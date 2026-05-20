@@ -65,3 +65,4 @@ build/
 # Python venv (used only for local image processing scripts)
 # ──────────────────────────────────────────────────────────────
 .venv/
+.env*.local

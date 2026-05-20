@@ -17,16 +17,74 @@ A production-ready static website for **Sadie Marie — Luxury Beauty Studio**, 
 
 ```
 .
-├── index.html              # The site
+├── index.html              # The marketing site
+├── manage.html             # Magic-link appointment management portal
 ├── css/
 │   └── styles.css          # All styles (including responsive @media queries)
 ├── js/
-│   └── main.js             # Nav scroll, reveal animations, FAQ accordion
+│   ├── main.js             # Nav scroll, reveal animations, FAQ, booking drawer
+│   └── manage.js           # Portal client: fetch, render, reschedule, cancel
+├── api/                    # Vercel Serverless Functions (Node)
+│   ├── booking.js          # GET  /api/booking?uid=...   — proxies Cal v2 read
+│   └── cancel-booking.js   # POST /api/cancel-booking    — proxies Cal v2 cancel
 ├── assets/
 │   └── images/             # All site images live here
 ├── .gitignore
 └── README.md
 ```
+
+## Appointment Management Portal
+
+Clients receive a magic link in their Cal.com confirmation email of the form:
+
+```
+https://sadiemarie.co/manage.html?uid=<bookingUid>
+```
+
+The portal lets them view, reschedule (via an inline Cal.com embed), or cancel
+their appointment without creating an account. All Cal.com API calls are made
+from Vercel Serverless Functions in `/api/` so the Cal API key never reaches
+the browser.
+
+### Required environment variable
+
+Set on Vercel under **Project → Settings → Environment Variables**:
+
+| Name          | Value                                    | Environments        |
+| ------------- | ---------------------------------------- | ------------------- |
+| `CAL_API_KEY` | A Cal.com API key (`cal_live_…`)         | Production, Preview, Development |
+
+Generate a key in Cal.com under **Settings → Developer → API Keys**. The same
+key works for both v1 and v2 endpoints.
+
+### Local development
+
+The plain `python3 -m http.server` workflow does **not** run the serverless
+functions. To exercise `/api/*` locally, use Vercel's dev server:
+
+```bash
+npx vercel dev
+```
+
+Then visit <http://localhost:3000/manage.html?uid=YOUR_REAL_BOOKING_UID>.
+
+Add a `.env.local` at the repo root (gitignored) containing:
+
+```
+CAL_API_KEY=cal_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+### Configuring Cal.com to send the magic link
+
+In Cal.com, open **Event Type → Workflows** (or Booking Questions / email
+template) and add a custom link to the confirmation/reminder emails:
+
+```
+{{BOOKING_UID_LINK_URL}}                ← built-in Cal variable; or:
+https://sadiemarie.co/manage.html?uid={{BOOKING_UID}}
+```
+
+Cal will substitute `{{BOOKING_UID}}` at send time.
 
 ## Image Assets
 

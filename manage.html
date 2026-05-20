@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Manage your appointment with Sadie Marie — reschedule or cancel using your private booking link.">
+  <meta name="theme-color" content="#0D1B2A">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Manage Your Appointment — Sadie Marie</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@200;300;400&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="portal-body">
+
+<nav id="navbar" class="portal-nav">
+  <a href="/" class="nav-logo">Sadie Marie</a>
+  <a href="/" class="portal-nav-back">← Back to site</a>
+</nav>
+
+<main class="portal-main">
+
+  <header class="portal-masthead">
+    <span class="section-label">Your Appointment</span>
+    <h1 class="portal-title">Manage Your<br><em>Reservation</em></h1>
+    <div class="section-divider"></div>
+    <p class="portal-intro">
+      This private link lets you view, reschedule, or cancel your upcoming session — no account required.
+    </p>
+  </header>
+
+  <!-- LOADING STATE -->
+  <section id="portal-loading" class="portal-state" aria-live="polite">
+    <div class="portal-skeleton">
+      <div class="portal-skeleton-bar portal-skeleton-bar--lg"></div>
+      <div class="portal-skeleton-bar"></div>
+      <div class="portal-skeleton-bar"></div>
+      <div class="portal-skeleton-bar portal-skeleton-bar--sm"></div>
+    </div>
+    <p class="portal-skeleton-note">Loading your appointment…</p>
+  </section>
+
+  <!-- ERROR / INVALID LINK STATE -->
+  <section id="portal-error" class="portal-state" hidden aria-live="polite">
+    <div class="portal-card portal-card--center">
+      <span class="portal-eyebrow">Heads up</span>
+      <h2 class="portal-card-title">This booking link is invalid<br>or has <em>expired</em>.</h2>
+      <p class="portal-card-body" id="portal-error-message">
+        We couldn't find an appointment matching this link. If you believe this is a mistake,
+        please reach out to us and we'll get you sorted right away.
+      </p>
+      <div class="portal-actions">
+        <a class="btn-navy" href="mailto:hello@sadiemarie.com">Contact the studio</a>
+        <a class="btn-outline-navy" href="/">Return to site</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- LOADED / DEFAULT STATE -->
+  <section id="portal-loaded" class="portal-state" hidden>
+    <div class="portal-grid">
+
+      <article class="portal-card portal-card--details">
+        <span class="portal-eyebrow">Appointment Details</span>
+        <h2 class="portal-card-title" id="portal-service-name">Your session</h2>
+        <p class="portal-status" id="portal-status-pill">Confirmed</p>
+
+        <dl class="portal-detail-list">
+          <div class="portal-detail-row">
+            <dt>Date</dt>
+            <dd id="portal-detail-date">—</dd>
+          </div>
+          <div class="portal-detail-row">
+            <dt>Time</dt>
+            <dd id="portal-detail-time">—</dd>
+          </div>
+          <div class="portal-detail-row">
+            <dt>Duration</dt>
+            <dd id="portal-detail-duration">—</dd>
+          </div>
+          <div class="portal-detail-row">
+            <dt>With</dt>
+            <dd id="portal-detail-host">—</dd>
+          </div>
+          <div class="portal-detail-row" id="portal-detail-where-row">
+            <dt>Where</dt>
+            <dd id="portal-detail-where">—</dd>
+          </div>
+          <div class="portal-detail-row" id="portal-detail-attendee-row">
+            <dt>Booked for</dt>
+            <dd id="portal-detail-attendee">—</dd>
+          </div>
+        </dl>
+      </article>
+
+      <aside class="portal-card portal-card--actions">
+        <span class="portal-eyebrow">Need to make a change?</span>
+        <h2 class="portal-card-title">Update or<br><em>cancel</em></h2>
+        <p class="portal-card-body">
+          You can pick a new time or cancel entirely. Changes take effect immediately —
+          we'll update our calendar and send you a fresh confirmation.
+        </p>
+        <div class="portal-actions portal-actions--stack">
+          <button type="button" class="btn-navy" id="portal-reschedule-btn">Reschedule</button>
+          <button type="button" class="btn-outline-navy portal-cancel-btn" id="portal-cancel-btn">Cancel appointment</button>
+        </div>
+        <p class="portal-fineprint">
+          Cancellations within 48 hours of your appointment may be subject to our
+          <a href="/#policies">studio policy</a>.
+        </p>
+      </aside>
+
+    </div>
+  </section>
+
+  <!-- RESCHEDULE STATE -->
+  <section id="portal-reschedule" class="portal-state" hidden>
+    <div class="portal-reschedule-header">
+      <div>
+        <span class="portal-eyebrow">Reschedule</span>
+        <h2 class="portal-card-title" id="portal-reschedule-title">Pick a new time</h2>
+      </div>
+      <button type="button" class="btn-outline-navy" id="portal-reschedule-back">← Back to details</button>
+    </div>
+    <div class="portal-reschedule-mount" id="portal-reschedule-mount"></div>
+  </section>
+
+  <!-- CANCELLED SUCCESS STATE -->
+  <section id="portal-cancelled" class="portal-state" hidden aria-live="polite">
+    <div class="portal-card portal-card--center">
+      <div class="portal-success-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12.5 10 17.5 19 8"/>
+        </svg>
+      </div>
+      <h2 class="portal-card-title">Your appointment has been<br><em>successfully cancelled</em>.</h2>
+      <p class="portal-card-body">
+        Thank you for letting us know. We've freed up the slot and sent you a confirmation by email.
+        We'd love to see you again whenever you're ready.
+      </p>
+      <div class="portal-actions">
+        <a class="btn-navy" href="/#services">Book a new session</a>
+        <a class="btn-outline-navy" href="/">Return to site</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- CANCEL CONFIRMATION MODAL -->
+<div id="portal-modal-backdrop" class="portal-modal-backdrop" hidden></div>
+<div id="portal-modal" class="portal-modal" role="dialog" aria-modal="true" aria-labelledby="portal-modal-title" hidden>
+  <h3 class="portal-card-title" id="portal-modal-title">Cancel this <em>appointment?</em></h3>
+  <p class="portal-card-body">
+    Are you sure you want to cancel? This can't be undone — you'd need to book a new session
+    if you change your mind.
+  </p>
+  <div class="portal-actions portal-actions--end">
+    <button type="button" class="btn-outline-navy" id="portal-modal-dismiss">Keep appointment</button>
+    <button type="button" class="btn-navy portal-cancel-btn" id="portal-modal-confirm">Yes, cancel it</button>
+  </div>
+  <p class="portal-modal-error" id="portal-modal-error" hidden></p>
+</div>
+
+<footer class="portal-footer">
+  <span class="footer-logo">Sadie Marie</span>
+  <p class="footer-copy">© 2026 Sadie Marie Beauty Studio.</p>
+</footer>
+
+<!-- Cal.com embed bootstrap (lifted from index.html so the reschedule embed shares branding) -->
+<script type="text/javascript">
+  (function (C, A, L) { let p = function (a, ar) { a.q.push(ar); }; let d = C.document; C.Cal = C.Cal || function () { let cal = C.Cal; let ar = arguments; if (!cal.loaded) { cal.ns = {}; cal.q = cal.q || []; d.head.appendChild(d.createElement("script")).src = A; cal.loaded = true; } if (ar[0] === L) { const api = function () { p(api, arguments); }; const namespace = ar[1]; api.q = api.q || []; if(typeof namespace === "string"){cal.ns[namespace] = cal.ns[namespace] || api;p(cal.ns[namespace], ar);p(cal, ["initNamespace", namespace]);} else p(cal, ar); return;} p(cal, ar); }; })(window, "https://app.cal.com/embed/embed.js", "init");
+
+  window.calUiConfig = {
+    theme: "light",
+    styles: { branding: { brandColor: "#0D1B2A" } },
+    hideEventTypeDetails: false,
+    layout: "month_view",
+    cssVarsPerTheme: {
+      light: {
+        "cal-brand": "#0D1B2A",
+        "cal-brand-emphasis": "#2A4460",
+        "cal-brand-text": "#F5F3F0",
+        "cal-brand-subtle": "rgba(13, 27, 42, 0.08)",
+        "cal-brand-accent": "#1C2E42",
+        "cal-bg": "transparent",
+        "cal-bg-emphasis": "rgba(13, 27, 42, 0.08)",
+        "cal-bg-muted": "rgba(13, 27, 42, 0.04)",
+        "cal-bg-subtle": "rgba(13, 27, 42, 0.03)",
+        "cal-bg-inverted": "#0D1B2A",
+        "cal-border": "rgba(13, 27, 42, 0.18)",
+        "cal-border-emphasis": "rgba(13, 27, 42, 0.45)",
+        "cal-border-subtle": "rgba(13, 27, 42, 0.08)",
+        "cal-text": "#1a1a24",
+        "cal-text-emphasis": "#0D1B2A",
+        "cal-text-subtle": "#4a5468",
+        "cal-text-muted": "#8A93A0",
+        "cal-text-inverted": "#F5F3F0",
+        "cal-text-error": "#8a3232"
+      }
+    }
+  };
+
+  Cal("init", { origin: "https://cal.com" });
+  Cal("ui", window.calUiConfig);
+</script>
+
+<script src="js/manage.js" defer></script>
+</body>
+</html>
