@@ -58,6 +58,11 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ error: 'method_not_allowed' });
   }
 
+  // TEMP DEBUG: dump the raw incoming Cal.com payload so we can confirm
+  // the actual shape of `responses` and where the phone number lives.
+  // Remove once the payload structure is known.
+  console.log('INCOMING PAYLOAD:', JSON.stringify(req.body, null, 2));
+
   let body;
   try {
     body = await readJsonBody(req);
