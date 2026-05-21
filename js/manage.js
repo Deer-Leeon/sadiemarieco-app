@@ -62,6 +62,10 @@
       if (!stateNodes[s]) return;
       stateNodes[s].hidden = s !== name;
     });
+    // Reschedule view goes "focus mode": masthead/footer hide and the Cal
+    // embed expands to fill the viewport so users don't have to scroll past
+    // any chrome to see and pick a new slot.
+    document.body.classList.toggle('portal-focus-mode', name === 'reschedule');
   };
 
   const showError = (message) => {

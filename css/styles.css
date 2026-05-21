@@ -1196,8 +1196,28 @@ footer {
 .portal-body {
   background: var(--off-white);
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
+}
+/* Focus mode: when the reschedule view is active we hide the masthead +
+   footer so the Cal embed has maximum breathing room. Cal's embed.js posts
+   its preferred height back to the iframe and we honour it (any attempt to
+   stretch the iframe past Cal's reported height causes Cal to clip its own
+   bottom rows). If the calendar ends up taller than the viewport, the page
+   scrolls naturally — far better than losing the bottom of the calendar. */
+.portal-body.portal-focus-mode .portal-masthead,
+.portal-body.portal-focus-mode .portal-footer { display: none; }
+.portal-body.portal-focus-mode .portal-main {
+  padding-top: 18px;
+  padding-bottom: 18px;
+}
+.portal-body.portal-focus-mode .portal-reschedule-header {
+  margin-bottom: 14px;
+}
+.portal-body.portal-focus-mode .portal-reschedule-mount {
+  min-height: 640px;
+  padding: 12px;
 }
 
 .portal-nav {
@@ -1228,34 +1248,46 @@ footer {
   max-width: 1180px;
   width: 100%;
   margin: 0 auto;
-  padding: 90px 64px 80px;
+  padding: 44px 64px 36px;
 }
 
 .portal-masthead {
-  margin-bottom: 56px;
+  margin-bottom: 28px;
   max-width: 760px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 28px;
+  align-items: end;
 }
+.portal-masthead .section-label,
+.portal-masthead .portal-title,
+.portal-masthead .section-divider {
+  grid-column: 1;
+}
+.portal-masthead .portal-intro { grid-column: 2; align-self: end; padding-bottom: 4px; }
 .portal-title {
   font-family: var(--serif);
-  font-size: clamp(2.4rem, 4.4vw, 4.4rem);
+  font-size: clamp(1.6rem, 2.8vw, 2.6rem);
   font-weight: 400;
   line-height: 1.05;
   color: var(--navy);
-  margin: 14px 0 24px;
-  -webkit-text-stroke: 1px var(--navy);
+  margin: 8px 0 14px;
+  -webkit-text-stroke: 0.5px var(--navy);
+  white-space: nowrap;
 }
 .portal-title em {
   font-style: italic;
-  -webkit-text-stroke: 1px var(--navy);
+  -webkit-text-stroke: 0.5px var(--navy);
 }
+.portal-masthead .section-divider { margin: 0 0 0; }
 .portal-intro {
   font-family: var(--serif-alt);
   font-style: italic;
-  font-size: 1.05rem;
-  line-height: 1.7;
+  font-size: 0.95rem;
+  line-height: 1.55;
   color: #4a5468;
-  margin-top: 8px;
-  max-width: 580px;
+  margin: 0;
+  max-width: 480px;
 }
 
 /* ── STATE CONTAINERS ── */
@@ -1267,42 +1299,42 @@ footer {
   border: 1px solid rgba(13,27,42,0.10);
   border-radius: 14px;
   box-shadow: 0 10px 36px rgba(13,27,42,0.05);
-  padding: 44px 44px 40px;
+  padding: 32px 34px 28px;
   position: relative;
 }
 .portal-card--center {
   max-width: 640px;
-  margin: 32px auto;
+  margin: 24px auto;
   text-align: center;
 }
 .portal-eyebrow {
   display: block;
   font-family: var(--sans);
-  font-size: 0.56rem;
+  font-size: 0.54rem;
   font-weight: 400;
-  letter-spacing: 0.32em;
+  letter-spacing: 0.30em;
   text-transform: uppercase;
   color: var(--mist);
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 .portal-card-title {
   font-family: var(--serif);
-  font-size: clamp(1.6rem, 2.4vw, 2.4rem);
+  font-size: clamp(1.3rem, 1.9vw, 1.85rem);
   font-weight: 400;
   line-height: 1.15;
   color: var(--navy);
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 .portal-card-title em {
   font-style: italic;
 }
 .portal-card-body {
   font-family: var(--sans);
-  font-size: 0.92rem;
+  font-size: 0.86rem;
   font-weight: 300;
-  line-height: 1.7;
+  line-height: 1.6;
   color: #4a5468;
-  margin-bottom: 28px;
+  margin-bottom: 20px;
 }
 
 /* ── DETAILS + ACTIONS GRID ── */
@@ -1316,13 +1348,13 @@ footer {
 .portal-status {
   display: inline-block;
   font-family: var(--sans);
-  font-size: 0.54rem;
+  font-size: 0.52rem;
   font-weight: 400;
-  letter-spacing: 0.28em;
+  letter-spacing: 0.26em;
   text-transform: uppercase;
-  padding: 6px 14px;
+  padding: 5px 12px;
   border-radius: 999px;
-  margin-bottom: 26px;
+  margin-bottom: 18px;
   border: 1px solid transparent;
 }
 .portal-status[data-variant="confirmed"] {
@@ -1345,14 +1377,14 @@ footer {
 .portal-detail-list {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 10px;
 }
 .portal-detail-row {
   display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: 24px;
+  grid-template-columns: 108px 1fr;
+  gap: 18px;
   align-items: baseline;
-  padding-bottom: 14px;
+  padding-bottom: 10px;
   border-bottom: 1px solid rgba(13,27,42,0.07);
 }
 .portal-detail-row:last-child {
@@ -1362,18 +1394,19 @@ footer {
 .portal-detail-row[hidden] { display: none; }
 .portal-detail-row dt {
   font-family: var(--sans);
-  font-size: 0.56rem;
+  font-size: 0.54rem;
   font-weight: 400;
-  letter-spacing: 0.28em;
+  letter-spacing: 0.26em;
   text-transform: uppercase;
   color: var(--mist);
 }
 .portal-detail-row dd {
   font-family: var(--sans);
-  font-size: 0.96rem;
+  font-size: 0.88rem;
   font-weight: 300;
-  line-height: 1.55;
+  line-height: 1.5;
   color: var(--ink);
+  overflow-wrap: anywhere;
 }
 
 /* ── ACTIONS ── */
@@ -1415,11 +1448,11 @@ button.btn-outline-navy:disabled {
 
 .portal-fineprint {
   font-family: var(--sans);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 300;
-  line-height: 1.6;
+  line-height: 1.55;
   color: var(--mist);
-  margin-top: 22px;
+  margin-top: 16px;
 }
 .portal-fineprint a {
   color: var(--navy);
@@ -1442,8 +1475,8 @@ button.btn-outline-navy:disabled {
   border: 1px solid rgba(13,27,42,0.10);
   border-radius: 14px;
   box-shadow: 0 10px 36px rgba(13,27,42,0.05);
-  padding: 24px;
-  min-height: 720px;
+  padding: 16px;
+  min-height: 620px;
 }
 .portal-reschedule-mount iframe {
   width: 100% !important;
@@ -1547,28 +1580,57 @@ button.btn-outline-navy:disabled {
 /* ── FOOTER (portal variant — slimmer than marketing footer) ── */
 .portal-footer {
   background: var(--ink);
-  padding: 32px 64px;
+  padding: 20px 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: 20px;
 }
+.portal-footer .footer-logo { font-size: 0.95rem; }
+.portal-footer .footer-copy { font-size: 0.54rem; }
 
 /* ── PORTAL RESPONSIVE ── */
 @media (max-width: 960px) {
-  .portal-nav { padding: 18px 24px; }
-  .portal-main { padding: 56px 24px 56px; }
-  .portal-masthead { margin-bottom: 36px; }
-  .portal-grid { grid-template-columns: 1fr; gap: 20px; }
-  .portal-card { padding: 32px 26px 28px; }
-  .portal-detail-row { grid-template-columns: 100px 1fr; gap: 16px; }
-  .portal-reschedule-header { flex-direction: column; align-items: stretch; }
-  .portal-reschedule-mount { min-height: 640px; padding: 12px; }
-  .portal-footer { padding: 24px; flex-direction: column; text-align: center; gap: 12px; }
+  .portal-nav { padding: 16px 22px; }
+  .portal-nav-back { font-size: 0.58rem; letter-spacing: 0.18em; }
+  .portal-main { padding: 28px 22px 28px; }
+  .portal-masthead {
+    margin-bottom: 22px;
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+  }
+  .portal-masthead .portal-intro {
+    grid-column: 1;
+    padding-bottom: 0;
+    padding-top: 4px;
+  }
+  .portal-title { font-size: clamp(1.6rem, 6vw, 2.2rem); white-space: normal; }
+  .portal-intro { font-size: 0.88rem; }
+  .portal-grid { grid-template-columns: 1fr; gap: 16px; }
+  .portal-card { padding: 24px 20px 22px; }
+  .portal-card-title { font-size: clamp(1.2rem, 4vw, 1.55rem); }
+  .portal-detail-row { grid-template-columns: 92px 1fr; gap: 12px; }
+  .portal-reschedule-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  .portal-reschedule-header .btn-outline-navy { align-self: flex-start; }
+  .portal-reschedule-mount { min-height: 540px; padding: 10px; }
+  .portal-footer { padding: 18px 22px; flex-direction: column; text-align: center; gap: 8px; }
+  /* On mobile, focus mode just slims the main padding — the Cal iframe keeps
+     its natural reported height so its content can't be clipped, and the
+     page scrolls if needed. */
+  .portal-body.portal-focus-mode .portal-main { padding: 14px 22px; }
+  .portal-body.portal-focus-mode .portal-reschedule-mount { min-height: 560px; }
 }
 @media (max-width: 540px) {
-  .portal-modal { padding: 28px 22px 22px; }
-  .portal-actions--end { justify-content: stretch; }
-  .portal-actions--end button { flex: 1; }
-  .portal-detail-row { grid-template-columns: 1fr; gap: 4px; }
+  .portal-nav { padding: 14px 18px; }
+  .portal-main { padding: 32px 18px 32px; }
+  .portal-card { padding: 24px 18px 22px; }
+  .portal-modal { padding: 26px 20px 20px; width: calc(100% - 32px); }
+  .portal-actions { flex-direction: column; align-items: stretch; }
+  .portal-actions .btn-navy,
+  .portal-actions .btn-outline-navy { width: 100%; text-align: center; padding-left: 24px; padding-right: 24px; }
+  .portal-actions--end { flex-direction: column-reverse; }
+  .portal-detail-row { grid-template-columns: 1fr; gap: 4px; padding-bottom: 12px; }
+  .portal-detail-row dt { font-size: 0.52rem; }
+  .portal-skeleton { padding: 28px 22px; }
+  .portal-success-mark { width: 48px; height: 48px; }
 }
