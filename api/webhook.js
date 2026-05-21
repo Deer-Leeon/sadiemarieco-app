@@ -58,11 +58,6 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ error: 'method_not_allowed' });
   }
 
-  // TEMP DEBUG: dump the raw incoming Cal.com payload so we can confirm
-  // the actual shape of `responses` and where the phone number lives.
-  // Remove once the payload structure is known.
-  console.log('INCOMING PAYLOAD:', JSON.stringify(req.body, null, 2));
-
   let body;
   try {
     body = await readJsonBody(req);
@@ -76,8 +71,15 @@ module.exports = async function handler(req, res) {
   const attendee = Array.isArray(payload.attendees) && payload.attendees[0] || {};
   const responses = payload.responses || {};
 
+  // Cal.com puts the SMS-reminder number on the attendee record directly
+  // (`attendees[0].phoneNumber`). The booking-question response object is a
+  // fallback for older payloads where the value lives under
+  // `responses.attendeePhoneNumber.value` (custom field wrapper shape).
   const clientName = unwrap(attendee.name) || unwrap(responses.name) || 'there';
-  const clientPhone = unwrap(responses.phone);
+  const clientPhone =
+    unwrap(attendee.phoneNumber) ||
+    unwrap(responses.attendeePhoneNumber) ||
+    unwrap(responses.phone);
   const serviceName = unwrap(payload.title) || 'appointment';
   const bookingUid = unwrap(payload.uid);
 
