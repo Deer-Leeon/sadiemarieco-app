@@ -1,6 +1,10 @@
 # Sadie Marie Beauty Studio
 
-A production-ready static website for **Sadie Marie — Luxury Beauty Studio**, an editorial-magazine-inspired marketing site for a luxury beauty studio based in Lehi, Utah. Built with semantic HTML, modern CSS (Grid, Flexbox, custom properties), and vanilla JavaScript — no build step required.
+Editorial-magazine-inspired site for **Sadie Marie — Luxury Beauty Studio** in
+Lehi, Utah. Hybrid architecture: static HTML/CSS/JS marketing site + magic-link
+booking portal, with a Clerk-protected Next.js admin dashboard layered on top.
+All real-time integration (Cal.com webhooks, Twilio SMS, QStash scheduling)
+runs through standalone Vercel Functions in `/api/`.
 
 ## Features
 
@@ -15,23 +19,65 @@ A production-ready static website for **Sadie Marie — Luxury Beauty Studio**, 
 
 ## Project Structure
 
+This is a hybrid project: the marketing site (`index.html`) and the client-facing
+booking portal (`manage.html`) remain pure static HTML served from `/public`,
+while the protected `/admin` dashboard is a Next.js App Router page rendered
+server-side with Clerk auth. Both run on the same Vercel deployment.
+
 ```
 .
-├── index.html              # The marketing site
-├── manage.html             # Magic-link appointment management portal
-├── css/
-│   └── styles.css          # All styles (including responsive @media queries)
-├── js/
-│   ├── main.js             # Nav scroll, reveal animations, FAQ, booking drawer
-│   └── manage.js           # Portal client: fetch, render, reschedule, cancel
-├── api/                    # Vercel Serverless Functions (Node)
-│   ├── booking.js          # GET  /api/booking?uid=...   — proxies Cal v2 read
-│   └── cancel-booking.js   # POST /api/cancel-booking    — proxies Cal v2 cancel
-├── assets/
-│   └── images/             # All site images live here
-├── .gitignore
+├── app/
+│   ├── layout.tsx          # Root layout, wraps everything in ClerkProvider
+│   ├── globals.css         # Tailwind v4 + shadcn theme tokens (light + dark)
+│   └── admin/
+│       └── page.tsx        # /admin — Clerk-gated bookings dashboard
+├── components/
+│   └── ui/                 # shadcn-style primitives (badge, card, table)
+├── lib/
+│   └── utils.ts            # cn() helper for tailwind class merging
+├── middleware.ts           # Clerk auth guard scoped to /admin only
+├── next.config.mjs         # Rewrites / → /index.html, /manage → /manage.html
+├── public/                 # Static assets served as-is
+│   ├── index.html          # The marketing site (served at /)
+│   ├── manage.html         # Magic-link appointment management portal
+│   ├── css/
+│   │   └── styles.css      # All static-site styles
+│   ├── js/
+│   │   ├── main.js         # Nav scroll, reveal animations, FAQ, booking drawer
+│   │   └── manage.js       # Portal client: fetch, render, reschedule, cancel
+│   └── assets/images/      # All site images
+├── api/                    # Vercel Serverless Functions (CommonJS, untouched
+│   │                       #   by the Next.js build — deployed as standalone
+│   │                       #   functions alongside the Next app)
+│   ├── booking.js          # GET  /api/booking?uid=...        — Cal v2 read proxy
+│   ├── cancel-booking.js   # POST /api/cancel-booking         — Cal cancel + DB
+│   ├── webhook.js          # POST /api/webhook                — Cal webhook dispatch
+│   │                       #   (BOOKING_CREATED → upsert + SMS + QStash schedule;
+│   │                       #    BOOKING_CANCELLED → status flip)
+│   ├── remind.js           # POST /api/remind                 — QStash 24h reminder
+│   └── feedback.js         # POST /api/feedback               — QStash 24h follow-up
+├── components.json         # shadcn config (style: new-york, neutral)
+├── tsconfig.json
+├── postcss.config.mjs
+├── package.json
 └── README.md
 ```
+
+### Why static HTML + Next.js coexist
+
+The original marketing site and booking portal predate the admin dashboard and
+are battle-tested. Re-implementing them as React Server Components would risk
+regressing the Cal.com embed flow in `manage.js`, the reveal animations in
+`main.js`, and the existing booking-confirmation iframe lifecycle. Instead:
+
+- `/` and `/manage.html` are served verbatim from `public/` (next.config.mjs
+  rewrites `/` to `/public/index.html` since Next.js doesn't do that on its own).
+- `/admin` is a real Next.js App Router page so we get React Server Components,
+  Clerk middleware integration, and direct `@vercel/postgres` calls inside the
+  server render.
+- Root-level `/api/*.js` files keep deploying as standalone Vercel Functions
+  (Vercel supports this hybrid model — Next.js routes coexist with vanilla
+  serverless functions in the same project).
 
 ## Appointment Management Portal
 
@@ -46,33 +92,132 @@ their appointment without creating an account. All Cal.com API calls are made
 from Vercel Serverless Functions in `/api/` so the Cal API key never reaches
 the browser.
 
-### Required environment variable
+## Admin Dashboard (`/admin`)
 
-Set on Vercel under **Project → Settings → Environment Variables**:
+A Clerk-protected dashboard showing the latest 50 appointments from the Neon
+Postgres database. Access is restricted to a hardcoded email allowlist in
+`app/admin/page.tsx`:
 
-| Name          | Value                                    | Environments        |
-| ------------- | ---------------------------------------- | ------------------- |
-| `CAL_API_KEY` | A Cal.com API key (`cal_live_…`)         | Production, Preview, Development |
+```ts
+const ALLOWED_EMAILS = new Set([
+  'lj.buchmiller@gmail.com',
+  'mcmarie27@gmail.com',
+]);
+```
 
-Generate a key in Cal.com under **Settings → Developer → API Keys**. The same
-key works for both v1 and v2 endpoints.
+Flow when an unauthenticated user hits `/admin`:
 
-### Local development
+1. `middleware.ts` runs (matcher: `/admin`, `/admin/:path*`)
+2. Clerk redirects to its hosted sign-in URL
+3. On successful sign-in, the user lands on `/admin`
+4. The server component checks the user's linked emails against the allowlist
+5. Non-matching users are `redirect('/')`ed silently (no 403 page leaks the
+   existence of the dashboard)
 
-The plain `python3 -m http.server` workflow does **not** run the serverless
-functions. To exercise `/api/*` locally, use Vercel's dev server:
+To add/remove admins, edit the `ALLOWED_EMAILS` set and redeploy.
+
+## Required environment variables
+
+Set all of these in Vercel under **Project → Settings → Environment Variables**
+(Production, Preview, and Development unless noted). After adding, run
+`vercel env pull .env.local` to sync them locally.
+
+### Cal.com (booking + cancel proxies)
+
+| Name          | Value                            |
+| ------------- | -------------------------------- |
+| `CAL_API_KEY` | A Cal.com API key (`cal_live_…`) |
+
+### Twilio (SMS confirmations + reminders + follow-ups)
+
+| Name                  | Value                                  |
+| --------------------- | -------------------------------------- |
+| `TWILIO_ACCOUNT_SID`  | Twilio account SID                     |
+| `TWILIO_AUTH_TOKEN`   | Twilio auth token                      |
+| `TWILIO_PHONE_NUMBER` | The Twilio number SMS is sent **from** |
+
+### Postgres (data + idempotency + admin dashboard)
+
+| Name           | Value                                                          |
+| -------------- | -------------------------------------------------------------- |
+| `POSTGRES_URL` | Auto-populated when you connect a Neon/Vercel Postgres DB      |
+
+Required tables / columns (see migration notes below):
+
+```sql
+CREATE TABLE clients (
+  id SERIAL PRIMARY KEY,
+  first_name TEXT,
+  last_name  TEXT,
+  email      TEXT UNIQUE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE appointments (
+  id SERIAL PRIMARY KEY,
+  client_id INT REFERENCES clients(id),
+  service_name TEXT,
+  booking_time TIMESTAMPTZ,
+  cal_event_id TEXT UNIQUE NOT NULL,
+  client_first_name TEXT,
+  client_last_name TEXT,
+  client_email TEXT,
+  client_phone TEXT,
+  status TEXT NOT NULL DEFAULT 'confirmed'
+);
+
+CREATE TABLE webhook_events (
+  id SERIAL PRIMARY KEY,
+  booking_uid TEXT UNIQUE NOT NULL,
+  processed_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### Upstash QStash (24h reminder + 24h follow-up scheduling)
+
+| Name                          | Value                                       |
+| ----------------------------- | ------------------------------------------- |
+| `QSTASH_TOKEN`                | Publish credential from Upstash console     |
+| `QSTASH_CURRENT_SIGNING_KEY`  | Signature-verification key                  |
+| `QSTASH_NEXT_SIGNING_KEY`     | For zero-downtime key rotation (recommended)|
+
+### Clerk (admin auth)
+
+| Name                                 | Value                          |
+| ------------------------------------ | ------------------------------ |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`  | Clerk publishable key          |
+| `CLERK_SECRET_KEY`                   | Clerk secret key (server-only) |
+
+Optional — only set if you self-host the sign-in pages:
+
+| Name                              | Value                          |
+| --------------------------------- | ------------------------------ |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL`   | `/sign-in` (if hosted in-app)  |
+| `NEXT_PUBLIC_CLERK_SIGN_UP_URL`   | `/sign-up` (if hosted in-app)  |
+
+### Optional
+
+| Name              | Value                                              |
+| ----------------- | -------------------------------------------------- |
+| `PUBLIC_BASE_URL` | Override for the prod URL used in SMS links / QStash callback URLs |
+
+## Local development
 
 ```bash
+npm install
 npx vercel dev
 ```
 
-Then visit <http://localhost:3000/manage.html?uid=YOUR_REAL_BOOKING_UID>.
+`vercel dev` runs the Next.js dev server AND the standalone `/api/*` Vercel
+Functions on a single port (default 3000). For a Next-only dev loop without
+the API functions, run `npm run next-dev` instead.
 
-Add a `.env.local` at the repo root (gitignored) containing:
-
-```
-CAL_API_KEY=cal_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
+| URL                                                | What it serves          |
+| -------------------------------------------------- | ----------------------- |
+| <http://localhost:3000>                            | `public/index.html`     |
+| <http://localhost:3000/manage.html?uid=…>          | `public/manage.html`    |
+| <http://localhost:3000/admin>                      | Clerk-gated dashboard   |
+| `POST http://localhost:3000/api/webhook` etc.      | Vercel Functions        |
 
 ### Configuring Cal.com to send the magic link
 
@@ -128,69 +273,21 @@ sips -g profile assets/images/your-photo.jpeg
 # Should print:  profile: sRGB IEC61966-2.1
 ```
 
-## Run Locally
-
-Because this is a pure static site, you have a few easy options.
-
-### Option 1 — Open the file directly
-Double-click `index.html` to open it in your browser. Works for most things, but some browsers restrict certain features when files load over the `file://` protocol.
-
-### Option 2 — Local server (recommended)
-A local web server gives you a clean `http://` URL and avoids any `file://` quirks.
-
-**Using Python (already installed on macOS):**
-
-```bash
-python3 -m http.server 8001
-```
-
-Then open <http://localhost:8001> in your browser.
-
-**Using Node.js:**
-
-```bash
-npx serve .
-```
-
-**Using VS Code:**
-Install the *Live Server* extension, right-click `index.html`, and choose **Open with Live Server**.
-
 ## Deploy to Vercel
 
-This site is configured to deploy on [Vercel](https://vercel.com/) with zero configuration — no build step, no framework detection.
-
-### 1. Push the repo to GitHub
-
-```bash
-git init
-git add .
-git commit -m "Initial commit: Sadie Marie Beauty Studio website"
-git branch -M main
-git remote add origin https://github.com/<your-username>/<your-repo>.git
-git push -u origin main
-```
-
-### 2. Import the repo into Vercel
-
-1. Go to <https://vercel.com/new>.
-2. Click **Import Git Repository** and select this repo.
-3. When asked for the **Framework Preset**, choose **Other** (Vercel will detect it as a static site automatically).
-4. Leave **Build Command**, **Output Directory**, and **Install Command** blank.
-5. Click **Deploy**.
-
-Vercel will give you a live URL (e.g. `sadie-marie.vercel.app`) within seconds. Every push to `main` automatically deploys; pushes to other branches create preview URLs.
-
-### 3. Add a custom domain (optional)
-
-In your Vercel project dashboard, go to **Settings → Domains** and follow the prompts to add a domain like `sadiemarie.co`. Vercel walks you through the DNS records you'll need to set at your registrar.
-
-### Alternative: Deploy from the CLI
+Vercel auto-detects Next.js from `package.json` and runs `next build`. The
+standalone `/api/*` functions are deployed as separate Vercel Functions
+alongside the Next.js app — no extra configuration required.
 
 ```bash
 npm i -g vercel
 vercel        # Preview deploy
 vercel --prod # Production deploy
 ```
+
+Make sure all environment variables in the table above are set in Vercel
+**before** deploying (otherwise the admin dashboard build will succeed but the
+runtime will fail on first request).
 
 ## Browser Support
 
