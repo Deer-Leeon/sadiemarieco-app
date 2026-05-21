@@ -6,8 +6,16 @@
  * requires the Cal API key, so the request is funnelled through this function
  * to keep the credential off the client.
  *
+ * After Cal acknowledges the cancellation, this handler also flips the local
+ * `appointments.status` to 'cancelled' so the QStash-driven reminder/feedback
+ * jobs (api/remind, api/feedback) skip the SMS when they fire later. The DB
+ * write is best-effort: a failure here is logged loudly but does NOT fail the
+ * response — the cancellation has already taken effect upstream at Cal.
+ *
  * Cal docs: https://cal.com/docs/api-reference/v2/bookings/cancel-a-booking
  */
+
+const { sql } = require('@vercel/postgres');
 
 const CAL_API_BASE = 'https://api.cal.com/v2';
 const CAL_API_VERSION = '2024-08-13';
@@ -77,6 +85,38 @@ module.exports = async function handler(req, res) {
         error: upstream.status === 404 ? 'booking_not_found' : 'upstream_error',
         upstreamStatus: upstream.status,
         upstreamMessage: payload && (payload.message || payload.error) || null
+      });
+    }
+
+    // ── LOCAL STATUS UPDATE ──────────────────────────────────────────────
+    // Cal has accepted the cancellation. Reflect it in our DB so the
+    // QStash reminder/feedback handlers will see status != 'confirmed'
+    // and skip the SMS. Best-effort: if this fails the cancellation is
+    // still effective at Cal (the user won't show up), the worst case is
+    // a stale reminder firing 24h later. We never propagate a DB failure
+    // back to the portal — that would invite a retry that 404s against
+    // Cal because the booking is already cancelled.
+    //
+    // 0 rows affected is not an error: it just means we don't have an
+    // appointment row for this UID (booking predates DB ingest, or its
+    // BOOKING_CREATED webhook never landed). RETURNING lets us log which
+    // case we hit without an extra SELECT.
+    try {
+      const { rows: updatedRows } = await sql`
+        UPDATE appointments
+        SET status = 'cancelled'
+        WHERE cal_event_id = ${uid}
+        RETURNING cal_event_id
+      `;
+      if (updatedRows.length === 0) {
+        console.warn('[api/cancel-booking] no appointment row matched on cancel', { uid });
+      } else {
+        console.log('[api/cancel-booking] appointment marked cancelled', { uid });
+      }
+    } catch (dbErr) {
+      console.error('[api/cancel-booking] DB status update failed (Cal cancel succeeded):', {
+        uid,
+        error: dbErr && dbErr.message,
       });
     }
 

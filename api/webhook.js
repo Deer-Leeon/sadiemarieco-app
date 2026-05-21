@@ -1,10 +1,18 @@
 /**
  * POST /api/webhook
  *
- * Receives Cal.com webhook events (configured with trigger BOOKING_CREATED)
- * and sends an SMS confirmation to the client via Twilio. Always returns
- * 200 OK to Cal.com — even on SMS failure — so Cal won't time out or retry
- * the webhook indefinitely. Errors are logged for our own debugging.
+ * Receives Cal.com webhook events and dispatches on `triggerEvent`:
+ *   - BOOKING_CREATED  → idempotent client + appointment upsert, schedule
+ *                        24h reminder + 24h feedback via QStash, send
+ *                        confirmation SMS via Twilio.
+ *   - BOOKING_CANCELLED → flip appointments.status to 'cancelled' so the
+ *                         scheduled QStash jobs (api/remind, api/feedback)
+ *                         see the status gate and skip their SMS.
+ *   - Anything else / missing triggerEvent → falls through to the creation
+ *     flow for backward compatibility with the original single-event setup.
+ *
+ * Always returns 200 OK — even on SMS or DB failure — so Cal won't time out
+ * or retry the webhook indefinitely. Errors are logged for our own debugging.
  *
  * Cal.com webhook payload reference:
  *   https://cal.com/docs/core-features/webhooks
@@ -13,12 +21,18 @@
  *   - TWILIO_ACCOUNT_SID
  *   - TWILIO_AUTH_TOKEN
  *   - TWILIO_PHONE_NUMBER   (the Twilio number the SMS is sent from)
+ *   - POSTGRES_URL          (read by @vercel/postgres automatically)
+ *   - QSTASH_TOKEN          (Upstash QStash publish credential)
+ *   - PUBLIC_BASE_URL       (optional override; defaults to the prod domain)
  */
 
 const twilio = require('twilio');
 const { sql } = require('@vercel/postgres');
+const { Client: QStashClient } = require('@upstash/qstash');
 
-const MANAGE_LINK_BASE = 'https://sadiemarieco.vercel.app/manage.html';
+const PUBLIC_BASE_URL =
+  process.env.PUBLIC_BASE_URL || 'https://sadiemarieco.vercel.app';
+const MANAGE_LINK_BASE = `${PUBLIC_BASE_URL}/manage.html`;
 
 // Cal.com normally sends application/json with the body already parsed by
 // Vercel's Node runtime into req.body. If anything ever sends it as a raw
@@ -92,6 +106,11 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ ok: true, skipped: 'invalid_json' });
   }
 
+  // Top-level event type. Cal sends this as a sibling of `payload`. May be
+  // absent on hand-rolled test posts; we treat absence as BOOKING_CREATED
+  // for backward compat with the original handler shape.
+  const triggerEvent = (body && body.triggerEvent) || '';
+
   const payload = (body && body.payload) || {};
   const attendee = Array.isArray(payload.attendees) && payload.attendees[0] || {};
   const responses = payload.responses || {};
@@ -120,11 +139,48 @@ module.exports = async function handler(req, res) {
   // Without a UID we can't dedupe or match an appointment record. Without
   // an email we can't upsert the client. Bail early in both cases.
   if (!bookingUid) {
-    console.warn('[api/webhook] no booking uid on payload — skipping');
+    console.warn('[api/webhook] no booking uid on payload — skipping', { triggerEvent });
     return res.status(200).json({ ok: true, skipped: 'no_uid' });
   }
+
+  // ── BOOKING_CANCELLED BRANCH ────────────────────────────────────────────
+  // Flip the local row to 'cancelled' so the QStash reminder/feedback
+  // handlers will hit the status gate when they fire later. We intentionally
+  // do NOT touch webhook_events here — that table tracks "did we send the
+  // welcome SMS?" for the create event and a cancellation has a different
+  // lifecycle. The UPDATE is naturally idempotent (cancelled → cancelled is
+  // a no-op) so re-deliveries from Cal are harmless.
+  //
+  // We don't cancel the pending QStash messages either: remind/feedback both
+  // gate on status, so the worst case is two no-op QStash deliveries that
+  // exit at the status check. Cheap. Adding QStash msg-id tracking just to
+  // avoid those is premature optimisation.
+  //
+  // Always returns 200 — DB failure must not cause Cal to retry indefinitely.
+  if (triggerEvent === 'BOOKING_CANCELLED') {
+    try {
+      const { rows: updatedRows } = await sql`
+        UPDATE appointments
+        SET status = 'cancelled'
+        WHERE cal_event_id = ${bookingUid}
+        RETURNING cal_event_id
+      `;
+      if (updatedRows.length === 0) {
+        console.warn('[api/webhook] BOOKING_CANCELLED: no matching appointment', { bookingUid });
+      } else {
+        console.log('[api/webhook] BOOKING_CANCELLED: appointment marked cancelled', { bookingUid });
+      }
+    } catch (err) {
+      console.error('[api/webhook] BOOKING_CANCELLED: db update failed', {
+        bookingUid,
+        error: err && err.message,
+      });
+    }
+    return res.status(200).json({ ok: true, event: 'BOOKING_CANCELLED' });
+  }
+
   if (!clientEmail) {
-    console.warn('[api/webhook] no email on payload — skipping', { bookingUid });
+    console.warn('[api/webhook] no email on payload — skipping', { bookingUid, triggerEvent });
     return res.status(200).json({ ok: true, skipped: 'no_email' });
   }
 
@@ -185,17 +241,19 @@ module.exports = async function handler(req, res) {
 
   // ── APPOINTMENT UPSERT ──────────────────────────────────────────────────
   // Insert the appointment keyed by cal_event_id (payload.uid). Denormalised
-  // client_* fields are stored alongside the client_id FK so the appointment
-  // remains self-contained if the client row is ever deleted/anonymised.
+  // client_* fields (incl. phone) are stored alongside the client_id FK so
+  // downstream scheduled jobs (api/remind, api/feedback) can look up everything
+  // they need from a single row without a JOIN, and so the appointment remains
+  // self-contained if the client row is ever deleted/anonymised.
   try {
     await sql`
       INSERT INTO appointments (
         client_id, service_name, booking_time, cal_event_id,
-        client_first_name, client_last_name, client_email
+        client_first_name, client_last_name, client_email, client_phone
       )
       VALUES (
         ${clientId}, ${serviceName}, ${bookingTime}, ${bookingUid},
-        ${firstName}, ${lastName}, ${clientEmail}
+        ${firstName}, ${lastName}, ${clientEmail}, ${clientPhone || null}
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,
@@ -203,7 +261,8 @@ module.exports = async function handler(req, res) {
         booking_time = EXCLUDED.booking_time,
         client_first_name = EXCLUDED.client_first_name,
         client_last_name = EXCLUDED.client_last_name,
-        client_email = EXCLUDED.client_email
+        client_email = EXCLUDED.client_email,
+        client_phone = EXCLUDED.client_phone
     `;
   } catch (err) {
     console.error('[api/webhook] appointment upsert failed:', {
@@ -212,6 +271,71 @@ module.exports = async function handler(req, res) {
       error: err && err.message
     });
     return res.status(200).json({ ok: true, skipped: 'appointment_upsert_failed' });
+  }
+
+  // ── QSTASH SCHEDULE: REMINDER + FEEDBACK ────────────────────────────────
+  // Schedule both future SMS jobs anchored to the actual appointment time,
+  // not "now". A booking made <24h in advance schedules a reminder in the
+  // past, which QStash delivers immediately — exactly the behavior we want
+  // (the client still gets reminded). Each publish is wrapped individually
+  // so one transient failure can't block the other.
+  //
+  // Best-effort: QStash outages must NOT block confirmation SMS or the 200
+  // response back to Cal.com. Failures are logged and we continue.
+  if (process.env.QSTASH_TOKEN && bookingTime) {
+    const appointmentMs = new Date(bookingTime).getTime();
+    if (Number.isFinite(appointmentMs)) {
+      const qstash = new QStashClient({ token: process.env.QSTASH_TOKEN });
+      const reminderAt = Math.floor((appointmentMs - 24 * 60 * 60 * 1000) / 1000);
+      const feedbackAt = Math.floor((appointmentMs + 24 * 60 * 60 * 1000) / 1000);
+
+      try {
+        const reminderRes = await qstash.publishJSON({
+          url: `${PUBLIC_BASE_URL}/api/remind`,
+          body: { bookingUid },
+          notBefore: reminderAt,
+        });
+        console.log('[api/webhook] qstash reminder scheduled', {
+          bookingUid,
+          messageId: reminderRes && reminderRes.messageId,
+          notBefore: reminderAt,
+        });
+      } catch (err) {
+        console.error('[api/webhook] qstash reminder publish failed:', {
+          bookingUid,
+          error: err && err.message,
+        });
+      }
+
+      try {
+        const feedbackRes = await qstash.publishJSON({
+          url: `${PUBLIC_BASE_URL}/api/feedback`,
+          body: { bookingUid },
+          notBefore: feedbackAt,
+        });
+        console.log('[api/webhook] qstash feedback scheduled', {
+          bookingUid,
+          messageId: feedbackRes && feedbackRes.messageId,
+          notBefore: feedbackAt,
+        });
+      } catch (err) {
+        console.error('[api/webhook] qstash feedback publish failed:', {
+          bookingUid,
+          error: err && err.message,
+        });
+      }
+    } else {
+      console.warn('[api/webhook] invalid booking_time — skipping qstash schedule', {
+        bookingUid,
+        bookingTime,
+      });
+    }
+  } else {
+    console.warn('[api/webhook] qstash schedule skipped', {
+      bookingUid,
+      hasToken: !!process.env.QSTASH_TOKEN,
+      hasBookingTime: !!bookingTime,
+    });
   }
 
   // SMS is best-effort beyond this point — the DB ingestion above is the
