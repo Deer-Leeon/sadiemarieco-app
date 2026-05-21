@@ -25,4 +25,11 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
   matcher: ['/admin', '/admin/:path*'],
+  // Force the Node.js runtime instead of the default Edge runtime. Clerk's
+  // middleware relies on Node-only APIs (crypto internals, dynamic require
+  // paths) that the Edge runtime does not expose, which manifests as a
+  // build/runtime error on Vercel. The trade-off is a slightly cooler cold
+  // start than Edge, which is acceptable since this matcher only fires on
+  // /admin requests (a low-volume internal route).
+  runtime: 'nodejs',
 };
