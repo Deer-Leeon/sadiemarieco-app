@@ -22,7 +22,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      // Lock the sign-in flow to our in-app page rather than Clerk's
+      // hosted accounts URL. The middleware reads this when calling
+      // auth.protect() on /admin to know where to send unauthenticated
+      // users. Keeping it in source (vs an env var) means a missing
+      // NEXT_PUBLIC_CLERK_SIGN_IN_URL can never accidentally route
+      // admins to a Clerk-branded page.
+      signInUrl="/sign-in"
+      signInFallbackRedirectUrl="/admin"
+    >
       <html lang="en">
         <head>
           {/*

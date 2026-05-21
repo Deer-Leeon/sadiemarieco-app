@@ -91,3 +91,47 @@
     font-family: var(--font-sans);
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────────
+   Clerk overrides
+   ──────────────────────────────────────────────────────────────────────
+   Clerk's published CSS for the SignIn widget uses specificity equal to
+   our Tailwind utilities AND ships some `text-align: start` defaults on
+   the `cl-header`/`cl-headerTitle` flex column. Setting `!text-center`
+   via the appearance.elements prop loses the specificity coin-flip
+   inconsistently. These rules use `!important` so the alignment is
+   deterministic regardless of CSS load order.
+   ────────────────────────────────────────────────────────────────────── */
+
+/* Center the entire Clerk widget chain within our max-w-md wrapper.
+   Clerk's cl-rootBox / cl-cardBox have a minimum intrinsic width and
+   render at flex-start (left edge) of the parent by default, which
+   makes the card visually drift left of the page-centered wordmark
+   above it. Forcing display: flex + justify-content: center on every
+   wrapper layer ensures the card sits dead-centre regardless of
+   how Clerk wraps it internally in future versions. */
+.cl-rootBox {
+  width: 100% !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+
+.cl-cardBox {
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+/* Header text alignment — the actual h1 / p inside the card. */
+.cl-header,
+.cl-headerTitle,
+.cl-headerSubtitle {
+  text-align: center !important;
+  width: 100% !important;
+}
+
+.cl-header {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
