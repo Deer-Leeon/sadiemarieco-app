@@ -47,6 +47,14 @@ const unwrap = (val) => {
   return String(val);
 };
 
+// Mask a phone number for log output — keeps the leading country code prefix
+// and the last 4 digits, redacts the rest. Avoids dumping full PII into our
+// Vercel log aggregator while preserving enough context to trace a failure.
+const maskPhone = (phone) => {
+  if (!phone || typeof phone !== 'string' || phone.length < 6) return '[redacted]';
+  return `${phone.slice(0, 2)}***${phone.slice(-4)}`;
+};
+
 const buildMessage = ({ clientName, serviceName, bookingUid }) => {
   const link = `${MANAGE_LINK_BASE}?uid=${encodeURIComponent(bookingUid)}`;
   return `Hi ${clientName}! 🤍 Your ${serviceName} at Sadie Marie is confirmed. To view policies, reschedule, or cancel, use your secure link: ${link}`;
@@ -116,13 +124,13 @@ module.exports = async function handler(req, res) {
       to: clientPhone,
       body: buildMessage({ clientName, serviceName, bookingUid })
     });
-    console.log('[api/webhook] SMS sent', { sid: message.sid, to: clientPhone, bookingUid });
+    console.log('[api/webhook] SMS sent', { sid: message.sid, to: maskPhone(clientPhone), bookingUid });
     return res.status(200).json({ ok: true, smsSid: message.sid });
   } catch (err) {
     // Per spec: always 200 so Cal.com doesn't retry. Log details for us.
     console.error('[api/webhook] Twilio send failed:', {
       bookingUid,
-      to: clientPhone,
+      to: maskPhone(clientPhone),
       code: err && err.code,
       status: err && err.status,
       message: err && err.message

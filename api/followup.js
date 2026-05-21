@@ -41,6 +41,13 @@ const unwrap = (val) => {
   return String(val);
 };
 
+// Mask a phone number for log output — keeps the leading country code prefix
+// and the last 4 digits, redacts the rest.
+const maskPhone = (phone) => {
+  if (!phone || typeof phone !== 'string' || phone.length < 6) return '[redacted]';
+  return `${phone.slice(0, 2)}***${phone.slice(-4)}`;
+};
+
 const buildMessage = ({ clientName }) =>
   `Hi ${clientName}! 🤍 Thank you so much for visiting Sadie Marie yesterday. We loved having you in the studio! When you are ready, you can book your next session here: ${SITE_URL}`;
 
@@ -98,12 +105,12 @@ module.exports = async function handler(req, res) {
       to: clientPhone,
       body: buildMessage({ clientName })
     });
-    console.log('[api/followup] SMS sent', { sid: message.sid, to: clientPhone, bookingUid });
+    console.log('[api/followup] SMS sent', { sid: message.sid, to: maskPhone(clientPhone), bookingUid });
     return res.status(200).json({ ok: true, smsSid: message.sid });
   } catch (err) {
     console.error('[api/followup] Twilio send failed:', {
       bookingUid,
-      to: clientPhone,
+      to: maskPhone(clientPhone),
       code: err && err.code,
       status: err && err.status,
       message: err && err.message
