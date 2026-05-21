@@ -17,6 +17,7 @@ export const dynamic = 'force-dynamic';
 const ALLOWED_EMAILS = new Set([
   'lj.buchmiller@gmail.com',
   'mcmarie27@gmail.com',
+  'mckenna@sadiemarie.co',
 ]);
 
 interface DbRow {
