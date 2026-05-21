@@ -27,6 +27,7 @@ interface DbRow {
   // and an ISO string in others. We normalise both before crossing the
   // server → client boundary.
   booking_time: Date | string | null;
+  end_time: Date | string | null;
   service_name: string | null;
   status: string | null;
 }
@@ -82,7 +83,7 @@ export default async function AdminPage() {
   let dbError: string | null = null;
   try {
     const { rows } = await sql<DbRow>`
-      SELECT id, client_first_name, client_last_name, booking_time,
+      SELECT id, client_first_name, client_last_name, booking_time, end_time,
              service_name, status
       FROM appointments
       WHERE booking_time >= NOW() - INTERVAL '30 days'
@@ -94,6 +95,7 @@ export default async function AdminPage() {
       client_first_name: r.client_first_name,
       client_last_name: r.client_last_name,
       booking_time: serializeDate(r.booking_time),
+      end_time: serializeDate(r.end_time),
       service_name: r.service_name,
       status: r.status,
     }));

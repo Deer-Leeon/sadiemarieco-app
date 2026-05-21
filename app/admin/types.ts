@@ -18,6 +18,14 @@ export interface Appointment {
   client_last_name: string | null;
   /** ISO 8601 string, or null if the booking has no scheduled time. */
   booking_time: string | null;
+  /**
+   * ISO 8601 string for the appointment's scheduled end (TIMESTAMPTZ
+   * `end_time` in Postgres). Null if Cal.com didn't send an `endTime`
+   * on the webhook payload — defensive, because in practice every
+   * Cal event has a duration and therefore an end. Same wire format
+   * as `booking_time` so the client can parse with `date-fns/parseISO`.
+   */
+  end_time: string | null;
   service_name: string | null;
   status: string | null;
 }

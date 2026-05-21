@@ -135,6 +135,14 @@ module.exports = async function handler(req, res) {
   // Cal sends ISO-8601 timestamps; Postgres TIMESTAMP/TIMESTAMPTZ accepts
   // them directly. Try webhook field name first, then fall back to v2 shape.
   const bookingTime = unwrap(payload.startTime) || unwrap(payload.start) || null;
+  // Matching shape for the appointment's scheduled end. Stored in the
+  // `end_time` TIMESTAMPTZ column so the dashboard can render duration /
+  // a calendar block-length and so future "is this still in progress?"
+  // logic doesn't have to re-derive it from service_name. We don't infer
+  // a fallback from booking_time + assumed duration on purpose: if Cal
+  // ever drops the field for a real reason, we'd rather store NULL than
+  // silently fabricate the wrong end timestamp.
+  const endTime = unwrap(payload.endTime) || unwrap(payload.end) || null;
 
   // Without a UID we can't dedupe or match an appointment record. Without
   // an email we can't upsert the client. Bail early in both cases.
@@ -248,17 +256,18 @@ module.exports = async function handler(req, res) {
   try {
     await sql`
       INSERT INTO appointments (
-        client_id, service_name, booking_time, cal_event_id,
+        client_id, service_name, booking_time, end_time, cal_event_id,
         client_first_name, client_last_name, client_email, client_phone
       )
       VALUES (
-        ${clientId}, ${serviceName}, ${bookingTime}, ${bookingUid},
+        ${clientId}, ${serviceName}, ${bookingTime}, ${endTime}, ${bookingUid},
         ${firstName}, ${lastName}, ${clientEmail}, ${clientPhone || null}
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,
         service_name = EXCLUDED.service_name,
         booking_time = EXCLUDED.booking_time,
+        end_time = EXCLUDED.end_time,
         client_first_name = EXCLUDED.client_first_name,
         client_last_name = EXCLUDED.client_last_name,
         client_email = EXCLUDED.client_email,
