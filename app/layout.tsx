@@ -24,6 +24,27 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en">
+        <head>
+          {/*
+            Loads the same Bodoni Moda + DM Sans family the public site
+            (public/index.html) uses, so the admin dashboard renders with
+            the studio's actual typography rather than the Georgia /
+            system-sans fallbacks declared in globals.css's @theme block.
+            Kept as a plain <link> rather than `next/font` to mirror the
+            public site exactly and to avoid the build-time CSS-variable
+            override that `next/font` would impose on our @theme tokens.
+          */}
+          <link rel="preconnect" href="https://fonts.googleapis.com" />
+          <link
+            rel="preconnect"
+            href="https://fonts.gstatic.com"
+            crossOrigin=""
+          />
+          <link
+            href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=DM+Sans:wght@200;300;400;500&display=swap"
+            rel="stylesheet"
+          />
+        </head>
         <body>{children}</body>
       </html>
     </ClerkProvider>
