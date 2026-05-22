@@ -30,4 +30,13 @@ export interface Appointment {
   status: string | null;
 }
 
-export type ViewMode = 'list' | 'calendar';
+/**
+ * Dashboard view modes.
+ *
+ *  - 'list'  : Day-grouped chronological list (ListView)
+ *  - 'month' : 7-col month-grid (CalendarView) — was previously 'calendar'
+ *  - '3day'  : Time-blocked agenda for the current day + next 2 (TimeGrid)
+ *  - 'week'  : Time-blocked agenda for the Sun–Sat week containing
+ *              the current date (TimeGrid)
+ */
+export type ViewMode = 'list' | 'month' | '3day' | 'week';

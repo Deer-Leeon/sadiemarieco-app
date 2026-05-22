@@ -1,127 +1,168 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   addMonths,
   eachDayOfInterval,
   endOfMonth,
-  endOfWeek,
   format,
+  getDay,
   isSameDay,
-  isSameMonth,
   isToday,
   parseISO,
   startOfMonth,
-  startOfWeek,
-  subMonths,
 } from 'date-fns';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 import type { Appointment } from './types';
 import { cleanServiceName, clientDisplayName } from './helpers';
 
+// ──────────────────────────────────────────────────────────────────────────
+// Constants
+// ──────────────────────────────────────────────────────────────────────────
 const WEEKDAY_HEADERS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+/**
+ * Month window: render 6 months of history + current + 12 months ahead
+ * (19 months total). This range covers a realistic studio's planning
+ * horizon — long enough to look back at last fall's clients, far enough
+ * forward to see a year of standing appointments — without ballooning
+ * the initial DOM to thousands of day cells.
+ *
+ * If we ever need a true infinite scroll (load months as the user
+ * approaches the edges), this is the right place to swap for an
+ * IntersectionObserver-driven pager.
+ */
+const MONTHS_BEFORE = 6;
+const MONTHS_AFTER = 12;
+const TOTAL_MONTHS = MONTHS_BEFORE + 1 + MONTHS_AFTER; // 19
+
+// ──────────────────────────────────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────────────────────────────────
 interface DayCell {
   date: Date;
-  inCurrentMonth: boolean;
   isToday: boolean;
   appointments: Appointment[];
 }
 
-/**
- * Build a 7-column month grid that always renders complete weeks.
- *
- * `startOfWeek(startOfMonth, …)` rolls back to the previous Sunday so the
- * first row is full; `endOfWeek(endOfMonth, …)` rolls forward to the next
- * Saturday so the last row is full. Days outside the focused month are
- * still rendered, just visually de-emphasised.
- */
-function buildCells(
-  cursor: Date,
-  appointments: Appointment[]
-): DayCell[] {
-  const gridStart = startOfWeek(startOfMonth(cursor), { weekStartsOn: 0 });
-  const gridEnd = endOfWeek(endOfMonth(cursor), { weekStartsOn: 0 });
-  const days = eachDayOfInterval({ start: gridStart, end: gridEnd });
-
-  return days.map((d) => ({
-    date: d,
-    inCurrentMonth: isSameMonth(d, cursor),
-    isToday: isToday(d),
-    appointments: appointments
-      .filter((a) => {
-        if (!a.booking_time) return false;
-        const at = parseISO(a.booking_time);
-        if (Number.isNaN(at.getTime())) return false;
-        return isSameDay(at, d);
-      })
-      .sort((a, b) => {
-        // booking_time is guaranteed non-null here by the filter above.
-        return (
-          parseISO(a.booking_time as string).getTime() -
-          parseISO(b.booking_time as string).getTime()
-        );
-      }),
-  }));
+interface MonthBlock {
+  /** First day of the month (used as a stable React key & for formatting). */
+  monthDate: Date;
+  /** 0–6 — number of empty cells before the 1st (Sun = 0, Sat = 6). */
+  leadingBlanks: number;
+  /** Just the days that actually belong to this month; no spill-over. */
+  cells: DayCell[];
+  /** True for the single month containing today — anchor for initial scroll. */
+  isCurrentMonth: boolean;
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Data build
+// ──────────────────────────────────────────────────────────────────────────
+
 /**
- * Month-view calendar grid.
+ * Build the full 19-month window with appointment buckets per day.
  *
- * Scrolling contract: the day grid container (`flex-1 overflow-y-auto`)
- * is the only scrollable element in this view. Individual day cells use
- * adaptive heights — they grow with their content rather than introducing
- * nested scrollbars, which avoids the "mouse-wheel ambiguity" UX trap of
- * nested scroll containers.
+ * Apple-Calendar style: each month is a self-contained block whose first
+ * row is offset by `leadingBlanks` empty cells (so the 1st appears in its
+ * correct weekday column) and whose last row may end short of Saturday.
+ * We deliberately do NOT pad with neighbouring-month days — that would
+ * double-render the same date in two adjacent month grids and looks
+ * confusing once the grids butt up to each other vertically.
+ */
+function buildMonths(now: Date, appointments: Appointment[]): MonthBlock[] {
+  const nowMonthKey = format(now, 'yyyy-MM');
+  const start = addMonths(startOfMonth(now), -MONTHS_BEFORE);
+
+  return Array.from({ length: TOTAL_MONTHS }, (_, i) => {
+    const monthDate = addMonths(start, i);
+    const lastDay = endOfMonth(monthDate);
+    const days = eachDayOfInterval({ start: monthDate, end: lastDay });
+
+    const cells: DayCell[] = days.map((d) => {
+      const buckets: Appointment[] = [];
+      for (const a of appointments) {
+        if (!a.booking_time) continue;
+        const at = parseISO(a.booking_time);
+        // Local-time comparison: TIMESTAMPTZ rows come out of Postgres in
+        // UTC, parseISO returns Date in the JS runtime's local TZ, and
+        // the studio's clock is the only meaningful "which day was this".
+        if (Number.isNaN(at.getTime())) continue;
+        if (isSameDay(at, d)) buckets.push(a);
+      }
+      buckets.sort(
+        (a, b) =>
+          parseISO(a.booking_time as string).getTime() -
+          parseISO(b.booking_time as string).getTime()
+      );
+      return { date: d, isToday: isToday(d), appointments: buckets };
+    });
+
+    return {
+      monthDate,
+      leadingBlanks: getDay(monthDate),
+      cells,
+      isCurrentMonth: format(monthDate, 'yyyy-MM') === nowMonthKey,
+    };
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Component
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Continuously-scrolling month view (Apple Calendar style).
+ *
+ * Architecture:
+ *   - The weekday header sits OUTSIDE the scroll container, so it stays
+ *     locked in place forever (no `sticky` needed → no z-index / blur
+ *     stacking-context complications).
+ *   - The scroll container is the only scrollable element in this view.
+ *     Its scrollbar is hidden in both Webkit (`::-webkit-scrollbar`) and
+ *     Gecko (`scrollbar-width`) for the Apple-style "scroll without
+ *     visible controls" look.
+ *   - On mount, we jump the scroll position to the top of the current
+ *     month so the user lands on "today" instead of 6 months in the past.
  */
 export default function CalendarView({
   appointments,
 }: {
   appointments: Appointment[];
 }) {
-  const [cursor, setCursor] = useState<Date>(() => new Date());
-  const cells = useMemo(
-    () => buildCells(cursor, appointments),
-    [cursor, appointments]
+  // Compute `now` once on mount. If the dashboard stays open past
+  // midnight the highlight may drift by a day until the user reloads —
+  // acceptable trade-off vs. wiring a setInterval just for the "today"
+  // ring. The same pattern is used in CalendarView's old single-month
+  // implementation and ListView.
+  const now = useMemo(() => new Date(), []);
+  const months = useMemo(
+    () => buildMonths(now, appointments),
+    [now, appointments]
   );
 
-  return (
-    <div className="flex h-full flex-col">
-      {/* ── Month nav ───────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between border-b border-stone-200 px-6 py-3">
-        <h2 className="font-serif text-xl text-stone-900">
-          {format(cursor, 'MMMM yyyy')}
-        </h2>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setCursor((c) => subMonths(c, 1))}
-            className="rounded-full border border-stone-200 bg-white p-1.5 text-stone-700 transition-colors hover:bg-stone-100"
-            aria-label="Previous month"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setCursor(new Date())}
-            className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100"
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            onClick={() => setCursor((c) => addMonths(c, 1))}
-            className="rounded-full border border-stone-200 bg-white p-1.5 text-stone-700 transition-colors hover:bg-stone-100"
-            aria-label="Next month"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const currentMonthRef = useRef<HTMLElement | null>(null);
 
-      {/* ── Weekday header row ──────────────────────────────────────── */}
-      <div className="grid grid-cols-7 border-b border-stone-200 px-6 py-2">
+  // Initial scroll alignment — runs once after the first paint. `offsetTop`
+  // is measured against the scroll container (the offsetParent of the
+  // section), so setting `scrollTop` directly is the cleanest way to
+  // align without animating or using scrollIntoView (which would scroll
+  // the entire page if the dashboard isn't `overflow: hidden` upstream).
+  useEffect(() => {
+    if (scrollRef.current && currentMonthRef.current) {
+      scrollRef.current.scrollTop = currentMonthRef.current.offsetTop;
+    }
+    // Intentionally empty deps — run once on mount only. Re-running on
+    // appointments change would yank the user back to today every time
+    // the DB refreshes, which is wrong.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="flex h-full flex-col bg-[#FAF9F6]">
+      {/* ── Locked weekday header ──────────────────────────────────── */}
+      <div className="grid grid-cols-7 border-b border-stone-200 bg-[#FAF9F6] px-6 py-3">
         {WEEKDAY_HEADERS.map((d) => (
           <div
             key={d}
@@ -132,33 +173,49 @@ export default function CalendarView({
         ))}
       </div>
 
-      {/* ── Day grid (only scrollable element in this view) ─────────── */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="grid grid-cols-7 gap-1 px-6 py-2">
-          {cells.map((cell) => (
-            <DayCellView key={cell.date.toISOString()} cell={cell} />
-          ))}
-        </div>
+      {/* ── Continuous-scroll month list ───────────────────────────── */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-6 pb-16 [&::-webkit-scrollbar]:hidden"
+        style={{ scrollbarWidth: 'none' }}
+      >
+        {months.map((m) => (
+          <section
+            key={m.monthDate.toISOString()}
+            ref={m.isCurrentMonth ? currentMonthRef : null}
+          >
+            <h2 className="mt-8 mb-4 font-serif text-2xl text-stone-900">
+              {format(m.monthDate, 'MMMM yyyy')}
+            </h2>
+            <div className="grid grid-cols-7 gap-1">
+              {/* Leading blanks push the 1st into its correct weekday column. */}
+              {Array.from({ length: m.leadingBlanks }, (_, i) => (
+                <div key={`blank-${i}`} aria-hidden="true" />
+              ))}
+              {m.cells.map((cell) => (
+                <DayCellView key={cell.date.toISOString()} cell={cell} />
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
     </div>
   );
 }
 
-function DayCellView({ cell }: { cell: DayCell }) {
-  const base = cell.inCurrentMonth
-    ? 'bg-white border-stone-200'
-    : 'bg-stone-50/60 border-stone-100';
-  const todayRing = cell.isToday ? 'ring-1 ring-stone-900/30' : '';
+// ──────────────────────────────────────────────────────────────────────────
+// Subcomponents
+// ──────────────────────────────────────────────────────────────────────────
 
+function DayCellView({ cell }: { cell: DayCell }) {
+  const todayRing = cell.isToday ? 'ring-1 ring-stone-900/30' : '';
   const dayNumClass = cell.isToday
     ? 'inline-flex h-5 w-5 items-center justify-center rounded-full bg-stone-900 text-[11px] font-medium text-stone-50'
-    : cell.inCurrentMonth
-      ? 'text-xs font-medium text-stone-700'
-      : 'text-xs font-medium text-stone-400';
+    : 'text-xs font-medium text-stone-700';
 
   return (
     <div
-      className={`min-h-[100px] rounded-md border p-1.5 text-left ${base} ${todayRing}`}
+      className={`min-h-[100px] rounded-md border border-stone-200 bg-white p-1.5 text-left ${todayRing}`}
     >
       <div className="mb-1 flex items-center justify-between">
         <span className={dayNumClass}>{format(cell.date, 'd')}</span>
