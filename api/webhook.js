@@ -86,9 +86,16 @@ const splitName = (fullName) => {
   return { first: parts[0] || '', last: parts.slice(1).join(' ') || '' };
 };
 
+// TODO: Replace the placeholder below with the real Google Voice number
+// before going live. This string is sent to every client verbatim — leaving
+// the placeholder in production means clients will literally see
+// "[Insert Your Google Voice Number Here]" in their inbox.
+const GOOGLE_VOICE_NUMBER = '[Insert Your Google Voice Number Here]';
+const FOOTER_NOTE = `(Note: This is an automated line. To reach the studio directly, please call or text ${GOOGLE_VOICE_NUMBER}).`;
+
 const buildMessage = ({ clientName, serviceName, bookingUid }) => {
   const link = `${MANAGE_LINK_BASE}?uid=${encodeURIComponent(bookingUid)}`;
-  return `Hi ${clientName}! 🤍 Your ${serviceName} at Sadie Marie is confirmed. To view policies, reschedule, or cancel, use your secure link: ${link}`;
+  return `Hi ${clientName}! 🤍 Your ${serviceName} at Sadie Marie is confirmed. To view policies, reschedule, or cancel, use your secure link: ${link}\n\n${FOOTER_NOTE}`;
 };
 
 module.exports = async function handler(req, res) {

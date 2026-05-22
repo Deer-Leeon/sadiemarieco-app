@@ -51,11 +51,18 @@ const readRawBody = (req) => new Promise((resolve, reject) => {
   req.on('error', reject);
 });
 
+// TODO: Replace the placeholder below with the real Google Voice number
+// before going live. This string is sent to every client verbatim — leaving
+// the placeholder in production means clients will literally see
+// "[Insert Your Google Voice Number Here]" in their inbox.
+const GOOGLE_VOICE_NUMBER = '[Insert Your Google Voice Number Here]';
+const FOOTER_NOTE = `(Note: This is an automated line. To reach the studio directly, please call or text ${GOOGLE_VOICE_NUMBER}).`;
+
 const buildMessage = ({ firstName, serviceName, bookingUid }) => {
   const link = `${MANAGE_LINK_BASE}?uid=${encodeURIComponent(bookingUid)}`;
   const who = firstName || 'there';
   const what = serviceName || 'appointment';
-  return `Hi ${who}! 🤍 Just a quick reminder that your ${what} at Sadie Marie is tomorrow. Need to adjust your time? Manage it securely here: ${link}`;
+  return `Hi ${who}! 🤍 Just a quick reminder that your ${what} at Sadie Marie is tomorrow. Need to adjust your time? Manage it securely here: ${link}\n\n${FOOTER_NOTE}`;
 };
 
 module.exports = async function handler(req, res) {

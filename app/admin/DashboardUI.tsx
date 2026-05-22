@@ -59,7 +59,12 @@ export default function DashboardUI({
   dbError,
   displayName,
 }: Props) {
-  const [view, setView] = useState<ViewMode>('list');
+  // Default to the continuous-scroll month calendar. It surfaces both
+  // the highest density of context (a full month of bookings at a
+  // glance) and lands the user on "today" via the auto-scroll in
+  // CalendarView — the closest single-view equivalent of the old
+  // homepage feeling.
+  const [view, setView] = useState<ViewMode>('month');
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
   // `modalDate` doubles as both the "is the modal open?" boolean and
   // the initialDate passed in. Null = closed. Stored as Date (not ISO
