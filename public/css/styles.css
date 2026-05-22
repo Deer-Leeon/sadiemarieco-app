@@ -77,6 +77,17 @@ nav.scrolled { padding: 16px 64px; }
 
 /* ── HERO — MAGAZINE COVER ── */
 #hero {
+  /*
+    Reserve the height of the fixed-position navbar at the top of the
+    section instead of letting the nav float over the right-column
+    image. Before this padding, the top ~88px of the hero photo was
+    covered by the translucent nav and never visible to the user —
+    which made the editor's WYSIWYG preview lie and made copy
+    decisions (face placement, crop) impossible to reason about. The
+    off-white hero background still extends the full 100vh visually
+    because background paints over the padding area; only the grid
+    content (text col + image col) is inset.
+  */
   height: 100vh;
   width: 100vw;
   position: relative;
@@ -84,6 +95,8 @@ nav.scrolled { padding: 16px 64px; }
   display: grid;
   grid-template-columns: 1fr 1fr;
   background: var(--off-white);
+  padding-top: 88px;
+  box-sizing: border-box;
 }
 .hero-img-col {
   position: relative;
@@ -109,7 +122,14 @@ nav.scrolled { padding: 16px 64px; }
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 80px 60px 40px 70px;
+  /*
+    Top padding was previously 80px to push the title below the
+    fixed-position navbar. Now that `#hero` reserves nav height via
+    its own padding-top, this internal top padding can drop to 0 and
+    `justify-content: center` distributes the title naturally in the
+    available column space.
+  */
+  padding: 0 60px 40px 70px;
   position: relative;
   z-index: 2;
   height: 100%;
@@ -1144,7 +1164,13 @@ footer {
   nav { padding: 18px 24px; }
   nav.scrolled { padding: 12px 24px; }
   .nav-links { display: none; }
-  #hero { grid-template-columns: 1fr; height: auto; min-height: 100vh; }
+  /*
+    Reset the desktop hero padding-top: on mobile the columns stack
+    and the text column's own `padding: 120px 24px 60px` already
+    clears the (shorter) mobile navbar. Doubling them would shove
+    the title way down the viewport.
+  */
+  #hero { grid-template-columns: 1fr; height: auto; min-height: 100vh; padding-top: 0; }
   .hero-img-col { min-height: 55vw; }
   .hero-text-col { padding: 120px 24px 60px; order: -1; justify-content: flex-end; }
   .hero-title { margin-right: 0; font-size: clamp(3.5rem,14vw,6rem); }

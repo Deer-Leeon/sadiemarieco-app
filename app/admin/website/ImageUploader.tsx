@@ -2,15 +2,62 @@
 
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ImageIcon, Upload } from 'lucide-react';
+import { ImageIcon, Pencil } from 'lucide-react';
 
 interface Props {
   /** Stable key into `site_images.id` — also drives the blob pathname. */
   imageId: string;
   /** Current public URL, or null if nothing's been uploaded yet. */
   currentUrl: string | null;
-  /** Editorial label shown above the preview. */
+  /** Editorial label shown above the preview (card) or on hover (tile). */
   label: string;
+  /**
+   * Tailwind aspect-ratio class applied to the preview frame so the
+   * editor tile mirrors the shape of the slot on the live site (WYSIWYG).
+   *
+   * Pass as a literal so Tailwind's JIT can see it: `aspect-[4/5]`,
+   * `aspect-[3/4]`, `aspect-[3/2]`. Defaults to `aspect-video`.
+   *
+   * Ignored in `tile` variant when the parent supplies a fixed grid-row
+   * height — the image fills the cell via `h-full` and aspect ratio is
+   * dictated by the grid cell.
+   */
+  aspectClass?: string;
+  /**
+   * Optional extra classes appended to the card root. Most common use:
+   * `h-full` so the card fills its grid cell and siblings stay aligned
+   * when one of them grows (e.g. an error message appears).
+   */
+  className?: string;
+  /**
+   * Visual style:
+   *   - `'card'` (default) — white card chrome with the slot label
+   *     printed above the image. Used for the Core Pages section so the
+   *     editor sees context at a glance.
+   *   - `'tile'` — edge-to-edge image with no card chrome, label hidden
+   *     until hover. Mirrors the live site's `.p-item` style for the
+   *     Portfolio Collage section.
+   *
+   * Both variants share the same click-to-replace interaction: clicking
+   * the image opens the native file picker. There is intentionally no
+   * separate "Replace Image" button — the image itself is the affordance.
+   */
+  variant?: 'card' | 'tile';
+  /**
+   * Optional JSX rendered ON TOP of the image preview as a WYSIWYG
+   * stand-in for live-site chrome that obscures part of the slot —
+   * e.g. the homepage hero is partly covered by a `position: fixed`
+   * navbar and a bottom gradient, so an image picked in the editor
+   * looks different in the wild. Inject the equivalent overlay here
+   * and the editor preview becomes a true 1:1 representation.
+   *
+   * Z-order inside the preview button:
+   *   image  →  chromeOverlay  →  hover/focus edit affordance  →  upload spinner
+   *
+   * `pointer-events-none` is applied for you, so chrome cannot
+   * accidentally intercept clicks meant for the file picker.
+   */
+  chromeOverlay?: React.ReactNode;
 }
 
 /**
@@ -18,23 +65,36 @@ interface Props {
  *
  * Wire contract:
  *   - Posts multipart `FormData` to /api/upload with two fields:
- *       * `file` (Blob)  — the chosen image
+ *       * `file` (Blob)   — the chosen image
  *       * `id`   (string) — the imageId prop (the route's primary key)
  *   - On success, calls router.refresh() so the parent server component
  *     re-fetches `site_images` and the new URL flows back into this
  *     component via the `currentUrl` prop. No client-side state for the
- *     URL itself — the server is the single source of truth, which keeps
- *     us out of "stale React state vs. fresh DB" bugs.
+ *     URL itself — the server is the single source of truth.
+ *
+ * Interaction:
+ *   - The image (or empty-state placeholder) is itself a `<button>`. On
+ *     hover, a translucent dark overlay fades in with a pencil icon to
+ *     telegraph editability. Click opens the native file picker.
+ *   - Keyboard accessible: the button gets a visible focus ring, and
+ *     Enter / Space activate the picker the same way a mouse click does.
+ *   - During upload the overlay is forced on with "Uploading…" copy so
+ *     the user gets immediate feedback before the network round trip
+ *     completes.
  *
  * Error handling:
  *   - Network failures and 4xx/5xx responses both surface a short error
- *     message under the button. We DO NOT clear the file input on error
+ *     message under the image. We DO NOT clear the file input on error
  *     so the user can retry without re-picking the file.
  */
 export default function ImageUploader({
   imageId,
   currentUrl,
   label,
+  aspectClass = 'aspect-video',
+  className,
+  variant = 'card',
+  chromeOverlay,
 }: Props) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -66,8 +126,6 @@ export default function ImageUploader({
       });
 
       if (!res.ok) {
-        // Try to surface the server's error key — fall back to status
-        // text if the body isn't JSON (e.g. platform-level 413).
         let detail = res.statusText;
         try {
           const body = (await res.json()) as { error?: string };
@@ -78,8 +136,6 @@ export default function ImageUploader({
         throw new Error(detail || 'upload_failed');
       }
 
-      // Tell Next.js to re-run the parent server component. The fresh
-      // image_url comes back through `currentUrl` automatically.
       router.refresh();
     } catch (err) {
       console.error('[ImageUploader] upload failed:', err);
@@ -90,67 +146,143 @@ export default function ImageUploader({
       );
     } finally {
       setIsUploading(false);
-      // Reset the input so picking the same file twice still fires
-      // `onChange` (browsers no-op when value === previous).
       if (inputRef.current) inputRef.current.value = '';
     }
   };
 
-  return (
-    <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-stone-500">
-        {label}
-      </h3>
+  const isCard = variant === 'card';
 
-      {/* ── Preview / placeholder ────────────────────────────────────── */}
+  // ── Clickable image area (shared between both variants) ─────────────
+  // Wrapped in a real <button> so it picks up keyboard focus, hits
+  // assistive-tech announcement paths, and inherits :hover / :focus
+  // states for the overlay transition (`group-hover` / `group-focus`).
+  const clickableImage = (
+    <button
+      type="button"
+      onClick={triggerPicker}
+      disabled={isUploading}
+      aria-label={`Replace ${label}`}
+      className={`group relative block w-full cursor-pointer overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 disabled:cursor-progress ${
+        isCard ? 'rounded-md' : 'h-full'
+      }`}
+    >
       {currentUrl ? (
-        // Using a plain <img> rather than next/image because:
-        //  1. Blob URLs aren't on the static `next.config` images domain
-        //     allowlist by default,
-        //  2. The admin tooling doesn't need next/image's optimisation
-        //     pipeline — image quality matters on the public site, not
-        //     in the editor preview.
-        //
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={currentUrl}
           alt={label}
-          className="aspect-video w-full rounded-md bg-stone-100 object-cover"
+          className={`${aspectClass} block w-full object-cover ${
+            isCard ? 'bg-stone-100' : 'h-full'
+          }`}
         />
       ) : (
-        <div className="flex aspect-video w-full items-center justify-center rounded-md bg-stone-100">
-          <ImageIcon className="h-8 w-8 text-stone-300" aria-hidden="true" />
+        <div
+          className={`flex ${aspectClass} w-full items-center justify-center ${
+            isCard ? 'bg-stone-100' : 'h-full bg-[#1C2E42]'
+          }`}
+        >
+          <ImageIcon
+            className={`h-8 w-8 ${
+              isCard ? 'text-stone-300' : 'text-white/30'
+            }`}
+            aria-hidden="true"
+          />
         </div>
       )}
 
-      {/* ── Hidden native file input ─────────────────────────────────── */}
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleFileChange}
-      />
+      {/*
+        Live-site chrome (nav band, gradient overlay, etc.). Rendered
+        UNDER the hover overlay so the editor sees the chrome at rest
+        and the chrome stays visible (slightly dimmed) when the user
+        hovers to click. `pointer-events-none` so it never steals the
+        click from the parent button.
+      */}
+      {chromeOverlay && (
+        <div className="pointer-events-none absolute inset-0">
+          {chromeOverlay}
+        </div>
+      )}
 
-      {/* ── Trigger button ───────────────────────────────────────────── */}
-      <button
-        type="button"
-        onClick={triggerPicker}
-        disabled={isUploading}
-        className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-4 py-2 text-sm text-stone-50 transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-400"
+      {/*
+        Hover/focus overlay — the visual cue that the image is editable.
+        Transitions in on group-hover/group-focus; forced on during
+        upload (via the sibling render below).
+
+        `pointer-events-none` keeps the click target on the parent button
+        rather than the overlay, so the cursor reports the button state
+        (pointer / progress) consistently.
+      */}
+      <div
+        className={`pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/0 transition-all duration-200 group-hover:bg-black/45 group-focus-visible:bg-black/45`}
       >
-        {isUploading ? (
-          'Uploading...'
-        ) : (
-          <>
-            <Upload className="h-3.5 w-3.5" />
-            {currentUrl ? 'Replace Image' : 'Upload Image'}
-          </>
+        <Pencil
+          className="h-6 w-6 text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100"
+          aria-hidden="true"
+        />
+        {!isCard && (
+          <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
+            {label}
+          </span>
         )}
-      </button>
+      </div>
 
+      {/* Forced-on overlay while the request is in flight. */}
+      {isUploading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/55 text-xs font-medium uppercase tracking-[0.2em] text-white">
+          Uploading…
+        </div>
+      )}
+    </button>
+  );
+
+  // ── Hidden native file input (shared) ───────────────────────────────
+  const fileInput = (
+    <input
+      ref={inputRef}
+      type="file"
+      accept="image/*"
+      className="hidden"
+      onChange={handleFileChange}
+    />
+  );
+
+  // ── CARD variant ────────────────────────────────────────────────────
+  if (isCard) {
+    return (
+      <div
+        className={`flex flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm ${
+          className ?? ''
+        }`}
+      >
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-stone-500">
+          {label}
+        </h3>
+        {clickableImage}
+        {fileInput}
+        {errorMsg && (
+          <p className="mt-2 text-xs text-rose-700" role="alert">
+            {errorMsg}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // ── TILE variant — edge-to-edge, no chrome (mirrors live .p-item) ───
+  // The wrapper is `relative` so the error toast can be absolutely
+  // positioned over the image without disturbing the grid cell. The
+  // root has no padding, no border, no background of its own — the
+  // image fills the cell exactly the way `.p-item img { width:100%;
+  // height:100% }` does on the live site.
+  return (
+    <div className={`relative overflow-hidden bg-[#1C2E42] ${className ?? ''}`}>
+      {clickableImage}
+      {fileInput}
       {errorMsg && (
-        <p className="mt-2 text-xs text-rose-700" role="alert">
+        <p
+          className="absolute inset-x-2 bottom-2 rounded bg-rose-900/95 px-2 py-1 text-xs text-rose-50 shadow"
+          role="alert"
+        >
           {errorMsg}
         </p>
       )}
@@ -178,6 +310,8 @@ function humaniseUploadError(detail: string): string {
       return 'You are not authorised to upload images.';
     case 'blob_upload_failed':
       return 'Could not reach storage. Please try again in a moment.';
+    case 'image_processing_failed':
+      return 'That image could not be processed. Try a different file.';
     case 'db_upsert_failed':
       return 'Upload saved but the website record did not update. Please try again.';
     default:
