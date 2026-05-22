@@ -18,7 +18,22 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { scroll-behavior: smooth; font-size: 16px; }
+html {
+  scroll-behavior: smooth;
+  font-size: 16px;
+  /*
+    Paint the html element with the navy nav color so when the user
+    pulls the page down past the top edge on macOS (Chrome / Safari
+    rubber-band overscroll), the bounce region blends seamlessly into
+    the fixed navbar instead of revealing the off-white body
+    background. The bounce itself is kept ON — it's the elastic feel
+    that makes the hero image continue down past the navbar rather
+    than abruptly stopping. See `#hero` for the matching geometry
+    (image col extends to viewport y=0 under the translucent nav, so
+    pulling down reveals more image, not off-white).
+  */
+  background-color: var(--navy);
+}
 body {
   background: var(--off-white);
   color: var(--ink);
@@ -32,7 +47,15 @@ nav {
   position: fixed; top: 0; left: 0; right: 0; z-index: 200;
   display: flex; align-items: center; justify-content: space-between;
   padding: 26px 64px;
-  background: rgba(13,27,42,0.95);
+  /*
+    Fully opaque navy. Previously rgba(0.95) which let 5% of whatever
+    sat behind the bar (the body's off-white) bleed through and
+    slightly desaturate the navbar — most visible at the very top
+    edge where the eye expects a crisp colour boundary against the
+    browser chrome. Solid navy = sharper transition, no perceived
+    "haze line" between browser and page.
+  */
+  background: var(--navy);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid rgba(245,243,240,0.1);
   transition: padding 0.4s ease;
@@ -78,15 +101,19 @@ nav.scrolled { padding: 16px 64px; }
 /* ── HERO — MAGAZINE COVER ── */
 #hero {
   /*
-    Reserve the height of the fixed-position navbar at the top of the
-    section instead of letting the nav float over the right-column
-    image. Before this padding, the top ~88px of the hero photo was
-    covered by the translucent nav and never visible to the user —
-    which made the editor's WYSIWYG preview lie and made copy
-    decisions (face placement, crop) impossible to reason about. The
-    off-white hero background still extends the full 100vh visually
-    because background paints over the padding area; only the grid
-    content (text col + image col) is inset.
+    The hero fills the full 100vh with NO top reservation for the
+    fixed navbar. This is intentional: the image column extends from
+    viewport y=0 all the way to y=100vh, and the translucent navbar
+    floats over the top ~88px. The text column avoids overlap by
+    carrying its own `padding-top: 80px` (see `.hero-text-col`).
+
+    Why we accept the small loss in the WYSIWYG editor — and gain a
+    much better feel — is the rubber-band overscroll: when the user
+    pulls the page down past the top edge on macOS, the body bounces
+    down and the hero image bounces with it. Because the image
+    extends to y=0, what slides into view is more image, not an
+    off-white "gap". The picture reads as continuous instead of
+    abruptly stopping at the navbar's lower edge.
   */
   height: 100vh;
   width: 100vw;
@@ -95,8 +122,6 @@ nav.scrolled { padding: 16px 64px; }
   display: grid;
   grid-template-columns: 1fr 1fr;
   background: var(--off-white);
-  padding-top: 88px;
-  box-sizing: border-box;
 }
 .hero-img-col {
   position: relative;
@@ -123,13 +148,15 @@ nav.scrolled { padding: 16px 64px; }
   flex-direction: column;
   justify-content: center;
   /*
-    Top padding was previously 80px to push the title below the
-    fixed-position navbar. Now that `#hero` reserves nav height via
-    its own padding-top, this internal top padding can drop to 0 and
-    `justify-content: center` distributes the title naturally in the
-    available column space.
+    The 80px top padding pushes the title clear of the fixed-position
+    navbar. We deliberately do NOT use a hero-level padding-top to
+    achieve this — that would also push the image column down and
+    create an off-white gap above the photo that would slide into
+    view during overscroll. By scoping the offset to the text column
+    only, the image column stays anchored at y=0 and the rubber-band
+    bounce reveals more image rather than off-white.
   */
-  padding: 0 60px 40px 70px;
+  padding: 80px 60px 40px 70px;
   position: relative;
   z-index: 2;
   height: 100%;

@@ -1,9 +1,10 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { currentUser } from '@clerk/nextjs/server';
 import { sql } from '@vercel/postgres';
-import { ArrowLeft } from 'lucide-react';
 
 import { getAdminAccess } from '../auth';
+import AdminHeader from '../AdminHeader';
+import AdminSectionTabs from '../AdminSectionTabs';
 import ImageUploader from './ImageUploader';
 
 /**
@@ -41,44 +42,40 @@ const KNOWN_SLOT_IDS = [
 ] as const;
 
 /**
- * Live-site chrome overlay for the homepage hero slot. Rendered inside
- * the editor's hero preview so the editor sees a true 1:1 view of what
- * shows up on the live site.
+ * Subtle "hidden by navbar" indicator for the homepage hero preview.
  *
- * The hero image lives behind two stacked overlays on the public page:
+ * The live site's fixed navbar is 95% opaque navy and sits over the
+ * top of the 100vh hero image — anything an editor places there is
+ * effectively invisible on the live site. Without a hint here, the
+ * editor sees the full image in the uploader and can pick a photo
+ * whose key subject lands in that masked zone.
  *
- *   1. The translucent navbar (`nav`, `position: fixed`,
- *      `background: rgba(13,27,42,0.95)`, ~80px tall on a 100vh hero
- *      ≈ 8% of the image height). See public/css/styles.css lines
- *      31–39.
+ * Height ratio — 6%:
  *
- *   2. A 35%-tall bottom-up navy gradient applied via
- *      `.hero-img-col::after` — `linear-gradient(to top,
- *      rgba(13,27,42,0.55) 0%, transparent 100%)`. See
- *      public/css/styles.css lines 100–106.
+ *   The live nav is roughly 60–80px tall (60px scrolled, 80px at
+ *   rest) over a 100vh hero. On the typical desktop viewport heights
+ *   we design for (≈900–1080px) that lands at 6–8%. We bias to the
+ *   lower end here so the mask never claims more vertical territory
+ *   than the actual navbar consumes — editors found 8% read as the
+ *   admin over-stating the hidden zone vs. the public site.
  *
- * Without this overlay the editor sees the entire untouched image and
- * can pick a photo whose key subject lands inside one of these masked
- * zones — which then disappears on the live site. With it, the editor
- * picks knowing exactly which pixels will read.
+ * Why this colour (#1E3A8A) and not the brand `--navy` family:
+ *
+ *   The brand navy `#0D1B2A` and navy-light `#2A4460` are dark AND
+ *   low-chroma blues. At <40% alpha, the warm photo tones (skin,
+ *   hair, fabric) overwhelm what little chroma they carry and the
+ *   band reads as plain grey. #1E3A8A (Tailwind blue-900) is in the
+ *   same dark-blue family but carries roughly 2× the chroma. At 30%
+ *   alpha it has enough hue dominance to override warm pixels
+ *   underneath and read as unambiguously *blue* without darkening
+ *   the image meaningfully. This is a deliberate departure from the
+ *   brand token because the token's purpose here is editorial
+ *   communication ("this is the navbar zone"), and that signal must
+ *   survive low alpha.
  */
-function HeroLiveChrome() {
+function HeroNavMask() {
   return (
-    <>
-      {/*
-        Nav band. The LIVE nav uses `rgba(13,27,42,0.95) + backdrop-blur(14px)`
-        so the image is almost completely hidden behind it. In the editor
-        that reads as a solid bar and the editor can't tell what subject
-        they're putting under the nav.
-        We deliberately render it as ~50% navy WITHOUT the blur so the
-        underlying image is dimmed but still recognisable — i.e. the
-        editor knows "this strip of my photo will sit behind the nav"
-        and can see exactly which pixels those are. Less accurate than
-        the live render, more useful as an editorial preview.
-      */}
-      <div className="absolute inset-x-0 top-0 h-[8%] border-b border-white/10 bg-[#0D1B2A]/50" />
-      <div className="absolute inset-x-0 bottom-0 h-[35%] bg-linear-to-t from-[#0D1B2A]/55 to-transparent" />
-    </>
+    <div className="absolute inset-x-0 top-0 h-[6%] bg-[#1E3A8A]/30" />
   );
 }
 
@@ -89,6 +86,14 @@ export default async function WebsiteEditorPage() {
   const access = await getAdminAccess();
   if (!access.userId) redirect('/');
   if (!access.hasAccess) redirect('/');
+
+  // Fetched separately from getAdminAccess (which intentionally only
+  // returns access-control fields) because the header just needs a
+  // friendly display name and not the full user object — pulled here
+  // so we can pass it down to <AdminHeader />.
+  const user = await currentUser();
+  const displayName =
+    user?.firstName || access.emails[0] || 'Admin';
 
   // ── DATA FETCH ────────────────────────────────────────────────────────
   // Single unfiltered SELECT — @vercel/postgres's `sql` tagged template
@@ -116,44 +121,50 @@ export default async function WebsiteEditorPage() {
 
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-stone-900">
-      {/* ── Page header ───────────────────────────────────────────────── */}
-      <header className="border-b border-stone-200 bg-[#FAF9F6]/95 px-6 py-6 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
-          <div>
-            <Link
-              href="/admin"
-              className="inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500 transition-colors hover:text-stone-900"
-            >
-              <ArrowLeft className="h-3 w-3" />
-              Sadie Marie · Admin
-            </Link>
-            <h1 className="mt-1 font-serif text-3xl leading-tight text-stone-900">
-              Website Editor
-            </h1>
-            <p className="mt-1 text-sm text-stone-500">
-              Replace the images that appear across the public site. Changes
-              go live the moment the upload completes.
-            </p>
-          </div>
-        </div>
-      </header>
+      {/*
+        Header chrome (eyebrow + page title + sign-out cluster) is shared
+        with /admin via <AdminHeader />, so the bar height + typographic
+        register stay pixel-identical between section tabs — only the
+        page body below should change when navigating.
 
-      {/* ── Body ──────────────────────────────────────────────────────── */}
-      <main className="mx-auto max-w-6xl px-6 py-8">
+        The page-level explainer ("Replace the images that appear across
+        the public site …") used to live in this header. It was moved
+        into the body where shifting between tabs is permitted, so the
+        header itself can match /admin's compact `text-2xl + py-4` form.
+      */}
+      <AdminHeader title="Website Editor" displayName={displayName} />
+
+      <AdminSectionTabs />
+
+      {/* ── Body ──────────────────────────────────────────────────────
+          Both sections (Core Pages + Portfolio) share the same reading
+          column (`max-w-6xl px-6`) and the same heading register
+          (`font-serif text-xl`) so the page reads as one coherent
+          surface. Only the section *contents* differ — Core Pages is
+          two stacked uploader cards, Portfolio is the collage grid
+          wrapped in a single card — which gives the page the uniform
+          feel the editor asked for without homogenising the actual
+          editing affordances.                                              */}
+      <main className="mx-auto max-w-6xl space-y-10 px-6 py-8">
+        <p className="text-sm text-stone-500">
+          Replace the images that appear across the public site. Changes
+          go live the moment the upload completes.
+        </p>
+
         {dbError && (
-          <div className="mb-6 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
-            Could not load existing images: {dbError}. You can still upload
-            new ones — they will appear after the page reloads.
+          <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+            Could not load existing images: {dbError}. You can still
+            upload new ones — they will appear after the page reloads.
           </div>
         )}
 
-        {/* ── SECTION 1 — Core Pages ──────────────────────────────────
+        {/* ── SECTION 1 — Core Pages ─────────────────────────────────
             Hero + About: two visually distinct shapes (4:5 portrait vs
-            3:4 portrait) shown side-by-side so an editor sees the actual
-            shape they're filling. `items-start` is essential here — the
-            two cards have meaningfully different natural heights and we
-            don't want CSS Grid's default `align-items: stretch` to
-            rubber-band them to the same height.                          */}
+            3:4 portrait) shown side-by-side so an editor sees the
+            actual shape they're filling. `items-start` is essential —
+            the two cards have meaningfully different natural heights
+            and we don't want CSS Grid's default `align-items: stretch`
+            to rubber-band them to the same height.                          */}
         <section>
           <h2 className="mb-6 font-serif text-xl text-stone-900">
             Core Pages
@@ -164,7 +175,7 @@ export default async function WebsiteEditorPage() {
               label="Homepage Hero Image"
               currentUrl={urlFor('home_hero')}
               aspectClass="aspect-[4/5]"
-              chromeOverlay={<HeroLiveChrome />}
+              chromeOverlay={<HeroNavMask />}
             />
             <ImageUploader
               imageId="about_profile"
@@ -175,70 +186,79 @@ export default async function WebsiteEditorPage() {
           </div>
         </section>
 
-        {/* ── SECTION 2 — Portfolio & Gallery Collage ─────────────────
-            1:1 clone of the live `.portfolio-collage` from
-            public/css/styles.css (lines 646–686):
-              - 12-column grid
-              - Two fixed rows: 320px tall (top) and 240px tall (bottom)
-              - 10px gap, navy `#0D1B2A` backdrop (live `--navy`)
-              - p-item-1: cols 1-5 (5/12 wide)
-              - p-item-2: cols 6-12 (7/12 wide) — asymmetric on purpose
-              - p-item-3/4/5: 4 cols each on row 2
+        {/* ── SECTION 2 — Portfolio & Gallery Collage ───────────────
+            Live-site geometry (12-col, 320px + 240px rows, 10px gap,
+            p-item-1: 5/12, p-item-2: 7/12, p-item-3/4/5: 4/12 each on
+            row 2) preserved verbatim. What changed from the previous
+            full-bleed treatment:
 
-            Mobile fallback (< md): collapses to a single column with
-            each tile taking the full row at a fixed height, mirroring
-            the live site's 860px-breakpoint behaviour.
-
-            Each tile is a `variant="tile"` ImageUploader: edge-to-edge
-            image, no card chrome, click to replace, hover reveals the
-            slot label + pencil icon. This is what the live site looks
-            like.                                                          */}
+              • The whole section now lives inside the same max-w-6xl
+                column as Core Pages, so horizontal alignment is
+                consistent between sections.
+              • The grid is wrapped in a white card whose padding
+                exactly equals the inter-tile gap (`p-[10px]`,
+                `gap-[10px]`), so every tile sits at the same 10px
+                inset from any neighbour — card edge or sibling.
+                Reads as one uniform mosaic.
+              • The 860px-and-below reflow (p-item-1 / p-item-2 each
+                taking their own row) is preserved.                          */}
         <section>
-          <h2 className="mb-6 mt-16 font-serif text-xl text-stone-900">
+          <h2 className="mb-6 font-serif text-xl text-stone-900">
             Portfolio &amp; Gallery Collage
           </h2>
-          <div
-            className="
-              grid gap-[10px] rounded-xl bg-[#0D1B2A] p-[10px]
-              grid-cols-1 auto-rows-[220px]
-              md:grid-cols-12 md:grid-rows-[320px_240px] md:auto-rows-auto
-            "
-          >
-            <ImageUploader
-              variant="tile"
-              imageId="portfolio_1"
-              label="Portfolio · Featured 1"
-              currentUrl={urlFor('portfolio_1')}
-              className="md:col-span-5 md:row-start-1"
-            />
-            <ImageUploader
-              variant="tile"
-              imageId="portfolio_2"
-              label="Portfolio · Featured 2"
-              currentUrl={urlFor('portfolio_2')}
-              className="md:col-span-7 md:row-start-1"
-            />
-            <ImageUploader
-              variant="tile"
-              imageId="portfolio_3"
-              label="Portfolio · Featured 3"
-              currentUrl={urlFor('portfolio_3')}
-              className="md:col-span-4 md:row-start-2"
-            />
-            <ImageUploader
-              variant="tile"
-              imageId="portfolio_4"
-              label="Portfolio · Featured 4"
-              currentUrl={urlFor('portfolio_4')}
-              className="md:col-span-4 md:row-start-2"
-            />
-            <ImageUploader
-              variant="tile"
-              imageId="portfolio_5"
-              label="Portfolio · Featured 5"
-              currentUrl={urlFor('portfolio_5')}
-              className="md:col-span-4 md:row-start-2"
-            />
+          <div className="rounded-xl border border-stone-200 bg-white p-[10px] shadow-sm">
+            <div
+              className="
+                grid gap-[10px]
+                grid-cols-12 grid-rows-[280px_220px]
+                max-[860px]:grid-rows-[260px_220px_180px]
+              "
+            >
+              {/*
+                Labels are the exact `.p-tag` strings hard-coded in
+                public/index.html (lines 257, 262, 267, 272, 277).
+                Using them here rather than admin-only slot names makes
+                the editor a true 1:1 visual preview — hovering a tile
+                reveals the same caption that will read on the live
+                site. The slot identity is still unambiguous because
+                the grid order matches the live site exactly.
+              */}
+              <ImageUploader
+                variant="tile"
+                imageId="portfolio_1"
+                label="Classic Lashes"
+                currentUrl={urlFor('portfolio_1')}
+                className="col-span-5 row-start-1 max-[860px]:col-span-12 max-[860px]:row-start-1"
+              />
+              <ImageUploader
+                variant="tile"
+                imageId="portfolio_2"
+                label="Glow Facial"
+                currentUrl={urlFor('portfolio_2')}
+                className="col-span-7 row-start-1 max-[860px]:col-span-12 max-[860px]:row-start-2"
+              />
+              <ImageUploader
+                variant="tile"
+                imageId="portfolio_3"
+                label="Brow Lamination"
+                currentUrl={urlFor('portfolio_3')}
+                className="col-span-4 row-start-2 max-[860px]:row-start-3"
+              />
+              <ImageUploader
+                variant="tile"
+                imageId="portfolio_4"
+                label="Volume Set"
+                currentUrl={urlFor('portfolio_4')}
+                className="col-span-4 row-start-2 max-[860px]:row-start-3"
+              />
+              <ImageUploader
+                variant="tile"
+                imageId="portfolio_5"
+                label="Skin Treatment"
+                currentUrl={urlFor('portfolio_5')}
+                className="col-span-4 row-start-2 max-[860px]:row-start-3"
+              />
+            </div>
           </div>
         </section>
       </main>

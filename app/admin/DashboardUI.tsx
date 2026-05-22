@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { SignOutButton } from '@clerk/nextjs';
 import {
   addDays,
   addWeeks,
@@ -17,10 +16,11 @@ import {
   ChevronRight,
   Columns3,
   List,
-  LogOut,
 } from 'lucide-react';
 
 import type { Appointment, ViewMode } from './types';
+import AdminHeader from './AdminHeader';
+import AdminSectionTabs from './AdminSectionTabs';
 import ListView from './ListView';
 import CalendarView from './CalendarView';
 import TimeGrid from './TimeGrid';
@@ -75,32 +75,11 @@ export default function DashboardUI({
 
   return (
     <div className="h-screen w-full overflow-hidden flex flex-col bg-[#FAF9F6] text-stone-900 font-sans">
-      <header className="flex flex-col gap-3 border-b border-stone-200 bg-[#FAF9F6]/95 px-6 py-4 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
-            Sadie Marie · Admin
-          </p>
-          <h1 className="font-serif text-2xl leading-tight text-stone-900">
-            Bookings
-          </h1>
-        </div>
+      <AdminHeader title="Bookings" displayName={displayName}>
+        <ViewToggle view={view} onChange={setView} />
+      </AdminHeader>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <ViewToggle view={view} onChange={setView} />
-          <span className="hidden text-sm text-stone-500 md:inline">
-            {displayName}
-          </span>
-          <SignOutButton redirectUrl="/">
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              Sign out
-            </button>
-          </SignOutButton>
-        </div>
-      </header>
+      <AdminSectionTabs />
 
       {showDateNav && (
         <DateNav

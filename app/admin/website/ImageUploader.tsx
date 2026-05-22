@@ -156,6 +156,19 @@ export default function ImageUploader({
   // Wrapped in a real <button> so it picks up keyboard focus, hits
   // assistive-tech announcement paths, and inherits :hover / :focus
   // states for the overlay transition (`group-hover` / `group-focus`).
+  //
+  // TILE variant — pixel-mirror of public/css/styles.css `.p-item`:
+  //   • saturate(0.82) filter on the image (matches the brand's slightly
+  //     desaturated, film-print feel)
+  //   • slow 0.9s cubic-bezier(0.25,0.46,0.45,0.94) transition on the
+  //     image transform, with a hover scale of 1.06
+  //   • `.p-tag` bottom-gradient label that fades + slides in on hover
+  //     (replacing the centered pencil+label hover overlay used in the
+  //     card variant)
+  //   • a subtle top-right pencil badge — the only editor affordance
+  //     we add on top of the live look, so the admin can still tell
+  //     the tile is clickable. Sized/positioned to read as a corner
+  //     UI affordance, not a content overlay.
   const clickableImage = (
     <button
       type="button"
@@ -172,7 +185,9 @@ export default function ImageUploader({
           src={currentUrl}
           alt={label}
           className={`${aspectClass} block w-full object-cover ${
-            isCard ? 'bg-stone-100' : 'h-full'
+            isCard
+              ? 'bg-stone-100'
+              : 'h-full saturate-[0.82] transition-transform duration-900 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] group-hover:scale-[1.06] group-focus-visible:scale-[1.06]'
           }`}
         />
       ) : (
@@ -203,28 +218,47 @@ export default function ImageUploader({
         </div>
       )}
 
-      {/*
-        Hover/focus overlay — the visual cue that the image is editable.
-        Transitions in on group-hover/group-focus; forced on during
-        upload (via the sibling render below).
-
-        `pointer-events-none` keeps the click target on the parent button
-        rather than the overlay, so the cursor reports the button state
-        (pointer / progress) consistently.
-      */}
-      <div
-        className={`pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/0 transition-all duration-200 group-hover:bg-black/45 group-focus-visible:bg-black/45`}
-      >
-        <Pencil
-          className="h-6 w-6 text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100"
-          aria-hidden="true"
-        />
-        {!isCard && (
-          <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
+      {isCard ? (
+        // CARD variant: dark hover overlay with centered pencil. The
+        // card frame already carries the slot label in its header, so
+        // the overlay doesn't need to repeat it.
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/0 transition-all duration-200 group-hover:bg-black/45 group-focus-visible:bg-black/45">
+          <Pencil
+            className="h-6 w-6 text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100"
+            aria-hidden="true"
+          />
+        </div>
+      ) : (
+        <>
+          {/*
+            `.p-tag` clone — bottom gradient + small uppercase label,
+            fades + slides in from 6px down on hover. Values mirror
+            public/css/styles.css lines 713–727:
+              padding: 24px 18px 14px
+              font-size: 0.58rem (~9.28px)
+              letter-spacing: 0.22em
+              color: rgba(245,243,240,0.8)
+              background: linear-gradient(to top, rgba(13,27,42,0.85), transparent)
+              opacity 0 → 1, translateY 6px → 0 over 300ms
+          */}
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 translate-y-[6px] bg-linear-to-t from-[rgba(13,27,42,0.85)] to-transparent px-[18px] pb-[14px] pt-[24px] font-sans text-[0.58rem] font-light uppercase tracking-[0.22em] text-[rgba(245,243,240,0.8)] opacity-0 transition-[opacity,transform] duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100"
+          >
             {label}
-          </span>
-        )}
-      </div>
+          </div>
+
+          {/*
+            Editor affordance — small pencil badge top-right. Sized
+            and positioned to read as UI chrome rather than content,
+            so it doesn't break the WYSIWYG feel. Always visible at
+            low opacity, brightens on hover so the cursor target is
+            unambiguous.
+          */}
+          <div className="pointer-events-none absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 opacity-70 backdrop-blur-sm transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
+            <Pencil className="h-3.5 w-3.5 text-white" aria-hidden="true" />
+          </div>
+        </>
+      )}
 
       {/* Forced-on overlay while the request is in flight. */}
       {isUploading && (
