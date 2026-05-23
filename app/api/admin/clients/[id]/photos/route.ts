@@ -9,20 +9,23 @@
  * blob.url, so that public-read is load-bearing.
  *
  * Methods:
- *   GET   List all photos for the client, newest first. Used by
- *         ClientProfileModal to populate the pictures view.
+ *   GET    List all photos for the client, newest first. Used by
+ *          ClientProfileModal to populate the pictures view.
  *
- *   POST  multipart/form-data with a single `file` field. Uploads
- *         the file to Vercel Blob and inserts the resulting URL
- *         into client_photos. Returns the new row so the UI can
- *         append it without a re-fetch.
+ *   POST   multipart/form-data with a single `file` field. Runs
+ *          the upload through the sRGB normalisation pipeline
+ *          (mirror of /api/upload), persists to Vercel Blob, and
+ *          inserts the resulting URL into client_photos.
  *
- * NOTE on image processing: this route does NOT apply the sRGB
- * normalisation that /api/upload does for site images. Client
- * photos are inspection / reference shots (before-after lash
- * shots, dye colour records, etc.) — they're shown only to the
- * admin and don't need consistent cross-browser colour. Skipping
- * the sharp pipeline keeps this route a thin pass-through.
+ *   DELETE JSON body `{ photoId, blobUrl }`. Removes the row + the
+ *          backing blob (best-effort cleanup if the blob del fails).
+ *
+ * Image processing: every upload — not just HEIC — flows through
+ * `processClientPhoto` so before/after gallery shots look the same
+ * across Safari, Chrome, Firefox, and Edge. Without this, iPhone
+ * Display-P3 photos appear over-saturated/over-exposed in Chrome
+ * because Chrome interprets the embedded P3 ICC profile incorrectly.
+ * See the doc comment on `processClientPhoto` for the full pipeline.
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { del, put } from '@vercel/blob';
@@ -43,6 +46,10 @@ export const revalidate = 0;
 // can raise it in one place if we ever switch to client-driven
 // uploads.
 const MAX_FILE_BYTES = 4.5 * 1024 * 1024;
+
+// Safety cap against maliciously crafted huge-dimension images that
+// could OOM the function during sharp decode. Matches /api/upload.
+const SHARP_PIXEL_LIMIT = 2 ** 28;
 
 const ALLOWED_MIME: ReadonlySet<string> = new Set([
   'image/jpeg',
@@ -87,6 +94,18 @@ function sanitiseFilename(name: string): string {
   return cleaned.length > 0 ? cleaned : 'photo';
 }
 
+/** Strip the final `.ext` from a filename. Returns the input
+ *  unchanged if there's no extension or it starts with a dot
+ *  (`.hidden`). Mirrors the helper in /api/upload. */
+function stripExtension(name: string): string {
+  const idx = name.lastIndexOf('.');
+  return idx <= 0 ? name : name.slice(0, idx);
+}
+
+function replaceExtension(name: string, newExt: string): string {
+  return `${stripExtension(name)}.${newExt}`;
+}
+
 /**
  * HEIC detection. Mirrors the client-side heuristic: trust MIME
  * first, fall back to filename extension because some upload
@@ -99,28 +118,40 @@ function isHeicFile(filename: string, mime: string): boolean {
 }
 
 /**
- * Server-side HEIC/HEIF → JPEG conversion. Three decoder paths
- * already failed by the time bytes reach us:
+ * Server-side processing pipeline for client gallery photos.
  *
- *   1. Chrome's native <img> decoder — rejects newer Apple HEIC
- *      variants (HDR, 10-bit, Live Photo sequences).
- *   2. heic2any (libheif WASM, 2020 build) — old libheif, no
- *      HEVC plugin → "ERR_LIBHEIF format not supported".
- *   3. sharp's libheif — modern, but its macOS/Linux prebuilt
- *      binaries OMIT the HEVC decoder plugin (libde265 / x265)
- *      due to redistribution licensing → "Support for this
- *      compression format has not been built in".
+ * Every accepted upload runs through this. It does three jobs:
  *
- * So we try sharp first (fast when it works — non-HEVC HEICs,
- * or builds with the plugin), and fall back to `heic-convert`
- * which ships its own libheif-js WASM build with libde265
- * bundled. Output of the fallback gets piped back through sharp
- * for resize + mozjpeg encoding so both paths produce the same
- * shape of file.
+ *   1. sRGB normalisation. iPhone photos ship with a Display-P3
+ *      ICC profile embedded; Safari handles that correctly but
+ *      Chrome/Firefox/Edge re-interpret the wide-gamut pixels as
+ *      sRGB and produce visibly over-exposed / over-saturated
+ *      results (sunburnt-looking skin tones, pink whites). The
+ *      `.withIccProfile('srgb')` step transforms pixel data into
+ *      the sRGB working space and attaches an sRGB profile to the
+ *      output. Mirrors `/api/upload` exactly so client photos and
+ *      site photos render the same.
+ *   2. EXIF orientation bake-in via `.rotate()` — phones store the
+ *      orientation in a tag instead of rotating pixels, and some
+ *      downstream tools ignore the tag. Baking the rotation in
+ *      removes a class of "the photo is sideways" bugs.
+ *   3. Resize cap at 2048×2048 (inside) so the stored blob doesn't
+ *      balloon to 12+ MP per shot when the gallery only renders at
+ *      thumbnail + lightbox size.
  *
- * Returns a processed JPEG buffer + suggested filename. The
- * resize step caps output at 2048×2048 (matching what the
- * gallery actually renders) to keep stored blobs small.
+ * Format strategy mirrors /api/upload:
+ *   * PNG  → PNG (preserves transparency)
+ *   * WebP → WebP
+ *   * JPEG / AVIF / GIF / HEIC / HEIF → JPEG
+ *
+ * HEIC decode strategy:
+ *   sharp's libheif → heic-convert (libheif-js w/ libde265 WASM).
+ *   Sharp's prebuilt binaries on macOS/many Linux Vercel builds
+ *   omit the HEVC decoder plugin (licensing), so we attempt sharp
+ *   first (fast path when the plugin is present, e.g. some Vercel
+ *   builds) and fall back to `heic-convert` whose bundled WASM
+ *   ships libde265 — that handles every iPhone HEIC profile we've
+ *   seen, including HDR / 10-bit / Live Photo sequences.
  */
 interface ProcessedImage {
   buffer: Buffer;
@@ -128,53 +159,107 @@ interface ProcessedImage {
   contentType: string;
 }
 
-async function convertHeicToJpegServer(
+/** Encode the (already-built) sharp pipeline to a final
+ *  format-appropriate buffer. Settings match /api/upload exactly. */
+async function encodeNormalised(
+  pipe: sharp.Sharp,
+  sourceMime: string
+): Promise<{ buffer: Buffer; mime: string; ext: string }> {
+  if (sourceMime === 'image/png') {
+    return {
+      buffer: await pipe.png({ compressionLevel: 9 }).keepExif().toBuffer(),
+      mime: 'image/png',
+      ext: 'png',
+    };
+  }
+  if (sourceMime === 'image/webp') {
+    return {
+      buffer: await pipe.webp({ quality: 90 }).keepExif().toBuffer(),
+      mime: 'image/webp',
+      ext: 'webp',
+    };
+  }
+  return {
+    buffer: await pipe
+      .jpeg({
+        quality: 90,
+        chromaSubsampling: '4:4:4',
+        progressive: true,
+        mozjpeg: true,
+      })
+      .keepExif()
+      .toBuffer(),
+    mime: 'image/jpeg',
+    ext: 'jpg',
+  };
+}
+
+/** Common sharp pipeline: rotate (EXIF bake-in) → sRGB
+ *  normalisation → resize cap → format-appropriate encode. The
+ *  same chain runs on both HEIC and non-HEIC inputs once HEIC has
+ *  been decoded upstream. */
+async function applyNormalisationAndEncode(
   input: Buffer,
+  outputMime: string,
+  filename: string
+): Promise<ProcessedImage> {
+  const pipe = sharp(input, {
+    failOn: 'truncated',
+    limitInputPixels: SHARP_PIXEL_LIMIT,
+  })
+    .rotate()
+    .withIccProfile('srgb')
+    .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true });
+
+  const { buffer, mime, ext } = await encodeNormalised(pipe, outputMime);
+  return {
+    buffer,
+    filename: replaceExtension(filename, ext),
+    contentType: mime,
+  };
+}
+
+async function processClientPhoto(
+  input: Buffer,
+  sourceMime: string,
   originalFilename: string
 ): Promise<ProcessedImage> {
-  let jpegBuffer: Buffer;
+  // Non-HEIC fast path: one sharp pass does decode + normalise +
+  // resize + encode. Source MIME drives the output format choice.
+  if (!isHeicFile(originalFilename, sourceMime)) {
+    return applyNormalisationAndEncode(input, sourceMime, originalFilename);
+  }
+
+  // HEIC: try sharp's libheif first (one pass, same chain). If
+  // libheif refuses (missing HEVC plugin) we fall back to
+  // heic-convert and run a second sharp pass on the JPEG it gives
+  // us. Both paths converge on JPEG output.
+  const jpegFilename = originalFilename.replace(/\.(heic|heif)$/i, '.jpg');
 
   try {
-    // ── Path A: sharp direct ────────────────────────────────
-    jpegBuffer = await sharp(input, { failOn: 'error' })
-      .rotate()
-      .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 88, mozjpeg: true })
-      .toBuffer();
+    return await applyNormalisationAndEncode(input, 'image/jpeg', jpegFilename);
   } catch (sharpErr) {
     console.warn(
       '[api/admin/clients/[id]/photos] sharp HEIC decode failed — falling back to heic-convert',
       { name: originalFilename, error: errorMessage(sharpErr) }
     );
-
-    // ── Path B: heic-convert (libheif-js w/ libde265 WASM) ──
-    // Dynamic import so the module's WASM payload (~3 MB) only
-    // loads when we actually need it. CommonJS interop yields
-    // `{ default: heicConvert }` via esModuleInterop.
-    const heicConvertModule = await import('heic-convert');
-    const heicConvert = heicConvertModule.default;
-    const intermediateAb = await heicConvert({
-      buffer: input,
-      format: 'JPEG',
-      quality: 0.92,
-    });
-
-    // Pipe heic-convert's full-resolution JPEG back through
-    // sharp to apply the same resize + mozjpeg encoder we use
-    // on the fast path. Decoding a normal JPEG works fine with
-    // any sharp build.
-    jpegBuffer = await sharp(Buffer.from(intermediateAb))
-      .rotate()
-      .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 88, mozjpeg: true })
-      .toBuffer();
   }
 
-  return {
-    buffer: jpegBuffer,
-    filename: originalFilename.replace(/\.(heic|heif)$/i, '.jpg'),
-    contentType: 'image/jpeg',
-  };
+  // heic-convert ships its own libheif-js WASM build with libde265
+  // bundled. Dynamic import keeps the ~3 MB WASM payload out of
+  // every other route's bundle — only HEIC uploads pay the cost.
+  const heicConvertModule = await import('heic-convert');
+  const heicConvert = heicConvertModule.default;
+  const intermediateAb = await heicConvert({
+    buffer: input,
+    format: 'JPEG',
+    quality: 0.95,
+  });
+  return applyNormalisationAndEncode(
+    Buffer.from(intermediateAb),
+    'image/jpeg',
+    jpegFilename
+  );
 }
 
 interface Context {
@@ -304,44 +389,32 @@ export async function POST(
     );
   }
 
-  // ── HEIC → JPEG conversion (server-side via sharp) ──────────
-  // Runs ONLY when the client either:
-  //   * couldn't decode the HEIC itself (neither native nor
-  //     heic2any worked — common for newer iPhone HDR variants), or
-  //   * forwarded the raw HEIC bytes intentionally.
-  // For everything else (JPEG, PNG, WebP, AVIF, GIF) we still
-  // pass through unmodified — keeps non-HEIC uploads as a thin
-  // proxy without unnecessary re-encoding.
-  let processedBuffer: Buffer | null = null;
-  let processedFilename: string = file.name;
-  let processedContentType: string = file.type;
-
-  if (isHeicFile(file.name, file.type)) {
-    try {
-      const inputBuffer = Buffer.from(await file.arrayBuffer());
-      const result = await convertHeicToJpegServer(inputBuffer, file.name);
-      processedBuffer = result.buffer;
-      processedFilename = result.filename;
-      processedContentType = result.contentType;
-      console.log('[api/admin/clients/[id]/photos] HEIC → JPEG converted', {
-        clientId: id,
-        originalName: file.name,
-        originalBytes: file.size,
-        jpegBytes: processedBuffer.byteLength,
-      });
-    } catch (err) {
-      console.error(
-        '[api/admin/clients/[id]/photos] sharp HEIC conversion failed:',
-        { name: file.name, error: errorMessage(err) }
-      );
-      return NextResponse.json(
-        {
-          error: 'heic_conversion_failed',
-          message: errorMessage(err),
-        },
-        { status: 422 }
-      );
-    }
+  // ── Image processing pipeline (sRGB normalise + resize + encode)
+  // Applies to EVERY upload (not just HEIC) so client gallery
+  // photos render with the same colours that /api/upload guarantees
+  // for the public site — see processClientPhoto's doc comment.
+  let processed: ProcessedImage;
+  try {
+    const inputBuffer = Buffer.from(await file.arrayBuffer());
+    processed = await processClientPhoto(inputBuffer, file.type, file.name);
+    console.log('[api/admin/clients/[id]/photos] photo processed', {
+      clientId: id,
+      originalName: file.name,
+      originalType: file.type || '(empty)',
+      originalBytes: file.size,
+      outputType: processed.contentType,
+      outputBytes: processed.buffer.byteLength,
+      outputName: processed.filename,
+    });
+  } catch (err) {
+    console.error(
+      '[api/admin/clients/[id]/photos] image processing failed:',
+      { name: file.name, type: file.type, error: errorMessage(err) }
+    );
+    return NextResponse.json(
+      { error: 'image_processing_failed', message: errorMessage(err) },
+      { status: 422 }
+    );
   }
 
   // Pathname includes the client id so the blob dashboard is
@@ -350,40 +423,37 @@ export async function POST(
   // Filename uniqueness is enforced two ways, belt-and-suspenders:
   //
   //   1. We prepend `${Date.now()}-${random6}` to the (sanitised)
-  //      filename. This makes the pathname unique by construction —
-  //      even two simultaneous uploads of the SAME file from the
-  //      SAME client get different keys, because Date.now() advances
-  //      and Math.random() is independent per call. Without this,
-  //      the studio hit a 502 blob_upload_failed whenever a photo
-  //      was re-uploaded with an identical filename (which is common
-  //      when phones use generic names like IMG_3784.png).
+  //      processed filename. This makes the pathname unique by
+  //      construction — even two simultaneous uploads of the SAME
+  //      file from the SAME client get different keys, because
+  //      Date.now() advances and Math.random() is independent per
+  //      call. Without this, the studio hit a 502 blob_upload_failed
+  //      whenever a photo was re-uploaded with an identical name
+  //      (which is common when phones use generic names like
+  //      IMG_3784.png).
   //
   //   2. `addRandomSuffix: true` on the put() call. Recent versions
   //      of @vercel/blob flipped the default from `true` to `false`,
-  //      so without this explicit flag, identical pathnames would
+  //      so without this explicit flag identical pathnames would
   //      collide instead of getting a suffix. Setting it true here
   //      gives us a second uniqueness layer even if (1) ever fails
   //      (e.g. clock skew making two Date.now() values equal in the
   //      same millisecond on the same random rng tick).
   //
-  // The (possibly HEIC→JPG renamed) filename stays as the trailing
-  // component so the Vercel Blob dashboard remains scanable — e.g.
-  // "1716504123456-9k4b2j-IMG_3784.jpg".
-  const safeOriginalName = sanitiseFilename(processedFilename);
+  // The (possibly extension-rewritten) filename stays as the
+  // trailing component so the Vercel Blob dashboard remains
+  // scanable — e.g. "1716504123456-9k4b2j-IMG_3784.jpg".
+  const safeOriginalName = sanitiseFilename(processed.filename);
   const uniqueFilename = `${Date.now()}-${Math.random()
     .toString(36)
     .substring(2, 8)}-${safeOriginalName}`;
   const pathname = `client-photos/${id}/${uniqueFilename}`;
 
-  // Pass the converted JPEG buffer when we did sharp work, else
-  // the original File. @vercel/blob.put() handles both shapes.
-  const uploadBody: Buffer | File = processedBuffer ?? file;
-
   let blob;
   try {
-    blob = await put(pathname, uploadBody, {
+    blob = await put(pathname, processed.buffer, {
       access: 'public',
-      contentType: processedContentType,
+      contentType: processed.contentType,
       addRandomSuffix: true,
     });
   } catch (err) {
@@ -410,8 +480,8 @@ export async function POST(
       clientId: id,
       photoId: rows[0].id,
       inputBytes: file.size,
-      storedBytes: processedBuffer?.byteLength ?? file.size,
-      converted: processedBuffer !== null,
+      storedBytes: processed.buffer.byteLength,
+      storedType: processed.contentType,
     });
     return NextResponse.json({ photo: rowToPhoto(rows[0]) });
   } catch (err) {
