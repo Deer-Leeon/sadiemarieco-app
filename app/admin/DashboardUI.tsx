@@ -25,6 +25,7 @@ import ListView from './ListView';
 import CalendarView from './CalendarView';
 import TimeGrid from './TimeGrid';
 import SingleDayModal from './SingleDayModal';
+import AppointmentModal from './AppointmentModal';
 
 interface Props {
   appointments: Appointment[];
@@ -70,6 +71,14 @@ export default function DashboardUI({
   // the initialDate passed in. Null = closed. Stored as Date (not ISO
   // string) because consumers (TimeGrid → SingleDayModal) speak Date.
   const [modalDate, setModalDate] = useState<Date | null>(null);
+  // `selectedAppointment` drives the AppointmentModal overlay. It
+  // lives alongside `modalDate` so the two modals can be open at the
+  // same time — clicking a pill inside SingleDayModal layers the
+  // appointment details on top without dismissing the day view.
+  // Closing the appointment modal returns the editor to whatever was
+  // beneath it (day modal, or the underlying calendar).
+  const [selectedAppointment, setSelectedAppointment] =
+    useState<Appointment | null>(null);
 
   const showDateNav = view === '3day' || view === 'week';
 
@@ -103,13 +112,17 @@ export default function DashboardUI({
         ) : view === 'list' ? (
           <ListView appointments={appointments} />
         ) : view === 'month' ? (
-          <CalendarView appointments={appointments} />
+          <CalendarView
+            appointments={appointments}
+            onAppointmentClick={setSelectedAppointment}
+          />
         ) : view === '3day' ? (
           <TimeGrid
             appointments={appointments}
             currentDate={currentDate}
             daysToShow={3}
             onDayClick={setModalDate}
+            onAppointmentClick={setSelectedAppointment}
           />
         ) : (
           <TimeGrid
@@ -117,21 +130,34 @@ export default function DashboardUI({
             currentDate={currentDate}
             daysToShow={7}
             onDayClick={setModalDate}
+            onAppointmentClick={setSelectedAppointment}
           />
         )}
       </main>
 
       {/* ── Modal portal ───────────────────────────────────────────────
-          Rendered at the bottom of the tree so its `fixed inset-0`
-          backdrop always overlays everything above it regardless of
+          Both modals render here at the root so their `fixed inset-0`
+          backdrops always overlay everything above them regardless of
           which view is active. Conditional render (not just hidden)
-          so the timeline body / keyboard listeners only mount when
-          the modal is actually open. */}
+          so timeline body / keyboard listeners only mount when the
+          modal is actually open.
+
+          Stacking order: SingleDayModal at z-50 (default for the
+          existing implementation), AppointmentModal at z-60 so a
+          click on a pill inside the day modal layers the details
+          card on top rather than fighting it for stacking context. */}
       {modalDate !== null && (
         <SingleDayModal
           appointments={appointments}
           initialDate={modalDate}
           onClose={() => setModalDate(null)}
+          onAppointmentClick={setSelectedAppointment}
+        />
+      )}
+      {selectedAppointment !== null && (
+        <AppointmentModal
+          appointment={selectedAppointment}
+          onClose={() => setSelectedAppointment(null)}
         />
       )}
     </div>

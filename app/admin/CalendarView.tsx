@@ -127,8 +127,16 @@ function buildMonths(now: Date, appointments: Appointment[]): MonthBlock[] {
  */
 export default function CalendarView({
   appointments,
+  onAppointmentClick,
 }: {
   appointments: Appointment[];
+  /**
+   * Fired when the user clicks any appointment pill anywhere in the
+   * month grid. Bubbles the bound Appointment up to DashboardUI so
+   * the AppointmentModal can render on top of the calendar without
+   * the month view having to know anything about the modal itself.
+   */
+  onAppointmentClick?: (appointment: Appointment) => void;
 }) {
   // Compute `now` once on mount. If the dashboard stays open past
   // midnight the highlight may drift by a day until the user reloads —
@@ -193,7 +201,11 @@ export default function CalendarView({
                 <div key={`blank-${i}`} aria-hidden="true" />
               ))}
               {m.cells.map((cell) => (
-                <DayCellView key={cell.date.toISOString()} cell={cell} />
+                <DayCellView
+                  key={cell.date.toISOString()}
+                  cell={cell}
+                  onAppointmentClick={onAppointmentClick}
+                />
               ))}
             </div>
           </section>
@@ -207,7 +219,13 @@ export default function CalendarView({
 // Subcomponents
 // ──────────────────────────────────────────────────────────────────────────
 
-function DayCellView({ cell }: { cell: DayCell }) {
+function DayCellView({
+  cell,
+  onAppointmentClick,
+}: {
+  cell: DayCell;
+  onAppointmentClick?: (appointment: Appointment) => void;
+}) {
   const todayRing = cell.isToday ? 'ring-1 ring-stone-900/30' : '';
   const dayNumClass = cell.isToday
     ? 'inline-flex h-5 w-5 items-center justify-center rounded-full bg-stone-900 text-[11px] font-medium text-stone-50'
@@ -227,14 +245,24 @@ function DayCellView({ cell }: { cell: DayCell }) {
       </div>
       <div className="space-y-0.5">
         {cell.appointments.map((a) => (
-          <AppointmentPill key={a.id} appointment={a} />
+          <AppointmentPill
+            key={a.id}
+            appointment={a}
+            onClick={onAppointmentClick}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function AppointmentPill({ appointment }: { appointment: Appointment }) {
+function AppointmentPill({
+  appointment,
+  onClick,
+}: {
+  appointment: Appointment;
+  onClick?: (appointment: Appointment) => void;
+}) {
   const status = (appointment.status || '').toLowerCase();
   const isCancelled = status === 'cancelled';
   const time = appointment.booking_time
@@ -246,15 +274,22 @@ function AppointmentPill({ appointment }: { appointment: Appointment }) {
   );
   const service = cleanServiceName(appointment.service_name);
 
+  // The pill is already a <button>; we just bind the click. No
+  // stopPropagation needed in the month view because the parent cell
+  // doesn't have its own click handler (unlike the time-grid columns).
+  const handleClick = () => onClick?.(appointment);
+
   return (
     <button
       type="button"
+      onClick={onClick ? handleClick : undefined}
       title={`${time ? time + ' · ' : ''}${name} — ${service}`}
+      aria-label={`Open booking: ${name}, ${service}${time ? `, ${time}` : ''}`}
       className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] transition-colors ${
         isCancelled
           ? 'bg-amber-50 text-amber-700 line-through hover:bg-amber-100'
           : 'bg-stone-100 text-stone-800 hover:bg-stone-200'
-      }`}
+      } ${onClick ? 'cursor-pointer' : ''}`}
     >
       <span className="font-medium">{time}</span>{' '}
       <span className="text-stone-600">{name}</span>

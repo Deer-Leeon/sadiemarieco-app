@@ -30,6 +30,12 @@ interface DbRow {
   end_time: Date | string | null;
   service_name: string | null;
   status: string | null;
+  client_phone: string | null;
+  client_email: string | null;
+  // NUMERIC arrives from Postgres as a string. We coerce in the row
+  // mapping below so the client sees a clean `number | null`.
+  service_price: string | null;
+  service_description: string | null;
 }
 
 function serializeDate(value: Date | string | null): string | null {
@@ -82,12 +88,41 @@ export default async function AdminPage() {
   let appointments: Appointment[] = [];
   let dbError: string | null = null;
   try {
+    // LEFT JOIN to site_services on the cleaned service title so the
+    // appointment-details modal can show the price + description
+    // alongside the booking. Cal stores `service_name` as the FULL
+    // event title ("Classic Lash Set between Sadie Marie and Leon"),
+    // so we strip everything from the first ' between ' onward via
+    // split_part before matching against site_services.title.
+    //
+    // The JOIN is LEFT (not INNER) so:
+    //   • bookings for services renamed in the CMS after the booking
+    //     was created still appear, just without price/description,
+    //   • the dashboard never silently drops legacy rows whose
+    //     service_name doesn't resolve to a current site_services row.
+    //
+    // Inactive site_services rows (is_active = FALSE) are filtered out
+    // explicitly so a soft-deleted service doesn't keep enriching new
+    // appointments after it's been retired.
     const { rows } = await sql<DbRow>`
-      SELECT id, client_first_name, client_last_name, booking_time, end_time,
-             service_name, status
-      FROM appointments
-      WHERE booking_time >= NOW() - INTERVAL '30 days'
-      ORDER BY booking_time ASC
+      SELECT
+        a.id,
+        a.client_first_name,
+        a.client_last_name,
+        a.booking_time,
+        a.end_time,
+        a.service_name,
+        a.status,
+        a.client_phone,
+        a.client_email,
+        s.price       AS service_price,
+        s.description AS service_description
+      FROM appointments a
+      LEFT JOIN site_services s
+        ON s.title = split_part(a.service_name, ' between ', 1)
+       AND s.is_active = TRUE
+      WHERE a.booking_time >= NOW() - INTERVAL '30 days'
+      ORDER BY a.booking_time ASC
       LIMIT 1000
     `;
     appointments = rows.map<Appointment>((r) => ({
@@ -98,6 +133,20 @@ export default async function AdminPage() {
       end_time: serializeDate(r.end_time),
       service_name: r.service_name,
       status: r.status,
+      client_phone: r.client_phone,
+      client_email: r.client_email,
+      // NUMERIC arrives stringified — coerce here so the client side
+      // never has to think about parsing. Use Number() rather than
+      // parseFloat so a non-numeric string surfaces as NaN, which we
+      // then normalise to null so the modal hides the line cleanly.
+      service_price:
+        r.service_price === null
+          ? null
+          : (() => {
+              const n = Number(r.service_price);
+              return Number.isFinite(n) ? n : null;
+            })(),
+      service_description: r.service_description,
     }));
   } catch (err) {
     console.error('[admin] appointments query failed:', err);

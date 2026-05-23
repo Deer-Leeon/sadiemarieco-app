@@ -34,14 +34,20 @@ interface Props {
   currentDate: Date;
   daysToShow: 3 | 7;
   /**
-   * Fired when the user clicks anywhere inside a day column. Receives
-   * the local-time Date for that day (time portion is start-of-day).
-   * Bubbling: clicks on appointment pills also bubble up here — that
-   * matches the spec ("the entire column for a specific day should be
-   * clickable") and gives the user the same "open the modal" affordance
-   * whether they click an empty hour slot or an existing pill.
+   * Fired when the user clicks an empty area inside a day column.
+   * Receives the local-time Date for that day (time portion is
+   * start-of-day). Clicks on appointment pills do NOT bubble up to
+   * this handler — those are routed to `onAppointmentClick` instead
+   * so the editor can drill into a specific booking without also
+   * opening the day view on top of it.
    */
   onDayClick?: (date: Date) => void;
+  /**
+   * Fired when the user clicks a specific appointment pill. Receives
+   * the bound Appointment so the parent can populate
+   * AppointmentModal directly without re-looking-up by id.
+   */
+  onAppointmentClick?: (appointment: Appointment) => void;
 }
 
 interface DayColumn {
@@ -101,6 +107,7 @@ export default function TimeGrid({
   currentDate,
   daysToShow,
   onDayClick,
+  onAppointmentClick,
 }: Props) {
   const days = buildDays(currentDate, daysToShow);
   const columns = buildColumns(days, appointments);
@@ -135,6 +142,7 @@ export default function TimeGrid({
               key={col.date.toISOString()}
               column={col}
               onClick={onDayClick}
+              onAppointmentClick={onAppointmentClick}
             />
           ))}
         </div>
@@ -189,9 +197,11 @@ function TimeLabelColumn() {
 function DayColumnView({
   column,
   onClick,
+  onAppointmentClick,
 }: {
   column: DayColumn;
   onClick?: (date: Date) => void;
+  onAppointmentClick?: (appointment: Appointment) => void;
 }) {
   const clickable = !!onClick;
   const handleClick = () => onClick?.(column.date);
@@ -229,7 +239,11 @@ function DayColumnView({
         />
       ))}
       {column.items.map((pa) => (
-        <AppointmentBlock key={pa.appointment.id} positioned={pa} />
+        <AppointmentBlock
+          key={pa.appointment.id}
+          positioned={pa}
+          onClick={onAppointmentClick}
+        />
       ))}
     </div>
   );
@@ -237,8 +251,10 @@ function DayColumnView({
 
 function AppointmentBlock({
   positioned,
+  onClick,
 }: {
   positioned: PositionedAppointment;
+  onClick?: (appointment: Appointment) => void;
 }) {
   const { appointment: apt, top, height, col, totalCols } = positioned;
   const cancelled = (apt.status || '').toLowerCase() === 'cancelled';
@@ -257,16 +273,36 @@ function AppointmentBlock({
   const widthPct = 100 / totalCols;
   const leftPct = col * widthPct;
 
+  // `pointer-events-auto` (default) + an onClick + stopPropagation in
+  // the handler is the trick to make pills clickable WITHOUT also
+  // bubbling to the day column's "open the day modal" handler. The
+  // previous implementation used pointer-events-none which was the
+  // opposite — pills passed clicks through to the column, opening
+  // the day modal. Now clicking a pill opens the appointment modal,
+  // clicking around a pill still opens the day modal.
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    onClick?.(apt);
+  };
+  const clickable = !!onClick;
+
   const baseClasses =
-    'absolute overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors pointer-events-none';
+    'absolute overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left';
   const variantClasses = cancelled
     ? 'border-l-[3px] border-amber-700 bg-amber-50'
     : 'border-l-[3px] border-stone-800 bg-stone-100';
+  const interactiveClasses = clickable
+    ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
+    : 'pointer-events-none';
 
   return (
-    <div
-      className={`${baseClasses} ${variantClasses}`}
+    <button
+      type="button"
+      onClick={clickable ? handleClick : undefined}
+      disabled={!clickable}
+      className={`${baseClasses} ${variantClasses} ${interactiveClasses}`}
       title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}`}
+      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}`}
       style={{
         top,
         height,
@@ -290,6 +326,6 @@ function AppointmentBlock({
         {timeLabel && service ? ' · ' : ''}
         {service}
       </div>
-    </div>
+    </button>
   );
 }

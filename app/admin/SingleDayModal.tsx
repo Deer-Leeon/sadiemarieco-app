@@ -20,6 +20,14 @@ interface Props {
   appointments: Appointment[];
   initialDate: Date;
   onClose: () => void;
+  /**
+   * Fired when the user clicks an appointment pill inside the day
+   * timeline. The parent renders AppointmentModal on top of this
+   * modal (z-[60] above the day modal's z-50) rather than dismissing
+   * the day view — so the editor keeps the day's context in place
+   * while drilling into a single booking.
+   */
+  onAppointmentClick?: (appointment: Appointment) => void;
 }
 
 /**
@@ -40,6 +48,7 @@ export default function SingleDayModal({
   appointments,
   initialDate,
   onClose,
+  onAppointmentClick,
 }: Props) {
   const [activeDate, setActiveDate] = useState<Date>(initialDate);
 
@@ -108,7 +117,10 @@ export default function SingleDayModal({
         />
 
         <div className="flex-1 overflow-y-auto">
-          <DayTimeline positioned={positioned} />
+          <DayTimeline
+            positioned={positioned}
+            onAppointmentClick={onAppointmentClick}
+          />
         </div>
       </div>
     </div>
@@ -171,8 +183,10 @@ function ModalHeader({
 
 function DayTimeline({
   positioned,
+  onAppointmentClick,
 }: {
   positioned: PositionedAppointment[];
+  onAppointmentClick?: (appointment: Appointment) => void;
 }) {
   // Same column structure as TimeGrid: a left time-labels column and a
   // single relative column for the day's content. Sharing the grid
@@ -186,7 +200,10 @@ function DayTimeline({
       }}
     >
       <TimeLabelColumn />
-      <DayBody positioned={positioned} />
+      <DayBody
+        positioned={positioned}
+        onAppointmentClick={onAppointmentClick}
+      />
     </div>
   );
 }
@@ -214,8 +231,10 @@ function TimeLabelColumn() {
 
 function DayBody({
   positioned,
+  onAppointmentClick,
 }: {
   positioned: PositionedAppointment[];
+  onAppointmentClick?: (appointment: Appointment) => void;
 }) {
   return (
     <div className="relative">
@@ -237,7 +256,11 @@ function DayBody({
       )}
       {/* Absolute-positioned pills overlay the gridlines */}
       {positioned.map((pa) => (
-        <ModalAppointment key={pa.appointment.id} positioned={pa} />
+        <ModalAppointment
+          key={pa.appointment.id}
+          positioned={pa}
+          onClick={onAppointmentClick}
+        />
       ))}
     </div>
   );
@@ -245,8 +268,10 @@ function DayBody({
 
 function ModalAppointment({
   positioned,
+  onClick,
 }: {
   positioned: PositionedAppointment;
+  onClick?: (appointment: Appointment) => void;
 }) {
   const { appointment: apt, top, height, col, totalCols } = positioned;
   const cancelled = (apt.status || '').toLowerCase() === 'cancelled';
@@ -270,16 +295,32 @@ function ModalAppointment({
   const widthPct = 100 / totalCols;
   const leftPct = col * widthPct;
 
+  // stopPropagation guards against the modal's outer
+  // backdrop-click-to-close handler firing when a pill is clicked.
+  // The pill itself opens AppointmentModal on top of this modal.
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    onClick?.(apt);
+  };
+  const clickable = !!onClick;
+
   const baseClasses =
-    'absolute overflow-hidden rounded-sm p-2 shadow-sm transition-colors';
+    'absolute overflow-hidden rounded-sm p-2 shadow-sm transition-colors text-left';
   const variantClasses = cancelled
     ? 'border-l-[3px] border-amber-700 bg-amber-50'
     : 'border-l-[3px] border-stone-800 bg-stone-100';
+  const interactiveClasses = clickable
+    ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
+    : '';
 
   return (
-    <div
-      className={`${baseClasses} ${variantClasses}`}
+    <button
+      type="button"
+      onClick={clickable ? handleClick : undefined}
+      disabled={!clickable}
+      className={`${baseClasses} ${variantClasses} ${interactiveClasses}`}
       title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}`}
+      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}`}
       style={{
         top,
         height,
@@ -303,6 +344,6 @@ function ModalAppointment({
         {timeLabel && service ? ' · ' : ''}
         {service}
       </div>
-    </div>
+    </button>
   );
 }

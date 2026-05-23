@@ -28,6 +28,34 @@ export interface Appointment {
   end_time: string | null;
   service_name: string | null;
   status: string | null;
+  /**
+   * Client's phone number as Cal.com sent it on the webhook (E.164
+   * when the booking form's phone field was filled in correctly,
+   * arbitrary string otherwise). Surfaced in the AppointmentModal
+   * so the studio can call/text from the dashboard without bouncing
+   * to Cal. Null when the client booked without supplying a phone.
+   */
+  client_phone: string | null;
+  /**
+   * Client's email. Same provenance as client_phone — captured at
+   * booking time and denormalised onto the appointments row.
+   */
+  client_email: string | null;
+  /**
+   * Price for this appointment's service, joined in from
+   * `site_services.price` on title match. Null when no matching CMS
+   * row exists (legacy bookings, manually renamed services, etc.).
+   * The modal hides the price line entirely when null rather than
+   * showing a misleading "$0".
+   */
+  service_price: number | null;
+  /**
+   * Marketing description for the service, joined in from
+   * `site_services.description`. Same nullability semantics as
+   * service_price — the modal hides the description block when null
+   * so it doesn't render an empty italic line.
+   */
+  service_description: string | null;
 }
 
 /**
