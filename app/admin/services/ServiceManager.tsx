@@ -38,20 +38,43 @@ import {
 
 export interface Service {
   id: number;
-  cal_event_id: number;
+  /**
+   * Null for group headers (groups are CMS-only accordion containers
+   * with no Cal.com event-type behind them). Required for every
+   * bookable service.
+   */
+  cal_event_id: number | null;
   category: string;
   title: string;
   description: string;
   price: number;
-  duration_mins: number;
+  /**
+   * Null for group headers (groups don't have a duration of their
+   * own — they aggregate bookable children that each carry one).
+   */
+  duration_mins: number | null;
   is_active: boolean;
   /**
    * The Cal.com event-type slug, used by the public site's
    * `data-cal-link` attribute to wire the booking drawer. Nullable
    * defensively — pre-migration rows that haven't been backfilled
-   * yet will be null until the operator runs the backfill script.
+   * yet will be null until the operator runs the backfill script,
+   * and groups are always null since they have no Cal event.
    */
   slug: string | null;
+  /**
+   * True when this row is an accordion header (a "Service Group"
+   * parent). Group rows have no Cal event, render as a "From $X"
+   * heading on the homepage, and contain bookable child services.
+   */
+  is_group: boolean;
+  /**
+   * Optional nesting under a group. Null means this row sits at the
+   * top level (a standalone bookable service, or a group itself).
+   * When set, this row renders inside its parent group's accordion
+   * on both the admin list and the public site.
+   */
+  parent_id: number | null;
 }
 
 interface Props {
@@ -80,6 +103,18 @@ interface FormState {
   description: string;
   price: string;
   length: string;
+  /**
+   * True when the editor is creating/editing a group header. Drives
+   * visibility of the duration + parent-picker fields and switches
+   * the submit payload to the no-Cal-sync path on the server.
+   */
+  is_group: boolean;
+  /**
+   * Stringified id of the parent group, or '' for "no parent
+   * (standalone)". Stored as a string because <select> values are
+   * always strings — coerced to `number | null` at submit time.
+   */
+  parent_id: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -91,6 +126,8 @@ const EMPTY_FORM: FormState = {
   description: '',
   price: '',
   length: '',
+  is_group: false,
+  parent_id: '',
 };
 
 type FormMode =
@@ -115,23 +152,83 @@ export default function ServiceManager({ initialServices }: Props) {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Derived: services grouped by category, sorted alphabetically ──────
-  // Recomputed only when `services` changes. Map preserves insertion
-  // order, which matches the sorted iteration we want for rendering.
+  // ── Derived: services grouped by category, hierarchical within each ───
+  // Each category renders in this order:
+  //   1. Group headers (is_group=true) with their children nested
+  //      visually beneath. Alphabetical among groups.
+  //   2. Standalone services (is_group=false, parent_id=null).
+  //      Alphabetical among standalones.
+  //
+  // Orphan children — rows whose parent_id points to a row that no
+  // longer exists (raced delete, manual SQL change) — are bubbled up
+  // and rendered as standalones so they never disappear from the
+  // editor. Surfacing them lets the editor reassign or delete them
+  // instead of having to read the database to find out where they
+  // went.
   const grouped = useMemo(() => {
-    const map = new Map<string, Service[]>();
-    const sorted = [...services].sort((a, b) => {
-      const cat = a.category.localeCompare(b.category);
-      if (cat !== 0) return cat;
-      return a.title.localeCompare(b.title);
-    });
-    for (const s of sorted) {
-      const list = map.get(s.category);
+    const byCategory = new Map<string, Service[]>();
+    for (const s of services) {
+      const list = byCategory.get(s.category);
       if (list) list.push(s);
-      else map.set(s.category, [s]);
+      else byCategory.set(s.category, [s]);
     }
-    return Array.from(map.entries());
+
+    return Array.from(byCategory.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([category, items]) => {
+        const groupSet = new Set(
+          items.filter((s) => s.is_group).map((s) => s.id)
+        );
+        const childrenByParent = new Map<number, Service[]>();
+        for (const s of items) {
+          if (s.parent_id !== null && groupSet.has(s.parent_id)) {
+            const list = childrenByParent.get(s.parent_id);
+            if (list) list.push(s);
+            else childrenByParent.set(s.parent_id, [s]);
+          }
+        }
+        // Sort each child list alphabetically so the admin view
+        // matches the public site's rendering order.
+        for (const list of childrenByParent.values()) {
+          list.sort((a, b) => a.title.localeCompare(b.title));
+        }
+
+        const groupRows = items
+          .filter((s) => s.is_group)
+          .sort((a, b) => a.title.localeCompare(b.title));
+
+        // Standalones = non-group rows whose parent_id is null OR
+        // whose parent_id no longer references a live group (the
+        // orphan-bubble-up case described in the block comment).
+        const standalones = items
+          .filter(
+            (s) =>
+              !s.is_group &&
+              (s.parent_id === null || !groupSet.has(s.parent_id))
+          )
+          .sort((a, b) => a.title.localeCompare(b.title));
+
+        return { category, groupRows, childrenByParent, standalones };
+      });
   }, [services]);
+
+  // ── Derived: flat list of groups for the parent-picker dropdown ───────
+  // Filtered by the form's current category so the editor can only
+  // nest under a same-category parent — matches the API's
+  // validateParentReference rule. Excludes the row being edited so
+  // a service can't end up as its own parent.
+  const candidateParents = useMemo(() => {
+    const editingId =
+      mode.kind === 'edit' ? mode.service.id : null;
+    return services
+      .filter(
+        (s) =>
+          s.is_group &&
+          s.category === form.category &&
+          s.id !== editingId
+      )
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [services, form.category, mode]);
 
   // ── Slide-over open/close side-effects ────────────────────────────────
   // Lock body scroll while the panel is open (otherwise the long form
@@ -179,7 +276,12 @@ export default function ServiceManager({ initialServices }: Props) {
       category: service.category,
       description: service.description,
       price: String(service.price),
-      length: String(service.duration_mins),
+      // Groups have no duration; keep the field empty so the form
+      // doesn't render "0" if the editor toggles is_group off mid-
+      // edit (which the server forbids — we still keep the UI tidy).
+      length: service.duration_mins !== null ? String(service.duration_mins) : '',
+      is_group: service.is_group,
+      parent_id: service.parent_id !== null ? String(service.parent_id) : '',
     });
     setMode({ kind: 'edit', service });
   }
@@ -196,13 +298,16 @@ export default function ServiceManager({ initialServices }: Props) {
     category: string;
     description: string;
     price: number;
-    length: number;
+    length: number | null;
+    is_group: boolean;
+    parent_id: number | null;
   } | null {
     const title = form.title.trim();
     const category = form.category.trim();
     const description = form.description.trim();
     const price = Number(form.price);
-    const length = Number(form.length);
+    const is_group = form.is_group;
+    const parent_id = form.parent_id ? Number(form.parent_id) : null;
 
     if (!title) {
       setSubmitError('Title is required.');
@@ -216,11 +321,32 @@ export default function ServiceManager({ initialServices }: Props) {
       setSubmitError('Price must be a non-negative number.');
       return null;
     }
-    if (!Number.isInteger(length) || length < 5) {
-      setSubmitError('Duration must be a whole number of at least 5 minutes.');
+
+    // Duration is only relevant for bookable services. For groups
+    // we don't validate (and we send `null` on the wire). For
+    // bookable services we keep the original 5-minute floor.
+    let length: number | null = null;
+    if (!is_group) {
+      length = Number(form.length);
+      if (!Number.isInteger(length) || length < 5) {
+        setSubmitError(
+          'Duration must be a whole number of at least 5 minutes.'
+        );
+        return null;
+      }
+    }
+
+    // Defensive cross-field check before the server has to weigh in
+    // (the API enforces this too, but a client-side message points
+    // the editor at the exact mistake without a network round-trip).
+    if (is_group && parent_id !== null) {
+      setSubmitError(
+        'A group header cannot itself be nested — clear "Nest under" or untick "This is a group header".'
+      );
       return null;
     }
-    return { title, category, description, price, length };
+
+    return { title, category, description, price, length, is_group, parent_id };
   }
 
   // ── Submit handlers ───────────────────────────────────────────────────
@@ -288,10 +414,11 @@ export default function ServiceManager({ initialServices }: Props) {
   async function confirmDelete(service: Service) {
     setDeletingId(service.id);
     try {
-      const qs = new URLSearchParams({
-        db_id: String(service.id),
-        cal_event_id: String(service.cal_event_id),
-      });
+      // The server now re-reads cal_event_id from the DB itself
+      // (groups don't have one, and trusting a client-supplied id
+      // for a group could PATCH `hidden: true` on the wrong event).
+      // We only send db_id; cal_event_id is derived server-side.
+      const qs = new URLSearchParams({ db_id: String(service.id) });
       const res = await fetch(`/api/admin/services?${qs.toString()}`, {
         method: 'DELETE',
       });
@@ -299,7 +426,14 @@ export default function ServiceManager({ initialServices }: Props) {
       if (!res.ok) {
         throw new Error(data.message || data.error || 'Delete failed');
       }
-      setServices((prev) => prev.filter((s) => s.id !== service.id));
+      // Server cascade-removes children of a deleted group. Mirror
+      // the cascade in local state so the list doesn't show stranded
+      // child cards under a now-deleted parent until the next refetch.
+      setServices((prev) =>
+        prev.filter(
+          (s) => s.id !== service.id && s.parent_id !== service.id
+        )
+      );
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -339,11 +473,13 @@ export default function ServiceManager({ initialServices }: Props) {
       {grouped.length === 0 ? (
         <EmptyState onAdd={openCreate} />
       ) : (
-        grouped.map(([category, items]) => (
+        grouped.map((section) => (
           <CategorySection
-            key={category}
-            category={category}
-            services={items}
+            key={section.category}
+            category={section.category}
+            groupRows={section.groupRows}
+            childrenByParent={section.childrenByParent}
+            standalones={section.standalones}
             confirmingDeleteId={confirmingDeleteId}
             deletingId={deletingId}
             onEdit={openEdit}
@@ -362,6 +498,7 @@ export default function ServiceManager({ initialServices }: Props) {
         submitError={submitError}
         onSubmit={handleSubmit}
         onClose={closeForm}
+        candidateParents={candidateParents}
       />
     </div>
   );
@@ -391,7 +528,9 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 
 interface CategorySectionProps {
   category: string;
-  services: Service[];
+  groupRows: Service[];
+  childrenByParent: Map<number, Service[]>;
+  standalones: Service[];
   confirmingDeleteId: number | null;
   deletingId: number | null;
   onEdit: (service: Service) => void;
@@ -402,7 +541,9 @@ interface CategorySectionProps {
 
 function CategorySection({
   category,
-  services,
+  groupRows,
+  childrenByParent,
+  standalones,
   confirmingDeleteId,
   deletingId,
   onEdit,
@@ -410,35 +551,112 @@ function CategorySection({
   onCancelDelete,
   onConfirmDelete,
 }: CategorySectionProps) {
+  // Total count for the section header. We count every visible row
+  // including children — matches the editor's mental model that
+  // "this category contains N services" regardless of nesting.
+  const totalCount =
+    groupRows.length +
+    standalones.length +
+    Array.from(childrenByParent.values()).reduce(
+      (sum, list) => sum + list.length,
+      0
+    );
+
+  const cardProps = (service: Service) => ({
+    isConfirmingDelete: confirmingDeleteId === service.id,
+    isDeleting: deletingId === service.id,
+    onEdit: () => onEdit(service),
+    onPrimeDelete: () => onPrimeDelete(service.id),
+    onCancelDelete,
+    onConfirmDelete: () => onConfirmDelete(service),
+  });
+
   return (
     <section>
       <div className="mb-4 flex items-baseline justify-between border-b border-stone-200 pb-2">
         <h3 className="font-serif text-lg text-stone-900">{category}</h3>
         <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
-          {services.length} {services.length === 1 ? 'service' : 'services'}
+          {totalCount} {totalCount === 1 ? 'service' : 'services'}
         </span>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {services.map((service) => (
-          <ServiceCard
-            key={service.id}
-            service={service}
-            isConfirmingDelete={confirmingDeleteId === service.id}
-            isDeleting={deletingId === service.id}
-            onEdit={() => onEdit(service)}
-            onPrimeDelete={() => onPrimeDelete(service.id)}
-            onCancelDelete={onCancelDelete}
-            onConfirmDelete={() => onConfirmDelete(service)}
-          />
-        ))}
+      {/*
+        Hierarchy layout, top to bottom:
+          1. Group rows — each is a full-width header card with its
+             children rendered inside an indented panel beneath it.
+             We don't put the group card in the 2-col grid because
+             the children panel needs to span the full width of the
+             section to feel like a contained "shelf".
+          2. Standalone services — rendered in the same 2-col grid
+             we used pre-feature, so the surface stays familiar when
+             no groups exist in a category.
+        A thin divider sits between groups and standalones to break
+        the two zones apart without screaming for attention.
+      */}
+      <div className="space-y-6">
+        {groupRows.map((group) => {
+          const children = childrenByParent.get(group.id) ?? [];
+          return (
+            <div key={group.id} className="space-y-3">
+              <ServiceCard
+                service={group}
+                variant="group"
+                {...cardProps(group)}
+              />
+
+              {children.length > 0 ? (
+                // Indented child shelf: a soft left border + padding
+                // makes the parent/child relationship readable at a
+                // glance without re-rendering the full card chrome.
+                <div className="ml-3 border-l-2 border-stone-200 pl-5">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {children.map((child) => (
+                      <ServiceCard
+                        key={child.id}
+                        service={child}
+                        variant="child"
+                        {...cardProps(child)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="ml-3 border-l-2 border-dashed border-stone-200 pl-5 py-3 text-xs italic text-stone-400">
+                  No child services yet. Add a new service and choose
+                  "{group.title}" as its parent.
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {standalones.length > 0 && (
+          <>
+            {groupRows.length > 0 && (
+              <div className="h-px bg-stone-100" aria-hidden="true" />
+            )}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {standalones.map((service) => (
+                <ServiceCard
+                  key={service.id}
+                  service={service}
+                  variant="standalone"
+                  {...cardProps(service)}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
 }
 
+type ServiceCardVariant = 'group' | 'child' | 'standalone';
+
 interface ServiceCardProps {
   service: Service;
+  variant: ServiceCardVariant;
   isConfirmingDelete: boolean;
   isDeleting: boolean;
   onEdit: () => void;
@@ -449,6 +667,7 @@ interface ServiceCardProps {
 
 function ServiceCard({
   service,
+  variant,
   isConfirmingDelete,
   isDeleting,
   onEdit,
@@ -456,27 +675,62 @@ function ServiceCard({
   onCancelDelete,
   onConfirmDelete,
 }: ServiceCardProps) {
+  const isGroup = variant === 'group';
+
+  // Visual variant cues:
+  //   • Group rows: warmer stone-50 background + serif italic
+  //     "Group" tag, signalling this isn't a bookable event.
+  //   • Children & standalones: identical white card; the surrounding
+  //     section already provides indentation context for children.
+  const surfaceClass = isGroup
+    ? 'bg-stone-50/80 border-stone-300'
+    : 'bg-white border-stone-200 hover:shadow-md';
+
   return (
     <article
-      className={`group relative flex flex-col rounded-xl border bg-white p-5 shadow-sm transition-shadow ${
-        isConfirmingDelete
-          ? 'border-rose-300'
-          : 'border-stone-200 hover:shadow-md'
+      className={`group relative flex flex-col rounded-xl border p-5 shadow-sm transition-shadow ${
+        isConfirmingDelete ? 'border-rose-300' : surfaceClass
       } ${isDeleting ? 'opacity-50' : ''}`}
     >
       <div className="flex items-start justify-between gap-3">
-        <h4 className="font-serif text-lg leading-tight text-stone-900">
-          {service.title}
-        </h4>
+        <div className="min-w-0 space-y-1">
+          {isGroup && (
+            <span className="inline-flex items-center rounded-full bg-stone-900/90 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.22em] text-[#FAF9F6]">
+              Group
+            </span>
+          )}
+          <h4 className="font-serif text-lg leading-tight text-stone-900">
+            {service.title}
+          </h4>
+        </div>
         <div className="flex shrink-0 items-center gap-3 text-sm font-medium text-stone-900">
           <span className="inline-flex items-center gap-1">
+            {/*
+              Group price reads "From $X" because the group itself
+              isn't bookable — the number represents the cheapest
+              child. The "From" prefix mirrors what the public site
+              renders, so the editor previews the customer-facing
+              wording without a context switch.
+            */}
+            {isGroup && (
+              <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
+                From
+              </span>
+            )}
             <DollarSign className="h-3.5 w-3.5 text-stone-400" />
             {formatPrice(service.price)}
           </span>
-          <span className="inline-flex items-center gap-1 text-stone-500">
-            <Clock className="h-3.5 w-3.5 text-stone-400" />
-            {service.duration_mins} min
-          </span>
+          {/*
+            Duration is meaningless for groups — they don't have one
+            of their own. Hiding the field entirely (rather than
+            rendering "— min") keeps the chrome honest.
+          */}
+          {!isGroup && service.duration_mins !== null && (
+            <span className="inline-flex items-center gap-1 text-stone-500">
+              <Clock className="h-3.5 w-3.5 text-stone-400" />
+              {service.duration_mins} min
+            </span>
+          )}
         </div>
       </div>
 
@@ -493,6 +747,11 @@ function ServiceCard({
           new tab — the editor's primary task lives on this page and
           we shouldn't yank them away from it.
 
+          Suppressed for group rows because groups have no Cal event
+          to deep-link to. The space stays — the action toolbar on
+          the right docks via `ml-auto`, so absence here just shifts
+          edit/delete left, which still reads cleanly.
+
           Why this link exists: Cal's v2 API enforces
           `checkIsEmailUserAccessible` on personal accounts, which
           means we cannot toggle the email field to optional from this
@@ -502,7 +761,7 @@ function ServiceCard({
           studio wants email-optional, this link is the one-click
           bridge to where they can flip the switch.
         */}
-        {!isConfirmingDelete && (
+        {!isConfirmingDelete && !isGroup && service.cal_event_id !== null && (
           <a
             href={`https://app.cal.com/event-types/${service.cal_event_id}`}
             target="_blank"
@@ -532,7 +791,11 @@ function ServiceCard({
                 className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-rose-700 disabled:opacity-50"
               >
                 <Trash2 className="h-3 w-3" />
-                {isDeleting ? 'Removing…' : 'Confirm delete'}
+                {isDeleting
+                  ? 'Removing…'
+                  : isGroup
+                    ? 'Confirm — removes children'
+                    : 'Confirm delete'}
               </button>
             </>
           ) : (
@@ -569,6 +832,12 @@ interface SlideOverFormProps {
   submitError: string | null;
   onSubmit: (e: React.FormEvent) => void;
   onClose: () => void;
+  /**
+   * Same-category group rows the editor may nest the current service
+   * under. Computed in the parent based on `form.category` so the
+   * dropdown updates if the editor switches category mid-form.
+   */
+  candidateParents: Service[];
 }
 
 function SlideOverForm({
@@ -579,9 +848,16 @@ function SlideOverForm({
   submitError,
   onSubmit,
   onClose,
+  candidateParents,
 }: SlideOverFormProps) {
   const isOpen = mode.kind !== 'closed';
   const isEdit = mode.kind === 'edit';
+  // is_group is immutable on the server side once a row exists —
+  // toggling between bookable / group would require creating or
+  // hard-deleting a Cal event mid-edit. The UI mirrors that rule by
+  // locking the checkbox in edit mode; the editor's escape hatch is
+  // "delete this row + create a fresh one with the right shape".
+  const lockGroupToggle = isEdit;
 
   return (
     <div
@@ -633,6 +909,61 @@ function SlideOverForm({
           className="flex min-h-0 flex-1 flex-col"
         >
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-6">
+            {/*
+              Group toggle at the top of the form. Editors who want to
+              create an accordion header pick this first; everything
+              below the checkbox is conditional on it. Disabled in edit
+              mode (see lockGroupToggle for the rationale) — the lock
+              icon-free visual nudge here is the dimmed checkbox + the
+              inline hint about deleting and recreating.
+            */}
+            <label
+              htmlFor="svc-is-group"
+              className={`flex cursor-pointer items-start gap-3 rounded-lg border bg-white p-4 transition-colors ${
+                lockGroupToggle
+                  ? 'cursor-not-allowed border-stone-200 opacity-70'
+                  : form.is_group
+                    ? 'border-stone-900 ring-1 ring-stone-900'
+                    : 'border-stone-200 hover:border-stone-300'
+              }`}
+            >
+              <input
+                id="svc-is-group"
+                type="checkbox"
+                checked={form.is_group}
+                disabled={lockGroupToggle}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  // Toggling on: clear parent_id (groups can't be
+                  // nested) AND clear length (groups don't carry one).
+                  // Toggling off: leave the fields untouched so the
+                  // editor doesn't have to retype after a misclick.
+                  onChange(
+                    next
+                      ? { ...form, is_group: true, parent_id: '', length: '' }
+                      : { ...form, is_group: false }
+                  );
+                }}
+                className="mt-1 h-4 w-4 cursor-pointer rounded border-stone-300 text-stone-900 focus:ring-stone-900 disabled:cursor-not-allowed"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-stone-900">
+                  This is a Group Header (Parent)
+                </span>
+                <span className="mt-1 block text-xs text-stone-500">
+                  Group headers are accordion containers on the public
+                  site. They don't sync to Cal.com and aren't bookable
+                  on their own — their child services are.
+                  {lockGroupToggle && (
+                    <span className="mt-1 block italic">
+                      Locked while editing. To convert this row, delete
+                      it and create a new one with the desired shape.
+                    </span>
+                  )}
+                </span>
+              </span>
+            </label>
+
             <Field label="Title" htmlFor="svc-title" required>
               <input
                 id="svc-title"
@@ -641,7 +972,9 @@ function SlideOverForm({
                 maxLength={120}
                 value={form.title}
                 onChange={(e) => onChange({ ...form, title: e.target.value })}
-                placeholder="Classic Lash Set"
+                placeholder={
+                  form.is_group ? 'Volume Lash Sets' : 'Classic Lash Set'
+                }
                 className={inputClass}
               />
             </Field>
@@ -698,6 +1031,59 @@ function SlideOverForm({
               </select>
             </Field>
 
+            {/*
+              Parent picker. Only meaningful for bookable services
+              (groups themselves are always top-level), so we hide it
+              entirely when is_group is true. The "None (Standalone)"
+              option is the no-parent default and uses an empty
+              string value — converted to null at submit.
+
+              When the editor switches category, candidateParents
+              recomputes in the parent component to scope the choices
+              to same-category groups. If the previously-selected
+              parent moves out of scope (cross-category edit), we
+              still render it as a flagged stale option so the editor
+              sees the existing state before it's silently dropped on
+              save — same pattern as the legacy-category escape hatch.
+            */}
+            {!form.is_group && (
+              <Field
+                label="Nest under…"
+                htmlFor="svc-parent"
+                hint={
+                  candidateParents.length === 0
+                    ? `No group headers in "${form.category}" yet. Create a group first to nest services beneath it.`
+                    : 'Choose a group header to nest this service under. Standalone services appear at the top level.'
+                }
+              >
+                <select
+                  id="svc-parent"
+                  value={form.parent_id}
+                  onChange={(e) =>
+                    onChange({ ...form, parent_id: e.target.value })
+                  }
+                  disabled={candidateParents.length === 0}
+                  className={`${inputClass} appearance-none bg-size-[14px_14px] bg-position-[right_0.75rem_center] bg-no-repeat pr-9 bg-[url("data:image/svg+xml;utf8,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2020%2020'%20fill='%2378716c'><path%20d='M5.516%207.548L10%2012.032l4.484-4.484L16%209.064l-6%206-6-6z'/></svg>")] disabled:opacity-60`}
+                >
+                  <option value="">None (Standalone)</option>
+                  {candidateParents.map((p) => (
+                    <option key={p.id} value={String(p.id)}>
+                      {p.title}
+                    </option>
+                  ))}
+                  {form.parent_id &&
+                    !candidateParents.some(
+                      (p) => String(p.id) === form.parent_id
+                    ) && (
+                      <option value={form.parent_id}>
+                        Parent #{form.parent_id} (stale — different
+                        category)
+                      </option>
+                    )}
+                </select>
+              </Field>
+            )}
+
             <Field label="Description" htmlFor="svc-description">
               <textarea
                 id="svc-description"
@@ -712,8 +1098,20 @@ function SlideOverForm({
               />
             </Field>
 
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Price ($)" htmlFor="svc-price" required>
+            {/*
+              Price + Duration row. For groups, duration is omitted
+              entirely and price becomes a single full-width field
+              labelled "From price ($)" — the public site renders it
+              with a "From " prefix, and matching that wording in the
+              admin label keeps the preview honest.
+            */}
+            {form.is_group ? (
+              <Field
+                label='"From" price ($)'
+                htmlFor="svc-price"
+                required
+                hint="Shown on the public site as 'From $X' on the group header."
+              >
                 <input
                   id="svc-price"
                   type="number"
@@ -728,27 +1126,45 @@ function SlideOverForm({
                   className={inputClass}
                 />
               </Field>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Price ($)" htmlFor="svc-price" required>
+                  <input
+                    id="svc-price"
+                    type="number"
+                    required
+                    min={0}
+                    step="0.01"
+                    value={form.price}
+                    onChange={(e) =>
+                      onChange({ ...form, price: e.target.value })
+                    }
+                    placeholder="125"
+                    className={inputClass}
+                  />
+                </Field>
 
-              <Field
-                label="Duration (min)"
-                htmlFor="svc-length"
-                required
-              >
-                <input
-                  id="svc-length"
-                  type="number"
+                <Field
+                  label="Duration (min)"
+                  htmlFor="svc-length"
                   required
-                  min={5}
-                  step={5}
-                  value={form.length}
-                  onChange={(e) =>
-                    onChange({ ...form, length: e.target.value })
-                  }
-                  placeholder="60"
-                  className={inputClass}
-                />
-              </Field>
-            </div>
+                >
+                  <input
+                    id="svc-length"
+                    type="number"
+                    required
+                    min={5}
+                    step={5}
+                    value={form.length}
+                    onChange={(e) =>
+                      onChange({ ...form, length: e.target.value })
+                    }
+                    placeholder="60"
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+            )}
 
             {submitError && (
               <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">

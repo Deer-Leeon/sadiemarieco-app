@@ -38,30 +38,58 @@
 
 CREATE TABLE IF NOT EXISTS site_services (
   id             SERIAL PRIMARY KEY,
-  cal_event_id   INTEGER UNIQUE NOT NULL,
+  cal_event_id   INTEGER UNIQUE,
   category       TEXT NOT NULL,
   title          TEXT NOT NULL,
   description    TEXT NOT NULL DEFAULT '',
   price          NUMERIC(10, 2) NOT NULL DEFAULT 0,
-  duration_mins  INTEGER NOT NULL,
+  duration_mins  INTEGER,
   is_active      BOOLEAN NOT NULL DEFAULT TRUE,
   slug           TEXT,
+  is_group       BOOLEAN NOT NULL DEFAULT FALSE,
+  parent_id      INTEGER REFERENCES site_services(id) ON DELETE CASCADE,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Schema evolution: `slug` was added after the initial migration so
--- existing rows don't have the column yet. The ALTER is a no-op for
--- fresh databases (where the CREATE above already includes it) but
--- required for any DB that ran the original schema.
+-- Schema evolution: each ALTER is a no-op when the CREATE TABLE above
+-- already includes the column (fresh databases), and applies the
+-- additive change for any DB that ran an earlier schema. We list them
+-- explicitly so the migration is unambiguous about what shape the
+-- live database must end up in regardless of where it started.
 --
--- We store the Cal.com event-type slug locally so the public-site
+-- `slug` — Cal.com event-type slug stored locally so the public-site
 -- HTML injector can build `data-cal-link="username/slug"` attributes
--- without an extra round-trip to Cal on every page load. Nullable
--- because the slug isn't known until POST /event-types returns —
--- and we want the row to exist even if a future change ever needs
--- to defer slug assignment.
+-- without a Cal round-trip on every page load.
 ALTER TABLE site_services ADD COLUMN IF NOT EXISTS slug TEXT;
+
+-- `is_group` / `parent_id` — Service Groups feature. A "group" is a
+-- non-bookable accordion header that nests bookable child services
+-- one level deep. Groups have NO Cal.com event-type (they are
+-- folders, not events), so cal_event_id and duration_mins are made
+-- nullable below to accommodate them. parent_id is a self-referential
+-- FK with ON DELETE CASCADE so hard-deleting a parent row also
+-- removes its children — our app uses soft-delete (is_active=false),
+-- but the cascade is the correct durable safety net if a row is ever
+-- pruned by hand or by a future cleanup script.
+ALTER TABLE site_services ADD COLUMN IF NOT EXISTS is_group BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE site_services
+  ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES site_services(id) ON DELETE CASCADE;
+
+-- Loosen NOT NULL constraints on the two columns that don't apply to
+-- group headers. Existing rows already have values (they were created
+-- pre-feature), so the drop is purely about allowing future groups
+-- to insert with NULLs. The UNIQUE constraint on cal_event_id stays —
+-- Postgres treats multiple NULLs as distinct, so groups can coexist
+-- without colliding.
+ALTER TABLE site_services ALTER COLUMN cal_event_id DROP NOT NULL;
+ALTER TABLE site_services ALTER COLUMN duration_mins DROP NOT NULL;
+
+-- Lookup index for the common "fetch all children of group X" path
+-- the admin list and public renderer both use.
+CREATE INDEX IF NOT EXISTS site_services_parent_id_idx
+  ON site_services (parent_id)
+  WHERE parent_id IS NOT NULL;
 
 -- Query pattern the admin UI uses on every page load:
 --   SELECT … FROM site_services WHERE is_active = TRUE ORDER BY category, title

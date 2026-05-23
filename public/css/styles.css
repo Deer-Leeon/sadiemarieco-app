@@ -358,6 +358,158 @@ nav.scrolled { padding: 16px 64px; }
   align-items: baseline;
 }
 
+/*
+  ─── SERVICE GROUPS (Parent/Child accordion) ─────────────────────────────
+  Group rows are CMS-only accordion headers. They sit at the top level of
+  a category column, render with a "From $X" price prefix, and own a
+  collapsible shelf of bookable child services beneath. The shelf is
+  vertical on mobile (default flex-direction: column, indented under the
+  parent) and switches to a horizontal scrolling shelf on tablet+ —
+  matching the layout intent the spec calls out.
+
+  Element vocabulary:
+    .service-group              wrapper around header + shelf
+    .service-item--group        the parent header row (non-bookable)
+    .service-group-toggle       small +/− indicator on the right
+    .service-group-children     the shelf containing child .service-items
+    .is-collapsed               hides the shelf (default state on render)
+    .is-expanded                marks the parent so CSS can rotate the
+                                toggle without scanning siblings
+
+  Why a max-height animation rather than display:none/flex toggling:
+  display changes don't animate, and the spec asks for a smooth
+  expansion. We animate max-height + opacity + margin-top instead;
+  the 3000px ceiling is more than the studio will ever ship per group.
+*/
+.service-group {
+  border-bottom: 1px solid rgba(13,27,42,0.07);
+}
+.service-group:last-child {
+  border-bottom: none;
+}
+.service-group > .service-item--group {
+  border-bottom: none;
+}
+
+.service-item--group {
+  position: relative;
+  padding-right: 28px; /* room for the .service-group-toggle */
+}
+.service-item--group .service-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+}
+.service-price-prefix {
+  font-family: var(--sans);
+  font-size: 0.62rem;
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin-right: 6px;
+}
+
+/*
+  The toggle is a centred +/− glyph drawn with two absolutely-positioned
+  pseudo-elements so we don't pull in an icon font or SVG asset. The
+  vertical bar scales to 0 in the .is-expanded state to morph + into −.
+*/
+.service-group-toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  opacity: 0.45;
+  transition: opacity 0.3s ease;
+}
+.service-item--group:hover .service-group-toggle {
+  opacity: 0.85;
+}
+.service-group-toggle::before,
+.service-group-toggle::after {
+  content: '';
+  position: absolute;
+  background: var(--navy);
+  top: 50%;
+  left: 50%;
+}
+.service-group-toggle::before {
+  width: 10px;
+  height: 1.5px;
+  transform: translate(-50%, -50%);
+}
+.service-group-toggle::after {
+  width: 1.5px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  transition: transform 0.3s ease;
+}
+.service-item--group.is-expanded .service-group-toggle::after {
+  transform: translate(-50%, -50%) scaleY(0);
+}
+
+.service-group-children {
+  display: flex;
+  flex-direction: column;
+  padding-left: 1.5rem; /* pl-6 — indented under the parent */
+  margin-top: 1rem;     /* mt-4 */
+  gap: 1rem;            /* gap-4 */
+  max-height: 3000px;
+  overflow-y: hidden;
+  opacity: 1;
+  transition: max-height 0.5s ease, margin-top 0.35s ease, opacity 0.3s ease;
+  border-left: 1px solid rgba(13, 27, 42, 0.08);
+}
+.service-group-children.is-collapsed {
+  max-height: 0;
+  margin-top: 0;
+  opacity: 0;
+  pointer-events: none;
+  border-left-color: transparent;
+}
+/*
+  Children inside the shelf shouldn't render the full per-row bottom
+  border treatment — that line is owned by the .service-group wrapper.
+  Padding stays so each child still reads as its own row.
+*/
+.service-group-children .service-item {
+  border-bottom: 1px solid rgba(13, 27, 42, 0.05);
+  padding: 14px 0;
+}
+.service-group-children .service-item:last-child {
+  border-bottom: none;
+}
+
+/*
+  Tablet+ horizontal shelf. Above 860px we still have the two-column
+  .services-cols grid, so the child shelf flows horizontally inside its
+  column rather than down. overflow-x lets the editor publish more
+  children than fit in the column without breaking layout.
+*/
+@media (min-width: 861px) {
+  .service-group-children {
+    flex-direction: row;
+    padding-left: 0;
+    overflow-x: auto;
+    border-left: none;
+    scrollbar-width: thin;
+  }
+  .service-group-children .service-item {
+    flex: 0 0 auto;
+    min-width: 220px;
+    padding: 14px 14px;
+    border-bottom: none;
+    border-right: 1px solid rgba(13, 27, 42, 0.05);
+  }
+  .service-group-children .service-item:last-child {
+    border-right: none;
+  }
+}
+
 /* ── BOOKING DRAWER (Slide-out off-canvas) ── */
 #booking-backdrop {
   position: fixed;

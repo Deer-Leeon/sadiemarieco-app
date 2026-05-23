@@ -70,27 +70,51 @@ const PRICE_MAX = 100000;
 
 interface ServiceRow {
   id: number;
-  cal_event_id: number;
+  cal_event_id: number | null;
   category: string;
   title: string;
   description: string;
   price: string; // NUMERIC arrives as a string from pg
-  duration_mins: number;
+  duration_mins: number | null;
   is_active: boolean;
   slug: string | null;
+  is_group: boolean;
+  parent_id: number | null;
 }
 
 interface CreatePayload {
   title: string;
   description: string;
-  length: number;
+  /**
+   * Duration in minutes. Required for bookable (non-group) services
+   * because Cal.com needs `lengthInMinutes`; ignored for groups
+   * (parents have no duration of their own). Validators below enforce
+   * the conditional requirement so the editor sees a clean 400
+   * instead of a Cal-side rejection.
+   */
+  length: number | null;
   price: number;
   category: string;
+  /** True for accordion-header rows that don't sync to Cal.com. */
+  is_group: boolean;
+  /**
+   * Optional nesting under a group header. Validated against the DB
+   * so children can't reference non-existent or non-group parents,
+   * or parents in a different category. Always null for groups
+   * themselves (a group cannot have a parent — depth is capped at 1).
+   */
+  parent_id: number | null;
 }
 
 interface UpdatePayload extends CreatePayload {
   db_id: number;
-  cal_event_id: number;
+  /**
+   * Optional — only present when editing a bookable service. Groups
+   * have no Cal event, so this is null/absent for those payloads.
+   * Type kept as nullable rather than required to avoid the client
+   * having to fabricate a sentinel when editing a group.
+   */
+  cal_event_id: number | null;
 }
 
 // ─── HANDLERS ──────────────────────────────────────────────────────────────
@@ -114,10 +138,12 @@ export async function GET(): Promise<NextResponse> {
         price,
         duration_mins,
         is_active,
-        slug
+        slug,
+        is_group,
+        parent_id
       FROM site_services
       WHERE is_active = TRUE
-      ORDER BY category ASC, title ASC
+      ORDER BY category ASC, is_group DESC, title ASC
     `;
 
     // NUMERIC columns come back as strings from node-postgres. Coerce to
@@ -161,6 +187,68 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // Cross-row validation must wait for the DB — pulled out of
+  // parseCreatePayload so the parser stays a pure shape validator
+  // (easy to unit-test) and the route handler owns the DB-touching
+  // checks. Same pattern used in PATCH below.
+  if (payload.parent_id !== null) {
+    try {
+      await validateParentReference(payload.parent_id, payload.category);
+    } catch (err) {
+      return NextResponse.json(
+        { error: 'invalid_payload', message: errorMessage(err) },
+        { status: 400 }
+      );
+    }
+  }
+
+  // ── GROUP BRANCH ────────────────────────────────────────────────────────
+  // Group headers are CMS-only — they exist solely to render the
+  // accordion shell on the homepage and never resolve to a bookable
+  // Cal event. Skip every Cal.com round-trip and write a row whose
+  // cal_event_id / slug / duration_mins are all NULL. The UNIQUE
+  // constraint on cal_event_id permits this because Postgres treats
+  // multiple NULLs as distinct.
+  if (payload.is_group) {
+    try {
+      const { rows } = await sql<ServiceRow>`
+        INSERT INTO site_services (
+          cal_event_id, category, title, description, price,
+          duration_mins, slug, is_group, parent_id
+        ) VALUES (
+          NULL,
+          ${payload.category},
+          ${payload.title},
+          ${payload.description},
+          ${payload.price},
+          NULL,
+          NULL,
+          TRUE,
+          NULL
+        )
+        RETURNING
+          id, cal_event_id, category, title, description, price,
+          duration_mins, is_active, slug, is_group, parent_id
+      `;
+      const service = rows[0];
+      console.log('[api/admin/services] POST: group created (no Cal sync)', {
+        id: service.id,
+        title: service.title,
+      });
+      return NextResponse.json({
+        service: { ...service, price: Number(service.price) },
+      });
+    } catch (err) {
+      console.error('[api/admin/services] POST: group insert failed:', err);
+      return NextResponse.json(
+        { error: 'db_insert_failed', message: errorMessage(err) },
+        { status: 500 }
+      );
+    }
+  }
+
+  // ── BOOKABLE SERVICE BRANCH ─────────────────────────────────────────────
+
   // ── STEP 1: create on Cal.com ───────────────────────────────────────────
   // Cal-first. If this fails, we return early and never touch Postgres,
   // so the editor's "the menu is unchanged" mental model holds.
@@ -190,12 +278,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // dashboard deep-link in the admin UI so editors can toggle the
   // field optional by hand if they want.
   const slug = makeSlug(payload.title);
+  // Narrowed by the `if (payload.is_group) return` early-exit above:
+  // when the branch reaches here, is_group is false and the parser
+  // guarantees `length` is a valid integer. The non-null assertion
+  // documents that invariant for the type checker.
+  const lengthInMinutes = payload.length!;
   let calEventId: number;
   try {
     const result = await createCalEvent(apiKey, {
       title: payload.title,
       description: payload.description,
-      lengthInMinutes: payload.length,
+      lengthInMinutes,
       slug,
     });
     calEventId = result.id;
@@ -242,19 +335,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const { rows } = await sql<ServiceRow>`
       INSERT INTO site_services (
-        cal_event_id, category, title, description, price, duration_mins, slug
+        cal_event_id, category, title, description, price,
+        duration_mins, slug, is_group, parent_id
       ) VALUES (
         ${calEventId},
         ${payload.category},
         ${payload.title},
         ${payload.description},
         ${payload.price},
-        ${payload.length},
-        ${slug}
+        ${lengthInMinutes},
+        ${slug},
+        FALSE,
+        ${payload.parent_id}
       )
       RETURNING
         id, cal_event_id, category, title, description, price,
-        duration_mins, is_active, slug
+        duration_mins, is_active, slug, is_group, parent_id
     `;
     const service = rows[0];
     return NextResponse.json({
@@ -305,17 +401,128 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // ── PRE-CHECK: fetch existing row ──────────────────────────────────────
+  // Three things we can only learn from the DB:
+  //   • Does the row still exist? (race with a concurrent delete.)
+  //   • What's its current is_group state? We forbid toggling it on
+  //     PATCH because that would require either creating or
+  //     hard-deleting a Cal event mid-update, and the simpler
+  //     "delete + recreate" UX gives the editor a clearer mental model.
+  //   • Same-category constraint on parent_id needs the stored row's
+  //     category as part of the check (the form might not even ship
+  //     category if the editor only changed price).
+  let existing: ServiceRow;
+  try {
+    const { rows } = await sql<ServiceRow>`
+      SELECT id, cal_event_id, category, title, description, price,
+             duration_mins, is_active, slug, is_group, parent_id
+      FROM site_services
+      WHERE id = ${payload.db_id}
+    `;
+    if (rows.length === 0) {
+      return NextResponse.json(
+        {
+          error: 'not_found',
+          message: `No site_services row with id=${payload.db_id}.`,
+        },
+        { status: 404 }
+      );
+    }
+    existing = rows[0];
+  } catch (err) {
+    console.error('[api/admin/services] PATCH: pre-check failed:', err);
+    return NextResponse.json(
+      { error: 'db_query_failed', message: errorMessage(err) },
+      { status: 500 }
+    );
+  }
+
+  if (existing.is_group !== payload.is_group) {
+    return NextResponse.json(
+      {
+        error: 'invalid_payload',
+        message:
+          'Cannot toggle is_group on an existing service — delete and re-create instead.',
+      },
+      { status: 400 }
+    );
+  }
+
+  // Hierarchy cross-row check (skipped for self-parent — already
+  // caught by the helper). We pass childOwnId so a parent_id pointing
+  // at the row itself fails with a clear message.
+  if (payload.parent_id !== null) {
+    try {
+      await validateParentReference(
+        payload.parent_id,
+        payload.category,
+        payload.db_id
+      );
+    } catch (err) {
+      return NextResponse.json(
+        { error: 'invalid_payload', message: errorMessage(err) },
+        { status: 400 }
+      );
+    }
+  }
+
+  // ── GROUP BRANCH (no Cal sync) ──────────────────────────────────────────
+  if (payload.is_group) {
+    try {
+      const { rows } = await sql<ServiceRow>`
+        UPDATE site_services SET
+          category    = ${payload.category},
+          title       = ${payload.title},
+          description = ${payload.description},
+          price       = ${payload.price},
+          parent_id   = ${payload.parent_id}
+        WHERE id = ${payload.db_id}
+        RETURNING
+          id, cal_event_id, category, title, description, price,
+          duration_mins, is_active, slug, is_group, parent_id
+      `;
+      const service = rows[0];
+      return NextResponse.json({
+        service: { ...service, price: Number(service.price) },
+      });
+    } catch (err) {
+      console.error('[api/admin/services] PATCH: group update failed:', err);
+      return NextResponse.json(
+        { error: 'db_update_failed', message: errorMessage(err) },
+        { status: 500 }
+      );
+    }
+  }
+
+  // ── BOOKABLE SERVICE BRANCH ─────────────────────────────────────────────
+  // Defensive: a bookable row in the DB must have a cal_event_id and
+  // the incoming payload must include length. Both are guaranteed by
+  // the parser when is_group=false, but we re-assert here so an
+  // upstream client mistake throws a clean 400 instead of a runtime
+  // null-deref in the SQL parameters.
+  if (existing.cal_event_id === null || payload.cal_event_id === null) {
+    return NextResponse.json(
+      {
+        error: 'invalid_payload',
+        message: 'Bookable service is missing cal_event_id — was it created as a group?',
+      },
+      { status: 400 }
+    );
+  }
+  const lengthInMinutes = payload.length!;
+
   // ── STEP 1: update Cal.com ──────────────────────────────────────────────
   // We only send the fields Cal.com knows about (title, description,
-  // lengthInMinutes). `price` and `category` are local-only and never
-  // reach Cal. v2 renames `length` → `lengthInMinutes` at the wire.
+  // lengthInMinutes). `price`, `category`, and the hierarchy fields
+  // are local-only and never reach Cal. v2 renames `length` →
+  // `lengthInMinutes` at the wire.
   try {
     await callCal(`/event-types/${payload.cal_event_id}`, apiKey, {
       method: 'PATCH',
       body: JSON.stringify({
         title: payload.title,
         description: payload.description,
-        lengthInMinutes: payload.length,
+        lengthInMinutes,
       }),
     });
   } catch (err) {
@@ -336,11 +543,12 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         title         = ${payload.title},
         description   = ${payload.description},
         price         = ${payload.price},
-        duration_mins = ${payload.length}
+        duration_mins = ${lengthInMinutes},
+        parent_id     = ${payload.parent_id}
       WHERE id = ${payload.db_id}
       RETURNING
         id, cal_event_id, category, title, description, price,
-        duration_mins, is_active, slug
+        duration_mins, is_active, slug, is_group, parent_id
     `;
     if (rows.length === 0) {
       // Cal.com was already updated but our row vanished — the editor
@@ -383,20 +591,22 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
   // DELETE conventionally has no body, so we accept db_id either in the
   // query string (?db_id=…) or as a JSON body — whichever the client
   // finds most natural. The admin UI uses the query string form.
+  //
+  // cal_event_id from the query string is now treated as an
+  // optimisation hint only — we always re-read the row from the DB to
+  // discover is_group + the canonical cal_event_id. Groups don't have
+  // a Cal event at all, so trusting a client-supplied cal_event_id
+  // could direct us to hide an unrelated event.
   let dbId: number | null = null;
-  let calEventId: number | null = null;
 
   const url = new URL(req.url);
   const qsDbId = url.searchParams.get('db_id');
-  const qsCalId = url.searchParams.get('cal_event_id');
   if (qsDbId) dbId = Number(qsDbId);
-  if (qsCalId) calEventId = Number(qsCalId);
 
   if (dbId === null || Number.isNaN(dbId)) {
     try {
       const body = await req.json();
       if (typeof body?.db_id === 'number') dbId = body.db_id;
-      if (typeof body?.cal_event_id === 'number') calEventId = body.cal_event_id;
     } catch {
       // No body is fine — we'll error out on the dbId check below.
     }
@@ -409,55 +619,114 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // If the client didn't tell us the Cal event id, look it up. Saves a
-  // round-trip in the happy path but keeps the endpoint usable from
-  // tools like cURL.
-  if (calEventId === null || Number.isNaN(calEventId)) {
-    try {
-      const { rows } = await sql<{ cal_event_id: number }>`
-        SELECT cal_event_id FROM site_services WHERE id = ${dbId}
-      `;
-      if (rows.length === 0) {
-        return NextResponse.json(
-          { error: 'not_found', message: `No service with id=${dbId}.` },
-          { status: 404 }
-        );
-      }
-      calEventId = rows[0].cal_event_id;
-    } catch (err) {
-      console.error('[api/admin/services] DELETE: db lookup failed:', err);
+  // ── LOOKUP: discover whether this is a group + collect children ────────
+  // The single SELECT also doubles as a "row exists" check; if it
+  // returns zero we 404 cleanly without touching Cal.
+  let target: { cal_event_id: number | null; is_group: boolean };
+  let childCalIds: number[] = [];
+  try {
+    const { rows } = await sql<{ cal_event_id: number | null; is_group: boolean }>`
+      SELECT cal_event_id, is_group
+      FROM site_services
+      WHERE id = ${dbId}
+    `;
+    if (rows.length === 0) {
       return NextResponse.json(
-        { error: 'db_query_failed', message: errorMessage(err) },
-        { status: 500 }
+        { error: 'not_found', message: `No service with id=${dbId}.` },
+        { status: 404 }
       );
     }
+    target = rows[0];
+
+    // For groups, also gather every active child's cal_event_id so
+    // step 1 below can hide each child on Cal. We filter is_active
+    // here so an already-soft-deleted child doesn't get re-PATCHed.
+    if (target.is_group) {
+      const { rows: children } = await sql<{ cal_event_id: number | null }>`
+        SELECT cal_event_id
+        FROM site_services
+        WHERE parent_id = ${dbId} AND is_active = TRUE
+      `;
+      childCalIds = children
+        .map((c) => c.cal_event_id)
+        .filter((v): v is number => typeof v === 'number');
+    }
+  } catch (err) {
+    console.error('[api/admin/services] DELETE: db lookup failed:', err);
+    return NextResponse.json(
+      { error: 'db_query_failed', message: errorMessage(err) },
+      { status: 500 }
+    );
   }
 
   // ── STEP 1: hide on Cal.com ─────────────────────────────────────────────
   // Soft delete: PATCH `{ hidden: true }` rather than DELETE. This keeps
   // booking history intact (existing bookings against the event still
   // resolve) but removes the event from the public booking grid.
-  try {
-    await callCal(`/event-types/${calEventId}`, apiKey, {
-      method: 'PATCH',
-      body: JSON.stringify({ hidden: true }),
-    });
-  } catch (err) {
-    console.error('[api/admin/services] DELETE: Cal.com hide failed:', err);
-    return NextResponse.json(
-      { error: 'cal_hide_failed', message: errorMessage(err) },
-      { status: 502 }
-    );
+  //
+  // For groups we hide every child event sequentially. We deliberately
+  // do NOT parallelise: Cal.com rate-limits per-key, and groups in
+  // this studio carry at most a handful of children (3–5). If one
+  // child fails we abort and don't soft-delete locally, so the editor
+  // sees a clear error and the rest of the group stays intact for a
+  // retry. The alternative ("partial hide + local delete") would leave
+  // some children bookable on Cal but invisible in our admin.
+  const calIdsToHide = target.is_group
+    ? childCalIds
+    : target.cal_event_id !== null
+      ? [target.cal_event_id]
+      : []; // standalone-group case is impossible per CREATE invariants
+
+  for (const calId of calIdsToHide) {
+    try {
+      await callCal(`/event-types/${calId}`, apiKey, {
+        method: 'PATCH',
+        body: JSON.stringify({ hidden: true }),
+      });
+    } catch (err) {
+      console.error('[api/admin/services] DELETE: Cal.com hide failed:', {
+        calId,
+        error: errorMessage(err),
+      });
+      return NextResponse.json(
+        { error: 'cal_hide_failed', message: errorMessage(err) },
+        { status: 502 }
+      );
+    }
   }
 
   // ── STEP 2: flip is_active in Postgres ──────────────────────────────────
+  // For groups, the single UPDATE soft-deletes the group AND every
+  // active child in one round-trip via the parent_id condition.
+  // The CTE keeps both flips in a single transaction so a Postgres
+  // failure mid-write doesn't leave half the children active.
   try {
+    if (target.is_group) {
+      const { rowCount } = await sql`
+        UPDATE site_services
+        SET is_active = FALSE
+        WHERE id = ${dbId} OR parent_id = ${dbId}
+      `;
+      if (rowCount === 0) {
+        return NextResponse.json(
+          { error: 'not_found', message: `No service with id=${dbId}.` },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json({
+        ok: true,
+        id: dbId,
+        // rowCount is non-null here because the zero-row branch
+        // returned above; subtracting 1 yields the count of child
+        // rows that were soft-deleted alongside the parent group.
+        children_removed: (rowCount ?? 1) - 1,
+      });
+    }
+
     const { rowCount } = await sql`
       UPDATE site_services SET is_active = FALSE WHERE id = ${dbId}
     `;
     if (rowCount === 0) {
-      // Cal.com was already updated but our row vanished. Same handling
-      // as the PATCH not_found case: surface clearly so the UI refetches.
       return NextResponse.json(
         { error: 'not_found', message: `No service with id=${dbId}.` },
         { status: 404 }
@@ -682,21 +951,42 @@ function parseCreatePayload(input: unknown): CreatePayload {
   if (!isRecord(input)) {
     throw new Error('Body must be a JSON object.');
   }
+
+  const is_group = validateBoolean(input.is_group ?? false, 'is_group');
+  const parent_id = parseOptionalInt(input.parent_id, 'parent_id');
+
+  // Hierarchy invariant: depth is capped at 1. Groups are top-level
+  // accordion headers and can never themselves be children. Enforced
+  // here so a malformed admin form never reaches the DB.
+  if (is_group && parent_id !== null) {
+    throw new Error('A group cannot have a parent_id (groups are top-level).');
+  }
+
+  // `length` is required for bookable services (Cal needs it) and
+  // forbidden for groups (they're folders, not events). We coerce to
+  // null in the group branch even if the client sent a value, so the
+  // DB never carries a phantom duration on a header row.
+  const length: number | null = is_group
+    ? null
+    : validateInt(input.length, 'length', {
+        min: LENGTH_MIN,
+        max: LENGTH_MAX,
+      });
+
   return {
     title: validateString(input.title, 'title', { max: TITLE_MAX, min: 1 }),
     description: validateString(input.description ?? '', 'description', {
       max: DESCRIPTION_MAX,
       min: 0,
     }),
-    length: validateInt(input.length, 'length', {
-      min: LENGTH_MIN,
-      max: LENGTH_MAX,
-    }),
+    length,
     price: validateNumber(input.price, 'price', { min: 0, max: PRICE_MAX }),
     category: validateString(input.category, 'category', {
       max: CATEGORY_MAX,
       min: 1,
     }),
+    is_group,
+    parent_id,
   };
 }
 
@@ -705,13 +995,22 @@ function parseUpdatePayload(input: unknown): UpdatePayload {
     throw new Error('Body must be a JSON object.');
   }
   const base = parseCreatePayload(input);
+  // `cal_event_id` is only meaningful for bookable services. Groups
+  // never carry one, so we accept null/missing for them and require a
+  // positive integer for everyone else. The PATCH handler still
+  // cross-checks the value against the stored row, so a client that
+  // omits cal_event_id while editing a bookable service will get a
+  // clean 400 there rather than silently no-op the Cal sync.
+  const cal_event_id = base.is_group
+    ? null
+    : validateInt(input.cal_event_id, 'cal_event_id', {
+        min: 1,
+        max: 2 ** 31 - 1,
+      });
   return {
     ...base,
     db_id: validateInt(input.db_id, 'db_id', { min: 1, max: 2 ** 31 - 1 }),
-    cal_event_id: validateInt(input.cal_event_id, 'cal_event_id', {
-      min: 1,
-      max: 2 ** 31 - 1,
-    }),
+    cal_event_id,
   };
 }
 
@@ -764,6 +1063,83 @@ function validateInt(
     throw new Error(`Field "${field}" must be an integer.`);
   }
   return n;
+}
+
+function validateBoolean(value: unknown, field: string): boolean {
+  if (typeof value === 'boolean') return value;
+  // Tolerate string forms — some form encodings deliver "true"/"false"
+  // even when the client wanted a JSON bool. Anything else is a real
+  // shape mismatch and worth a 400.
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`Field "${field}" must be a boolean.`);
+}
+
+/**
+ * Coerce optional integer fields ({null|undefined|missing} → null,
+ * positive int → number, anything else → throw). Used for the
+ * hierarchical `parent_id` field where "no parent" is a legitimate
+ * value distinct from "validation error".
+ */
+function parseOptionalInt(value: unknown, field: string): number | null {
+  if (value === null || value === undefined) return null;
+  return validateInt(value, field, { min: 1, max: 2 ** 31 - 1 });
+}
+
+/**
+ * Confirm that a `parent_id` references a row that:
+ *   1. Exists and is active,
+ *   2. Is itself a group (is_group = TRUE),
+ *   3. Sits in the same category as the would-be child.
+ *
+ * All three rules together encode the visual invariant the public
+ * site assumes: every accordion shelf renders inside a single
+ * category column, and only group headers can host children. A
+ * misconfigured pairing here would either orphan the child on the
+ * homepage or create a confusing two-tier nesting we don't render.
+ *
+ * Throws a user-facing error string on any violation — the POST/PATCH
+ * handlers surface it verbatim in the 400 response body.
+ */
+async function validateParentReference(
+  parentId: number,
+  childCategory: string,
+  childOwnId: number | null = null
+): Promise<void> {
+  const { rows } = await sql<{
+    id: number;
+    is_group: boolean;
+    category: string;
+    is_active: boolean;
+  }>`
+    SELECT id, is_group, category, is_active
+    FROM site_services
+    WHERE id = ${parentId}
+  `;
+  if (rows.length === 0) {
+    throw new Error(`Parent service id=${parentId} does not exist.`);
+  }
+  const parent = rows[0];
+  if (!parent.is_active) {
+    throw new Error(
+      `Parent service id=${parentId} is inactive (soft-deleted).`
+    );
+  }
+  if (!parent.is_group) {
+    throw new Error(
+      `Parent service id=${parentId} is not a group header — only groups can host children.`
+    );
+  }
+  if (parent.category !== childCategory) {
+    throw new Error(
+      `Parent group sits in category "${parent.category}" but child is in "${childCategory}". Move them to the same category.`
+    );
+  }
+  // Self-reference protection — only relevant on PATCH where the row
+  // already exists in the DB.
+  if (childOwnId !== null && childOwnId === parentId) {
+    throw new Error('A service cannot be its own parent.');
+  }
 }
 
 /**

@@ -83,8 +83,23 @@ interface SiteServiceRow {
   title: string;
   description: string;
   price: string; // NUMERIC arrives as a string from node-postgres
-  duration_mins: number;
+  /**
+   * Null for group headers — they don't carry a duration of their
+   * own. The renderer omits the .service-duration span entirely for
+   * these rows.
+   */
+  duration_mins: number | null;
+  /** Null for group headers (no Cal event-type behind them). */
   slug: string | null;
+  /** True for accordion-header rows; false for bookable services. */
+  is_group: boolean;
+  /**
+   * Optional self-reference: when set, this row renders inside the
+   * accordion shelf of its parent group. The renderer bubbles orphan
+   * children (parent_id pointing at a row that no longer exists or
+   * isn't a group) up to the top level so they remain visible.
+   */
+  parent_id: number | null;
 }
 
 // Module-scope cache for the static HTML. Safe because the file only
@@ -206,10 +221,12 @@ async function fetchServicesHtml(): Promise<string> {
         description,
         price,
         duration_mins,
-        slug
+        slug,
+        is_group,
+        parent_id
       FROM site_services
       WHERE is_active = TRUE
-      ORDER BY category DESC, id ASC
+      ORDER BY category DESC, is_group DESC, id ASC
     `;
     return renderServicesHtml(rows);
   } catch (err) {
@@ -231,15 +248,33 @@ async function fetchServicesHtml(): Promise<string> {
  *     index 1 gets reveal-delay-1, etc. — matches the legacy markup.
  *   • A <div class="col-rule"></div> divider between adjacent
  *     category columns. CSS turns this into the vertical hairline.
- *   • Inside each column, the .category-head label followed by one
- *     .service-item per row in the input order.
+ *   • Inside each column, the .category-head label followed by either
+ *     a bare .service-item per bookable row, or a .service-group
+ *     wrapping a group header + indented .service-group-children
+ *     accordion shelf for each group.
+ *
+ * Hierarchy handling:
+ *   • Group rows (is_group=true) get a non-bookable .service-item--
+ *     group header with a "From " prefix on the price and no
+ *     duration. They carry data-service-group="<id>" so the inlined
+ *     accordion script can find them.
+ *   • Child rows (parent_id pointing to an active group in the same
+ *     category) render normally as .service-item inside their
+ *     parent's .service-group-children container. The container
+ *     carries the matching data-service-group-children="<id>".
+ *   • Orphan children — parent_id pointing at a missing or non-group
+ *     row — bubble up to the top level. The customer never sees a
+ *     service vanish because of an inconsistent admin state; the
+ *     editor sees the orphan in /admin/services to reassign or
+ *     delete.
  *
  * Safety:
  *   All dynamic text passes through escapeHtml() so a title like
  *   `Sadie's <Best>` can't break out of an attribute or smuggle a
  *   script tag onto the page. data-cal-link is omitted entirely when
  *   slug is null so the booking drawer no-ops on click rather than
- *   navigating to a broken URL.
+ *   navigating to a broken URL. Group rows never get data-cal-link
+ *   regardless of slug — they're folders, not events.
  */
 function renderServicesHtml(rows: readonly SiteServiceRow[]): string {
   if (rows.length === 0) return '';
@@ -248,7 +283,7 @@ function renderServicesHtml(rows: readonly SiteServiceRow[]): string {
 
   const columns = groups.map(([category, services], index) => {
     const delayClass = index === 0 ? '' : ` reveal-delay-${index}`;
-    const items = services.map(renderServiceItem).join('\n');
+    const items = renderCategoryItems(services);
     return `
     <div class="reveal${delayClass}">
       <div class="category-head">${escapeHtml(category)}</div>
@@ -256,13 +291,67 @@ ${items}
     </div>`;
   });
 
-  return columns.join('\n\n    <div class="col-rule"></div>\n');
+  // Accordion toggle script appended once at the end of the injected
+  // markup. Placed inside the services container (rather than before
+  // </body>) so the only edit point on the public site is this single
+  // <!-- INJECT_SERVICES_HTML --> token. A script element is parsed
+  // and run as soon as the parser reaches it, by which point every
+  // [data-service-group] element above already exists in the DOM,
+  // so no DOMContentLoaded gate is needed.
+  return (
+    columns.join('\n\n    <div class="col-rule"></div>\n') + ACCORDION_SCRIPT
+  );
+}
+
+function renderCategoryItems(services: readonly SiteServiceRow[]): string {
+  // Discover which ids in this column are actually group headers.
+  // Used twice below: once to build the children-by-parent map (only
+  // honour parent_id pointers that resolve to a known group in this
+  // column), and once to filter the top-level row list.
+  const groupIds = new Set(
+    services.filter((s) => s.is_group).map((s) => s.id)
+  );
+
+  const childrenByParent = new Map<number, SiteServiceRow[]>();
+  for (const s of services) {
+    if (s.parent_id !== null && groupIds.has(s.parent_id)) {
+      const list = childrenByParent.get(s.parent_id);
+      if (list) list.push(s);
+      else childrenByParent.set(s.parent_id, [s]);
+    }
+  }
+
+  // Top-level rows = groups + standalones + orphan children. The
+  // orphan inclusion is the third condition: a non-group row whose
+  // parent_id is set but doesn't resolve to a live group in this
+  // column. We bubble it up so the customer always sees the service.
+  const topLevel = services.filter(
+    (s) =>
+      s.is_group ||
+      s.parent_id === null ||
+      !groupIds.has(s.parent_id)
+  );
+
+  return topLevel
+    .map((row) => {
+      if (row.is_group) {
+        return renderGroupHeader(row, childrenByParent.get(row.id) ?? []);
+      }
+      return renderServiceItem(row);
+    })
+    .join('\n');
 }
 
 function renderServiceItem(service: SiteServiceRow): string {
   const calLinkAttr =
     service.slug !== null
       ? ` data-cal-link="${escapeAttr(`${CAL_USERNAME}/${service.slug}`)}"`
+      : '';
+  const durationHtml =
+    service.duration_mins !== null
+      ? `\n            <span class="service-duration">${escapeHtml(
+          formatDuration(service.duration_mins)
+        )}</span>`
       : '';
   return `      <div class="service-item"${calLinkAttr}>
         <div class="service-header">
@@ -271,12 +360,99 @@ function renderServiceItem(service: SiteServiceRow): string {
             <span class="service-detail">${escapeHtml(service.description)}</span>
           </div>
           <div class="service-meta">
-            <span class="service-price">${escapeHtml(formatPrice(service.price))}</span>
-            <span class="service-duration">${escapeHtml(formatDuration(service.duration_mins))}</span>
+            <span class="service-price">${escapeHtml(formatPrice(service.price))}</span>${durationHtml}
           </div>
         </div>
       </div>`;
 }
+
+/**
+ * Render a group header row + its indented children shelf. The
+ * children container starts in the `.is-collapsed` state so the page
+ * loads tidy; the inline accordion script toggles it on click.
+ *
+ * Empty groups (no active children) still render their header so the
+ * editor sees the category structure they configured. Customers see
+ * a non-collapsible header with no shelf beneath — visually identical
+ * to a normal bookable row except for the "From " price prefix.
+ */
+function renderGroupHeader(
+  parent: SiteServiceRow,
+  children: readonly SiteServiceRow[]
+): string {
+  const headerRow = `      <div class="service-item service-item--group" data-service-group="${parent.id}">
+        <div class="service-header">
+          <div>
+            <span class="service-name">${escapeHtml(parent.title)}</span>
+            <span class="service-detail">${escapeHtml(parent.description)}</span>
+          </div>
+          <div class="service-meta">
+            <span class="service-price"><span class="service-price-prefix">From </span>${escapeHtml(formatPrice(parent.price))}</span>
+          </div>
+        </div>
+        <span class="service-group-toggle" aria-hidden="true"></span>
+      </div>`;
+
+  if (children.length === 0) {
+    return `      <div class="service-group">
+${headerRow}
+      </div>`;
+  }
+
+  const childItems = children.map(renderServiceItem).join('\n');
+  return `      <div class="service-group">
+${headerRow}
+        <div class="service-group-children is-collapsed" data-service-group-children="${parent.id}">
+${childItems}
+        </div>
+      </div>`;
+}
+
+/**
+ * Inline accordion controller. Attaches a click handler to every
+ * group header (`[data-service-group]`) that toggles the matching
+ * children shelf (`[data-service-group-children="<id>"]`) in and out
+ * of the `.is-collapsed` state.
+ *
+ * Design choices:
+ *   • Plain IIFE rather than DOMContentLoaded — by the time this
+ *     script element parses, every group element above it is already
+ *     in the DOM (HTML parses top-to-bottom; scripts run inline as
+ *     they're reached). Avoids a brief flash where clicks before
+ *     DCL would no-op.
+ *   • Click swallowing: if the click target sits inside a child
+ *     element with data-cal-link, the booking drawer in main.js owns
+ *     that click. We bail out so toggling the parent shelf doesn't
+ *     accidentally happen on top of an in-flight booking action. In
+ *     practice children sit INSIDE the children container (not the
+ *     header), so this guard only matters if a future refactor nests
+ *     a bookable element inside the header itself.
+ *   • Toggling adds `is-expanded` to the parent in addition to
+ *     `is-collapsed` on the children — gives the CSS a hook to
+ *     rotate a chevron or recolour the header without scanning for
+ *     the sibling state.
+ */
+const ACCORDION_SCRIPT = `
+
+    <script>
+      (function () {
+        var parents = document.querySelectorAll('[data-service-group]');
+        for (var i = 0; i < parents.length; i++) {
+          (function (parent) {
+            parent.addEventListener('click', function (e) {
+              if (e.target.closest('[data-cal-link]')) return;
+              var id = parent.getAttribute('data-service-group');
+              var children = document.querySelector(
+                '[data-service-group-children="' + id + '"]'
+              );
+              if (!children) return;
+              children.classList.toggle('is-collapsed');
+              parent.classList.toggle('is-expanded');
+            });
+          })(parents[i]);
+        }
+      })();
+    </script>`;
 
 function groupByCategory(
   rows: readonly SiteServiceRow[]

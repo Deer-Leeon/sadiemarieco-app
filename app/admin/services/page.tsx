@@ -16,14 +16,16 @@ export const dynamic = 'force-dynamic';
 
 interface ServiceRow {
   id: number;
-  cal_event_id: number;
+  cal_event_id: number | null;
   category: string;
   title: string;
   description: string;
   price: string; // NUMERIC arrives as a string from node-postgres
-  duration_mins: number;
+  duration_mins: number | null;
   is_active: boolean;
   slug: string | null;
+  is_group: boolean;
+  parent_id: number | null;
 }
 
 export default async function ServicesPage() {
@@ -54,10 +56,12 @@ export default async function ServicesPage() {
         price,
         duration_mins,
         is_active,
-        slug
+        slug,
+        is_group,
+        parent_id
       FROM site_services
       WHERE is_active = TRUE
-      ORDER BY category ASC, title ASC
+      ORDER BY category ASC, is_group DESC, title ASC
     `;
     services = rows.map((r) => ({
       ...r,

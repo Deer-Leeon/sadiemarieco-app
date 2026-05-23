@@ -15,23 +15,34 @@ import { sql } from '@vercel/postgres';
 const STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS site_services (
      id             SERIAL PRIMARY KEY,
-     cal_event_id   INTEGER UNIQUE NOT NULL,
+     cal_event_id   INTEGER UNIQUE,
      category       TEXT NOT NULL,
      title          TEXT NOT NULL,
      description    TEXT NOT NULL DEFAULT '',
      price          NUMERIC(10, 2) NOT NULL DEFAULT 0,
-     duration_mins  INTEGER NOT NULL,
+     duration_mins  INTEGER,
      is_active      BOOLEAN NOT NULL DEFAULT TRUE,
      slug           TEXT,
+     is_group       BOOLEAN NOT NULL DEFAULT FALSE,
+     parent_id      INTEGER REFERENCES site_services(id) ON DELETE CASCADE,
      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
      updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
    )`,
 
   `ALTER TABLE site_services ADD COLUMN IF NOT EXISTS slug TEXT`,
+  `ALTER TABLE site_services ADD COLUMN IF NOT EXISTS is_group BOOLEAN NOT NULL DEFAULT FALSE`,
+  `ALTER TABLE site_services
+     ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES site_services(id) ON DELETE CASCADE`,
+  `ALTER TABLE site_services ALTER COLUMN cal_event_id DROP NOT NULL`,
+  `ALTER TABLE site_services ALTER COLUMN duration_mins DROP NOT NULL`,
 
   `CREATE INDEX IF NOT EXISTS site_services_active_category_title_idx
      ON site_services (category, title)
      WHERE is_active = TRUE`,
+
+  `CREATE INDEX IF NOT EXISTS site_services_parent_id_idx
+     ON site_services (parent_id)
+     WHERE parent_id IS NOT NULL`,
 
   `CREATE OR REPLACE FUNCTION site_services_touch_updated_at()
    RETURNS TRIGGER AS $$
