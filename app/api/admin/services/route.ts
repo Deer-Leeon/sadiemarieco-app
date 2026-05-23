@@ -46,16 +46,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import {
+  CalApiError,
+  callCal,
+  reconcileWithCal,
+} from '@/app/admin/services/sync';
 
 export const dynamic = 'force-dynamic';
-
-const CAL_API_BASE = 'https://api.cal.com/v2';
-
-// The v2 event-types endpoints are versioned by date header. 2024-06-14
-// is the schema we wrote against (lengthInMinutes, data.id response,
-// etc.); pinning it means a future Cal-side rev won't silently change
-// shapes underneath us.
-const CAL_API_VERSION = '2024-06-14';
 
 // Validation bounds. Stricter than the DB constraints so a bad form
 // submission gets a clean 400 instead of a 500 from a SQL CHECK or a
@@ -122,6 +119,13 @@ interface UpdatePayload extends CreatePayload {
 export async function GET(): Promise<NextResponse> {
   const gate = await gateAdmin();
   if (gate) return gate;
+
+  // Reconcile orphans before we read the list. `force: true` bypasses
+  // the public-facing TTL — when the editor refetches services they
+  // expect "I deleted in Cal, refresh shows it" to be immediate, not
+  // "within the next minute". See app/admin/services/sync.ts for the
+  // full safeguard rationale.
+  await reconcileWithCal({ force: true });
 
   try {
     // ORDER BY category first then title gives the UI a stable section
@@ -677,6 +681,12 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
       ? [target.cal_event_id]
       : []; // standalone-group case is impossible per CREATE invariants
 
+  // Tracks Cal event-types that were already gone when we tried to
+  // hide them. We surface the count in the response so the UI can
+  // optionally inform the editor that the row was auto-reconciled,
+  // and so we have a structured signal in the logs.
+  const calIdsAlreadyGone: number[] = [];
+
   for (const calId of calIdsToHide) {
     try {
       await callCal(`/event-types/${calId}`, apiKey, {
@@ -684,6 +694,20 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
         body: JSON.stringify({ hidden: true }),
       });
     } catch (err) {
+      // 404 from Cal means the event-type was deleted directly in the
+      // Cal dashboard (outside our admin UI). Our local row is the
+      // orphan — the right move is to complete the local soft-delete
+      // so the row stops appearing on /admin/services and the public
+      // homepage. Without this, the orphan was effectively un-
+      // deletable and stayed visible forever.
+      if (err instanceof CalApiError && err.status === 404) {
+        console.warn(
+          '[api/admin/services] DELETE: Cal event already gone (404); treating as orphan and continuing',
+          { calId }
+        );
+        calIdsAlreadyGone.push(calId);
+        continue;
+      }
       console.error('[api/admin/services] DELETE: Cal.com hide failed:', {
         calId,
         error: errorMessage(err),
@@ -720,6 +744,7 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
         // returned above; subtracting 1 yields the count of child
         // rows that were soft-deleted alongside the parent group.
         children_removed: (rowCount ?? 1) - 1,
+        cal_events_already_gone: calIdsAlreadyGone,
       });
     }
 
@@ -732,7 +757,11 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
         { status: 404 }
       );
     }
-    return NextResponse.json({ ok: true, id: dbId });
+    return NextResponse.json({
+      ok: true,
+      id: dbId,
+      cal_events_already_gone: calIdsAlreadyGone,
+    });
   } catch (err) {
     console.error('[api/admin/services] DELETE: db soft-delete failed:', err);
     return NextResponse.json(
@@ -758,63 +787,8 @@ async function gateAdmin(): Promise<NextResponse | null> {
   );
 }
 
-/**
- * Thin wrapper around fetch for Cal.com v2.
- *
- * Reasons for the indirection:
- *   • Centralises the v2 auth + version headers (Bearer token,
- *     `cal-api-version`) so individual call sites don't drift.
- *   • Surfaces Cal.com error bodies verbatim in the thrown Error so the
- *     client gets actionable messages ("slug already exists", "invalid
- *     length", etc.) rather than a generic 502.
- *   • Returns parsed JSON when available, an empty object otherwise
- *     (Cal.com's PATCH/DELETE responses are sometimes 204 No Content).
- *
- * Error message extraction:
- *   v2 error bodies are nested under `error.message` (the new envelope
- *   shape: `{ status: 'error', error: { code, message } }`). v1 used a
- *   top-level `message`. We probe both so we surface the actually
- *   useful string from whichever shape Cal returns.
- */
-async function callCal<T = unknown>(
-  path: string,
-  apiKey: string,
-  init: RequestInit
-): Promise<T> {
-  const res = await fetch(`${CAL_API_BASE}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-      'cal-api-version': CAL_API_VERSION,
-      ...(init.headers ?? {}),
-    },
-    // Cal.com responses shouldn't be cached by anything in the chain —
-    // even a brief stale read could mislead the editor about whether
-    // a write actually landed.
-    cache: 'no-store',
-  });
-
-  // Read once. Some Cal endpoints return JSON, others plain text on
-  // error — handle both gracefully.
-  const raw = await res.text();
-  let parsed: unknown = null;
-  if (raw.length > 0) {
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = raw;
-    }
-  }
-
-  if (!res.ok) {
-    const detail = extractCalErrorMessage(parsed) || res.statusText;
-    throw new Error(`Cal.com ${res.status}: ${detail}`);
-  }
-
-  return (parsed ?? {}) as T;
-}
+// `callCal` and `CalApiError` live in app/admin/services/sync.ts so
+// the Server Components (page.tsx, app/route.ts) can share them.
 
 /**
  * Wrapper for the v2 POST /event-types call. Lifts the response-shape
@@ -931,21 +905,6 @@ const STUDIO_BOOKING_FIELDS: CalBookingField[] = [
     hidden: false,
   },
 ];
-
-/**
- * Pull the most useful human-readable string out of a Cal.com error
- * response. v2 nests under `error.message`; v1 used top-level
- * `message`; plain-text bodies are returned verbatim. Falls back to
- * the JSON-stringified payload (truncated) so we never lose context.
- */
-function extractCalErrorMessage(parsed: unknown): string {
-  if (typeof parsed === 'string') return parsed;
-  if (!isRecord(parsed)) return '';
-  const err = parsed.error;
-  if (isRecord(err) && typeof err.message === 'string') return err.message;
-  if (typeof parsed.message === 'string') return parsed.message;
-  return JSON.stringify(parsed).slice(0, 300);
-}
 
 function parseCreatePayload(input: unknown): CreatePayload {
   if (!isRecord(input)) {

@@ -227,14 +227,42 @@ module.exports = async function handler(req, res) {
   // have been inserted — we propagate name updates so subsequent bookings
   // pick up any profile changes the client made in Cal.com. RETURNING gives
   // us the id (whether the row was just inserted or already existed).
+  //
+  // Phone handling:
+  //   Cal.com sends `client_phone` in arbitrary format (E.164 if the
+  //   booking form was filled correctly, free-text otherwise). We
+  //   normalise to digits-only here so it matches the CRM contract
+  //   (see /api/admin/clients) and the UNIQUE constraint we added in
+  //   migrate_clients.sql. The COALESCE on UPDATE keeps an existing
+  //   phone if Cal sends a new booking without one — we never want a
+  //   blank phone to overwrite a populated one. The NOT EXISTS guard
+  //   sidesteps the UNIQUE constraint when two clients (different
+  //   emails) share a phone — only the first one wins the phone slot,
+  //   subsequent rows stay phone=NULL and the admin can merge by hand.
+  const normPhone =
+    (typeof clientPhone === 'string' ? clientPhone.replace(/\D/g, '') : '') || null;
   let clientId;
   try {
+    // Two-step UPSERT: first try to claim the phone. If another row
+    // already owns this phone (different email — same human under a
+    // different inbox), fall back to phone=NULL on the conflict
+    // branch so the email-keyed row still gets created/updated.
     const { rows } = await sql`
-      INSERT INTO clients (first_name, last_name, email)
-      VALUES (${firstName}, ${lastName}, ${clientEmail})
+      INSERT INTO clients (first_name, last_name, email, phone)
+      VALUES (
+        ${firstName},
+        ${lastName},
+        ${clientEmail},
+        CASE
+          WHEN ${normPhone}::text IS NULL THEN NULL
+          WHEN EXISTS (SELECT 1 FROM clients WHERE phone = ${normPhone}) THEN NULL
+          ELSE ${normPhone}
+        END
+      )
       ON CONFLICT (email) DO UPDATE SET
         first_name = EXCLUDED.first_name,
-        last_name = EXCLUDED.last_name
+        last_name = EXCLUDED.last_name,
+        phone = COALESCE(clients.phone, EXCLUDED.phone)
       RETURNING id
     `;
     clientId = rows[0] && rows[0].id;

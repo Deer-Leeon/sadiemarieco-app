@@ -44,6 +44,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { sql } from '@vercel/postgres';
 
+import { reconcileWithCal } from './admin/services/sync';
+
 // Node.js runtime required for `node:fs` — the Edge runtime doesn't
 // expose the filesystem. Default runtime for route handlers is already
 // Node, but pinning it explicitly future-proofs against accidental
@@ -57,11 +59,13 @@ export const dynamic = 'force-dynamic';
  * booking-drawer wiring; promote to a CAL_USERNAME env var once the
  * studio has its own production handle separate from the developer's.
  *
- * Source of truth: the namespace component of the URLs the existing
- * static HTML referenced before this route became CMS-driven, e.g.
- * `data-cal-link="leon-buchmiller-xepszb/classic-full-set"`.
+ * Updated May 2026 from the developer's personal handle
+ * (`leon-buchmiller-xepszb`) to the studio's production account
+ * (`mckenna-sadiemarie`) after the Cal.com account migration. The
+ * slug component on each service row is unchanged; only the
+ * namespace before the `/` swaps.
  */
-const CAL_USERNAME = 'leon-buchmiller-xepszb';
+const CAL_USERNAME = 'mckenna-sadiemarie';
 
 /**
  * Token placed in public/index.html inside `<div class="services-cols">`.
@@ -158,6 +162,24 @@ export async function GET(): Promise<Response> {
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     });
   }
+
+  // ── RECONCILE WITH CAL (TTL-throttled) ────────────────────────────────
+  // Sync orphans before reading site_services so a service deleted
+  // directly from the Cal.com dashboard disappears from the public
+  // menu within the cache window. We DON'T pass `force: true` here —
+  // this is a high-traffic path and a per-visitor Cal round-trip is
+  // wasteful. The default 60-second TTL in sync.ts means we hit Cal
+  // at most once a minute regardless of visitor volume.
+  //
+  // The admin path (`/admin/services` Server Component) force-runs
+  // the reconciler on every load, so editors see orphans disappear
+  // immediately. The public site converges on the same DB state
+  // within the next TTL window — by the time a customer browses, the
+  // editor has usually already triggered the reconcile.
+  //
+  // The reconciler swallows its own errors, so a Cal outage can't
+  // break the homepage render.
+  await reconcileWithCal();
 
   // ── DATA FETCH ────────────────────────────────────────────────────────
   // Both queries run in parallel — they target different tables and

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import {
   Calendar,
+  ChevronRight,
   Clock,
   DollarSign,
   Mail,
@@ -14,11 +15,23 @@ import {
 
 import type { Appointment } from './types';
 import { cleanServiceName, clientDisplayName } from './helpers';
+import ClientProfileModal from './ClientProfileModal';
 
 interface Props {
   appointment: Appointment;
   onClose: () => void;
 }
+
+/**
+ * The modal's top-level content swap. AppointmentModal owns the
+ * outer shell (backdrop, card, ESC handler, scroll lock) and routes
+ * between the appointment-detail body and the ClientProfileModal
+ * body based on this state. We keep the routing here rather than at
+ * the dashboard level because closing the modal should land back on
+ * the calendar regardless of which content view was active when the
+ * close happened — a single top-level `onClose` is the right shape.
+ */
+type ModalView = 'appointment' | 'client';
 
 /**
  * AppointmentModal
@@ -53,6 +66,12 @@ interface Props {
  * re-applied correctly when this one closes.
  */
 export default function AppointmentModal({ appointment, onClose }: Props) {
+  // Internal "what content is rendered inside the shell" state. The
+  // shell stays mounted across swaps so the backdrop / ESC handler /
+  // scroll lock don't churn when the admin drills into a client
+  // profile and back.
+  const [view, setView] = useState<ModalView>('appointment');
+
   // ESC to close. Bound at window so the modal closes regardless of
   // which child element has focus when the user hits the key.
   useEffect(() => {
@@ -86,19 +105,34 @@ export default function AppointmentModal({ appointment, onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Appointment details"
+        aria-label={
+          view === 'client' ? 'Client profile' : 'Appointment details'
+        }
       >
-        <ModalHeader appointment={appointment} onClose={onClose} />
+        {view === 'appointment' ? (
+          <>
+            <ModalHeader appointment={appointment} onClose={onClose} />
 
-        <div className="flex-1 overflow-y-auto px-6 py-6">
-          <div className="flex flex-col gap-4">
-            <ClientBox appointment={appointment} />
-            <DateTimeBox appointment={appointment} />
-            <ServiceBox appointment={appointment} />
-          </div>
-        </div>
+            <div className="flex-1 overflow-y-auto px-6 py-6">
+              <div className="flex flex-col gap-4">
+                <ClientBox
+                  appointment={appointment}
+                  onOpenProfile={() => setView('client')}
+                />
+                <DateTimeBox appointment={appointment} />
+                <ServiceBox appointment={appointment} />
+              </div>
+            </div>
 
-        <ActionFooter />
+            <ActionFooter />
+          </>
+        ) : (
+          <ClientProfileModal
+            appointment={appointment}
+            onBackToAppointment={() => setView('appointment')}
+            onClose={onClose}
+          />
+        )}
       </div>
     </div>
   );
@@ -170,15 +204,42 @@ function DetailBox({
   );
 }
 
-function ClientBox({ appointment }: { appointment: Appointment }) {
+function ClientBox({
+  appointment,
+  onOpenProfile,
+}: {
+  appointment: Appointment;
+  onOpenProfile: () => void;
+}) {
   const name = clientDisplayName(
     appointment.client_first_name,
     appointment.client_last_name
   );
 
+  // The name turns into a clickable entry-point to ClientProfileModal
+  // when we have a phone to identify the client by. Without a phone
+  // we render the name as plain text — the CRM is phone-keyed and
+  // wouldn't know which row to load (an appointment without a phone
+  // is a legacy / web-form booking we never associated with a real
+  // CRM record).
+  const canOpenProfile = Boolean(appointment.client_phone);
+
   return (
     <DetailBox label="Client" icon={<Scissors className="h-3 w-3" />}>
-      <p className="font-serif text-xl leading-tight text-stone-900">{name}</p>
+      {canOpenProfile ? (
+        <button
+          type="button"
+          onClick={onOpenProfile}
+          className="group inline-flex items-baseline gap-1.5 text-left font-serif text-xl leading-tight text-stone-900 underline-offset-4 transition-colors hover:text-stone-600 hover:underline"
+        >
+          <span>{name}</span>
+          <ChevronRight className="h-4 w-4 self-center text-stone-400 transition-transform group-hover:translate-x-0.5" />
+        </button>
+      ) : (
+        <p className="font-serif text-xl leading-tight text-stone-900">
+          {name}
+        </p>
+      )}
 
       <div className="mt-3 space-y-1.5 text-sm">
         {/*

@@ -6,6 +6,7 @@ import { getAdminAccess } from '../auth';
 import AdminHeader from '../AdminHeader';
 import AdminSectionTabs from '../AdminSectionTabs';
 import ServiceManager, { type Service } from './ServiceManager';
+import { reconcileWithCal } from './sync';
 
 /**
  * Same dynamic posture as the other admin pages: this route reads
@@ -38,6 +39,19 @@ export default async function ServicesPage() {
 
   const user = await currentUser();
   const displayName = user?.firstName || access.emails[0] || 'Admin';
+
+  // ── RECONCILE WITH CAL ─────────────────────────────────────────────────
+  // Soft-delete any local row whose Cal.com event-type was removed
+  // directly from the Cal dashboard before we paint the list. `force:
+  // true` bypasses the public-facing TTL — the editor expects "I
+  // deleted in Cal, refresh shows it" to be immediate. Errors inside
+  // the reconciler are warn-logged but never thrown, so a Cal outage
+  // can't take down the admin page.
+  //
+  // This call ALSO closes the loop for the public homepage on the
+  // next render — both paths read `site_services` directly, and once
+  // an orphan is is_active=FALSE here it stays gone for everyone.
+  await reconcileWithCal({ force: true });
 
   // ── DATA FETCH ─────────────────────────────────────────────────────────
   // We fetch on the server so the editor sees the list painted on first

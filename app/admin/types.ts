@@ -68,3 +68,57 @@ export interface Appointment {
  *              the current date (TimeGrid)
  */
 export type ViewMode = 'list' | 'month' | '3day' | 'week';
+
+/**
+ * Persisted CRM client. Mirrors the shape the API returns from
+ * /api/admin/clients (POST upsert + GET lookup + PATCH update).
+ *
+ * Identifier discipline:
+ *   - `id` is a UUID string (NOT a serial integer — the live `clients`
+ *     table predates this feature and uses `uuid`/`gen_random_uuid()`).
+ *   - `phone` is digits-only (normalised by the API before insert via
+ *     `replace(/\D/g, '')`). Nullable for legacy rows that the
+ *     pre-CRM webhook created keyed by email alone.
+ *
+ * The wire format uses ISO 8601 strings for timestamps — same
+ * server→client convention as `Appointment` above. The client parses
+ * with `date-fns/parseISO` where needed.
+ */
+export interface Client {
+  id: string;
+  phone: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  /** ISO 8601 string. */
+  created_at: string | null;
+}
+
+/**
+ * Single row from the `client_photos` table — the photo gallery the
+ * admin uploads to from ClientProfileModal. `blob_url` is the public
+ * URL returned by @vercel/blob; the UI uses it directly as an
+ * `<img src>`.
+ */
+export interface ClientPhoto {
+  id: number;
+  blob_url: string;
+  /** ISO 8601 string. */
+  uploaded_at: string;
+}
+
+/**
+ * A row in the client's appointment history (what
+ * /api/admin/clients/[id]/appointments returns). Lighter shape than
+ * the dashboard's `Appointment` — we only show date, time, service
+ * name and status in the modal's history list.
+ */
+export interface ClientAppointment {
+  id: string;
+  service_name: string | null;
+  /** ISO 8601 string. */
+  booking_time: string | null;
+  /** ISO 8601 string. */
+  end_time: string | null;
+  status: string | null;
+}
