@@ -34,12 +34,13 @@ interface Props {
   currentDate: Date;
   daysToShow: 3 | 7;
   /**
-   * Fired when the user clicks an empty area inside a day column.
-   * Receives the local-time Date for that day (time portion is
-   * start-of-day). Clicks on appointment pills do NOT bubble up to
-   * this handler — those are routed to `onAppointmentClick` instead
-   * so the editor can drill into a specific booking without also
-   * opening the day view on top of it.
+   * Fired when the user clicks the day-header cell (weekday name +
+   * date number) at the top of a column. Receives the local-time
+   * Date for that day (time portion is start-of-day). The time-grid
+   * body below the header is NOT clickable — empty space inside a
+   * day column intentionally does nothing, so the only ways to open
+   * the day modal are (a) clicking the day header, or (b) clicking
+   * an appointment pill (routed through `onAppointmentClick`).
    */
   onDayClick?: (date: Date) => void;
   /**
@@ -98,9 +99,16 @@ function buildColumns(
  *     the left so they scroll WITH the grid (so they line up with hours).
  *
  * Interactivity:
- *   - When `onDayClick` is supplied, day columns become clickable
- *     surfaces (cursor-pointer, subtle hover tint, role="button" for
- *     screen readers, Enter/Space keyboard support).
+ *   - When `onDayClick` is supplied, the day-HEADER cell at the top
+ *     of each column becomes a clickable surface (cursor-pointer,
+ *     subtle hover tint, role="button" for screen readers,
+ *     Enter/Space keyboard support).
+ *   - The time-grid body itself is intentionally NOT clickable —
+ *     dead clicks inside the grid were too easy to trigger by
+ *     accident while scrolling, and the day-header gives a clearer
+ *     affordance for "I want to focus on this day".
+ *   - Appointment pills route their clicks to `onAppointmentClick`
+ *     and stop propagation so they never bubble.
  */
 export default function TimeGrid({
   appointments,
@@ -124,7 +132,7 @@ export default function TimeGrid({
       >
         <div /> {/* corner spacer above the time-labels column */}
         {days.map((d) => (
-          <DayHeader key={d.toISOString()} date={d} />
+          <DayHeader key={d.toISOString()} date={d} onClick={onDayClick} />
         ))}
       </div>
 
@@ -141,7 +149,6 @@ export default function TimeGrid({
             <DayColumnView
               key={col.date.toISOString()}
               column={col}
-              onClick={onDayClick}
               onAppointmentClick={onAppointmentClick}
             />
           ))}
@@ -151,10 +158,42 @@ export default function TimeGrid({
   );
 }
 
-function DayHeader({ date }: { date: Date }) {
+function DayHeader({
+  date,
+  onClick,
+}: {
+  date: Date;
+  onClick?: (date: Date) => void;
+}) {
   const today = isToday(date);
+  const clickable = !!onClick;
+
+  const handleClick = () => onClick?.(date);
+  const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!onClick) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onClick(date);
+    }
+  };
+
   return (
-    <div className="px-2 py-3 text-center">
+    <div
+      onClick={clickable ? handleClick : undefined}
+      onKeyDown={clickable ? handleKey : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-label={
+        clickable
+          ? `Open day view for ${format(date, 'EEEE, MMMM d')}`
+          : undefined
+      }
+      className={`px-2 py-3 text-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/30 ${
+        clickable
+          ? 'cursor-pointer hover:bg-stone-100/70 active:bg-stone-200/60'
+          : ''
+      }`}
+    >
       <div className="font-serif text-sm tracking-wide text-stone-900">
         {format(date, 'EEE')}
       </div>
@@ -196,41 +235,16 @@ function TimeLabelColumn() {
 
 function DayColumnView({
   column,
-  onClick,
   onAppointmentClick,
 }: {
   column: DayColumn;
-  onClick?: (date: Date) => void;
   onAppointmentClick?: (appointment: Appointment) => void;
 }) {
-  const clickable = !!onClick;
-  const handleClick = () => onClick?.(column.date);
-  // Standard div-as-button accessibility shim: when no real <button>
-  // wrapper is available (because we need the relative container with
-  // absolutely-positioned pills inside), expose ARIA + keyboard handlers.
-  const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!onClick) return;
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onClick(column.date);
-    }
-  };
-
+  // Day-column body is intentionally inert. The only clickable
+  // surfaces inside the time grid are (1) the day header above
+  // (handled in DayHeader) and (2) the appointment pills below.
   return (
-    <div
-      className={`relative border-l border-stone-200 transition-colors ${
-        clickable ? 'cursor-pointer hover:bg-stone-50' : ''
-      }`}
-      onClick={clickable ? handleClick : undefined}
-      onKeyDown={clickable ? handleKey : undefined}
-      role={clickable ? 'button' : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      aria-label={
-        clickable
-          ? `Open day view for ${format(column.date, 'EEEE, MMMM d')}`
-          : undefined
-      }
-    >
+    <div className="relative border-l border-stone-200">
       {Array.from({ length: HOURS }, (_, i) => (
         <div
           key={i}
@@ -273,13 +287,10 @@ function AppointmentBlock({
   const widthPct = 100 / totalCols;
   const leftPct = col * widthPct;
 
-  // `pointer-events-auto` (default) + an onClick + stopPropagation in
-  // the handler is the trick to make pills clickable WITHOUT also
-  // bubbling to the day column's "open the day modal" handler. The
-  // previous implementation used pointer-events-none which was the
-  // opposite — pills passed clicks through to the column, opening
-  // the day modal. Now clicking a pill opens the appointment modal,
-  // clicking around a pill still opens the day modal.
+  // stopPropagation is defensive — the day-column body no longer
+  // has its own click handler (only the day-header at the top of
+  // the column does), but stopping the bubble here keeps the pill
+  // self-contained against any future ancestor handler.
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     onClick?.(apt);
