@@ -105,12 +105,19 @@ export default function DashboardUI({
               Could not load bookings: {dbError}
             </div>
           </div>
-        ) : appointments.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-stone-500">No bookings yet.</p>
-          </div>
         ) : view === 'list' ? (
-          <ListView appointments={appointments} />
+          // List view is the only mode where "0 bookings" has nothing
+          // meaningful to render — show an empty-state instead of a
+          // blank scroll region. The other views (3-day / week / month)
+          // always render their date grid so the studio still has a
+          // calendar to look at when scheduling is light.
+          appointments.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-sm text-stone-500">No bookings yet.</p>
+            </div>
+          ) : (
+            <ListView appointments={appointments} />
+          )
         ) : view === 'month' ? (
           <CalendarView
             appointments={appointments}

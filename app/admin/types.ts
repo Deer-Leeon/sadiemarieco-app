@@ -13,7 +13,24 @@
  * easier to reason about. The client parses with `date-fns/parseISO`.
  */
 export interface Appointment {
-  id: number;
+  /** Local Postgres primary key (UUID in the live schema). */
+  id: string;
+  /**
+   * Cal.com booking UID — the unique identifier Cal stamps on every
+   * booking when it fires the webhook (e.g. `buiaE8jHmNAxLrqitahCeL`).
+   * Stored on the DB side as `appointments.cal_event_id` (the column
+   * name predates this field's purpose — it actually holds the BOOKING
+   * uid, not the event-type id). We surface it under `cal_uid` here so
+   * the property reads cleanly at call sites and never collides with
+   * our local Postgres `id`.
+   *
+   * Required by Cal's reschedule URL: `cal.com/reschedule/<cal_uid>`
+   * resolves to a "pick a new time" flow that emails the client on
+   * confirmation. Nullable defensively; in practice every appointment
+   * row has one (the webhook writes it on insert and the column is
+   * `NOT NULL` in the live schema).
+   */
+  cal_uid: string | null;
   client_first_name: string | null;
   client_last_name: string | null;
   /** ISO 8601 string, or null if the booking has no scheduled time. */
@@ -56,6 +73,18 @@ export interface Appointment {
    * so it doesn't render an empty italic line.
    */
   service_description: string | null;
+  /**
+   * Cal.com event-type slug, joined in from `site_services.slug`.
+   * Needed by the reschedule embed to build a calLink in the form
+   * `<username>/<slug>` — Cal's iframe embed can't render the
+   * top-level `/reschedule/<uid>` redirect (returns "Cal Link
+   * seems to be wrong"), so we instead load the actual event-type
+   * page and pass `rescheduleUid` as a config-level query param.
+   * Null when the appointment's service title no longer matches a
+   * current CMS row (renamed/deleted services) — the Reschedule
+   * button is disabled in that case.
+   */
+  service_slug: string | null;
 }
 
 /**

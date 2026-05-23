@@ -2,12 +2,19 @@
  * POST /api/webhook
  *
  * Receives Cal.com webhook events and dispatches on `triggerEvent`:
- *   - BOOKING_CREATED  → idempotent client + appointment upsert, schedule
- *                        24h reminder + 24h feedback via QStash, send
- *                        confirmation SMS via Twilio.
- *   - BOOKING_CANCELLED → flip appointments.status to 'cancelled' so the
- *                         scheduled QStash jobs (api/remind, api/feedback)
- *                         see the status gate and skip their SMS.
+ *   - BOOKING_CREATED    → idempotent client + appointment upsert, schedule
+ *                          24h reminder + 24h feedback via QStash, send
+ *                          confirmation SMS via Twilio.
+ *   - BOOKING_CANCELLED  → flip appointments.status to 'cancelled' so the
+ *                          scheduled QStash jobs (api/remind, api/feedback)
+ *                          see the status gate and skip their SMS.
+ *   - BOOKING_RESCHEDULED→ move the existing appointment row to its new
+ *                          slot: swap cal_event_id from the OLD UID
+ *                          (payload.rescheduleUid) to the NEW UID
+ *                          (payload.uid) and overwrite booking_time /
+ *                          end_time. Preserves the row's local id +
+ *                          client_id (and therefore booking history /
+ *                          CRM linkage) instead of creating a duplicate.
  *   - Anything else / missing triggerEvent → falls through to the creation
  *     flow for backward compatibility with the original single-event setup.
  *
@@ -156,6 +163,101 @@ module.exports = async function handler(req, res) {
   if (!bookingUid) {
     console.warn('[api/webhook] no booking uid on payload — skipping', { triggerEvent });
     return res.status(200).json({ ok: true, skipped: 'no_uid' });
+  }
+
+  // ── BOOKING_RESCHEDULED BRANCH ──────────────────────────────────────────
+  // Cal fires this whenever a booking is moved to a new slot — both for
+  // admin-initiated reschedules (which the dashboard also handles
+  // synchronously via /api/admin/appointments/<id>/reschedule for instant
+  // UI feedback) and for client-initiated ones (the "Reschedule" link in
+  // Cal's confirmation email). Without this branch, BOOKING_RESCHEDULED
+  // would fall through to the creation flow below and INSERT a duplicate
+  // appointment row at the new time while leaving the old one stranded.
+  //
+  // Strategy: locate the existing row by its OLD UID (Cal sends it as
+  // payload.rescheduleUid; we also accept `fromReschedule.uid` defensively
+  // because Cal has shipped both shapes historically), then UPDATE its
+  // cal_event_id, booking_time, end_time, and status. The row's primary
+  // key, client_id, contact fields, and service_name are preserved so
+  // CRM linkage and history stay intact.
+  //
+  // If no row matches the OLD UID — e.g. the original booking was created
+  // before this table existed, or somebody deleted it manually — we fall
+  // through into the regular creation flow so the new slot still ends up
+  // tracked locally, just as a fresh row. Better than silently dropping it.
+  //
+  // Idempotency: re-running the same UPDATE is harmless. The synchronous
+  // admin endpoint may already have applied the change before this
+  // webhook lands; the SET clauses just rewrite to the same values.
+  //
+  // Always returns 200 OK — DB failure must not cause Cal to retry forever.
+  if (triggerEvent === 'BOOKING_RESCHEDULED') {
+    const oldUid =
+      unwrap(payload.rescheduleUid) ||
+      unwrap(payload.fromReschedule && payload.fromReschedule.uid) ||
+      '';
+    if (!oldUid) {
+      console.warn(
+        '[api/webhook] BOOKING_RESCHEDULED: no rescheduleUid on payload — skipping (avoid duplicate row)',
+        { newUid: bookingUid }
+      );
+      return res
+        .status(200)
+        .json({ ok: true, skipped: 'reschedule_no_old_uid' });
+    }
+
+    try {
+      const { rows: updatedRows } = await sql`
+        UPDATE appointments
+        SET cal_event_id = ${bookingUid},
+            booking_time = ${bookingTime},
+            end_time     = ${endTime},
+            service_name = ${serviceName},
+            status       = 'confirmed'
+        WHERE cal_event_id = ${oldUid}
+        RETURNING id, cal_event_id
+      `;
+      if (updatedRows.length > 0) {
+        console.log('[api/webhook] BOOKING_RESCHEDULED: appointment moved', {
+          appointmentId: updatedRows[0].id,
+          oldUid,
+          newUid: bookingUid,
+          bookingTime,
+          endTime,
+        });
+        try {
+          await sql`
+            INSERT INTO webhook_events (booking_uid)
+            VALUES (${bookingUid})
+            ON CONFLICT (booking_uid) DO NOTHING
+          `;
+        } catch (dedupErr) {
+          console.warn(
+            '[api/webhook] BOOKING_RESCHEDULED: webhook_events insert failed (non-fatal)',
+            { error: dedupErr && dedupErr.message }
+          );
+        }
+        return res
+          .status(200)
+          .json({ ok: true, event: 'BOOKING_RESCHEDULED' });
+      }
+      console.warn(
+        '[api/webhook] BOOKING_RESCHEDULED: no matching appointment for oldUid — skipping (avoid duplicate row)',
+        { oldUid, newUid: bookingUid }
+      );
+      return res
+        .status(200)
+        .json({ ok: true, skipped: 'reschedule_row_not_found' });
+    } catch (err) {
+      console.error('[api/webhook] BOOKING_RESCHEDULED: db update failed', {
+        oldUid,
+        newUid: bookingUid,
+        error: err && err.message,
+      });
+      return res
+        .status(200)
+        .json({ ok: true, skipped: 'reschedule_update_failed' });
+    }
   }
 
   // ── BOOKING_CANCELLED BRANCH ────────────────────────────────────────────

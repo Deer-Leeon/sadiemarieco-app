@@ -20,7 +20,20 @@ const ALLOWED_EMAILS = new Set([
 ]);
 
 interface DbRow {
-  id: number;
+  id: string;
+  // appointments.cal_event_id — actually stores the Cal.com booking
+  // UID (despite the column name). Mapped to Appointment.cal_uid
+  // below so the modal can build Cal's reschedule URL.
+  cal_event_id: string | null;
+  // site_services.slug — Cal.com event-type slug joined in below.
+  // The reschedule embed needs this to construct the calLink path
+  // (`<username>/<slug>`); the booking UID alone isn't enough,
+  // because Cal's iframe loads the event-type page in reschedule
+  // mode rather than the top-level /reschedule/<uid> redirect
+  // (which Cal returns "Cal Link seems to be wrong" for inside
+  // an embed). Null when the appointment's title doesn't resolve
+  // to a current site_services row (legacy / renamed services).
+  service_slug: string | null;
   client_first_name: string | null;
   client_last_name: string | null;
   // @vercel/postgres returns TIMESTAMPTZ as a Date in some environments
@@ -107,6 +120,7 @@ export default async function AdminPage() {
     const { rows } = await sql<DbRow>`
       SELECT
         a.id,
+        a.cal_event_id,
         a.client_first_name,
         a.client_last_name,
         a.booking_time,
@@ -116,7 +130,8 @@ export default async function AdminPage() {
         a.client_phone,
         a.client_email,
         s.price       AS service_price,
-        s.description AS service_description
+        s.description AS service_description,
+        s.slug        AS service_slug
       FROM appointments a
       LEFT JOIN site_services s
         ON s.title = split_part(a.service_name, ' between ', 1)
@@ -127,6 +142,7 @@ export default async function AdminPage() {
     `;
     appointments = rows.map<Appointment>((r) => ({
       id: r.id,
+      cal_uid: r.cal_event_id,
       client_first_name: r.client_first_name,
       client_last_name: r.client_last_name,
       booking_time: serializeDate(r.booking_time),
@@ -147,6 +163,7 @@ export default async function AdminPage() {
               return Number.isFinite(n) ? n : null;
             })(),
       service_description: r.service_description,
+      service_slug: r.service_slug,
     }));
   } catch (err) {
     console.error('[admin] appointments query failed:', err);
