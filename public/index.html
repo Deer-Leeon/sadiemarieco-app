@@ -71,130 +71,22 @@
     <p class="services-note">All services include a personalized consultation and complimentary aftercare guidance.</p>
   </div>
 
+  <!--
+    Services grid is now CMS-driven. The Next.js route handler at
+    app/route.ts queries site_services on every request, groups by
+    category, and substitutes the token below with rendered HTML that
+    matches the .services-cols + .service-item structure exactly.
+
+    Keep the surrounding <div class="services-cols"> in place so the
+    grid styling (column rule, gaps, responsive breakpoints) anchors
+    to a stable DOM node — only the column children are dynamic.
+
+    To edit the live menu, use /admin/services. Do NOT add hardcoded
+    service rows here; they would render alongside the dynamic ones
+    and the editor wouldn't have a way to remove them.
+  -->
   <div class="services-cols">
-    <div class="reveal">
-      <div class="category-head">Lash Services</div>
-      <div class="service-item" data-cal-link="leon-buchmiller-xepszb/classic-full-set">
-        <div class="service-header">
-          <div>
-            <span class="service-name">Classic Full Set</span>
-            <span class="service-detail">One extension per lash · Natural finish</span>
-          </div>
-          <div class="service-meta">
-            <span class="service-price">$165</span>
-            <span class="service-duration">90 min</span>
-          </div>
-        </div>
-      </div>
-      <div class="service-item" data-cal-link="leon-buchmiller-xepszb/hybrid-full-set">
-        <div class="service-header">
-          <div>
-            <span class="service-name">Hybrid Full Set</span>
-            <span class="service-detail">Classic & volume blend · Wispy effect</span>
-          </div>
-          <div class="service-meta">
-            <span class="service-price">$195</span>
-            <span class="service-duration">120 min</span>
-          </div>
-        </div>
-      </div>
-      <div class="service-item" data-cal-link="leon-buchmiller-xepszb/volume-full-set">
-        <div class="service-header">
-          <div>
-            <span class="service-name">Volume Full Set</span>
-            <span class="service-detail">Handcrafted fans · Dramatic glamour</span>
-          </div>
-          <div class="service-meta">
-            <span class="service-price">$225</span>
-            <span class="service-duration">150 min</span>
-          </div>
-        </div>
-      </div>
-      <div class="service-item" data-cal-link="leon-buchmiller-xepszb/2-week-fill">
-        <div class="service-header">
-          <div>
-            <span class="service-name">2-Week Fill</span>
-            <span class="service-detail">Maintenance · Every 2–3 weeks</span>
-          </div>
-          <div class="service-meta">
-            <span class="service-price">From $75</span>
-            <span class="service-duration">60–75 min</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-rule"></div>
-
-    <div class="reveal reveal-delay-1">
-      <div class="category-head">Brow Services</div>
-      <div class="service-item" data-cal-link="leon-buchmiller-xepszb/brow-lamination">
-        <div class="service-header">
-          <div>
-            <span class="service-name">Brow Lamination</span>
-            <span class="service-detail">Fluffy, lifted brows · Lasts 6–8 weeks</span>
-          </div>
-          <div class="service-meta">
-            <span class="service-price">$95</span>
-            <span class="service-duration">60 min</span>
-          </div>
-        </div>
-      </div>
-      <div class="service-item" data-cal-link="leon-buchmiller-xepszb/lamination-tint">
-        <div class="service-header">
-          <div>
-            <span class="service-name">Lamination + Tint</span>
-            <span class="service-detail">Enhanced color &amp; shape definition</span>
-          </div>
-          <div class="service-meta">
-            <span class="service-price">$120</span>
-            <span class="service-duration">75 min</span>
-          </div>
-        </div>
-      </div>
-      <div class="service-item" data-cal-link="leon-buchmiller-xepszb/brow-shaping-wax">
-        <div class="service-header">
-          <div>
-            <span class="service-name">Brow Shaping &amp; Wax</span>
-            <span class="service-detail">Precision sculpting · Clean arch</span>
-          </div>
-          <div class="service-meta">
-            <span class="service-price">$35</span>
-            <span class="service-duration">30 min</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-rule"></div>
-
-    <div class="reveal reveal-delay-2">
-      <div class="category-head">Skincare</div>
-      <div class="service-item" data-cal-link="leon-buchmiller-xepszb/signature-glow-facial">
-        <div class="service-header">
-          <div>
-            <span class="service-name">Signature Glow Facial</span>
-            <span class="service-detail">Deep cleanse, exfoliation &amp; hydration</span>
-          </div>
-          <div class="service-meta">
-            <span class="service-price">$145</span>
-            <span class="service-duration">75 min</span>
-          </div>
-        </div>
-      </div>
-      <div class="service-item" data-cal-link="leon-buchmiller-xepszb/express-radiance">
-        <div class="service-header">
-          <div>
-            <span class="service-name">Express Radiance</span>
-            <span class="service-detail">Brightening · Perfect before an event</span>
-          </div>
-          <div class="service-meta">
-            <span class="service-price">$85</span>
-            <span class="service-duration">45 min</span>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- INJECT_SERVICES_HTML -->
   </div>
 </section>
 

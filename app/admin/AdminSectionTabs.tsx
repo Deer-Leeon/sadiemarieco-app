@@ -29,6 +29,7 @@ interface AdminSection {
 const SECTIONS: AdminSection[] = [
   { href: '/admin', label: 'Bookings' },
   { href: '/admin/website', label: 'Website' },
+  { href: '/admin/services', label: 'Services' },
 ];
 
 export default function AdminSectionTabs() {

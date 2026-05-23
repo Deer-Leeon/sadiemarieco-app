@@ -316,7 +316,18 @@ nav.scrolled { padding: 16px 64px; }
 }
 .services-cols {
   display: grid;
-  grid-template-columns: 1fr 1px 1fr 1px 1fr;
+  /*
+    Two-column default to match the studio's published menu (Lash
+    Services | Brow Services). The middle 1px track holds the vertical
+    .col-rule divider. Was 1fr 1px 1fr 1px 1fr when the menu also
+    carried a Skincare column; collapsed when the menu was narrowed to
+    two categories and the CMS layout became dynamic.
+
+    Responsive overrides further down reduce this to a single column
+    on narrower viewports. Both rules still target this selector by
+    name, so the cascade keeps working.
+  */
+  grid-template-columns: 1fr 1px 1fr;
   gap: 0 40px;
 }
 .col-rule { background: rgba(13,27,42,0.1); }
