@@ -31,6 +31,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { format, parseISO } from 'date-fns';
+import imageCompression from 'browser-image-compression';
 import {
   ArrowLeft,
   Calendar,
@@ -43,6 +44,7 @@ import {
   Phone,
   Plus,
   Scissors,
+  Trash2,
   Upload,
   User,
   X,
@@ -598,11 +600,139 @@ function AppointmentRow({ appointment }: { appointment: ClientAppointment }) {
 
 // ─── PICTURES (with lightbox) ──────────────────────────────────────────────
 
+// iPhones emit HEIC/HEIF by default — Chrome/Firefox on desktop can't
+// decode them, which broke both browser-image-compression and Vercel
+// Blob's content sniffer. Detect by MIME first (most reliable) and
+// fall back to filename extension for browsers/OSes that leave the
+// File.type empty for HEIC.
+function isHeicFile(file: File): boolean {
+  const mime = file.type.toLowerCase();
+  if (mime === 'image/heic' || mime === 'image/heif') return true;
+  return /\.(heic|heif)$/i.test(file.name);
+}
+
+// Convert a HEIC/HEIF File to a real JPEG File. We try every
+// available path in order of preference:
+//
+//   1. Native browser decoder. Chrome 121+ on macOS, Safari, and
+//      Edge (Windows w/ HEIF codec) can decode HEIC straight into
+//      an <img>. We blit that to a canvas and re-encode as JPEG.
+//      Zero library cost and handles modern HEIC variants
+//      (10-bit, HDR, P3) that older WASM decoders choke on.
+//
+//   2. heic2any (libheif-js WASM). Fallback for browsers without
+//      native HEIC support — Firefox, Chrome on bare Windows.
+//      Note: ships an old libheif build that rejects newer Apple
+//      HEIC profiles with `ERR_LIBHEIF format not supported`, so
+//      this path will fail on iPhone 12 Pro+ HDR shots.
+async function convertHeicToJpeg(file: File): Promise<File> {
+  const targetName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
+
+  // ── 1. Native browser decoder ─────────────────────────────────
+  try {
+    return await decodeImageToJpegFile(file, targetName);
+  } catch (nativeErr) {
+    console.warn(
+      '[ClientProfileModal] native HEIC decode failed, falling back to heic2any',
+      nativeErr
+    );
+  }
+
+  // ── 2. heic2any (libheif-js WASM) ─────────────────────────────
+  const { default: heic2any } = await import('heic2any');
+  const converted = await heic2any({
+    blob: file,
+    toType: 'image/jpeg',
+    quality: 0.92,
+  });
+  const jpegBlob = Array.isArray(converted) ? converted[0] : converted;
+  return new File([jpegBlob], targetName, {
+    type: 'image/jpeg',
+    lastModified: file.lastModified,
+  });
+}
+
+// Decode any browser-supported image format (incl. HEIC when the
+// OS decoder is available) to a JPEG File via canvas.
+async function decodeImageToJpegFile(
+  file: File,
+  targetName: string
+): Promise<File> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () =>
+        reject(new Error('Browser cannot decode this image format'));
+      el.src = url;
+    });
+
+    if (img.naturalWidth === 0 || img.naturalHeight === 0) {
+      throw new Error('Image decoded to zero dimensions');
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not obtain 2D canvas context');
+    ctx.drawImage(img, 0, 0);
+
+    const blob: Blob | null = await new Promise((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.92)
+    );
+    if (!blob) throw new Error('Canvas → JPEG export returned empty blob');
+
+    return new File([blob], targetName, {
+      type: 'image/jpeg',
+      lastModified: file.lastModified,
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// heic2any (and other worker-backed libs) routinely reject with a
+// raw DOM Event instead of an Error, which makes `.message` return
+// undefined and our user-facing toast collapse to "unknown error".
+// This pulls something useful out regardless of the rejection shape.
+function describeUnknownError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'string' && err) return err;
+  if (typeof Event !== 'undefined' && err instanceof Event) {
+    const target = err.target as
+      | { error?: { message?: string }; src?: string }
+      | null;
+    if (target?.error?.message) return target.error.message;
+    return `${err.type || 'event'} from ${target?.src ?? 'worker'}`;
+  }
+  if (err && typeof err === 'object') {
+    const maybeMessage = (err as { message?: unknown }).message;
+    if (typeof maybeMessage === 'string' && maybeMessage) return maybeMessage;
+    try {
+      const json = JSON.stringify(err);
+      if (json && json !== '{}') return json;
+    } catch {
+      // fall through
+    }
+    return Object.prototype.toString.call(err);
+  }
+  return String(err);
+}
+
 function PicturesView({ client }: { client: Client }) {
   const [photos, setPhotos] = useState<ClientPhoto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
+  // Two-stage upload state so the UI can distinguish the
+  // (CPU-bound, occasionally slow) client-side compression
+  // pass from the actual network upload. Both phases disable
+  // the button; only the label changes.
+  const [uploadPhase, setUploadPhase] = useState<
+    'idle' | 'converting' | 'compressing' | 'uploading'
+  >('idle');
+  const uploading = uploadPhase !== 'idle';
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<ClientPhoto | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -648,11 +778,90 @@ function PicturesView({ client }: { client: Client }) {
       // time (browsers don't fire `change` for identical re-select).
       input.value = '';
       if (!file) return;
-      setUploading(true);
+
+      // Flip the spinner on IMMEDIATELY so the user sees feedback
+      // even before the HEIC→JPEG conversion / compression starts —
+      // both can take 1-2 s on older devices.
+      const isHeic = isHeicFile(file);
+      setUploadPhase(isHeic ? 'converting' : 'compressing');
       setUploadError(null);
+
       try {
+        // iPhone HEIC/HEIF → JPEG. The conversion helper tries
+        // the native browser decoder first (Chrome 121+ on macOS,
+        // Safari, Edge w/ HEIF codec) and falls back to heic2any.
+        // BOTH can fail on newer iPhone HEIC variants (HDR /
+        // 10-bit / Live Photo sequences) which Apple ships by
+        // default on iPhone 12 Pro+. When that happens we don't
+        // block — the server route runs sharp (libvips + libheif,
+        // current build) which handles every Apple HEIC profile.
+        let workingFile: File = file;
+        if (isHeic) {
+          try {
+            workingFile = await convertHeicToJpeg(file);
+          } catch (convertErr) {
+            console.warn(
+              '[ClientProfileModal] client-side HEIC decode failed — deferring conversion to the server',
+              {
+                raw: convertErr,
+                file: {
+                  name: file.name,
+                  type: file.type || '(empty)',
+                  size: file.size,
+                },
+              }
+            );
+            // workingFile stays as the raw HEIC. Skip the
+            // browser-image-compression pass below — it'd fail
+            // for the same reason heic2any did.
+          }
+          setUploadPhase('compressing');
+        }
+
+        // Client-side compression keeps us comfortably under
+        // Vercel's 4.5 MB serverless request-body cap. Modern
+        // phone cameras routinely emit 5-10 MB JPEGs which were
+        // tripping HTTP 413 (file_too_large) at the edge before
+        // they ever reached our route handler. We only run this
+        // on files we KNOW the browser can decode — raw HEIC
+        // would just fail in the canvas read and waste 1-2 s.
+        let uploadFile: File = workingFile;
+        const stillHeic = isHeicFile(workingFile);
+        if (workingFile.type.startsWith('image/') && !stillHeic) {
+          try {
+            const compressed = await imageCompression(workingFile, {
+              maxSizeMB: 1,
+              maxWidthOrHeight: 1920,
+              useWebWorker: true,
+            });
+            // The lib returns a File whose `name` may have been
+            // rewritten (e.g. ".heic" → ".jpeg" via re-encoding).
+            // Re-wrap to lock in the working filename so the
+            // server's existing `${Date.now()}-${rand}-${name}`
+            // unique-suffix logic stays deterministic.
+            uploadFile = new File([compressed], workingFile.name, {
+              type: compressed.type || workingFile.type,
+              lastModified: workingFile.lastModified,
+            });
+          } catch (compressErr) {
+            // Don't block the upload if compression itself fails
+            // (OOM on very large images, unsupported codec, etc.).
+            // Fall back to the working (post-conversion) file and
+            // let the server reject it if it's too big.
+            console.warn(
+              '[ClientProfileModal] image compression failed; uploading original',
+              compressErr
+            );
+          }
+        }
+
+        setUploadPhase('uploading');
         const form = new FormData();
-        form.append('file', file);
+        // Third arg to FormData.append pins the filename the server
+        // sees, independent of `uploadFile.name`. Use the post-HEIC
+        // name so the stored blob has a `.jpg` extension that
+        // matches its actual bytes.
+        form.append('file', uploadFile, workingFile.name);
         const res = await fetch(`/api/admin/clients/${client.id}/photos`, {
           method: 'POST',
           body: form,
@@ -666,8 +875,33 @@ function PicturesView({ client }: { client: Client }) {
       } catch (err) {
         setUploadError(err instanceof Error ? err.message : String(err));
       } finally {
-        setUploading(false);
+        setUploadPhase('idle');
       }
+    },
+    [client.id]
+  );
+
+  // Deletion is initiated from inside the Lightbox button. The
+  // confirm dialog lives in the Lightbox too (so a cancelled
+  // confirm doesn't reach us at all). On success we drop the row
+  // from local state AND unmount the lightbox by clearing the
+  // selection — that's why this lives in PicturesView, not in
+  // the Lightbox itself.
+  const handleDeletePhoto = useCallback(
+    async (photoId: number, blobUrl: string) => {
+      const res = await fetch(`/api/admin/clients/${client.id}/photos`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photoId, blobUrl }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      setPhotos((prev) =>
+        prev ? prev.filter((p) => p.id !== photoId) : prev
+      );
+      setLightbox(null);
     },
     [client.id]
   );
@@ -699,7 +933,11 @@ function PicturesView({ client }: { client: Client }) {
             <>
               <Loader2 className="h-6 w-6 animate-spin" />
               <span className="text-[10px] font-medium uppercase tracking-[0.18em]">
-                Uploading
+                {uploadPhase === 'converting'
+                  ? 'Converting'
+                  : uploadPhase === 'compressing'
+                    ? 'Processing'
+                    : 'Uploading'}
               </span>
             </>
           ) : (
@@ -753,7 +991,11 @@ function PicturesView({ client }: { client: Client }) {
       />
 
       {lightbox && (
-        <Lightbox photo={lightbox} onClose={() => setLightbox(null)} />
+        <Lightbox
+          photo={lightbox}
+          onClose={() => setLightbox(null)}
+          onDelete={handleDeletePhoto}
+        />
       )}
     </div>
   );
@@ -762,34 +1004,98 @@ function PicturesView({ client }: { client: Client }) {
 function Lightbox({
   photo,
   onClose,
+  onDelete,
 }: {
   photo: ClientPhoto;
   onClose: () => void;
+  /**
+   * Server round-trip + local state cleanup, owned by PicturesView.
+   * Resolves on success (and PicturesView unmounts us by clearing
+   * the lightbox selection), rejects on HTTP failure so we can
+   * show an inline error pill below the delete button.
+   */
+  onDelete: (photoId: number, blobUrl: string) => Promise<void>;
 }) {
-  // ESC closes. Bound at window so it works regardless of focus
-  // — the lightbox doesn't have a natural focus target.
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  // ESC handling, in priority order:
+  //   1. If a request is mid-flight: do nothing.
+  //   2. If the confirm dialog is open: dismiss the confirm
+  //      (keeps the user in the lightbox).
+  //   3. Otherwise: close the lightbox.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      if (isDeleting) return;
+      if (showConfirm) {
+        setShowConfirm(false);
+        return;
+      }
+      onClose();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, isDeleting, showConfirm]);
+
+  // Backdrop click closes the lightbox — but NOT while the confirm
+  // dialog is open (that would yank the lightbox out from under
+  // the dialog) and NOT during an in-flight delete.
+  const onBackdropClick = () => {
+    if (isDeleting || showConfirm) return;
+    onClose();
+  };
+
+  const onDeleteClick = (e: React.MouseEvent) => {
+    // Don't bubble to backdrop.
+    e.stopPropagation();
+    if (isDeleting) return;
+    setDeleteError(null);
+    setShowConfirm(true);
+  };
+
+  const cancelConfirm = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (isDeleting) return;
+    setShowConfirm(false);
+  };
+
+  const confirmDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isDeleting) return;
+    setIsDeleting(true);
+    setShowConfirm(false);
+    try {
+      await onDelete(photo.id, photo.blob_url);
+      // Parent clears the lightbox selection on success, which
+      // unmounts us — no further state work needed here.
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : String(err));
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <div
       className="fixed inset-0 z-100 flex items-center justify-center bg-black/90 p-4"
-      onClick={onClose}
+      onClick={onBackdropClick}
       role="presentation"
     >
       <button
         type="button"
-        onClick={onClose}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (isDeleting || showConfirm) return;
+          onClose();
+        }}
+        disabled={isDeleting || showConfirm}
         aria-label="Close photo"
-        className="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+        className="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <X className="h-5 w-5" />
       </button>
+
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={photo.blob_url}
@@ -797,6 +1103,114 @@ function Lightbox({
         className="max-h-full max-w-full rounded-md object-contain"
         onClick={(e) => e.stopPropagation()}
       />
+
+      {/* Destructive trigger. Bottom-centred so the X stays clean
+          and the user has to deliberately reach for it. Rose tint
+          + subtle backdrop blur matches our admin aesthetic. */}
+      <button
+        type="button"
+        onClick={onDeleteClick}
+        disabled={isDeleting || showConfirm}
+        aria-label="Delete photo"
+        className="absolute bottom-6 left-1/2 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-rose-300/40 bg-rose-500/15 px-5 py-2.5 text-sm font-medium text-rose-100 backdrop-blur-sm transition-colors hover:border-rose-300/60 hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {isDeleting ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Deleting…</span>
+          </>
+        ) : (
+          <>
+            <Trash2 className="h-4 w-4" strokeWidth={1.8} />
+            <span>Delete photo</span>
+          </>
+        )}
+      </button>
+
+      {deleteError && (
+        <div
+          className="absolute bottom-20 left-1/2 -translate-x-1/2 rounded-md border border-rose-300/40 bg-rose-950/50 px-3 py-1.5 text-xs text-rose-100 backdrop-blur-sm"
+          onClick={(e) => e.stopPropagation()}
+          role="alert"
+        >
+          Couldn’t delete — {deleteError}
+        </div>
+      )}
+
+      {/* Custom confirm dialog. Replaces the native window.confirm
+          so the destructive prompt matches the rest of the admin
+          UI (cream card, serif heading, rose CTA). Sits on top of
+          the lightbox via z-110 (lightbox itself is z-100). */}
+      {showConfirm && (
+        <ConfirmDeleteDialog
+          onCancel={cancelConfirm}
+          onConfirm={confirmDelete}
+        />
+      )}
+    </div>
+  );
+}
+
+function ConfirmDeleteDialog({
+  onCancel,
+  onConfirm,
+}: {
+  onCancel: (e?: React.MouseEvent) => void;
+  onConfirm: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <div
+      className="absolute inset-0 z-110 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+      onClick={onCancel}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-delete-photo-title"
+    >
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-2xl border border-stone-200/80 bg-stone-50 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start gap-3 px-6 pt-6">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+            <Trash2 className="h-5 w-5" strokeWidth={1.6} />
+          </span>
+          <div className="flex-1">
+            <h3
+              id="confirm-delete-photo-title"
+              className="font-serif text-lg leading-tight text-stone-900"
+            >
+              Delete this photo?
+            </h3>
+            <p className="mt-1.5 text-sm leading-relaxed text-stone-600">
+              The photo will be permanently removed from the client’s gallery.
+              This action cannot be undone.
+            </p>
+          </div>
+        </div>
+
+        {/* Footer / actions. Subtle divider matches the rest of
+            our card UI; Cancel on the left as a safe escape hatch,
+            destructive primary on the right. */}
+        <div className="mt-6 flex items-center justify-end gap-2 border-t border-stone-200/70 bg-stone-100/50 px-5 py-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:border-stone-400 hover:bg-stone-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            autoFocus
+            className="inline-flex items-center gap-1.5 rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500/40 focus:ring-offset-2 focus:ring-offset-stone-50"
+          >
+            <Trash2 className="h-4 w-4" strokeWidth={1.8} />
+            Delete photo
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
