@@ -7,9 +7,8 @@ import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import type { Appointment } from './types';
 import { cleanServiceName, clientDisplayName } from './helpers';
 import {
-  GRID_HEIGHT_PX,
-  HOUR_HEIGHT_PX,
   HOURS,
+  MIN_PILL_HEIGHT_PX,
   START_HOUR,
   layoutForDay,
   safeParseISO,
@@ -116,7 +115,10 @@ export default function SingleDayModal({
           onClose={onClose}
         />
 
-        <div className="flex-1 overflow-y-auto">
+        {/* Timeline body fills the remaining space inside the modal card.
+            `min-h-0` lets it shrink properly inside the flex column so the
+            whole 9 AM → 9 PM range always fits without internal scroll. */}
+        <div className="flex min-h-0 flex-1">
           <DayTimeline
             positioned={positioned}
             onAppointmentClick={onAppointmentClick}
@@ -189,14 +191,18 @@ function DayTimeline({
   onAppointmentClick?: (appointment: Appointment) => void;
 }) {
   // Same column structure as TimeGrid: a left time-labels column and a
-  // single relative column for the day's content. Sharing the grid
-  // template keeps the modal feeling visually continuous with TimeGrid.
+  // single relative column for the day's content. The grid fills its
+  // parent's height (the modal body), and hour rows distribute evenly
+  // via the children's own grid-template-rows.
   return (
     <div
-      className="grid"
+      className="grid w-full"
       style={{
         gridTemplateColumns: '60px minmax(0, 1fr)',
-        height: GRID_HEIGHT_PX,
+        // Single implicit row → force it to fill the flex parent's
+        // height so the inner `repeat(HOURS, 1fr)` rows have something
+        // real to scale into. See TimeGrid for the same reasoning.
+        gridTemplateRows: 'minmax(0, 1fr)',
       }}
     >
       <TimeLabelColumn />
@@ -210,7 +216,10 @@ function DayTimeline({
 
 function TimeLabelColumn() {
   return (
-    <div className="border-r border-stone-200">
+    <div
+      className="grid border-r border-stone-200"
+      style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+    >
       {Array.from({ length: HOURS }, (_, i) => {
         const hour = START_HOUR + i;
         const labelDate = new Date();
@@ -219,7 +228,6 @@ function TimeLabelColumn() {
           <div
             key={hour}
             className="border-t border-stone-200 pr-2 pt-1 text-right text-[10px] uppercase tracking-widest text-stone-400"
-            style={{ height: HOUR_HEIGHT_PX }}
           >
             {format(labelDate, 'h a')}
           </div>
@@ -238,14 +246,17 @@ function DayBody({
 }) {
   return (
     <div className="relative">
-      {/* Background hour gridlines */}
-      {Array.from({ length: HOURS }, (_, i) => (
-        <div
-          key={i}
-          className="border-t border-stone-200"
-          style={{ height: HOUR_HEIGHT_PX }}
-        />
-      ))}
+      {/* Background hour gridlines — fill the column via `inset-0` + a
+          1fr-row grid so they always match the time-labels column. */}
+      <div
+        className="pointer-events-none absolute inset-0 grid"
+        style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+        aria-hidden="true"
+      >
+        {Array.from({ length: HOURS }, (_, i) => (
+          <div key={i} className="border-t border-stone-200" />
+        ))}
+      </div>
       {/* Empty-state placeholder centred over the timeline */}
       {positioned.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -273,7 +284,7 @@ function ModalAppointment({
   positioned: PositionedAppointment;
   onClick?: (appointment: Appointment) => void;
 }) {
-  const { appointment: apt, top, height, col, totalCols } = positioned;
+  const { appointment: apt, topPct, heightPct, col, totalCols } = positioned;
   const cancelled = (apt.status || '').toLowerCase() === 'cancelled';
 
   const start = safeParseISO(apt.booking_time);
@@ -322,8 +333,9 @@ function ModalAppointment({
       title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}`}
       aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}`}
       style={{
-        top,
-        height,
+        top: `${topPct}%`,
+        height: `${heightPct}%`,
+        minHeight: MIN_PILL_HEIGHT_PX,
         left: `calc(${leftPct}% + 0.5rem)`,
         width: `calc(${widthPct}% - 1rem)`,
       }}

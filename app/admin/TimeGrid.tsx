@@ -11,9 +11,8 @@ import {
 import type { Appointment } from './types';
 import { cleanServiceName, clientDisplayName } from './helpers';
 import {
-  GRID_HEIGHT_PX,
-  HOUR_HEIGHT_PX,
   HOURS,
+  MIN_PILL_HEIGHT_PX,
   START_HOUR,
   layoutForDay,
   safeParseISO,
@@ -136,23 +135,31 @@ export default function TimeGrid({
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        <div
-          className="grid"
-          style={{
-            gridTemplateColumns: gridTemplate,
-            height: GRID_HEIGHT_PX,
-          }}
-        >
-          <TimeLabelColumn />
-          {columns.map((col) => (
-            <DayColumnView
-              key={col.date.toISOString()}
-              column={col}
-              onAppointmentClick={onAppointmentClick}
-            />
-          ))}
-        </div>
+      {/* Grid body fills the remaining flex height. Two load-bearing
+          bits:
+            • `min-h-0` — without it, flex children refuse to shrink
+              below their content size and you'd get a scrollbar again.
+            • `gridTemplateRows: minmax(0, 1fr)` — the outer grid only
+              has one row; without explicit row sizing it would shrink
+              to content (`auto`), which then collapses the inner
+              `repeat(HOURS, 1fr)` rows to zero. Forcing the row to
+              `1fr` makes it fill the body, so every hour-cell below
+              has a real height to scale into. */}
+      <div
+        className="grid min-h-0 flex-1"
+        style={{
+          gridTemplateColumns: gridTemplate,
+          gridTemplateRows: 'minmax(0, 1fr)',
+        }}
+      >
+        <TimeLabelColumn />
+        {columns.map((col) => (
+          <DayColumnView
+            key={col.date.toISOString()}
+            column={col}
+            onAppointmentClick={onAppointmentClick}
+          />
+        ))}
       </div>
     </div>
   );
@@ -214,7 +221,10 @@ function DayHeader({
 
 function TimeLabelColumn() {
   return (
-    <div className="border-r border-stone-200">
+    <div
+      className="grid border-r border-stone-200"
+      style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+    >
       {Array.from({ length: HOURS }, (_, i) => {
         const hour = START_HOUR + i;
         const labelDate = new Date();
@@ -223,7 +233,6 @@ function TimeLabelColumn() {
           <div
             key={hour}
             className="border-t border-stone-200 pr-2 pt-1 text-right text-[10px] uppercase tracking-widest text-stone-400"
-            style={{ height: HOUR_HEIGHT_PX }}
           >
             {format(labelDate, 'h a')}
           </div>
@@ -243,15 +252,25 @@ function DayColumnView({
   // Day-column body is intentionally inert. The only clickable
   // surfaces inside the time grid are (1) the day header above
   // (handled in DayHeader) and (2) the appointment pills below.
+  //
+  // Layered structure:
+  //   * `.relative` parent — owns the appointment-pill coordinate
+  //     space (percentages are computed against THIS element's height).
+  //   * inner `.absolute inset-0` grid — paints the hour gridlines
+  //     using `repeat(HOURS, 1fr)` so they stretch to fill any height.
+  //   * pills — absolutely positioned with topPct/heightPct, layered
+  //     above the gridlines.
   return (
     <div className="relative border-l border-stone-200">
-      {Array.from({ length: HOURS }, (_, i) => (
-        <div
-          key={i}
-          className="border-t border-stone-200"
-          style={{ height: HOUR_HEIGHT_PX }}
-        />
-      ))}
+      <div
+        className="pointer-events-none absolute inset-0 grid"
+        style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+        aria-hidden="true"
+      >
+        {Array.from({ length: HOURS }, (_, i) => (
+          <div key={i} className="border-t border-stone-200" />
+        ))}
+      </div>
       {column.items.map((pa) => (
         <AppointmentBlock
           key={pa.appointment.id}
@@ -270,7 +289,7 @@ function AppointmentBlock({
   positioned: PositionedAppointment;
   onClick?: (appointment: Appointment) => void;
 }) {
-  const { appointment: apt, top, height, col, totalCols } = positioned;
+  const { appointment: apt, topPct, heightPct, col, totalCols } = positioned;
   const cancelled = (apt.status || '').toLowerCase() === 'cancelled';
 
   const start = safeParseISO(apt.booking_time);
@@ -315,8 +334,9 @@ function AppointmentBlock({
       title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}`}
       aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}`}
       style={{
-        top,
-        height,
+        top: `${topPct}%`,
+        height: `${heightPct}%`,
+        minHeight: MIN_PILL_HEIGHT_PX,
         left: `calc(${leftPct}% + 2px)`,
         width: `calc(${widthPct}% - 4px)`,
       }}

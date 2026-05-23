@@ -12,16 +12,27 @@ import type { Appointment } from './types';
 // ──────────────────────────────────────────────────────────────────────────
 // Geometry constants
 // ──────────────────────────────────────────────────────────────────────────
-export const HOUR_HEIGHT_PX = 80;
-export const START_HOUR = 7; // 7 AM — first visible hour
-export const END_HOUR = 19;  // 7 PM — last visible hour (exclusive end)
+//
+// The time grid is RELATIVE-sized — it fills whatever vertical space its
+// parent flex container offers, with all hour rows distributed evenly via
+// `grid-template-rows: repeat(HOURS, 1fr)`. Appointment pills position
+// themselves with percentages (`topPct`, `heightPct`) so they stretch &
+// shrink with the container — no internal scrolling, the whole 9 AM →
+// 9 PM window is always visible at once.
+//
+// We deliberately do NOT export GRID_HEIGHT_PX anymore: the grid has no
+// fixed pixel height. HOUR_HEIGHT_PX is kept around purely as a CSS floor
+// (via min-height) on the hour-label rows so labels stay legible on very
+// short viewports.
+export const START_HOUR = 9;  // 9 AM — first visible hour
+export const END_HOUR = 21;   // 9 PM — last visible hour (exclusive end)
 export const HOURS = END_HOUR - START_HOUR; // 12
-export const GRID_HEIGHT_PX = HOURS * HOUR_HEIGHT_PX; // 960
 
 /**
- * Anything ≤ this many minutes still renders at this minimum pixel
- * height so micro-appointments (e.g. 15-min touch-ups) stay readable
- * instead of becoming unclickable slivers.
+ * Minimum pill height in pixels. Micro-appointments (e.g. 15-min touch-ups)
+ * would otherwise become unclickable slivers as the parent shrinks. We
+ * apply this as a CSS `min-height` on each pill, layered on top of the
+ * percent-based `heightPct`.
  */
 export const MIN_PILL_HEIGHT_PX = 22;
 
@@ -30,10 +41,12 @@ export const MIN_PILL_HEIGHT_PX = 22;
 // ──────────────────────────────────────────────────────────────────────────
 export interface PositionedAppointment {
   appointment: Appointment;
-  /** Pixels from the top of the START_HOUR line. */
-  top: number;
-  /** Pixel height, already clamped to MIN_PILL_HEIGHT_PX. */
-  height: number;
+  /** Top offset as a percentage (0-100) of the visible day window. */
+  topPct: number;
+  /** Height as a percentage (0-100) of the visible day window.
+   *  Consumers should ALSO apply `min-height: MIN_PILL_HEIGHT_PX` via CSS
+   *  so micro-appointments stay clickable when the parent is short. */
+  heightPct: number;
   /** 0-indexed lane within the overlap-packed layout for the day. */
   col: number;
   /** Total number of lanes the day needs — uniform across the day. */
@@ -54,21 +67,27 @@ export function safeParseISO(iso: string | null): Date | null {
 // ──────────────────────────────────────────────────────────────────────────
 
 /**
- * Convert an appointment's start/end timestamps into a top/height pair
- * clipped to the visible START_HOUR..END_HOUR window. Returns null when
- * the appointment is malformed or falls entirely outside that window.
+ * Convert an appointment's start/end timestamps into a top/height pair,
+ * expressed as percentages of the visible START_HOUR..END_HOUR window.
+ * Returns null when the appointment is malformed or falls entirely
+ * outside that window.
  *
- * Math (per spec):
- *   top    = ((startHour + startMinute/60) - START_HOUR) * HOUR_HEIGHT_PX
- *   height = (durationMinutes / 60) * HOUR_HEIGHT_PX
+ * Math:
+ *   topPct    = ((minutesFromVisibleStart) / totalVisibleMinutes) * 100
+ *   heightPct = (durationMinutes / totalVisibleMinutes) * 100
  *
  * We use millisecond arithmetic instead of doing hours/minutes math by
  * hand because it correctly handles DST transitions, sub-minute starts,
  * and end-of-day wraparounds with one expression.
+ *
+ * Why percentages instead of pixels: the grid is responsive — it fills
+ * whatever vertical space its parent offers, so positions need to scale
+ * with container height. Consumers add `min-height: MIN_PILL_HEIGHT_PX`
+ * via CSS to keep micro-appointments clickable on short viewports.
  */
 export function positionFor(
   apt: Appointment
-): { top: number; height: number } | null {
+): { topPct: number; heightPct: number } | null {
   const start = safeParseISO(apt.booking_time);
   if (!start) return null;
 
@@ -87,12 +106,13 @@ export function positionFor(
 
   if (endMs <= startMs) return null;
 
+  const totalVisibleMinutes = HOURS * 60;
   const minutesFromVisibleStart = (startMs - visibleStartMs) / 60000;
   const durationMinutes = (endMs - startMs) / 60000;
 
-  const top = (minutesFromVisibleStart / 60) * HOUR_HEIGHT_PX;
-  const rawHeight = (durationMinutes / 60) * HOUR_HEIGHT_PX;
-  return { top, height: Math.max(rawHeight, MIN_PILL_HEIGHT_PX) };
+  const topPct = (minutesFromVisibleStart / totalVisibleMinutes) * 100;
+  const heightPct = (durationMinutes / totalVisibleMinutes) * 100;
+  return { topPct, heightPct };
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -108,15 +128,15 @@ export function positionFor(
  * predictable, calmer-looking grid).
  */
 function packLanes(
-  raw: { apt: Appointment; top: number; height: number }[]
+  raw: { apt: Appointment; topPct: number; heightPct: number }[]
 ): PositionedAppointment[] {
-  const sorted = [...raw].sort((a, b) => a.top - b.top);
+  const sorted = [...raw].sort((a, b) => a.topPct - b.topPct);
   const lanes: { end: number }[] = [];
   const colByIdx: number[] = [];
 
   sorted.forEach((it) => {
-    const start = it.top;
-    const end = it.top + it.height;
+    const start = it.topPct;
+    const end = it.topPct + it.heightPct;
     let placed = false;
     for (let i = 0; i < lanes.length; i++) {
       if (lanes[i].end <= start) {
@@ -135,8 +155,8 @@ function packLanes(
   const totalCols = Math.max(lanes.length, 1);
   return sorted.map((it, i) => ({
     appointment: it.apt,
-    top: it.top,
-    height: it.height,
+    topPct: it.topPct,
+    heightPct: it.heightPct,
     col: colByIdx[i],
     totalCols,
   }));
@@ -152,13 +172,14 @@ export function layoutForDay(
   date: Date,
   appointments: Appointment[]
 ): PositionedAppointment[] {
-  const positioned: { apt: Appointment; top: number; height: number }[] = [];
+  const positioned: { apt: Appointment; topPct: number; heightPct: number }[] =
+    [];
   for (const apt of appointments) {
     const start = safeParseISO(apt.booking_time);
     if (!start || !isSameDay(start, date)) continue;
     const pos = positionFor(apt);
     if (!pos) continue;
-    positioned.push({ apt, top: pos.top, height: pos.height });
+    positioned.push({ apt, topPct: pos.topPct, heightPct: pos.heightPct });
   }
   return packLanes(positioned);
 }
