@@ -499,43 +499,57 @@ type ReschedulePhase = 'embed' | 'error' | 'completing';
  * values so disabled days, hover states, and selection chips read
  * the same density as the rest of the dashboard's neutral palette.
  */
+/*
+ * Why `dark` mirrors `light`:
+ * Cal's `UiConfig.cssVarsPerTheme` is typed as `Record<Theme, ...>`
+ * where `Theme = 'dark' | 'light'`, so both keys are required at
+ * build time even though we hard-pin `theme: 'light'` above and the
+ * `dark` vars are dead code in practice. We mirror the same stone /
+ * cream palette into `dark` so the modal stays on-brand if Cal ever
+ * resolves a different theme (e.g. user OS dark-mode bleeding into
+ * an `auto` resolution after a future config tweak). Keeping the
+ * two blocks identical avoids a second palette to maintain.
+ */
+const ADMIN_CAL_LIGHT_VARS = {
+  'cal-brand': '#1c1917', // stone-900
+  'cal-brand-emphasis': '#292524', // stone-800
+  'cal-brand-text': '#FAF9F6', // cream
+  'cal-brand-subtle': 'rgba(28, 25, 23, 0.08)',
+  'cal-brand-accent': '#44403c', // stone-700
+
+  'cal-bg': 'transparent',
+  'cal-bg-emphasis': 'rgba(28, 25, 23, 0.08)',
+  'cal-bg-muted': 'rgba(28, 25, 23, 0.04)',
+  'cal-bg-subtle': 'rgba(28, 25, 23, 0.03)',
+  'cal-bg-inverted': '#1c1917',
+  'cal-bg-info': 'rgba(28, 25, 23, 0.06)',
+  'cal-bg-success': 'rgba(28, 25, 23, 0.06)',
+  'cal-bg-attention': 'rgba(180, 83, 9, 0.08)',
+  'cal-bg-error': 'rgba(159, 18, 57, 0.08)',
+  'cal-bg-dark-error': 'rgba(159, 18, 57, 0.18)',
+
+  'cal-border': 'rgba(28, 25, 23, 0.16)',
+  'cal-border-emphasis': 'rgba(28, 25, 23, 0.42)',
+  'cal-border-subtle': 'rgba(28, 25, 23, 0.08)',
+  'cal-border-booker': 'transparent',
+  'cal-border-error': 'rgba(159, 18, 57, 0.32)',
+
+  'cal-text': '#1c1917', // stone-900
+  'cal-text-emphasis': '#0c0a09', // stone-950
+  'cal-text-subtle': '#57534e', // stone-600
+  'cal-text-muted': '#78716c', // stone-500
+  'cal-text-inverted': '#FAF9F6',
+  'cal-text-error': '#9f1239',
+} as const;
+
 const ADMIN_CAL_UI_CONFIG = {
   theme: 'light' as const,
   styles: { branding: { brandColor: '#292524' /* stone-800 */ } },
   hideEventTypeDetails: false,
   layout: 'month_view' as const,
   cssVarsPerTheme: {
-    light: {
-      'cal-brand': '#1c1917', // stone-900
-      'cal-brand-emphasis': '#292524', // stone-800
-      'cal-brand-text': '#FAF9F6', // cream
-      'cal-brand-subtle': 'rgba(28, 25, 23, 0.08)',
-      'cal-brand-accent': '#44403c', // stone-700
-
-      'cal-bg': 'transparent',
-      'cal-bg-emphasis': 'rgba(28, 25, 23, 0.08)',
-      'cal-bg-muted': 'rgba(28, 25, 23, 0.04)',
-      'cal-bg-subtle': 'rgba(28, 25, 23, 0.03)',
-      'cal-bg-inverted': '#1c1917',
-      'cal-bg-info': 'rgba(28, 25, 23, 0.06)',
-      'cal-bg-success': 'rgba(28, 25, 23, 0.06)',
-      'cal-bg-attention': 'rgba(180, 83, 9, 0.08)',
-      'cal-bg-error': 'rgba(159, 18, 57, 0.08)',
-      'cal-bg-dark-error': 'rgba(159, 18, 57, 0.18)',
-
-      'cal-border': 'rgba(28, 25, 23, 0.16)',
-      'cal-border-emphasis': 'rgba(28, 25, 23, 0.42)',
-      'cal-border-subtle': 'rgba(28, 25, 23, 0.08)',
-      'cal-border-booker': 'transparent',
-      'cal-border-error': 'rgba(159, 18, 57, 0.32)',
-
-      'cal-text': '#1c1917', // stone-900
-      'cal-text-emphasis': '#0c0a09', // stone-950
-      'cal-text-subtle': '#57534e', // stone-600
-      'cal-text-muted': '#78716c', // stone-500
-      'cal-text-inverted': '#FAF9F6',
-      'cal-text-error': '#9f1239',
-    },
+    light: ADMIN_CAL_LIGHT_VARS,
+    dark: ADMIN_CAL_LIGHT_VARS,
   },
 };
 
