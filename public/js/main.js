@@ -218,6 +218,12 @@
 
   serviceItems.forEach((item) => {
     item.addEventListener('click', (event) => {
+      // The bookable rows are now <a> elements whose href points at the
+      // canonical Cal.com URL — that's the no-JS fallback. With JS
+      // available we own the booking experience via the in-page drawer,
+      // so preventDefault keeps the browser from navigating off to
+      // cal.com when the row is clicked.
+      event.preventDefault();
       // Suppress Cal.com's auto-popup: because the row carries [data-cal-link],
       // Cal would otherwise open its built-in modal alongside our drawer.
       // Our IIFE attaches this handler first (Cal's embed.js loads async),

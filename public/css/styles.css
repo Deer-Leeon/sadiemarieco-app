@@ -394,6 +394,105 @@ nav.scrolled { padding: 16px 64px; }
 }
 
 /*
+  ─── BOOKABLE SERVICE ROW (anchor variant) ───────────────────────────────
+  Renderer in `app/route.ts` wraps every BOOKABLE service in an <a> tag —
+  unbookable rows (slug=null) and group headers stay as <div>, so the
+  `a.service-item` selector cleanly scopes the click-cue affordance to
+  rows that actually open the booking drawer.
+
+  Layout intent:
+    [name + detail]                 [........service-action........]
+                                    [    $price   Book Now    ›    ]
+
+    • The .service-action zone has a fixed min-width sized for the
+      hover state. Its three children — price stack, label, chevron —
+      flex-end justify, so at rest the price hugs the chevron (the
+      label sits between them but collapsed to zero width). On hover
+      the label expands via max-width, naturally pushing the price
+      leftward inside the reserved space. The name/description column
+      never reflows because the action column already owned the wider
+      hover-state width.
+    • The chevron is an inline SVG so it inherits `currentColor` for
+      clean color transitions and scales crisply alongside the
+      editorial type. No emoji metrics like the prior `→`.
+    • Focus mirrors hover so the keyboard path is identical — the
+      anchor is natively focusable, no tabindex needed.
+
+  Group headers (.service-item--group) keep their existing two-column
+  layout — they're <div>s, not anchors, and they own the +/− toggle in
+  the right gutter, so they intentionally don't get the action zone.
+*/
+a.service-item {
+  text-decoration: none;
+  color: inherit;
+}
+a.service-item:focus-visible {
+  outline: none;
+  background-color: rgba(13,27,42,0.04);
+  padding-left: 10px;
+  padding-right: 10px;
+  box-shadow: inset 0 0 0 1px rgba(13,27,42,0.12);
+  border-radius: 4px;
+}
+a.service-item:hover {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.service-action {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  /* Inherited by the chevron via currentColor. */
+  color: rgba(13,27,42,0.55);
+}
+
+.service-action .service-meta {
+  /* Small breathing room between the price stack and the chevron — 8px
+     reads as a deliberate kiss without feeling glued. */
+  margin-right: 8px;
+}
+
+.service-cue-arrow {
+  /* Typographic chevron (U+203A) rendered in the page's display serif.
+     We size it just slightly larger than the price so it sits visually
+     centred against the price baseline, with line-height: 1 so the
+     glyph doesn't bring its own vertical padding into the flex row. */
+  display: inline-block;
+  flex-shrink: 0;
+  font-family: var(--serif);
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 1;
+  /* Bodoni's right-pointing angle quote sits with a hair of leading
+     whitespace; nudge it visually closer to the price without crowding. */
+  margin-left: -2px;
+  transition: color 0.3s ease;
+}
+
+a.service-item:hover .service-action,
+a.service-item:focus-visible .service-action {
+  color: var(--navy, #0d1b2a);
+}
+
+/*
+  Mobile fallback: drop the row's horizontal inset and the colour shift
+  since there's no hover on touch devices. The chevron is already
+  static, so nothing else needs to be unwound here.
+*/
+@media (max-width: 768px) {
+  a.service-item:hover {
+    padding-left: 0;
+    padding-right: 0;
+    background-color: transparent;
+  }
+  a.service-item:hover .service-action,
+  a.service-item:focus-visible .service-action {
+    color: rgba(13,27,42,0.55);
+  }
+}
+
+/*
   ─── SERVICE GROUPS (Parent/Child accordion) ─────────────────────────────
   Group rows are CMS-only accordion headers. They sit at the top level of
   a category column, render with a "From $X" price prefix, and own a
@@ -507,41 +606,54 @@ nav.scrolled { padding: 16px 64px; }
   border-left-color: transparent;
 }
 /*
-  Children inside the shelf shouldn't render the full per-row bottom
-  border treatment — that line is owned by the .service-group wrapper.
-  Padding stays so each child still reads as its own row.
+  Each child renders as a discrete card — border only, no fill,
+  rounded corners — so Classic / Hybrid / Volume read as
+  visually grouped peers under their fill-week parent rather than a
+  flat list. The card treatment replaces the previous bottom-border
+  divider (mobile) and right-border divider (tablet+).
 */
 .service-group-children .service-item {
-  border-bottom: 1px solid rgba(13, 27, 42, 0.05);
-  padding: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(13, 27, 42, 0.12);
+  border-radius: 8px;
+  background-color: transparent;
+  transition: border-color 0.3s ease;
 }
-.service-group-children .service-item:last-child {
-  border-bottom: none;
+.service-group-children a.service-item:hover,
+.service-group-children a.service-item:focus-visible {
+  /* Override the global a.service-item hover inset — boxed cards
+     already have their own padding and edge, so the row-style inset
+     would re-pad the interior and shift content. Hover deepens the
+     border only — no fill — to preserve the monotone editorial feel. */
+  padding-left: 16px;
+  padding-right: 16px;
+  background-color: transparent;
+  border-color: rgba(13, 27, 42, 0.28);
+  box-shadow: none;
 }
 
 /*
-  Tablet+ horizontal shelf. Above 860px we still have the two-column
-  .services-cols grid, so the child shelf flows horizontally inside its
-  column rather than down. overflow-x lets the editor publish more
-  children than fit in the column without breaking layout.
+  Tablet+ horizontal shelf. Above 860px the children flow horizontally
+  inside the category column. We allow wrapping (rather than the
+  previous overflow-x scroll) so additional children fall to a second
+  row instead of hiding behind a scrollbar — cleaner read at this
+  density. flex: 1 1 calc(33.333% - 10px/2 spread) gives three even
+  cards per row at the typical 3-child case (Classic / Hybrid / Volume)
+  while still wrapping gracefully if the editor adds a fourth.
 */
 @media (min-width: 861px) {
   .service-group-children {
     flex-direction: row;
+    flex-wrap: wrap;
     padding-left: 0;
-    overflow-x: auto;
+    overflow-x: visible;
     border-left: none;
-    scrollbar-width: thin;
+    gap: 10px;
+    margin-top: 14px;
   }
   .service-group-children .service-item {
-    flex: 0 0 auto;
-    min-width: 220px;
-    padding: 14px 14px;
-    border-bottom: none;
-    border-right: 1px solid rgba(13, 27, 42, 0.05);
-  }
-  .service-group-children .service-item:last-child {
-    border-right: none;
+    flex: 1 1 calc(33.333% - 7px);
+    min-width: 160px;
   }
 }
 

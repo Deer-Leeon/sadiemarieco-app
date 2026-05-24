@@ -530,27 +530,69 @@ function renderCategoryItems(services: readonly SiteServiceRow[]): string {
 }
 
 function renderServiceItem(service: SiteServiceRow): string {
-  const calLinkAttr =
-    service.slug !== null
-      ? ` data-cal-link="${escapeAttr(`${CAL_USERNAME}/${service.slug}`)}"`
-      : '';
   const durationHtml =
     service.duration_mins !== null
-      ? `\n            <span class="service-duration">${escapeHtml(
+      ? `\n              <span class="service-duration">${escapeHtml(
           formatDuration(service.duration_mins)
         )}</span>`
       : '';
-  return `      <div class="service-item"${calLinkAttr}>
+
+  const priceMeta = `<div class="service-meta">
+              <span class="service-price">${escapeHtml(formatPrice(service.price))}</span>${durationHtml}
+            </div>`;
+
+  // Slugless rows can't actually be booked (no Cal event-type to
+  // route to) — render them as a passive <div> with no action zone
+  // so the customer isn't promised an interaction the page can't
+  // honour. In practice this branch only fires for legacy rows that
+  // predate the slug column. Group headers take a different code
+  // path (renderGroupHeader) below.
+  if (service.slug === null) {
+    return `      <div class="service-item">
         <div class="service-header">
           <div>
             <span class="service-name">${escapeHtml(service.title)}</span>
             <span class="service-detail">${escapeHtml(service.description)}</span>
           </div>
-          <div class="service-meta">
-            <span class="service-price">${escapeHtml(formatPrice(service.price))}</span>${durationHtml}
-          </div>
+          ${priceMeta}
         </div>
       </div>`;
+  }
+
+  // Bookable variant.
+  //
+  //   • Wrapper is <a> with the canonical Cal.com URL as href so a
+  //     no-JS visitor still lands on a bookable page when they click
+  //     the row. The in-page drawer in public/js/main.js intercepts
+  //     the click with preventDefault for everyone else.
+  //   • data-cal-link is the username/slug pair the drawer uses to
+  //     spin up the matching pre-rendered iframe.
+  //   • .service-action is the right-side cue zone: it holds the
+  //     price stack followed immediately by a static chevron that
+  //     signals "this row opens something". The chevron does not
+  //     animate on hover — only the row's background tint changes —
+  //     so the cue stays calm and editorial rather than reading as a
+  //     button. No "Book Now" label: the chevron alone is the cue.
+  //   • The chevron is the typographic `›` glyph (U+203A) rendered in
+  //     var(--serif) — Bodoni Moda. Using a glyph instead of an SVG
+  //     means it inherits the page's display-serif character (high
+  //     contrast, refined terminals) and scales with the surrounding
+  //     prices automatically.
+  const calUrl = `https://cal.com/${CAL_USERNAME}/${service.slug}`;
+  return `      <a class="service-item" href="${escapeAttr(calUrl)}" data-cal-link="${escapeAttr(
+    `${CAL_USERNAME}/${service.slug}`
+  )}">
+        <div class="service-header">
+          <div>
+            <span class="service-name">${escapeHtml(service.title)}</span>
+            <span class="service-detail">${escapeHtml(service.description)}</span>
+          </div>
+          <div class="service-action">
+            ${priceMeta}
+            <span class="service-cue-arrow" aria-hidden="true">&rsaquo;</span>
+          </div>
+        </div>
+      </a>`;
 }
 
 /**
