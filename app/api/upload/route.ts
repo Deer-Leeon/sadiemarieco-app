@@ -71,6 +71,13 @@ const ALLOWED_MIME = new Set([
 // risks generating malformed URLs or schema collisions.
 const ID_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
 
+// Hard cap on the editable caption length. The public site's `.p-tag`
+// overlay is a single short editorial phrase ("Glow Facial"), so we
+// don't need anywhere near the column's TEXT capacity — 300 chars gives
+// the editor headroom for a longer caption while keeping a determined
+// adversary from stuffing a megabyte of text through the upload route.
+const MAX_CAPTION_LENGTH = 300;
+
 interface ProcessedImage {
   buffer: Buffer;
   mime: string;
@@ -98,6 +105,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const file = form.get('file');
   const id = form.get('id');
+  // Caption is OPTIONAL:
+  //   • field absent  → leave existing caption untouched (we use
+  //                     COALESCE in the upsert below to preserve the
+  //                     stored value on partial updates).
+  //   • empty string  → explicit clear (NULL in DB), so the public
+  //                     site falls back to the hardcoded p-tag text.
+  //   • non-empty     → store as-is, trimmed; the public renderer
+  //                     escapes the value before injecting.
+  // A 300-char cap is generous for an editorial subtitle while
+  // keeping a determined adversary from stuffing a megabyte of
+  // text in there.
+  const rawCaption = form.get('caption');
+  const captionProvided = rawCaption !== null;
+  let captionValue: string | null = null;
+  if (captionProvided) {
+    if (typeof rawCaption !== 'string') {
+      return NextResponse.json(
+        { error: 'invalid_caption' },
+        { status: 400 }
+      );
+    }
+    const trimmed = rawCaption.trim();
+    if (trimmed.length > MAX_CAPTION_LENGTH) {
+      return NextResponse.json(
+        { error: 'caption_too_long', maxChars: MAX_CAPTION_LENGTH },
+        { status: 400 }
+      );
+    }
+    captionValue = trimmed.length > 0 ? trimmed : null;
+  }
 
   if (typeof id !== 'string' || !ID_REGEX.test(id)) {
     return NextResponse.json(
@@ -150,11 +187,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // so the CDN serves the right Content-Type — e.g. a HEIC upload that
   // got transcoded to JPEG will be stored as `…/foo.jpg`, not `…/foo.heic`.
   //
-  // `addRandomSuffix: true` (default) ensures each upload yields a unique
-  // URL — important because cached <img src> on the live site would
-  // otherwise keep serving the old image until the CDN evicted it. The
-  // Postgres row gets the new URL on upsert, so the next page render
-  // surfaces the fresh image immediately.
+  // `addRandomSuffix: true` ensures each upload yields a unique URL —
+  // important because cached <img src> on the live site would otherwise
+  // keep serving the old image until the CDN evicted it. The Postgres
+  // row gets the new URL on upsert, so the next page render surfaces
+  // the fresh image immediately.
+  //
+  // Why it's explicit rather than relying on the default: @vercel/blob
+  // v2 flipped the default to `addRandomSuffix: false`. With our stable
+  // slot-id pathname (e.g. `site-images/about_profile/photo.jpg`) the
+  // second upload to the same slot would hit "blob already exists"
+  // (HTTP 409) and fail unless we opt back in here. The alternative —
+  // `allowOverwrite: true` — would also work but would re-use the URL
+  // and leave stale CDN copies in front of admins for the cache TTL.
   const basename = stripExtension(sanitiseFilename(file.name)) || 'image';
   const pathname = `site-images/${id}/${basename}.${processed.extension}`;
 
@@ -163,6 +208,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     blob = await put(pathname, processed.buffer, {
       access: 'public',
       contentType: processed.mime,
+      addRandomSuffix: true,
     });
   } catch (err) {
     console.error('[api/upload] blob put failed:', {
@@ -177,12 +223,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── DB UPSERT ──────────────────────────────────────────────────────────
   // If this fails the blob is orphaned. We best-effort delete it so we
   // don't leak storage — failure of the cleanup is logged but not fatal.
+  //
+  // Caption semantics on UPDATE:
+  //   • Field present → overwrite with the new value (empty → NULL).
+  //   • Field absent  → keep the existing stored value.
+  // We encode that by passing two extra placeholders: the value (or
+  // NULL) and a boolean flag. Postgres CASE evaluates the flag at row
+  // level so a partial update can't accidentally null the caption.
   try {
     await sql`
-      INSERT INTO site_images (id, image_url)
-      VALUES (${id}, ${blob.url})
+      INSERT INTO site_images (id, image_url, caption)
+      VALUES (${id}, ${blob.url}, ${captionValue})
       ON CONFLICT (id) DO UPDATE SET
         image_url = EXCLUDED.image_url,
+        caption = CASE
+          WHEN ${captionProvided}::boolean THEN EXCLUDED.caption
+          ELSE site_images.caption
+        END,
         updated_at = NOW()
     `;
   } catch (err) {
@@ -209,9 +266,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     inputType: file.type,
     outputBytes: processed.buffer.length,
     outputType: processed.mime,
+    captionProvided,
   });
 
-  return NextResponse.json({ url: blob.url, id });
+  return NextResponse.json({
+    url: blob.url,
+    id,
+    // Echo back the persisted caption so the admin client doesn't
+    // have to assume what we stored. `null` when the editor cleared
+    // it, the trimmed string when they saved something, undefined
+    // (key absent) when no caption was provided at all.
+    ...(captionProvided ? { caption: captionValue } : {}),
+  });
 }
 
 /**

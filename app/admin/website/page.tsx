@@ -18,6 +18,18 @@ export const dynamic = 'force-dynamic';
 interface SiteImageRow {
   id: string;
   image_url: string;
+  caption: string | null;
+}
+
+/**
+ * Stored slot record we hand down to each <ImageUploader />. Both
+ * fields can be null independently: a slot may have an image
+ * uploaded but no custom caption (fall back to the hardcoded
+ * `.p-tag` text), or a caption pre-populated but no image yet.
+ */
+interface SlotRecord {
+  url: string | null;
+  caption: string | null;
 }
 
 /**
@@ -101,23 +113,27 @@ export default async function WebsiteEditorPage() {
   // check), and a CMS image table will only ever hold a handful of rows.
   // Cheaper to filter client-side than to build a raw query string for
   // such a small table.
-  let imageMap: Record<string, string> = {};
+  let slotMap: Record<string, SlotRecord> = {};
   let dbError: string | null = null;
   try {
     const { rows } = await sql<SiteImageRow>`
-      SELECT id, image_url FROM site_images
+      SELECT id, image_url, caption FROM site_images
     `;
     const knownIds = new Set<string>(KNOWN_SLOT_IDS);
-    imageMap = Object.fromEntries(
-      rows.filter((r) => knownIds.has(r.id)).map((r) => [r.id, r.image_url])
+    slotMap = Object.fromEntries(
+      rows
+        .filter((r) => knownIds.has(r.id))
+        .map((r) => [r.id, { url: r.image_url, caption: r.caption }])
     );
   } catch (err) {
     console.error('[admin/website] site_images query failed:', err);
     dbError = err instanceof Error ? err.message : 'Unknown DB error';
   }
 
-  // Small convenience to keep the JSX below readable.
-  const urlFor = (id: string): string | null => imageMap[id] ?? null;
+  // Small conveniences to keep the JSX below readable.
+  const urlFor = (id: string): string | null => slotMap[id]?.url ?? null;
+  const captionFor = (id: string): string | null =>
+    slotMap[id]?.caption ?? null;
 
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-stone-900">
@@ -228,6 +244,7 @@ export default async function WebsiteEditorPage() {
                 imageId="portfolio_1"
                 label="Classic Lashes"
                 currentUrl={urlFor('portfolio_1')}
+                initialCaption={captionFor('portfolio_1')}
                 className="col-span-5 row-start-1 max-[860px]:col-span-12 max-[860px]:row-start-1"
               />
               <ImageUploader
@@ -235,6 +252,7 @@ export default async function WebsiteEditorPage() {
                 imageId="portfolio_2"
                 label="Glow Facial"
                 currentUrl={urlFor('portfolio_2')}
+                initialCaption={captionFor('portfolio_2')}
                 className="col-span-7 row-start-1 max-[860px]:col-span-12 max-[860px]:row-start-2"
               />
               <ImageUploader
@@ -242,6 +260,7 @@ export default async function WebsiteEditorPage() {
                 imageId="portfolio_3"
                 label="Brow Lamination"
                 currentUrl={urlFor('portfolio_3')}
+                initialCaption={captionFor('portfolio_3')}
                 className="col-span-4 row-start-2 max-[860px]:row-start-3"
               />
               <ImageUploader
@@ -249,6 +268,7 @@ export default async function WebsiteEditorPage() {
                 imageId="portfolio_4"
                 label="Volume Set"
                 currentUrl={urlFor('portfolio_4')}
+                initialCaption={captionFor('portfolio_4')}
                 className="col-span-4 row-start-2 max-[860px]:row-start-3"
               />
               <ImageUploader
@@ -256,6 +276,7 @@ export default async function WebsiteEditorPage() {
                 imageId="portfolio_5"
                 label="Skin Treatment"
                 currentUrl={urlFor('portfolio_5')}
+                initialCaption={captionFor('portfolio_5')}
                 className="col-span-4 row-start-2 max-[860px]:row-start-3"
               />
             </div>

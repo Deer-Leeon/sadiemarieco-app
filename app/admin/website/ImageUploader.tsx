@@ -1,16 +1,40 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ImageIcon, Pencil } from 'lucide-react';
+import Cropper, { type Area } from 'react-easy-crop';
+import { Check, ImageIcon, Loader2, Pencil, X } from 'lucide-react';
+
+import { getCroppedImageFile } from '@/lib/cropImage';
 
 interface Props {
   /** Stable key into `site_images.id` — also drives the blob pathname. */
   imageId: string;
   /** Current public URL, or null if nothing's been uploaded yet. */
   currentUrl: string | null;
-  /** Editorial label shown above the preview (card) or on hover (tile). */
+  /**
+   * Editorial label shown above the preview (card) or as the
+   * default tile hover label when no custom caption has been set.
+   *
+   * For card variant: also the admin-facing slot name shown above
+   * the preview ("Homepage Hero Image", "About Section Portrait")
+   * — these don't render on the public site and aren't editable.
+   *
+   * For tile variant: serves as the FALLBACK p-tag text — public
+   * site shows the custom `initialCaption` if set, otherwise this.
+   */
   label: string;
+  /**
+   * Persisted custom caption from `site_images.caption`. Null when
+   * the admin hasn't saved a value yet (the live site falls back
+   * to the hardcoded `.p-tag` text in `public/index.html`, which
+   * matches `label` for portfolio tiles).
+   *
+   * Only the `tile` variant exposes an editor for this — the Core
+   * Pages cards have no subtitle on the public site and ignore the
+   * prop if it's accidentally passed.
+   */
+  initialCaption?: string | null;
   /**
    * Tailwind aspect-ratio class applied to the preview frame so the
    * editor tile mirrors the shape of the slot on the live site (WYSIWYG).
@@ -91,6 +115,7 @@ export default function ImageUploader({
   imageId,
   currentUrl,
   label,
+  initialCaption = null,
   aspectClass = 'aspect-video',
   className,
   variant = 'card',
@@ -98,45 +123,235 @@ export default function ImageUploader({
 }: Props) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Ref to the clickable image button so we can measure its
+  // bounding rect at the moment the user picks a file. The cropper
+  // adopts that exact aspect ratio so the admin can only commit a
+  // crop that matches the live slot's shape (4:5 hero, 3:4 about
+  // portrait, whatever the portfolio grid cell happens to be).
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Optimistic display URL — lets the tile swap to the freshly
+  // uploaded image the INSTANT the POST succeeds, without waiting
+  // for `router.refresh()` to round-trip the server component and
+  // hand us a new `currentUrl` prop. We seed from prop and re-sync
+  // whenever the prop changes (so if some other tab updates the
+  // same slot, our display still reflects the canonical server
+  // value once the refresh completes).
+  const [displayUrl, setDisplayUrl] = useState<string | null>(currentUrl);
+  useEffect(() => {
+    setDisplayUrl(currentUrl);
+  }, [currentUrl]);
+
+  // Same pattern for the persisted caption. Null = "no custom
+  // caption set, fall back to the hardcoded p-tag text in
+  // public/index.html" (which matches the `label` prop for
+  // portfolio tiles). When the editor saves a non-empty value via
+  // the cropper input, we flip this to the new string and the tile
+  // hover label updates instantly.
+  const [savedCaption, setSavedCaption] = useState<string | null>(
+    initialCaption
+  );
+  useEffect(() => {
+    setSavedCaption(initialCaption);
+  }, [initialCaption]);
+
+  // Working draft the cropper input writes to. Initialised from
+  // the persisted caption every time the cropper opens (see
+  // handleFileChange below) so cancelling a crop doesn't bleed an
+  // unsaved draft into a future session.
+  const [captionDraft, setCaptionDraft] = useState<string>('');
+
+  // Caption editing is only meaningful for the tile variant —
+  // Core Pages cards don't render a subtitle on the public site.
+  // Cropper UI gates the input on this flag.
+  const captionEditable = variant === 'tile';
+
+  // Text shown on the tile hover overlay. Custom caption wins; if
+  // none is set, fall back to the slot's default label so the
+  // hover tag is never blank.
+  const displayLabel = captionEditable
+    ? savedCaption?.trim() || label
+    : label;
+
+  // ── Cropper state ─────────────────────────────────────────────
+  // `imageToCrop` is an object URL we own and must revoke when
+  // we're done with it (handled by the useEffect cleanup below).
+  // `originalFileName` is the picked file's original name so the
+  // post-crop File gets a sensible `.jpg` filename rather than a
+  // generic placeholder.
+  const [imageToCrop, setImageToCrop] = useState<string | null>(null);
+  const [originalFileName, setOriginalFileName] = useState<string>('image.jpg');
+  const [crop, setCrop] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState<number>(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(
+    null
+  );
+  // Slot aspect ratio (width / height) sampled at cropper-open
+  // time. Falls back to 1 if measurement fails (e.g. the button
+  // hadn't laid out yet) — never blocks the flow.
+  const [cropAspect, setCropAspect] = useState<number>(1);
+
+  // Revoke the object URL whenever it changes (cleanup of the
+  // previous one) or on unmount. Without this we'd leak the
+  // decoded image in browser memory until the tab closes.
+  useEffect(() => {
+    return () => {
+      if (imageToCrop) URL.revokeObjectURL(imageToCrop);
+    };
+  }, [imageToCrop]);
+
   const triggerPicker = () => {
-    if (isUploading) return;
+    if (isUploading || imageToCrop) return;
     inputRef.current?.click();
   };
 
-  const handleFileChange = async (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
+  // STAGE 1: file picked → open cropper. NO upload here.
+  // We measure the rendered slot's aspect ratio first so the
+  // cropper can constrain the user to the live shape; this is the
+  // whole point of cropping inside the CMS — the editor sees what
+  // the public site will see.
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset the input immediately so the same file can be picked
+    // again next time (browsers don't fire `change` for identical
+    // re-select).
+    e.target.value = '';
     if (!file) return;
 
     setErrorMsg(null);
-    setIsUploading(true);
 
-    const form = new FormData();
-    form.append('file', file);
-    form.append('id', imageId);
+    // Sample the slot aspect at this exact moment. Bounding rect
+    // works for both variants: card has an aspect-class image
+    // inside, tile has `h-full` so it adopts the grid cell.
+    const rect = buttonRef.current?.getBoundingClientRect();
+    const sampled =
+      rect && rect.width > 0 && rect.height > 0
+        ? rect.width / rect.height
+        : 1;
+    setCropAspect(sampled);
 
-    try {
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: form,
-      });
+    // Reset crop state every time we open the cropper so the
+    // image starts perfectly centred and unzoomed.
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCroppedAreaPixels(null);
 
-      if (!res.ok) {
-        let detail = res.statusText;
-        try {
-          const body = (await res.json()) as { error?: string };
-          if (body?.error) detail = body.error;
-        } catch {
-          /* non-JSON body — keep statusText */
+    setOriginalFileName(file.name);
+    // Seed the caption input with whatever's persisted so the
+    // editor sees the current value and can tweak rather than
+    // retype from scratch. Cancelling the crop doesn't write back,
+    // so an unsaved draft can't leak across sessions.
+    setCaptionDraft(savedCaption ?? '');
+    setImageToCrop(URL.createObjectURL(file));
+  };
+
+  const onCropComplete = useCallback((_area: Area, pixels: Area) => {
+    setCroppedAreaPixels(pixels);
+  }, []);
+
+  const handleCancelCrop = useCallback(() => {
+    if (isUploading) return; // don't yank the cropper mid-upload
+    setImageToCrop(null);
+    setCroppedAreaPixels(null);
+  }, [isUploading]);
+
+  // Extracted from the previous handleFileChange. Runs the actual
+  // server round-trip given an arbitrary File + optional caption.
+  //
+  // Returns the parsed response so the caller can update the
+  // tile preview AND the saved caption optimistically (router
+  // .refresh() also fires here, but it's async and we don't want
+  // the UI to wait on the server re-render to show the new state).
+  //
+  // Caption semantics:
+  //   • `undefined` → don't send the caption field at all; the
+  //     server preserves whatever it had stored.
+  //   • `string`    → send (possibly empty) so the server overwrites.
+  //     Empty/whitespace-only ends up as NULL in the DB (cleared).
+  const uploadFile = useCallback(
+    async (
+      file: File,
+      caption?: string
+    ): Promise<{ url: string; caption?: string | null }> => {
+      setIsUploading(true);
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('id', imageId);
+        if (caption !== undefined) {
+          form.append('caption', caption);
         }
-        throw new Error(detail || 'upload_failed');
-      }
 
-      router.refresh();
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: form,
+        });
+
+        if (!res.ok) {
+          let detail = res.statusText;
+          try {
+            const body = (await res.json()) as { error?: string };
+            if (body?.error) detail = body.error;
+          } catch {
+            /* non-JSON body — keep statusText */
+          }
+          throw new Error(detail || 'upload_failed');
+        }
+
+        const data = (await res.json()) as {
+          url: string;
+          id: string;
+          caption?: string | null;
+        };
+        // Fire-and-forget — re-fetches the server component so any
+        // OTHER on-page consumer of `site_images` (e.g. a sibling
+        // uploader showing the same slot) stays consistent. Our own
+        // tile updates immediately via the returned values below.
+        router.refresh();
+        return { url: data.url, caption: data.caption };
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [imageId, router]
+  );
+
+  // STAGE 2: admin confirmed crop → produce the cropped File,
+  // upload it (along with the caption draft), then dismiss the
+  // cropper. On failure we leave the cropper open so they can
+  // retry without re-picking the file.
+  const handleConfirmCrop = useCallback(async () => {
+    if (!imageToCrop || !croppedAreaPixels) return;
+    setErrorMsg(null);
+    try {
+      const file = await getCroppedImageFile(
+        imageToCrop,
+        croppedAreaPixels,
+        originalFileName
+      );
+      // Caption is only sent for tile-variant slots — the card
+      // variant has no editor, and sending an empty string for
+      // those would clobber any value that somehow got into the
+      // DB out-of-band.
+      const captionToSend = captionEditable ? captionDraft : undefined;
+      const result = await uploadFile(file, captionToSend);
+      // Swap the tile preview to the new image immediately. The
+      // subsequent router.refresh() (fired inside uploadFile) will
+      // hand us the same URL via `currentUrl` a moment later — the
+      // useEffect above keeps the two in sync without flicker.
+      setDisplayUrl(result.url);
+      // Same optimistic pattern for the caption: trust the server
+      // echo (so a trimmed-to-empty draft correctly clears the
+      // overlay) and resync from the prop after refresh.
+      if (captionEditable) {
+        setSavedCaption(result.caption ?? null);
+      }
+      // Close the cropper. The useEffect cleanup on imageToCrop
+      // revokes the object URL we created in handleFileChange.
+      setImageToCrop(null);
+      setCroppedAreaPixels(null);
     } catch (err) {
       console.error('[ImageUploader] upload failed:', err);
       setErrorMsg(
@@ -144,11 +359,15 @@ export default function ImageUploader({
           ? humaniseUploadError(err.message)
           : 'Upload failed. Please try again.'
       );
-    } finally {
-      setIsUploading(false);
-      if (inputRef.current) inputRef.current.value = '';
     }
-  };
+  }, [
+    imageToCrop,
+    croppedAreaPixels,
+    originalFileName,
+    captionDraft,
+    captionEditable,
+    uploadFile,
+  ]);
 
   const isCard = variant === 'card';
 
@@ -172,17 +391,18 @@ export default function ImageUploader({
   const clickableImage = (
     <button
       type="button"
+      ref={buttonRef}
       onClick={triggerPicker}
-      disabled={isUploading}
+      disabled={isUploading || !!imageToCrop}
       aria-label={`Replace ${label}`}
       className={`group relative block w-full cursor-pointer overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 disabled:cursor-progress ${
         isCard ? 'rounded-md' : 'h-full'
       }`}
     >
-      {currentUrl ? (
+      {displayUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={currentUrl}
+          src={displayUrl}
           alt={label}
           className={`${aspectClass} block w-full object-cover ${
             isCard
@@ -244,7 +464,7 @@ export default function ImageUploader({
           <div
             className="pointer-events-none absolute inset-x-0 bottom-0 translate-y-[6px] bg-linear-to-t from-[rgba(13,27,42,0.85)] to-transparent px-[18px] pb-[14px] pt-[24px] font-sans text-[0.58rem] font-light uppercase tracking-[0.22em] text-[rgba(245,243,240,0.8)] opacity-0 transition-[opacity,transform] duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100"
           >
-            {label}
+            {displayLabel}
           </div>
 
           {/*
@@ -280,6 +500,31 @@ export default function ImageUploader({
     />
   );
 
+  // Shared crop overlay — both variants render the same modal when
+  // a file is mid-crop. Rendered as a portal-like fixed overlay so
+  // it sits on top of every uploader on the page, not just inside
+  // the current card / tile.
+  const cropOverlay = imageToCrop && (
+    <CropperOverlay
+      imageSrc={imageToCrop}
+      aspect={cropAspect}
+      label={label}
+      crop={crop}
+      zoom={zoom}
+      onCropChange={setCrop}
+      onZoomChange={setZoom}
+      onCropComplete={onCropComplete}
+      onCancel={handleCancelCrop}
+      onConfirm={handleConfirmCrop}
+      isUploading={isUploading}
+      canConfirm={!!croppedAreaPixels}
+      captionEditable={captionEditable}
+      captionDraft={captionDraft}
+      onCaptionDraftChange={setCaptionDraft}
+      captionPlaceholder={label}
+    />
+  );
+
   // ── CARD variant ────────────────────────────────────────────────────
   if (isCard) {
     return (
@@ -298,6 +543,7 @@ export default function ImageUploader({
             {errorMsg}
           </p>
         )}
+        {cropOverlay}
       </div>
     );
   }
@@ -320,6 +566,232 @@ export default function ImageUploader({
           {errorMsg}
         </p>
       )}
+      {cropOverlay}
+    </div>
+  );
+}
+
+/**
+ * Full-screen cropper overlay. Premium dark-stone surface matching
+ * the admin's neutral palette (no rose/blue chrome). Backdrop click
+ * is intentionally inert — cropping requires a deliberate
+ * commit/cancel, not an accidental dismissal.
+ *
+ * The crop area mirrors the live slot's aspect ratio so the editor
+ * can only ship something that will look right on the public site.
+ * If the slot is portrait (4:5, 3:4) the crop frame is portrait; if
+ * landscape (portfolio tiles, hero on mobile) it's landscape.
+ */
+function CropperOverlay({
+  imageSrc,
+  aspect,
+  label,
+  crop,
+  zoom,
+  onCropChange,
+  onZoomChange,
+  onCropComplete,
+  onCancel,
+  onConfirm,
+  isUploading,
+  canConfirm,
+  captionEditable,
+  captionDraft,
+  onCaptionDraftChange,
+  captionPlaceholder,
+}: {
+  imageSrc: string;
+  aspect: number;
+  label: string;
+  crop: { x: number; y: number };
+  zoom: number;
+  onCropChange: (crop: { x: number; y: number }) => void;
+  onZoomChange: (zoom: number) => void;
+  onCropComplete: (area: Area, pixels: Area) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  isUploading: boolean;
+  canConfirm: boolean;
+  captionEditable: boolean;
+  captionDraft: string;
+  onCaptionDraftChange: (next: string) => void;
+  captionPlaceholder: string;
+}) {
+  // ESC closes the cropper unless an upload is in flight — never
+  // let the user dismiss UI while a network request is still
+  // mid-air.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape' && e.key !== 'Esc') return;
+      if (isUploading) return;
+      onCancel();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isUploading, onCancel]);
+
+  // Make the crop canvas a sensible size relative to the viewport:
+  //   • Portrait slots (aspect < 1): cap height, derive width.
+  //   • Landscape slots (aspect ≥ 1): cap width, derive height.
+  // Keeps the cropper visually centred and never overflows on
+  // 13-inch laptops or scales pathologically small on 4K.
+  const canvasStyle: React.CSSProperties =
+    aspect < 1
+      ? { height: 'min(72vh, 560px)', aspectRatio: `${aspect}` }
+      : { width: 'min(72vw, 720px)', aspectRatio: `${aspect}` };
+
+  return (
+    <div
+      // z-110 keeps us above any other admin chrome. Backdrop is
+      // dark-stone with a slight blur so the editor sees only the
+      // cropping task while it's active.
+      className="fixed inset-0 z-110 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Crop ${label}`}
+    >
+      <div className="flex w-auto max-w-[95vw] flex-col overflow-hidden rounded-2xl border border-stone-800 bg-stone-950 shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-6 border-b border-stone-800/80 px-5 py-3">
+          <div className="min-w-0">
+            <h3 className="truncate font-serif text-base leading-tight text-stone-100">
+              Crop · {label}
+            </h3>
+            <p className="mt-0.5 text-[11px] uppercase tracking-[0.2em] text-stone-500">
+              Drag to reposition · scroll or slide to zoom
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isUploading}
+            aria-label="Cancel crop"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/5 text-stone-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Crop canvas. `position: relative` is required by
+            react-easy-crop (it positions its layers absolutely
+            inside this container). Aspect ratio is locked to the
+            live slot via inline style above. */}
+        <div className="relative bg-stone-900" style={canvasStyle}>
+          <Cropper
+            image={imageSrc}
+            crop={crop}
+            zoom={zoom}
+            aspect={aspect}
+            cropShape="rect"
+            showGrid={true}
+            objectFit="contain"
+            onCropChange={onCropChange}
+            onZoomChange={onZoomChange}
+            onCropComplete={onCropComplete}
+            minZoom={1}
+            maxZoom={4}
+            zoomSpeed={0.5}
+            classes={{
+              containerClassName: 'bg-stone-900',
+              mediaClassName: 'select-none',
+            }}
+          />
+
+          {isUploading && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/60 backdrop-blur-sm">
+              <Loader2 className="h-7 w-7 animate-spin text-stone-100" />
+              <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-stone-200">
+                Uploading
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Zoom slider. Native range input with the stone palette so
+            it sits naturally on the dark surface. */}
+        <div className="border-t border-stone-800/80 px-5 py-3.5">
+          <label className="flex items-center gap-3">
+            <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
+              Zoom
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={4}
+              step={0.01}
+              value={zoom}
+              onChange={(e) => onZoomChange(Number(e.target.value))}
+              disabled={isUploading}
+              aria-label="Zoom level"
+              className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-stone-700 accent-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+            <span className="w-10 text-right font-mono text-[11px] tabular-nums text-stone-400">
+              {zoom.toFixed(1)}×
+            </span>
+          </label>
+        </div>
+
+        {/* Caption editor. Only rendered for tile-variant slots
+            (portfolio tiles) — Core Pages cards have no subtitle
+            on the public site. Leaving the field blank reverts the
+            slot to the hardcoded `.p-tag` text in
+            public/index.html, which is shown here as a placeholder
+            so the editor knows what they're falling back to. */}
+        {captionEditable && (
+          <div className="border-t border-stone-800/80 px-5 py-3.5">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
+                Subtitle
+              </span>
+              <input
+                type="text"
+                value={captionDraft}
+                onChange={(e) => onCaptionDraftChange(e.target.value)}
+                disabled={isUploading}
+                placeholder={captionPlaceholder}
+                maxLength={300}
+                aria-label="Image subtitle"
+                className="w-full rounded-md border border-stone-700 bg-stone-900 px-3 py-2 text-sm text-stone-100 placeholder:text-stone-500 transition-colors focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500/50 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              <span className="text-[10px] text-stone-500">
+                Shown on hover over this tile. Leave blank to use the default
+                ({captionPlaceholder}).
+              </span>
+            </label>
+          </div>
+        )}
+
+        {/* Footer — Cancel + Confirm. Cream primary on stone matches
+            the admin's neutral aesthetic; no rose/blue accents. */}
+        <div className="flex items-center justify-end gap-2 border-t border-stone-800/80 bg-stone-900/60 px-5 py-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isUploading}
+            className="rounded-md border border-stone-700 bg-transparent px-4 py-2 text-sm font-medium text-stone-200 transition-colors hover:border-stone-500 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isUploading || !canConfirm}
+            className="inline-flex items-center gap-1.5 rounded-md bg-stone-100 px-4 py-2 text-sm font-medium text-stone-900 shadow-sm transition-colors hover:bg-white focus:outline-none focus:ring-2 focus:ring-stone-300/50 focus:ring-offset-2 focus:ring-offset-stone-950 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isUploading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Uploading…</span>
+              </>
+            ) : (
+              <>
+                <Check className="h-4 w-4" strokeWidth={2} />
+                <span>Confirm crop</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

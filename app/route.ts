@@ -79,6 +79,18 @@ const SERVICES_TOKEN = '<!-- INJECT_SERVICES_HTML -->';
 interface SiteImageRow {
   id: string;
   image_url: string;
+  caption: string | null;
+}
+
+/**
+ * Render-time view of a site_images row. URL is required (a row
+ * without one shouldn't exist — the upload route writes both in
+ * the same upsert), caption is optional and falls back to the
+ * hardcoded text in public/index.html when null/empty.
+ */
+interface SiteImage {
+  url: string;
+  caption: string | null;
 }
 
 interface SiteServiceRow {
@@ -144,15 +156,50 @@ async function loadIndexHtml(): Promise<string> {
  *     attribute value itself contains a literal `>` (e.g. `alt="x > y"`).
  *     Acceptable here; we control the HTML and don't do that.
  */
-function injectImageUrls(html: string, imageMap: Record<string, string>): string {
+function injectImageUrls(
+  html: string,
+  imageMap: Record<string, SiteImage>
+): string {
   if (Object.keys(imageMap).length === 0) return html;
   return html.replace(/<img\s+[^>]*>/g, (tag) => {
     const idMatch = tag.match(/data-image-id="([^"]+)"/);
     if (!idMatch) return tag;
-    const url = imageMap[idMatch[1]];
-    if (!url) return tag;
-    return tag.replace(/src="[^"]*"/, `src="${url}"`);
+    const entry = imageMap[idMatch[1]];
+    if (!entry?.url) return tag;
+    return tag.replace(/src="[^"]*"/, `src="${entry.url}"`);
   });
+}
+
+/**
+ * Replace the text content of `<span ... data-caption-id="X" ...>`
+ * tags with the caption stored in `imageMap` for slot X. Spans
+ * without a matching DB row, or with a row whose caption is
+ * null/empty, are left untouched — the hardcoded fallback in
+ * `public/index.html` continues to render. This is the same
+ * "keep the existing markup if there's nothing to inject"
+ * contract as `injectImageUrls`.
+ *
+ * Robustness notes mirror `injectImageUrls`:
+ *   - Double-quoted attributes only.
+ *   - `[^<]*` for the inner text — we control the source HTML and
+ *     never put nested tags inside `.p-tag`.
+ *   - `[^>]*?` (non-greedy) inside the open tag so multi-span
+ *     lines don't get swallowed across siblings.
+ */
+function injectCaptions(
+  html: string,
+  imageMap: Record<string, SiteImage>
+): string {
+  if (Object.keys(imageMap).length === 0) return html;
+  return html.replace(
+    /<span\s+([^>]*?)data-caption-id="([^"]+)"([^>]*)>([^<]*)<\/span>/g,
+    (match, before: string, id: string, after: string, _text: string) => {
+      const entry = imageMap[id];
+      const caption = entry?.caption?.trim();
+      if (!caption) return match;
+      return `<span ${before}data-caption-id="${id}"${after}>${escapeHtml(caption)}</span>`;
+    }
+  );
 }
 
 export async function GET(): Promise<Response> {
@@ -201,6 +248,7 @@ export async function GET(): Promise<Response> {
   ]);
 
   let rendered = injectImageUrls(html, imageMap);
+  rendered = injectCaptions(rendered, imageMap);
   rendered = rendered.replace(SERVICES_TOKEN, servicesHtml);
 
   return new Response(rendered, {
@@ -214,12 +262,14 @@ export async function GET(): Promise<Response> {
   });
 }
 
-async function fetchImageMap(): Promise<Record<string, string>> {
+async function fetchImageMap(): Promise<Record<string, SiteImage>> {
   try {
     const { rows } = await sql<SiteImageRow>`
-      SELECT id, image_url FROM site_images
+      SELECT id, image_url, caption FROM site_images
     `;
-    return Object.fromEntries(rows.map((r) => [r.id, r.image_url]));
+    return Object.fromEntries(
+      rows.map((r) => [r.id, { url: r.image_url, caption: r.caption }])
+    );
   } catch (err) {
     console.error('[/] site_images query failed:', err);
     return {};
