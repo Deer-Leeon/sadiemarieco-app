@@ -11,6 +11,8 @@ import {
   X,
 } from 'lucide-react';
 
+import { getServiceColor } from '../serviceColors';
+
 /**
  * ServiceManager
  *
@@ -75,6 +77,15 @@ export interface Service {
    * on both the admin list and the public site.
    */
   parent_id: number | null;
+  /**
+   * Editor-assigned hex colour used to paint this service's
+   * appointment blocks on the admin calendar. Canonical form is
+   * `#RRGGBB` (7 chars). Null means "auto-pick from the keyword +
+   * duration matcher in app/admin/serviceColors.ts" — the same
+   * behaviour every row had before this column existed. Mirrors
+   * `site_services.color`; persisted via /api/admin/services.
+   */
+  color: string | null;
 }
 
 interface Props {
@@ -127,6 +138,13 @@ interface FormState {
    * always strings — coerced to `number | null` at submit time.
    */
   parent_id: string;
+  /**
+   * Editor-assigned calendar-block colour, '#RRGGBB' or '' for "use
+   * the auto-matcher fallback". Stored as a string (not `string |
+   * null`) so the controlled <input> never sees a `null` value
+   * mid-typing — we coerce empty → null at submit time.
+   */
+  color: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -140,7 +158,33 @@ const EMPTY_FORM: FormState = {
   length: '',
   is_group: false,
   parent_id: '',
+  color: '',
 };
+
+const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
+
+/**
+ * Native `<input type="color">` requires its value in the canonical
+ * `#rrggbb` form. Editors may type a hex with no `#`, with a 3-char
+ * shorthand, or in upper-case — this helper canonicalises whatever
+ * they typed into the 7-char lower-case form the colour picker
+ * understands, so the swatch always reflects what the editor will
+ * actually save. Returns null when the input doesn't parse to a
+ * full hex, signalling "leave the swatch on its previous value".
+ */
+function toCanonicalHex(value: string): string | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  const withHash = raw.startsWith('#') ? raw : `#${raw}`;
+  // Allow 3-char shorthand (#fa3) too — expand to 6-char before
+  // validating against the strict CHECK pattern we send to Postgres.
+  if (/^#[0-9A-Fa-f]{3}$/.test(withHash)) {
+    const [, r, g, b] = withHash;
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  if (HEX_COLOR_RE.test(withHash)) return withHash.toLowerCase();
+  return null;
+}
 
 type FormMode =
   | { kind: 'closed' }
@@ -294,6 +338,9 @@ export default function ServiceManager({ initialServices }: Props) {
       length: service.duration_mins !== null ? String(service.duration_mins) : '',
       is_group: service.is_group,
       parent_id: service.parent_id !== null ? String(service.parent_id) : '',
+      // Pre-fill the colour input with the saved hex; '' means the
+      // editor never set one yet (auto-matcher fallback in effect).
+      color: service.color ?? '',
     });
     setMode({ kind: 'edit', service });
   }
@@ -313,6 +360,7 @@ export default function ServiceManager({ initialServices }: Props) {
     length: number | null;
     is_group: boolean;
     parent_id: number | null;
+    color: string | null;
   } | null {
     const title = form.title.trim();
     const category = form.category.trim();
@@ -320,6 +368,22 @@ export default function ServiceManager({ initialServices }: Props) {
     const price = Number(form.price);
     const is_group = form.is_group;
     const parent_id = form.parent_id ? Number(form.parent_id) : null;
+    // Colour is OPTIONAL — '' means "no override, use the auto-
+    // matcher". A non-empty value that doesn't canonicalise to a
+    // valid 6-digit hex aborts submit with a clear message; the
+    // canonicalised lower-case form is what we send to the API.
+    let color: string | null = null;
+    const rawColor = form.color.trim();
+    if (rawColor) {
+      const canonical = toCanonicalHex(rawColor);
+      if (!canonical) {
+        setSubmitError(
+          `Calendar colour must be a hex like "#FE036A" (got "${rawColor}").`
+        );
+        return null;
+      }
+      color = canonical;
+    }
 
     if (!title) {
       setSubmitError('Title is required.');
@@ -358,7 +422,16 @@ export default function ServiceManager({ initialServices }: Props) {
       return null;
     }
 
-    return { title, category, description, price, length, is_group, parent_id };
+    return {
+      title,
+      category,
+      description,
+      price,
+      length,
+      is_group,
+      parent_id,
+      color,
+    };
   }
 
   // ── Submit handlers ───────────────────────────────────────────────────
@@ -754,25 +827,18 @@ function ServiceCard({
 
       <div className="mt-5 flex items-center justify-between gap-2 border-t border-stone-100 pt-3">
         {/*
-          Cal.com dashboard deep-link, left-anchored so it sits visually
-          apart from the destructive actions on the right. Opens in a
-          new tab — the editor's primary task lives on this page and
-          we shouldn't yank them away from it.
-
-          Suppressed for group rows because groups have no Cal event
-          to deep-link to. The space stays — the action toolbar on
-          the right docks via `ml-auto`, so absence here just shifts
-          edit/delete left, which still reads cleanly.
-
-          Why this link exists: Cal's v2 API enforces
-          `checkIsEmailUserAccessible` on personal accounts, which
-          means we cannot toggle the email field to optional from this
-          CMS no matter what payload we send (Cal issue #25430, fix
-          pending in PR #26316). Cal's own dashboard UI uses a
-          different code path and DOES allow the toggle. So when the
-          studio wants email-optional, this link is the one-click
-          bridge to where they can flip the switch.
+          Left dock: calendar-colour chip + Cal.com deep-link. Both
+          are "context cues" rather than primary actions, so they
+          stay visually quieter than the Edit / Delete pair on the
+          right. The chip is suppressed for group rows since groups
+          have no appointments to colour-code; the Cal link is
+          suppressed for the same reason (no Cal event behind a group)
+          AND while the destructive confirm is primed (we don't want
+          to compete for attention with a confirm-delete).
         */}
+        {!isConfirmingDelete && !isGroup && (
+          <ServiceColorChip service={service} />
+        )}
         {!isConfirmingDelete && !isGroup && service.cal_event_id !== null && (
           <a
             href={`https://app.cal.com/event-types/${service.cal_event_id}`}
@@ -1178,6 +1244,11 @@ function SlideOverForm({
               </div>
             )}
 
+            <ColorField
+              value={form.color}
+              onChange={(next) => onChange({ ...form, color: next })}
+            />
+
             {submitError && (
               <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
                 {submitError}
@@ -1234,6 +1305,157 @@ function Field({ label, htmlFor, required, hint, children }: FieldProps) {
       </label>
       {children}
       {hint && <p className="mt-1.5 text-xs text-stone-400">{hint}</p>}
+    </div>
+  );
+}
+
+/**
+ * In-catalogue colour chip. Shows the editor-assigned hex for this
+ * service so the catalogue is scannable by colour — same hex the
+ * calendar will paint. Renders nothing when no colour is set; the
+ * editor opens the slide-over and uses the colour field there to
+ * assign one.
+ */
+function ServiceColorChip({ service }: { service: Service }) {
+  const resolved = getServiceColor({ service_color: service.color });
+  if (!resolved) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500"
+      title={`Calendar colour ${resolved.accent}`}
+    >
+      <span
+        aria-hidden="true"
+        className="inline-block h-3 w-3 rounded-full ring-1 ring-stone-300"
+        style={{ backgroundColor: resolved.accent }}
+      />
+      <span className="font-mono normal-case tracking-wider text-stone-700">
+        {resolved.accent}
+      </span>
+    </span>
+  );
+}
+
+interface ColorFieldProps {
+  /** Raw form value — '' or a hex string in any case, with/without `#'. */
+  value: string;
+  onChange: (next: string) => void;
+}
+
+/**
+ * Hex-code editor with three coordinated controls:
+ *
+ *   1. The native `<input type="color">` swatch — gives editors the
+ *      OS colour-picker for quick visual exploration without dragging
+ *      a heavyweight react-colorful dependency in.
+ *   2. A free-text `<input>` for typing/pasting an exact hex. This is
+ *      the canonical "hex code editor" the studio asked for — pasting
+ *      `FE036A` (no hash) or `#fe036a` (lower) both work; we lean on
+ *      `toCanonicalHex` to normalise both into the form Postgres
+ *      stores so the swatch and the saved value never disagree.
+ *   3. A "Clear" button that wipes both controls back to '' which
+ *      maps to NULL in the DB and re-engages the auto-matcher
+ *      fallback in app/admin/serviceColors.ts.
+ *
+ * The text input owns the source-of-truth state; the swatch reads
+ * canonicalised value via `toCanonicalHex` so partial typing
+ * (`#fe03` mid-keystroke) doesn't reset the colour picker — it just
+ * keeps showing the last valid hex. A small "preview" pill on the
+ * right paints the appointment-block colour at the size + radius
+ * the calendar will actually render, so editors see the studio chrome
+ * 1:1 before saving.
+ */
+function ColorField({ value, onChange }: ColorFieldProps) {
+  const canonical = toCanonicalHex(value);
+  // The native picker NEEDS a valid 7-char hex; default to a neutral
+  // stone when the field is empty so the swatch doesn't render
+  // browser-default black, which would mis-signal "this service has
+  // a black colour assigned".
+  const swatchValue = canonical ?? '#a8a29e';
+  const hasColor = canonical !== null;
+
+  return (
+    <div>
+      <label
+        htmlFor="svc-color-hex"
+        className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500"
+      >
+        Calendar colour
+      </label>
+
+      <div className="flex items-center gap-2">
+        {/* Native colour swatch — clicking it opens the OS picker.
+            We hide the underlying input visually (it's the entire 40×40
+            box) and style the wrapper as the bordered swatch so the
+            visual is consistent across browsers. */}
+        <label
+          htmlFor="svc-color-swatch"
+          className="relative inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-stone-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+          aria-label="Open OS colour picker"
+        >
+          <span
+            aria-hidden="true"
+            className="block h-full w-full"
+            style={{
+              backgroundColor: hasColor ? swatchValue : 'transparent',
+              backgroundImage: hasColor
+                ? undefined
+                : // Subtle checker pattern signals "no colour set" without
+                  // resorting to a separate empty-state component. The
+                  // pattern is reused on the card chip below.
+                  'linear-gradient(45deg, #e7e5e4 25%, transparent 25%), linear-gradient(-45deg, #e7e5e4 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e7e5e4 75%), linear-gradient(-45deg, transparent 75%, #e7e5e4 75%)',
+              backgroundSize: hasColor ? undefined : '8px 8px',
+              backgroundPosition: hasColor
+                ? undefined
+                : '0 0, 0 4px, 4px -4px, -4px 0',
+            }}
+          />
+          <input
+            id="svc-color-swatch"
+            type="color"
+            value={swatchValue}
+            onChange={(e) => onChange(e.target.value.toUpperCase())}
+            // Fully cover the parent so the click anywhere on the swatch
+            // opens the OS picker; `opacity-0` hides Chrome/Safari's
+            // default chrome but keeps the input clickable.
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          />
+        </label>
+
+        {/* Hex text input — the canonical editor. Accepts any case,
+            with/without leading `#`, and 3-char shorthand; the
+            canonicaliser handles the rest at submit time. */}
+        <input
+          id="svc-color-hex"
+          type="text"
+          inputMode="text"
+          autoCapitalize="characters"
+          spellCheck={false}
+          maxLength={7}
+          placeholder="#FE036A"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          // monospace + tracking-wider so a hex code reads as a code,
+          // matching the look of CSS variables in the editor.
+          className={`${inputClass} font-mono uppercase tracking-wider`}
+        />
+
+        {hasColor && (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="inline-flex shrink-0 items-center rounded-full border border-stone-200 bg-white px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      <p className="mt-1.5 text-xs text-stone-400">
+        {hasColor
+          ? 'This colour paints every appointment of this service on the admin calendar.'
+          : 'No colour assigned — appointments of this service will render with neutral chrome until a hex is set.'}
+      </p>
     </div>
   );
 }

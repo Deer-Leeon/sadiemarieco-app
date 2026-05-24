@@ -64,6 +64,9 @@ interface AppointmentRow {
   // NUMERIC arrives stringified — coerced to number below.
   service_price: string | null;
   service_description: string | null;
+  // Editor-assigned hex from site_services.color; null = "no override,
+  // fall back to the auto-matcher" — see app/admin/serviceColors.ts.
+  service_color: string | null;
 }
 
 function serializeDate(value: Date | string | null): string | null {
@@ -94,6 +97,7 @@ function rowToAppointment(row: AppointmentRow): Appointment {
           })(),
     service_description: row.service_description,
     service_slug: row.service_slug,
+    service_color: row.service_color,
   };
 }
 
@@ -176,10 +180,11 @@ export async function GET(
         a.client_email,
         s.price       AS service_price,
         s.description AS service_description,
-        s.slug        AS service_slug
+        s.slug        AS service_slug,
+        s.color       AS service_color
       FROM appointments a
       LEFT JOIN LATERAL (
-        SELECT s.price, s.description, s.slug
+        SELECT s.price, s.description, s.slug, s.color
         FROM site_services s
         WHERE s.title = split_part(a.service_name, ' between ', 1)
           AND s.is_active = TRUE

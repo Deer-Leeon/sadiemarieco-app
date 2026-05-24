@@ -36,6 +36,30 @@ const STATEMENTS = [
   `ALTER TABLE site_services ALTER COLUMN cal_event_id DROP NOT NULL`,
   `ALTER TABLE site_services ALTER COLUMN duration_mins DROP NOT NULL`,
 
+  // Editor-assigned per-service hex code used by the calendar's
+  // appointment chrome. NULL means "fall back to the keyword/duration
+  // auto-matcher in app/admin/serviceColors.ts" — see the migration
+  // file `scripts/add_site_services_color.sql` for the contract.
+  `ALTER TABLE site_services ADD COLUMN IF NOT EXISTS color TEXT NULL`,
+
+  // CHECK constraint must be added defensively — neither ADD nor DROP
+  // CONSTRAINT supports IF [NOT] EXISTS pre-PG 16, so we wrap in a
+  // DO block that consults pg_constraint. Constraint name is stable
+  // so re-runs are no-ops.
+  `DO $$
+   BEGIN
+     IF NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'site_services_color_format_chk'
+     ) THEN
+       ALTER TABLE site_services
+         ADD CONSTRAINT site_services_color_format_chk
+         CHECK (color IS NULL OR color ~ '^#[0-9A-Fa-f]{6}$');
+     END IF;
+   END
+   $$`,
+
   `CREATE INDEX IF NOT EXISTS site_services_active_category_title_idx
      ON site_services (category, title)
      WHERE is_active = TRUE`,

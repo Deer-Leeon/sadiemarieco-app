@@ -320,17 +320,18 @@ function ModalAppointment({
   };
   const clickable = !!onClick;
 
-  // Same colour-coding contract as TimeGrid / ListView — accent
-  // border + faint tint for active bookings, untouched neutral grey
-  // for no-shows so the strike-through still reads as "wasted slot".
+  // Same colour-coding contract as TimeGrid / ListView — the whole
+  // pill is painted in the assigned hex with auto-contrasted text,
+  // and the no-show neutral grey treatment is preserved so the
+  // strike-through still reads as "wasted slot".
   const color = isNoShow ? null : getServiceColor(apt);
   const baseClasses =
-    'absolute overflow-hidden rounded-sm border-l-[3px] p-2 shadow-sm transition-colors text-left';
+    'absolute overflow-hidden rounded-sm p-2 shadow-sm transition-colors text-left';
   const variantClasses = isNoShow
-    ? 'border-stone-400 bg-stone-50 opacity-60'
+    ? 'border-l-[3px] border-stone-400 bg-stone-50 opacity-60'
     : color
       ? ''
-      : 'border-stone-800 bg-stone-100';
+      : 'border-l-[3px] border-stone-800 bg-stone-100';
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : '';
@@ -350,22 +351,32 @@ function ModalAppointment({
         left: `calc(${leftPct}% + 0.5rem)`,
         width: `calc(${widthPct}% - 1rem)`,
         ...(color && {
-          borderLeftColor: color.accent,
-          backgroundColor: color.tint,
+          backgroundColor: color.accent,
+          color: color.text,
         }),
       }}
     >
       <div
         className={`truncate text-sm font-medium ${
-          isNoShow ? 'text-gray-400 line-through' : 'text-stone-900'
+          isNoShow
+            ? 'text-gray-400 line-through'
+            : color
+              ? ''
+              : 'text-stone-900'
         }`}
+        style={color ? { color: color.text } : undefined}
       >
         {name}
       </div>
       <div
         className={`mt-0.5 truncate text-[11px] ${
-          isNoShow ? 'text-gray-400 line-through' : 'text-stone-500'
+          isNoShow
+            ? 'text-gray-400 line-through'
+            : color
+              ? ''
+              : 'text-stone-500'
         }`}
+        style={color ? { color: color.textMuted } : undefined}
       >
         {timeLabel}
         {timeLabel && service ? ' · ' : ''}

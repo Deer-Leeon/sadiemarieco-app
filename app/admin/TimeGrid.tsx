@@ -321,18 +321,20 @@ function AppointmentBlock({
   };
   const clickable = !!onClick;
 
-  // Service-type colour coding for active rows. No-show pills keep
-  // the neutral grey treatment so the wasted slot reads as "this
-  // didn't happen" regardless of what was booked. Unmapped services
-  // fall back to the original stone palette.
+  // Service-type colour coding: the whole pill is painted in the
+  // assigned hex. Foreground text auto-flips to white or stone based
+  // on luminance (see makeColor in serviceColors.ts). No-show pills
+  // keep the neutral grey treatment so the wasted slot reads as
+  // "this didn't happen" regardless of what was booked. Unmapped
+  // services fall back to the original stone palette.
   const color = isNoShow ? null : getServiceColor(apt);
   const baseClasses =
-    'absolute overflow-hidden rounded-sm border-l-[3px] p-1.5 shadow-sm transition-colors text-left';
+    'absolute overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left';
   const variantClasses = isNoShow
-    ? 'border-stone-400 bg-stone-50 opacity-60'
+    ? 'border-l-[3px] border-stone-400 bg-stone-50 opacity-60'
     : color
       ? ''
-      : 'border-stone-800 bg-stone-100';
+      : 'border-l-[3px] border-stone-800 bg-stone-100';
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : 'pointer-events-none';
@@ -352,22 +354,32 @@ function AppointmentBlock({
         left: `calc(${leftPct}% + 2px)`,
         width: `calc(${widthPct}% - 4px)`,
         ...(color && {
-          borderLeftColor: color.accent,
-          backgroundColor: color.tint,
+          backgroundColor: color.accent,
+          color: color.text,
         }),
       }}
     >
       <div
         className={`truncate text-xs font-medium ${
-          isNoShow ? 'text-gray-400 line-through' : 'text-stone-900'
+          isNoShow
+            ? 'text-gray-400 line-through'
+            : color
+              ? ''
+              : 'text-stone-900'
         }`}
+        style={color ? { color: color.text } : undefined}
       >
         {name}
       </div>
       <div
         className={`truncate text-[10px] ${
-          isNoShow ? 'text-gray-400 line-through' : 'text-stone-500'
+          isNoShow
+            ? 'text-gray-400 line-through'
+            : color
+              ? ''
+              : 'text-stone-500'
         }`}
+        style={color ? { color: color.textMuted } : undefined}
       >
         {timeLabel}
         {timeLabel && service ? ' · ' : ''}

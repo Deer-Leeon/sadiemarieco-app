@@ -152,6 +152,16 @@ export interface Appointment {
    * button is disabled in that case.
    */
   service_slug: string | null;
+  /**
+   * Editor-assigned hex colour for this service, joined in from
+   * `site_services.color`. When non-null this wins over the keyword
+   * + duration auto-matcher in `serviceColors.ts`. Null means
+   * "no override — fall back to the auto-matcher", which preserves
+   * the pre-CMS-colour behaviour for legacy bookings and any service
+   * the editor never customised. Always in the canonical `#RRGGBB`
+   * form (enforced by the CHECK constraint on the column).
+   */
+  service_color: string | null;
 }
 
 /**

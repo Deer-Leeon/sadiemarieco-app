@@ -284,16 +284,13 @@ function AppointmentPill({
   // doesn't have its own click handler (unlike the time-grid columns).
   const handleClick = () => onClick?.(appointment);
 
-  // Month-grid pills are 10px tall one-liners — a 3px accent border
-  // would eat the row visually, so colour-coded pills get a coloured
-  // tint background + a left-border bar via box-shadow inset (which
-  // doesn't disturb the truncation layout the way `border-left` would).
+  // Month-grid pills are 10px tall one-liners painted with the full
+  // service-type colour — the auto-contrast text (white vs stone)
+  // baked into makeColor keeps both the time stamp and the client
+  // name legible on every hue in the palette.
   const color = isNoShow ? null : getServiceColor(appointment);
   const colorStyle = color
-    ? {
-        backgroundColor: color.tint,
-        boxShadow: `inset 3px 0 0 0 ${color.accent}`,
-      }
+    ? { backgroundColor: color.accent, color: color.text }
     : undefined;
 
   return (
@@ -306,13 +303,16 @@ function AppointmentPill({
         isNoShow
           ? 'bg-stone-50 text-gray-400 line-through opacity-60 hover:bg-stone-100'
           : color
-            ? 'text-stone-800 hover:brightness-95'
+            ? 'hover:brightness-95'
             : 'bg-stone-100 text-stone-800 hover:bg-stone-200'
       } ${onClick ? 'cursor-pointer' : ''}`}
       style={colorStyle}
     >
       <span className="font-medium">{time}</span>{' '}
-      <span className={isNoShow ? 'text-gray-400' : 'text-stone-600'}>
+      <span
+        className={isNoShow ? 'text-gray-400' : color ? '' : 'text-stone-600'}
+        style={color ? { color: color.textMuted } : undefined}
+      >
         {name}
       </span>
     </button>

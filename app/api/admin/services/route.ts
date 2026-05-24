@@ -77,7 +77,17 @@ interface ServiceRow {
   slug: string | null;
   is_group: boolean;
   parent_id: number | null;
+  color: string | null;
 }
+
+/**
+ * Canonical 7-char hex form: `#` + 6 hex digits, case-insensitive on
+ * the wire (normalised to upper-case before insert so the DB row is
+ * deterministic). Matches the DB CHECK in
+ * `scripts/add_site_services_color.sql` exactly so a value that
+ * passes here can never bounce off the constraint.
+ */
+const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 
 interface CreatePayload {
   title: string;
@@ -101,6 +111,14 @@ interface CreatePayload {
    * themselves (a group cannot have a parent — depth is capped at 1).
    */
   parent_id: number | null;
+  /**
+   * Editor-assigned hex colour, canonical `#RRGGBB`. Null = "no
+   * override — use the auto-matcher". A malformed hex is rejected
+   * with a 400 by the parser; an empty string from the form is
+   * normalised to null so editors can "clear" a colour by deleting
+   * the input contents.
+   */
+  color: string | null;
 }
 
 interface UpdatePayload extends CreatePayload {
@@ -144,7 +162,8 @@ export async function GET(): Promise<NextResponse> {
         is_active,
         slug,
         is_group,
-        parent_id
+        parent_id,
+        color
       FROM site_services
       WHERE is_active = TRUE
       ORDER BY category ASC, is_group DESC, title ASC
@@ -218,7 +237,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const { rows } = await sql<ServiceRow>`
         INSERT INTO site_services (
           cal_event_id, category, title, description, price,
-          duration_mins, slug, is_group, parent_id
+          duration_mins, slug, is_group, parent_id, color
         ) VALUES (
           NULL,
           ${payload.category},
@@ -228,11 +247,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           NULL,
           NULL,
           TRUE,
-          NULL
+          NULL,
+          ${payload.color}
         )
         RETURNING
           id, cal_event_id, category, title, description, price,
-          duration_mins, is_active, slug, is_group, parent_id
+          duration_mins, is_active, slug, is_group, parent_id, color
       `;
       const service = rows[0];
       console.log('[api/admin/services] POST: group created (no Cal sync)', {
@@ -340,7 +360,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const { rows } = await sql<ServiceRow>`
       INSERT INTO site_services (
         cal_event_id, category, title, description, price,
-        duration_mins, slug, is_group, parent_id
+        duration_mins, slug, is_group, parent_id, color
       ) VALUES (
         ${calEventId},
         ${payload.category},
@@ -350,11 +370,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ${lengthInMinutes},
         ${slug},
         FALSE,
-        ${payload.parent_id}
+        ${payload.parent_id},
+        ${payload.color}
       )
       RETURNING
         id, cal_event_id, category, title, description, price,
-        duration_mins, is_active, slug, is_group, parent_id
+        duration_mins, is_active, slug, is_group, parent_id, color
     `;
     const service = rows[0];
     return NextResponse.json({
@@ -419,7 +440,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   try {
     const { rows } = await sql<ServiceRow>`
       SELECT id, cal_event_id, category, title, description, price,
-             duration_mins, is_active, slug, is_group, parent_id
+             duration_mins, is_active, slug, is_group, parent_id, color
       FROM site_services
       WHERE id = ${payload.db_id}
     `;
@@ -479,11 +500,12 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
           title       = ${payload.title},
           description = ${payload.description},
           price       = ${payload.price},
-          parent_id   = ${payload.parent_id}
+          parent_id   = ${payload.parent_id},
+          color       = ${payload.color}
         WHERE id = ${payload.db_id}
         RETURNING
           id, cal_event_id, category, title, description, price,
-          duration_mins, is_active, slug, is_group, parent_id
+          duration_mins, is_active, slug, is_group, parent_id, color
       `;
       const service = rows[0];
       return NextResponse.json({
@@ -548,11 +570,12 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         description   = ${payload.description},
         price         = ${payload.price},
         duration_mins = ${lengthInMinutes},
-        parent_id     = ${payload.parent_id}
+        parent_id     = ${payload.parent_id},
+        color         = ${payload.color}
       WHERE id = ${payload.db_id}
       RETURNING
         id, cal_event_id, category, title, description, price,
-        duration_mins, is_active, slug, is_group, parent_id
+        duration_mins, is_active, slug, is_group, parent_id, color
     `;
     if (rows.length === 0) {
       // Cal.com was already updated but our row vanished — the editor
@@ -946,7 +969,34 @@ function parseCreatePayload(input: unknown): CreatePayload {
     }),
     is_group,
     parent_id,
+    color: parseOptionalColor(input.color, 'color'),
   };
+}
+
+/**
+ * Coerce optional colour fields:
+ *   • undefined / null / '' → null  (editor cleared the field)
+ *   • '#rrggbb' / '#RRGGBB' → '#RRGGBB' (canonicalised to upper-case)
+ *   • anything else         → throw  (UI rejects + DB CHECK would too)
+ *
+ * The upper-case normalisation matters because the YIQ contrast
+ * computation in `app/admin/serviceColors.ts` is case-insensitive,
+ * but the calendar's data-attributes and any future CSS selectors
+ * benefit from a single deterministic spelling in the DB.
+ */
+function parseOptionalColor(value: unknown, field: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') {
+    throw new Error(`Field "${field}" must be a string or null.`);
+  }
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  if (!HEX_COLOR_RE.test(trimmed)) {
+    throw new Error(
+      `Field "${field}" must be a hex colour in the form "#RRGGBB" (got "${trimmed}").`
+    );
+  }
+  return trimmed.toUpperCase();
 }
 
 function parseUpdatePayload(input: unknown): UpdatePayload {

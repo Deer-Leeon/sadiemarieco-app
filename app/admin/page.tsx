@@ -49,6 +49,10 @@ interface DbRow {
   // mapping below so the client sees a clean `number | null`.
   service_price: string | null;
   service_description: string | null;
+  // Editor-assigned hex from site_services.color (joined below). When
+  // set, the calendar uses this over the auto-matcher heuristics; see
+  // `app/admin/serviceColors.ts` for the resolution order.
+  service_color: string | null;
 }
 
 function serializeDate(value: Date | string | null): string | null {
@@ -141,10 +145,11 @@ export default async function AdminPage() {
         a.client_email,
         s.price       AS service_price,
         s.description AS service_description,
-        s.slug        AS service_slug
+        s.slug        AS service_slug,
+        s.color       AS service_color
       FROM appointments a
       LEFT JOIN LATERAL (
-        SELECT s.price, s.description, s.slug
+        SELECT s.price, s.description, s.slug, s.color
         FROM site_services s
         WHERE s.title = split_part(a.service_name, ' between ', 1)
           AND s.is_active = TRUE
@@ -179,6 +184,7 @@ export default async function AdminPage() {
             })(),
       service_description: r.service_description,
       service_slug: r.service_slug,
+      service_color: r.service_color,
     }));
   } catch (err) {
     console.error('[admin] appointments query failed:', err);

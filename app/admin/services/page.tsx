@@ -27,6 +27,7 @@ interface ServiceRow {
   slug: string | null;
   is_group: boolean;
   parent_id: number | null;
+  color: string | null;
 }
 
 export default async function ServicesPage() {
@@ -72,7 +73,8 @@ export default async function ServicesPage() {
         is_active,
         slug,
         is_group,
-        parent_id
+        parent_id,
+        color
       FROM site_services
       WHERE is_active = TRUE
       ORDER BY category ASC, is_group DESC, title ASC

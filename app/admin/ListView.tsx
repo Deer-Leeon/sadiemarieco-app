@@ -112,19 +112,19 @@ function AppointmentRow({ appointment }: { appointment: Appointment }) {
   // out + struck through so the wasted slot is visible without
   // pretending it's bookable.
   const isNoShow = (appointment.status || '').toLowerCase() === 'no-show';
-  // Subtle service-type colour coding: 4px left accent + faint
-  // background tint. No-show rows skip the colour entirely — a
+  // Service-type colour coding: the WHOLE row is painted in the
+  // assigned hex, with the foreground text auto-flipped to white or
+  // dark stone based on the background's luminance (see makeColor in
+  // serviceColors.ts). No-show rows skip the colour entirely — a
   // wasted slot should read as "neutral grey" and the strike-through
   // carries the meaning. Returns null for any service we haven't
   // colour-coded yet (defaults to the unchanged white card).
   const color = isNoShow ? null : getServiceColor(appointment);
   const colorStyle = color
-    ? {
-        borderLeftWidth: '4px',
-        borderLeftColor: color.accent,
-        backgroundColor: color.tint,
-      }
+    ? { backgroundColor: color.accent, color: color.text }
     : undefined;
+  const primaryColorStyle = color ? { color: color.text } : undefined;
+  const mutedColorStyle = color ? { color: color.textMuted } : undefined;
   return (
     <li
       className={`grid grid-cols-[80px_1fr_auto] items-center gap-4 rounded-lg border border-stone-200 bg-white px-4 py-3 transition-shadow hover:shadow-sm ${
@@ -134,16 +134,26 @@ function AppointmentRow({ appointment }: { appointment: Appointment }) {
     >
       <span
         className={`font-serif text-base ${
-          isNoShow ? 'text-gray-400 line-through' : 'text-stone-900'
+          isNoShow
+            ? 'text-gray-400 line-through'
+            : color
+              ? ''
+              : 'text-stone-900'
         }`}
+        style={primaryColorStyle}
       >
         {time}
       </span>
       <div className="min-w-0">
         <p
           className={`truncate text-sm font-medium ${
-            isNoShow ? 'text-gray-400 line-through' : 'text-stone-900'
+            isNoShow
+              ? 'text-gray-400 line-through'
+              : color
+                ? ''
+                : 'text-stone-900'
           }`}
+          style={primaryColorStyle}
         >
           {clientDisplayName(
             appointment.client_first_name,
@@ -152,8 +162,13 @@ function AppointmentRow({ appointment }: { appointment: Appointment }) {
         </p>
         <p
           className={`mt-0.5 truncate text-xs ${
-            isNoShow ? 'text-gray-400 line-through' : 'text-stone-500'
+            isNoShow
+              ? 'text-gray-400 line-through'
+              : color
+                ? ''
+                : 'text-stone-500'
           }`}
+          style={mutedColorStyle}
         >
           {appointmentServiceLabel(appointment)}
         </p>

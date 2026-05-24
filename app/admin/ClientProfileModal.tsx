@@ -679,17 +679,19 @@ function AppointmentRow({
   // bookings (cancellations, no-shows, etc.).
   const badge = describeRowBadge(appointment.status);
   const dim = badge !== null;
-  // Service-type accent + tint. Suppressed for any non-confirmed
-  // row (cancelled/no-show) so the existing dimmed-grey status
-  // treatment isn't overpowered — the colour rail belongs to live
-  // bookings only, the badge carries the meaning otherwise.
+  // Service-type colour coding in the client profile reads as a thin
+  // 4 px left accent only — the row body stays the standard white
+  // card so a single client's history scans as a calm list rather
+  // than a multi-coloured wall. The calendar views (list / 3-day /
+  // week / month / single-day) still paint the full block so the
+  // colour signal stays loud where the studio actually plans the
+  // day. Suppressed for any non-confirmed row (cancelled/no-show)
+  // so the existing dimmed-grey status treatment isn't overpowered —
+  // the colour belongs to live bookings only, the badge carries the
+  // meaning otherwise.
   const color = dim ? null : getServiceColor(appointment);
   const colorStyle = color
-    ? {
-        borderLeftWidth: '4px',
-        borderLeftColor: color.accent,
-        backgroundColor: color.tint,
-      }
+    ? { borderLeftWidth: '4px', borderLeftColor: color.accent }
     : undefined;
 
   return (
