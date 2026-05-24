@@ -261,31 +261,43 @@ module.exports = async function handler(req, res) {
   }
 
   // ── BOOKING_CANCELLED BRANCH ────────────────────────────────────────────
-  // Flip the local row to 'cancelled' so the QStash reminder/feedback
-  // handlers will hit the status gate when they fire later. We intentionally
-  // do NOT touch webhook_events here — that table tracks "did we send the
-  // welcome SMS?" for the create event and a cancellation has a different
-  // lifecycle. The UPDATE is naturally idempotent (cancelled → cancelled is
-  // a no-op) so re-deliveries from Cal are harmless.
+  // Mark the local row as 'canceled_by_client'. Cal fires this event for
+  // ANY cancellation — including the ones initiated from the admin
+  // dashboard's PATCH /api/admin/appointments/[id]/status route — so the
+  // WHERE clause explicitly preserves 'canceled_by_admin'. Without that
+  // guard, the late-arriving webhook would clobber the more specific
+  // admin-set status with the generic client-cancel one and the badge in
+  // the client profile would be wrong.
   //
-  // We don't cancel the pending QStash messages either: remind/feedback both
-  // gate on status, so the worst case is two no-op QStash deliveries that
-  // exit at the status check. Cheap. Adding QStash msg-id tracking just to
-  // avoid those is premature optimisation.
+  // Note on legacy values: rows still carrying the historical British
+  // spelling 'cancelled' are flipped to 'canceled_by_client' by the
+  // migration in `scripts/update_status_constraint.sql` before the
+  // CHECK constraint goes on; we don't need to handle that legacy value
+  // here.
+  //
+  // QStash reminder/feedback handlers already gate on
+  // status === 'confirmed', so the new value silences them too.
+  // Idempotency: re-running this UPDATE on an already-canceled row is
+  // a no-op, so duplicate webhook deliveries are harmless. We don't
+  // touch webhook_events — that table is for BOOKING_CREATED dedupe.
   //
   // Always returns 200 — DB failure must not cause Cal to retry indefinitely.
   if (triggerEvent === 'BOOKING_CANCELLED') {
     try {
       const { rows: updatedRows } = await sql`
         UPDATE appointments
-        SET status = 'cancelled'
+        SET status = 'canceled_by_client'
         WHERE cal_event_id = ${bookingUid}
-        RETURNING cal_event_id
+          AND (status IS NULL OR status <> 'canceled_by_admin')
+        RETURNING cal_event_id, status
       `;
       if (updatedRows.length === 0) {
-        console.warn('[api/webhook] BOOKING_CANCELLED: no matching appointment', { bookingUid });
+        console.warn(
+          '[api/webhook] BOOKING_CANCELLED: no matching appointment OR already canceled_by_admin (preserved)',
+          { bookingUid }
+        );
       } else {
-        console.log('[api/webhook] BOOKING_CANCELLED: appointment marked cancelled', { bookingUid });
+        console.log('[api/webhook] BOOKING_CANCELLED: appointment marked canceled_by_client', { bookingUid });
       }
     } catch (err) {
       console.error('[api/webhook] BOOKING_CANCELLED: db update failed', {

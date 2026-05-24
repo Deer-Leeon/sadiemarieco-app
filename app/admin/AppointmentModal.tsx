@@ -12,13 +12,14 @@ import {
   Clock,
   DollarSign,
   ExternalLink,
+  Loader2,
   Mail,
   Phone,
   Scissors,
   X,
 } from 'lucide-react';
 
-import type { Appointment } from './types';
+import type { Appointment, AppointmentStatus } from './types';
 import { cleanServiceName, clientDisplayName } from './helpers';
 import ClientProfileModal from './ClientProfileModal';
 
@@ -91,6 +92,8 @@ type ModalView = 'appointment' | 'client';
  * re-applied correctly when this one closes.
  */
 export default function AppointmentModal({ appointment, onClose }: Props) {
+  const router = useRouter();
+
   // Internal "what content is rendered inside the shell" state. The
   // shell stays mounted across swaps so the backdrop / ESC handler /
   // scroll lock don't churn when the admin drills into a client
@@ -103,6 +106,77 @@ export default function AppointmentModal({ appointment, onClose }: Props) {
   // signals success (router.refresh + onClose), we drop straight out
   // of the modal rather than flashing the details view first.
   const [isRescheduling, setIsRescheduling] = useState(false);
+
+  // Loading state for the No-show / Cancel status PATCH. We disable
+  // BOTH buttons (not just the clicked one) while one request is in
+  // flight — once the local DB write succeeds we router.refresh() and
+  // onClose(), so a parallel second click would race the unmount.
+  const [statusAction, setStatusAction] = useState<
+    null | 'no-show' | 'canceled_by_admin'
+  >(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+
+  const handleStatusChange = async (next: AppointmentStatus) => {
+    if (statusAction !== null) return;
+    if (next === 'canceled_by_admin') {
+      const confirmed = window.confirm(
+        'Are you sure you want to cancel this appointment? The client will be notified.'
+      );
+      if (!confirmed) return;
+    }
+
+    setStatusAction(next === 'no-show' ? 'no-show' : 'canceled_by_admin');
+    setStatusError(null);
+
+    try {
+      const res = await fetch(
+        `/api/admin/appointments/${appointment.id}/status`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: next }),
+        }
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        const msg =
+          (data && typeof data === 'object' && 'message' in data
+            ? (data as { message?: string }).message
+            : null) ||
+          (data && typeof data === 'object' && 'error' in data
+            ? (data as { error?: string }).error
+            : null) ||
+          `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+      // Non-fatal Cal cancel error: the local DB row was updated but
+      // Cal didn't accept the cancellation. We surface this as a
+      // warning rather than blocking the close, because the admin's
+      // intent ("this is no longer on my calendar") is now reflected
+      // locally. They can manually reconcile in Cal's dashboard.
+      const data = (await res.json().catch(() => null)) as
+        | { cal_cancel_error?: string | null }
+        | null;
+      if (data?.cal_cancel_error) {
+        console.warn(
+          '[AppointmentModal] cal cancel warning',
+          data.cal_cancel_error
+        );
+        // Surface to the admin via a transient alert. We deliberately
+        // don't block the close — a future polish pass could swap
+        // this for a toast component, but alert is the least-bad
+        // option without one wired up.
+        alert(
+          `Saved locally, but Cal.com didn't confirm the cancellation:\n${data.cal_cancel_error}\n\nThe appointment will still disappear from your dashboard. You may want to verify the booking in Cal.com.`
+        );
+      }
+      router.refresh();
+      onClose();
+    } catch (err) {
+      setStatusError(err instanceof Error ? err.message : String(err));
+      setStatusAction(null);
+    }
+  };
 
   // ESC to close. Bound at window so the modal closes regardless of
   // which child element has focus when the user hits the key. While
@@ -176,6 +250,10 @@ export default function AppointmentModal({ appointment, onClose }: Props) {
             <ActionFooter
               canReschedule={Boolean(appointment.service_slug)}
               onReschedule={() => setIsRescheduling(true)}
+              onNoShow={() => handleStatusChange('no-show')}
+              onCancel={() => handleStatusChange('canceled_by_admin')}
+              statusAction={statusAction}
+              statusError={statusError}
             />
           </>
         ) : (
@@ -199,19 +277,17 @@ function ModalHeader({
   appointment: Appointment;
   onClose: () => void;
 }) {
-  // The header eyebrow uses the status pill colour so a cancelled
-  // booking reads as cancelled at a glance even before the editor
+  // The header eyebrow uses the status pill colour so a cancelled /
+  // no-show booking reads as such at a glance, even before the editor
   // notices the strikethrough on the service line below.
   const status = (appointment.status || '').toLowerCase();
-  const statusLabel = status === 'cancelled' ? 'Cancelled booking' : 'Booking';
+  const { label: statusLabel, tone } = describeHeaderStatus(status);
 
   return (
     <div className="relative flex items-center justify-between border-b border-stone-200 bg-[#FAF9F6] px-6 py-4">
       <div>
         <p
-          className={`text-[10px] font-medium uppercase tracking-[0.28em] ${
-            status === 'cancelled' ? 'text-amber-700' : 'text-stone-500'
-          }`}
+          className={`text-[10px] font-medium uppercase tracking-[0.28em] ${tone}`}
         >
           {statusLabel}
         </p>
@@ -424,6 +500,10 @@ function ServiceBox({ appointment }: { appointment: Appointment }) {
 function ActionFooter({
   canReschedule,
   onReschedule,
+  onNoShow,
+  onCancel,
+  statusAction,
+  statusError,
 }: {
   /**
    * False when the appointment has no `cal_uid` (legacy / corrupted
@@ -433,45 +513,101 @@ function ActionFooter({
    */
   canReschedule: boolean;
   onReschedule: () => void;
+  onNoShow: () => void;
+  onCancel: () => void;
+  /**
+   * Which status mutation is currently in flight, if any. Drives
+   * the per-button spinner and disables BOTH buttons (so the admin
+   * can't fire two PATCHes that race the router refresh + close).
+   */
+  statusAction: null | 'no-show' | 'canceled_by_admin';
+  /**
+   * Surfaced under the footer when the PATCH fails. Cleared
+   * automatically on the next attempt.
+   */
+  statusError: string | null;
 }) {
-  // No-show / Cancel are still placeholders pending their own
-  // endpoints. Keeping them visible (not commented out) so the
-  // footer reads as a finished action surface — these light up in a
-  // later pass without touching the Reschedule wiring.
-  const onNoShow = () => alert('Functionality coming soon');
-  const onCancel = () => alert('Functionality coming soon');
+  const busy = statusAction !== null;
 
   return (
-    <div className="flex items-center justify-end gap-2 border-t border-stone-200 bg-white px-6 py-4">
-      <button
-        type="button"
-        onClick={onReschedule}
-        disabled={!canReschedule}
-        title={
-          canReschedule
-            ? undefined
-            : 'Cannot reschedule — no Cal.com service link on this appointment.'
-        }
-        className="rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-700 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
-      >
-        Reschedule
-      </button>
-      <button
-        type="button"
-        onClick={onNoShow}
-        className="rounded-full border border-amber-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-amber-700 transition-colors hover:bg-amber-50"
-      >
-        No-show
-      </button>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="rounded-full border border-rose-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-rose-700 transition-colors hover:bg-rose-50"
-      >
-        Cancel
-      </button>
+    <div className="border-t border-stone-200 bg-white">
+      {statusError && (
+        <div className="border-b border-rose-200 bg-rose-50 px-6 py-2 text-xs text-rose-800">
+          Couldn&rsquo;t update — {statusError}
+        </div>
+      )}
+      <div className="flex items-center justify-end gap-2 px-6 py-4">
+        <button
+          type="button"
+          onClick={onReschedule}
+          disabled={!canReschedule || busy}
+          title={
+            canReschedule
+              ? undefined
+              : 'Cannot reschedule — no Cal.com service link on this appointment.'
+          }
+          className="rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-700 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
+        >
+          Reschedule
+        </button>
+        <button
+          type="button"
+          onClick={onNoShow}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white"
+        >
+          {statusAction === 'no-show' ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Saving
+            </>
+          ) : (
+            'No-show'
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white"
+        >
+          {statusAction === 'canceled_by_admin' ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Canceling
+            </>
+          ) : (
+            'Cancel'
+          )}
+        </button>
+      </div>
     </div>
   );
+}
+
+/**
+ * Map the row's raw status text to a header eyebrow label + colour
+ * tone. Centralised so the four lifecycle states render with
+ * consistent vocabulary across the modal header (here) and the
+ * client-profile history badges. Unknown / legacy values render as
+ * a neutral "Booking" — better than throwing on an unrecognised
+ * string from the DB.
+ */
+function describeHeaderStatus(status: string): {
+  label: string;
+  tone: string;
+} {
+  switch (status) {
+    case 'canceled_by_admin':
+      return { label: 'Cancelled by you', tone: 'text-rose-700' };
+    case 'canceled_by_client':
+      return { label: 'Cancelled by client', tone: 'text-amber-700' };
+    case 'no-show':
+      return { label: 'No-show', tone: 'text-stone-500' };
+    case 'confirmed':
+    default:
+      return { label: 'Booking', tone: 'text-stone-500' };
+  }
 }
 
 /** Cal embed mode: true reschedule vs fresh slot on the same service. */

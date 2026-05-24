@@ -89,29 +89,36 @@ module.exports = async function handler(req, res) {
     }
 
     // ── LOCAL STATUS UPDATE ──────────────────────────────────────────────
-    // Cal has accepted the cancellation. Reflect it in our DB so the
-    // QStash reminder/feedback handlers will see status != 'confirmed'
-    // and skip the SMS. Best-effort: if this fails the cancellation is
+    // Cal has accepted the cancellation. This route is hit ONLY from the
+    // public manage portal (`public/manage.html` + `public/js/manage.js`),
+    // which is always a client-initiated cancel, so we mark the row as
+    // 'canceled_by_client' to match the new lifecycle vocabulary in
+    // `app/admin/types.ts` + `scripts/update_status_constraint.sql`.
+    //
+    // Preserve any prior 'canceled_by_admin' status — that's a strictly
+    // more specific value and the BOOKING_CANCELLED webhook does the
+    // same guard. Best-effort write: if this fails the cancellation is
     // still effective at Cal (the user won't show up), the worst case is
     // a stale reminder firing 24h later. We never propagate a DB failure
     // back to the portal — that would invite a retry that 404s against
     // Cal because the booking is already cancelled.
     //
-    // 0 rows affected is not an error: it just means we don't have an
-    // appointment row for this UID (booking predates DB ingest, or its
-    // BOOKING_CREATED webhook never landed). RETURNING lets us log which
-    // case we hit without an extra SELECT.
+    // 0 rows affected is not an error: either we don't have an
+    // appointment row for this UID (legacy booking) or the row was
+    // already canceled_by_admin and the guard short-circuited.
+    // RETURNING lets us log which case we hit without an extra SELECT.
     try {
       const { rows: updatedRows } = await sql`
         UPDATE appointments
-        SET status = 'cancelled'
+        SET status = 'canceled_by_client'
         WHERE cal_event_id = ${uid}
+          AND (status IS NULL OR status <> 'canceled_by_admin')
         RETURNING cal_event_id
       `;
       if (updatedRows.length === 0) {
-        console.warn('[api/cancel-booking] no appointment row matched on cancel', { uid });
+        console.warn('[api/cancel-booking] no appointment row matched on cancel (or admin-cancel preserved)', { uid });
       } else {
-        console.log('[api/cancel-booking] appointment marked cancelled', { uid });
+        console.log('[api/cancel-booking] appointment marked canceled_by_client', { uid });
       }
     } catch (dbErr) {
       console.error('[api/cancel-booking] DB status update failed (Cal cancel succeeded):', {

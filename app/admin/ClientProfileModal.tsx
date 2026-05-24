@@ -560,20 +560,27 @@ function AppointmentRow({ appointment }: { appointment: ClientAppointment }) {
   const hasStart = start && !Number.isNaN(start.getTime());
   const hasEnd = end && !Number.isNaN(end.getTime());
 
-  const status = (appointment.status || '').toLowerCase();
-  const isCancelled = status === 'cancelled';
+  // In the CLIENT PROFILE we explicitly do NOT filter canceled/no-show
+  // rows — they're audit history. Each non-confirmed status gets its
+  // own colour-coded badge + a struck-through row so McKenna can see
+  // at a glance how this client has historically behaved with their
+  // bookings (cancellations, no-shows, etc.).
+  const badge = describeRowBadge(appointment.status);
+  const dim = badge !== null;
 
   return (
     <div
       className={`rounded-lg border border-stone-200 bg-white p-3 ${
-        isCancelled ? 'opacity-70' : ''
+        dim ? 'opacity-70' : ''
       }`}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p
-            className={`font-serif text-base leading-tight text-stone-900 ${
-              isCancelled ? 'line-through decoration-stone-400' : ''
+            className={`font-serif text-base leading-tight ${
+              dim
+                ? 'text-stone-500 line-through decoration-stone-400'
+                : 'text-stone-900'
             }`}
           >
             {cleanServiceName(appointment.service_name)}
@@ -588,14 +595,54 @@ function AppointmentRow({ appointment }: { appointment: ClientAppointment }) {
               : 'No time scheduled'}
           </p>
         </div>
-        {isCancelled && (
-          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.18em] text-amber-700">
-            Cancelled
+        {badge !== null && (
+          <span
+            className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.18em] ${badge.className}`}
+          >
+            {badge.label}
           </span>
         )}
       </div>
     </div>
   );
+}
+
+/**
+ * Map an appointment-history row's status to its badge label + style.
+ * Returning `null` for 'confirmed' tells the renderer to render the row
+ * undecorated, which is the right visual default for the most common
+ * lifecycle state. Unknown / legacy values fall through to `null` too
+ * — better than rendering a confusing "raw db value" pill.
+ *
+ * Legacy note: the British 'cancelled' value from before
+ * `scripts/update_status_constraint.sql` ran is treated as
+ * 'canceled_by_client' (which is what the migration converts it to)
+ * so historical rows render correctly even if the migration hasn't
+ * been applied to a particular environment yet.
+ */
+function describeRowBadge(
+  status: string | null
+): { label: string; className: string } | null {
+  const s = (status || '').toLowerCase();
+  if (s === 'canceled_by_admin') {
+    return {
+      label: 'Cancelled by you',
+      className: 'bg-rose-50 text-rose-700 ring-1 ring-rose-200/70',
+    };
+  }
+  if (s === 'canceled_by_client' || s === 'cancelled') {
+    return {
+      label: 'Cancelled by client',
+      className: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200/70',
+    };
+  }
+  if (s === 'no-show') {
+    return {
+      label: 'No-show',
+      className: 'bg-stone-100 text-stone-600 ring-1 ring-stone-300/70',
+    };
+  }
+  return null;
 }
 
 // ─── PICTURES (with lightbox) ──────────────────────────────────────────────

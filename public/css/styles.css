@@ -333,14 +333,49 @@ nav.scrolled { padding: 16px 64px; }
 .col-rule { background: rgba(13,27,42,0.1); }
 .category-head {
   font-family: var(--sans);
-  font-size: 0.55rem;
+  font-size: 0.62rem;
   font-weight: 400;
-  letter-spacing: 0.4em;
+  letter-spacing: 0.36em;
   text-transform: uppercase;
   color: var(--navy);
   border-bottom: 1px solid var(--cloud-mid);
   padding-bottom: 10px;
   margin-bottom: 28px;
+}
+/*
+  When a second .category-head appears inside the same column (the
+  "Teeth Whitening" coming-soon placeholder sits below the brow
+  services list in the right-hand column), give it deliberate top
+  spacing so the two sections read as separate blocks rather than a
+  continuous list. The amount matches the visual rhythm of the
+  hero/about transitions on the same page.
+*/
+/* No overrides — inherits all styles from .category-head so the
+   header looks identical to Lash Services / Brow Services. The
+   wrapper's flex centering handles spacing instead. */
+/*
+  "Coming soon." copy under a placeholder category head. Mirrors the
+  typography of .service-detail (muted italic serif used for the
+  service descriptions across the rest of the menu) so the
+  placeholder feels native to the pricing column rather than bolted
+  on. Subtle vertical padding matches the breathing room of a real
+  .service-item without the cursor: pointer / hover state that would
+  imply the row is bookable.
+*/
+.coming-soon-wrapper {
+  margin-top: 48px;
+}
+.coming-soon-wrapper .category-head {
+  width: 100%;
+}
+.coming-soon-note {
+  font-family: var(--serif-alt);
+  font-style: italic;
+  font-size: 0.92rem;
+  letter-spacing: 0.01em;
+  color: var(--mist);
+  margin: 0;
+  padding: 8px 0 4px;
 }
 .service-item {
   padding: 18px 0;

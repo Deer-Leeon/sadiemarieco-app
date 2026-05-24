@@ -106,17 +106,40 @@ function AppointmentRow({ appointment }: { appointment: Appointment }) {
   const time = appointment.booking_time
     ? format(parseISO(appointment.booking_time), TIME_FORMAT)
     : '—';
+  // DashboardUI filters out the two canceled statuses upstream, so
+  // the only special visual state this row needs is no-show: greyed
+  // out + struck through so the wasted slot is visible without
+  // pretending it's bookable.
+  const isNoShow = (appointment.status || '').toLowerCase() === 'no-show';
   return (
-    <li className="grid grid-cols-[80px_1fr_auto] items-center gap-4 rounded-lg border border-stone-200 bg-white px-4 py-3 transition-shadow hover:shadow-sm">
-      <span className="font-serif text-base text-stone-900">{time}</span>
+    <li
+      className={`grid grid-cols-[80px_1fr_auto] items-center gap-4 rounded-lg border border-stone-200 bg-white px-4 py-3 transition-shadow hover:shadow-sm ${
+        isNoShow ? 'opacity-60' : ''
+      }`}
+    >
+      <span
+        className={`font-serif text-base ${
+          isNoShow ? 'text-gray-400 line-through' : 'text-stone-900'
+        }`}
+      >
+        {time}
+      </span>
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-stone-900">
+        <p
+          className={`truncate text-sm font-medium ${
+            isNoShow ? 'text-gray-400 line-through' : 'text-stone-900'
+          }`}
+        >
           {clientDisplayName(
             appointment.client_first_name,
             appointment.client_last_name
           )}
         </p>
-        <p className="mt-0.5 truncate text-xs text-stone-500">
+        <p
+          className={`mt-0.5 truncate text-xs ${
+            isNoShow ? 'text-gray-400 line-through' : 'text-stone-500'
+          }`}
+        >
           {cleanServiceName(appointment.service_name)}
         </p>
       </div>
@@ -134,10 +157,28 @@ function StatusPill({ status }: { status: string | null }) {
       </span>
     );
   }
-  if (s === 'cancelled') {
+  if (s === 'no-show') {
+    return (
+      <span className="inline-flex items-center rounded-full border border-stone-300 bg-stone-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
+        No-show
+      </span>
+    );
+  }
+  // The two canceled statuses won't normally appear here because
+  // DashboardUI filters them out before the list renders, but we
+  // keep a defensive pill for the historical 'cancelled' value or
+  // anything else that slips through.
+  if (s === 'canceled_by_admin') {
+    return (
+      <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-rose-700">
+        Cancelled by you
+      </span>
+    );
+  }
+  if (s === 'canceled_by_client' || s === 'cancelled') {
     return (
       <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-700">
-        Cancelled
+        Cancelled by client
       </span>
     );
   }

@@ -83,19 +83,31 @@ interface Props {
 
 /**
  * Closed enum of categories the studio is willing to publish to the
- * public site. Public homepage hard-codes a two-column layout for
- * Lash Services on the left and Brow Services on the right; adding a
- * third category here would orphan its services on the live site
- * because there's no third column to render them into. If/when the
- * studio expands the menu, update this list AND the corresponding
- * grid layout in public/index.html + .services-cols in styles.css.
+ * public site. Public homepage uses a two-column layout (Lash
+ * Services left, Brow Services right) and currently treats
+ * `Teeth Whitening` as a "coming soon" placeholder rendered as a
+ * sibling block under Brow Services in the right column (see
+ * `app/route.ts`). Rows in that category CAN be created here today
+ * but won't appear on the live menu until the placeholder is
+ * replaced with the dynamic list — by design, so the studio can
+ * pre-stage the launch catalogue.
+ *
+ * If/when a fourth category gets added, update this list AND the
+ * column-routing logic in `app/route.ts` so the new category lands
+ * in the right column. The two-column grid in
+ * `public/css/styles.css` doesn't need touching — categories stack
+ * vertically inside whichever column they're routed to.
  *
  * Closed-enum (not free text + suggestions) because the previous
  * datalist let editors create near-duplicate sections by typing
  * variants like "Lashes" vs "Lash Services". A strict <select> is
  * the only way to guarantee the data shape the public site expects.
  */
-const CATEGORIES = ['Lash Services', 'Brow Services'] as const;
+const CATEGORIES = [
+  'Lash Services',
+  'Brow Services',
+  'Teeth Whitening',
+] as const;
 
 interface FormState {
   title: string;

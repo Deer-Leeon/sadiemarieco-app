@@ -5,6 +5,65 @@
  */
 
 /**
+ * Lifecycle status for an appointment row.
+ *
+ *   • 'confirmed'           — booking is live and on the schedule.
+ *   • 'no-show'             — booking happened but the client never
+ *                             arrived. Stays visible on the calendar
+ *                             with a struck-through visual treatment
+ *                             so the studio can still see what slot
+ *                             was wasted.
+ *   • 'canceled_by_admin'   — McKenna cancelled the slot from the
+ *                             dashboard. Triggers an outbound Cal.com
+ *                             cancellation (which fires Cal's native
+ *                             client-facing email), then disappears
+ *                             from calendar views entirely.
+ *   • 'canceled_by_client'  — client cancelled via the manage portal
+ *                             or directly through Cal's confirmation
+ *                             email. The webhook flips the row here.
+ *                             Also disappears from calendar views.
+ *
+ * Mirrors the CHECK constraint added in
+ * `scripts/update_status_constraint.sql`. If you add a new status,
+ * update BOTH this union AND the SQL CHECK so the DB and the type
+ * system stay aligned.
+ */
+export type AppointmentStatus =
+  | 'confirmed'
+  | 'no-show'
+  | 'canceled_by_admin'
+  | 'canceled_by_client';
+
+/**
+ * Tuple form of `AppointmentStatus` for runtime validation in API
+ * routes. Kept as `readonly` so callers can't accidentally mutate the
+ * canonical list, and `as const` so it widens correctly into the
+ * `AppointmentStatus` union when iterated.
+ */
+export const APPOINTMENT_STATUSES: readonly AppointmentStatus[] = [
+  'confirmed',
+  'no-show',
+  'canceled_by_admin',
+  'canceled_by_client',
+] as const;
+
+/**
+ * Predicate for narrowing an arbitrary string to `AppointmentStatus`.
+ * Used by both the PATCH route (request body validation) and any UI
+ * code that wants to safely read `appointment.status` (which is
+ * `string | null` on the wire because the DB column is `text` —
+ * any legacy/unknown value should fall through to a neutral display).
+ */
+export function isAppointmentStatus(
+  value: unknown
+): value is AppointmentStatus {
+  return (
+    typeof value === 'string' &&
+    (APPOINTMENT_STATUSES as readonly string[]).includes(value)
+  );
+}
+
+/**
  * Serialised appointment shape — what the server passes to the client.
  *
  * `booking_time` is intentionally a string (ISO 8601), not a Date. Dates
@@ -44,6 +103,14 @@ export interface Appointment {
    */
   end_time: string | null;
   service_name: string | null;
+  /**
+   * One of `AppointmentStatus`, or `null` for malformed legacy rows
+   * that predate the CHECK constraint. Kept as `string | null` on the
+   * wire (rather than narrowing here) because the column type is
+   * `text` and we want unknown values to surface as "Unknown" in
+   * the UI rather than break the row. Use `isAppointmentStatus` to
+   * narrow before branching on a specific status.
+   */
   status: string | null;
   /**
    * Client's phone number as Cal.com sent it on the webhook (E.164

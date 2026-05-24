@@ -305,20 +305,128 @@ async function fetchServicesHtml(): Promise<string> {
  *   navigating to a broken URL. Group rows never get data-cal-link
  *   regardless of slug — they're folders, not events.
  */
-function renderServicesHtml(rows: readonly SiteServiceRow[]): string {
-  if (rows.length === 0) return '';
+/**
+ * Categories that the homepage renders as "coming soon" placeholders
+ * instead of a dynamic service list. Rows in these categories are
+ * filtered out of the dynamic render below so they can't accidentally
+ * grow a third column on the two-up grid; they're surfaced as a
+ * hardcoded sibling block underneath their host column. Admins can
+ * still create rows in these categories via /admin/services to
+ * pre-stage the launch catalogue — the rows just don't appear on
+ * the public menu yet.
+ */
+const COMING_SOON_CATEGORIES = new Set(['Teeth Whitening']);
 
-  const groups = groupByCategory(rows);
+/**
+ * Static "Coming soon." block injected at the bottom of the host
+ * column for a placeholder category. Uses the same `.category-head`
+ * vocabulary as the dynamic headers so the typography lines up
+ * pixel-for-pixel; the body uses a `.coming-soon-note` class defined
+ * in `public/css/styles.css` that inherits the muted italic serif
+ * register of `.service-detail`.
+ *
+ * Visual rhythm: `.category-head--coming-soon` carries the extra
+ * top margin so the brow services list and the new placeholder block
+ * feel like two deliberate sections rather than a continuous list.
+ */
+function renderComingSoonBlock(category: string): string {
+  return `
+      <div class="coming-soon-wrapper">
+        <div class="category-head">${escapeHtml(category)}</div>
+        <p class="coming-soon-note">Coming soon.</p>
+      </div>`;
+}
+
+/**
+ * Decide which dynamic column should host each coming-soon placeholder.
+ * Today: Teeth Whitening rides under Brow Services (the right column
+ * of the two-up grid). If a coming-soon category gets reassigned to a
+ * different column, update this map — the rest of the render pipeline
+ * resolves the destination from this single source of truth.
+ *
+ * Fallback strategy: if the host category isn't in the current
+ * render (e.g. the studio has zero brow services configured yet),
+ * the block is appended to the LAST rendered column instead. That
+ * keeps the placeholder visible during early menu seeding without
+ * crashing the layout.
+ */
+const COMING_SOON_HOST_CATEGORY: Record<string, string> = {
+  'Teeth Whitening': 'Brow Services',
+};
+
+function renderServicesHtml(rows: readonly SiteServiceRow[]): string {
+  if (rows.length === 0) {
+    // Even with an empty service catalogue we still want the
+    // placeholder columns to render so the homepage doesn't show a
+    // blank pricing section. We emit a minimal scaffold: a (still
+    // empty) two-column structure with the coming-soon block in the
+    // right column. Editors will replace this scaffolding as soon as
+    // they add their first service in /admin/services.
+    const placeholder = Array.from(COMING_SOON_CATEGORIES)
+      .map(renderComingSoonBlock)
+      .join('\n');
+    return `
+    <div class="reveal"></div>
+
+    <div class="col-rule"></div>
+    <div class="reveal reveal-delay-1">
+${placeholder}
+    </div>${ACCORDION_SCRIPT}`;
+  }
+
+  // Strip coming-soon categories from the dynamic group set: they're
+  // injected by-hand as a sibling block under their host column
+  // below. Without this filter, a single Teeth Whitening row in the
+  // DB would spawn a third grid column and break the two-up layout.
+  const groups = groupByCategory(rows).filter(
+    ([category]) => !COMING_SOON_CATEGORIES.has(category)
+  );
+
+  // Build a host-category → list-of-coming-soon-blocks map so a
+  // column can absorb multiple placeholders if we ever add more.
+  // Order within a host column is insertion order from
+  // COMING_SOON_HOST_CATEGORY (today just the one).
+  const extrasByHost = new Map<string, string[]>();
+  for (const [comingSoon, host] of Object.entries(COMING_SOON_HOST_CATEGORY)) {
+    if (!COMING_SOON_CATEGORIES.has(comingSoon)) continue;
+    const list = extrasByHost.get(host) ?? [];
+    list.push(renderComingSoonBlock(comingSoon));
+    extrasByHost.set(host, list);
+  }
+
+  // Track which host categories we've actually rendered so we can
+  // append any orphan placeholders (host missing from this build) to
+  // the last column as a fallback.
+  const renderedHosts = new Set<string>();
 
   const columns = groups.map(([category, services], index) => {
     const delayClass = index === 0 ? '' : ` reveal-delay-${index}`;
     const items = renderCategoryItems(services);
+    const extras = extrasByHost.get(category);
+    let extrasHtml = '';
+    if (extras && extras.length > 0) {
+      renderedHosts.add(category);
+      extrasHtml = '\n' + extras.join('\n');
+    }
     return `
     <div class="reveal${delayClass}">
       <div class="category-head">${escapeHtml(category)}</div>
-${items}
+${items}${extrasHtml}
     </div>`;
   });
+
+  // Fallback: any coming-soon placeholder whose host wasn't in the
+  // dynamic render gets appended to the last column. Keeps the
+  // placeholder visible during early menu seeding (e.g. before the
+  // studio adds its first brow service).
+  for (const [host, extras] of extrasByHost.entries()) {
+    if (renderedHosts.has(host)) continue;
+    if (columns.length === 0) continue;
+    const lastIndex = columns.length - 1;
+    const trimmed = columns[lastIndex].replace(/\s*<\/div>\s*$/, '');
+    columns[lastIndex] = `${trimmed}\n${extras.join('\n')}
+    </div>`;
+  }
 
   // Accordion toggle script appended once at the end of the injected
   // markup. Placed inside the services container (rather than before

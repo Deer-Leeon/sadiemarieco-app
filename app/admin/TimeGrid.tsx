@@ -290,7 +290,11 @@ function AppointmentBlock({
   onClick?: (appointment: Appointment) => void;
 }) {
   const { appointment: apt, topPct, heightPct, col, totalCols } = positioned;
-  const cancelled = (apt.status || '').toLowerCase() === 'cancelled';
+  // Canceled rows (admin- or client-initiated) are filtered out
+  // upstream in DashboardUI, so they never reach this pill. No-show
+  // rows DO render — with a struck-through, greyed-out treatment so
+  // the wasted slot stays visible without pretending it's bookable.
+  const isNoShow = (apt.status || '').toLowerCase() === 'no-show';
 
   const start = safeParseISO(apt.booking_time);
   const end = safeParseISO(apt.end_time);
@@ -318,8 +322,8 @@ function AppointmentBlock({
 
   const baseClasses =
     'absolute overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left';
-  const variantClasses = cancelled
-    ? 'border-l-[3px] border-amber-700 bg-amber-50'
+  const variantClasses = isNoShow
+    ? 'border-l-[3px] border-stone-400 bg-stone-50 opacity-60'
     : 'border-l-[3px] border-stone-800 bg-stone-100';
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
@@ -331,8 +335,8 @@ function AppointmentBlock({
       onClick={clickable ? handleClick : undefined}
       disabled={!clickable}
       className={`${baseClasses} ${variantClasses} ${interactiveClasses}`}
-      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}`}
-      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}`}
+      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}`}
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,
@@ -343,14 +347,14 @@ function AppointmentBlock({
     >
       <div
         className={`truncate text-xs font-medium ${
-          cancelled ? 'text-amber-800 line-through' : 'text-stone-900'
+          isNoShow ? 'text-gray-400 line-through' : 'text-stone-900'
         }`}
       >
         {name}
       </div>
       <div
         className={`truncate text-[10px] ${
-          cancelled ? 'text-amber-700' : 'text-stone-500'
+          isNoShow ? 'text-gray-400 line-through' : 'text-stone-500'
         }`}
       >
         {timeLabel}

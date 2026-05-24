@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   addDays,
   addWeeks,
@@ -82,6 +82,25 @@ export default function DashboardUI({
 
   const showDateNav = view === '3day' || view === 'week';
 
+  // The calendar / list views show ONLY the bookings that are still
+  // operationally relevant. Canceled rows (admin- or client-initiated)
+  // disappear from view entirely — the studio doesn't want to see
+  // ghost slots on the calendar. The original Appointment records
+  // remain in the DB and surface in the client profile's history so
+  // McKenna can audit the cancellation later.
+  //
+  // No-show rows DO render here, with a struck-through visual
+  // treatment defined in each child view, so a wasted slot stays
+  // visible at-a-glance without pretending the slot is still bookable.
+  const visibleAppointments = useMemo(
+    () =>
+      appointments.filter((a) => {
+        const s = (a.status || '').toLowerCase();
+        return s !== 'canceled_by_admin' && s !== 'canceled_by_client';
+      }),
+    [appointments]
+  );
+
   return (
     <div className="h-screen w-full overflow-hidden flex flex-col bg-[#FAF9F6] text-stone-900 font-sans">
       <AdminHeader title="Bookings" displayName={displayName}>
@@ -111,21 +130,21 @@ export default function DashboardUI({
           // blank scroll region. The other views (3-day / week / month)
           // always render their date grid so the studio still has a
           // calendar to look at when scheduling is light.
-          appointments.length === 0 ? (
+          visibleAppointments.length === 0 ? (
             <div className="flex h-full items-center justify-center">
               <p className="text-sm text-stone-500">No bookings yet.</p>
             </div>
           ) : (
-            <ListView appointments={appointments} />
+            <ListView appointments={visibleAppointments} />
           )
         ) : view === 'month' ? (
           <CalendarView
-            appointments={appointments}
+            appointments={visibleAppointments}
             onAppointmentClick={setSelectedAppointment}
           />
         ) : view === '3day' ? (
           <TimeGrid
-            appointments={appointments}
+            appointments={visibleAppointments}
             currentDate={currentDate}
             daysToShow={3}
             onDayClick={setModalDate}
@@ -133,7 +152,7 @@ export default function DashboardUI({
           />
         ) : (
           <TimeGrid
-            appointments={appointments}
+            appointments={visibleAppointments}
             currentDate={currentDate}
             daysToShow={7}
             onDayClick={setModalDate}
@@ -155,7 +174,7 @@ export default function DashboardUI({
           card on top rather than fighting it for stacking context. */}
       {modalDate !== null && (
         <SingleDayModal
-          appointments={appointments}
+          appointments={visibleAppointments}
           initialDate={modalDate}
           onClose={() => setModalDate(null)}
           onAppointmentClick={setSelectedAppointment}

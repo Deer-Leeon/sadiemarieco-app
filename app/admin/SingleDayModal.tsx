@@ -285,7 +285,11 @@ function ModalAppointment({
   onClick?: (appointment: Appointment) => void;
 }) {
   const { appointment: apt, topPct, heightPct, col, totalCols } = positioned;
-  const cancelled = (apt.status || '').toLowerCase() === 'cancelled';
+  // Canceled rows are filtered out at DashboardUI before reaching
+  // this modal, so the only special-case left here is no-show: render
+  // it as a struck-through, greyed-out pill so the wasted slot is
+  // visible without looking actionable.
+  const isNoShow = (apt.status || '').toLowerCase() === 'no-show';
 
   const start = safeParseISO(apt.booking_time);
   const end = safeParseISO(apt.end_time);
@@ -317,8 +321,8 @@ function ModalAppointment({
 
   const baseClasses =
     'absolute overflow-hidden rounded-sm p-2 shadow-sm transition-colors text-left';
-  const variantClasses = cancelled
-    ? 'border-l-[3px] border-amber-700 bg-amber-50'
+  const variantClasses = isNoShow
+    ? 'border-l-[3px] border-stone-400 bg-stone-50 opacity-60'
     : 'border-l-[3px] border-stone-800 bg-stone-100';
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
@@ -330,8 +334,8 @@ function ModalAppointment({
       onClick={clickable ? handleClick : undefined}
       disabled={!clickable}
       className={`${baseClasses} ${variantClasses} ${interactiveClasses}`}
-      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}`}
-      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}`}
+      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}`}
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,
@@ -342,14 +346,14 @@ function ModalAppointment({
     >
       <div
         className={`truncate text-sm font-medium ${
-          cancelled ? 'text-amber-800 line-through' : 'text-stone-900'
+          isNoShow ? 'text-gray-400 line-through' : 'text-stone-900'
         }`}
       >
         {name}
       </div>
       <div
         className={`mt-0.5 truncate text-[11px] ${
-          cancelled ? 'text-amber-700' : 'text-stone-500'
+          isNoShow ? 'text-gray-400 line-through' : 'text-stone-500'
         }`}
       >
         {timeLabel}

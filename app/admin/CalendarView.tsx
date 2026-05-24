@@ -263,8 +263,12 @@ function AppointmentPill({
   appointment: Appointment;
   onClick?: (appointment: Appointment) => void;
 }) {
+  // Canceled rows are filtered upstream in DashboardUI before they
+  // ever reach CalendarView, so the only visual special-case here is
+  // no-show: render with strikethrough + greyed-out colours so the
+  // wasted slot is still visible at a glance.
   const status = (appointment.status || '').toLowerCase();
-  const isCancelled = status === 'cancelled';
+  const isNoShow = status === 'no-show';
   const time = appointment.booking_time
     ? format(parseISO(appointment.booking_time), 'h:mm a')
     : '';
@@ -283,16 +287,18 @@ function AppointmentPill({
     <button
       type="button"
       onClick={onClick ? handleClick : undefined}
-      title={`${time ? time + ' · ' : ''}${name} — ${service}`}
-      aria-label={`Open booking: ${name}, ${service}${time ? `, ${time}` : ''}`}
+      title={`${time ? time + ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${time ? `, ${time}` : ''}${isNoShow ? ', no-show' : ''}`}
       className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] transition-colors ${
-        isCancelled
-          ? 'bg-amber-50 text-amber-700 line-through hover:bg-amber-100'
+        isNoShow
+          ? 'bg-stone-50 text-gray-400 line-through opacity-60 hover:bg-stone-100'
           : 'bg-stone-100 text-stone-800 hover:bg-stone-200'
       } ${onClick ? 'cursor-pointer' : ''}`}
     >
       <span className="font-medium">{time}</span>{' '}
-      <span className="text-stone-600">{name}</span>
+      <span className={isNoShow ? 'text-gray-400' : 'text-stone-600'}>
+        {name}
+      </span>
     </button>
   );
 }
