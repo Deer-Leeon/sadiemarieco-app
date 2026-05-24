@@ -203,18 +203,3 @@ export interface ClientPhoto {
   uploaded_at: string;
 }
 
-/**
- * A row in the client's appointment history (what
- * /api/admin/clients/[id]/appointments returns). Lighter shape than
- * the dashboard's `Appointment` — we only show date, time, service
- * name and status in the modal's history list.
- */
-export interface ClientAppointment {
-  id: string;
-  service_name: string | null;
-  /** ISO 8601 string. */
-  booking_time: string | null;
-  /** ISO 8601 string. */
-  end_time: string | null;
-  status: string | null;
-}

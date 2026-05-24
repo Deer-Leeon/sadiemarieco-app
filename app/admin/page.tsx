@@ -117,6 +117,16 @@ export default async function AdminPage() {
     // Inactive site_services rows (is_active = FALSE) are filtered out
     // explicitly so a soft-deleted service doesn't keep enriching new
     // appointments after it's been retired.
+    // LEFT JOIN LATERAL with LIMIT 1 instead of a plain LEFT JOIN: the
+    // site_services table can hold multiple rows with the same title
+    // (e.g. "Classic" / "Hybrid" / "Volume" exist as children under each
+    // of the 2-Week / 3-Week / 4-Week Fill groups). A naive equality
+    // join multiplies every appointment by the match count — same
+    // booking rendered three times in every calendar view, same `id`
+    // appearing as duplicate React keys (see browser console). The
+    // lateral keeps exactly one enrichment row per appointment,
+    // deterministically picking the most-recently-touched matching
+    // service so the price / slug we display is the freshest available.
     const { rows } = await sql<DbRow>`
       SELECT
         a.id,
@@ -133,9 +143,14 @@ export default async function AdminPage() {
         s.description AS service_description,
         s.slug        AS service_slug
       FROM appointments a
-      LEFT JOIN site_services s
-        ON s.title = split_part(a.service_name, ' between ', 1)
-       AND s.is_active = TRUE
+      LEFT JOIN LATERAL (
+        SELECT s.price, s.description, s.slug
+        FROM site_services s
+        WHERE s.title = split_part(a.service_name, ' between ', 1)
+          AND s.is_active = TRUE
+        ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
+        LIMIT 1
+      ) s ON TRUE
       WHERE a.booking_time >= NOW() - INTERVAL '30 days'
       ORDER BY a.booking_time ASC
       LIMIT 1000

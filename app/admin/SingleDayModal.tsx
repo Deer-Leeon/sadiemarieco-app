@@ -5,7 +5,8 @@ import { addDays, format, subDays } from 'date-fns';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 
 import type { Appointment } from './types';
-import { cleanServiceName, clientDisplayName } from './helpers';
+import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import { getServiceColor } from './serviceColors';
 import {
   HOURS,
   MIN_PILL_HEIGHT_PX,
@@ -300,7 +301,7 @@ function ModalAppointment({
     : '';
 
   const name = clientDisplayName(apt.client_first_name, apt.client_last_name);
-  const service = cleanServiceName(apt.service_name);
+  const service = appointmentServiceLabel(apt);
 
   // Single-pill case (no overlap): renders exactly per the spec —
   //   absolute w-[calc(100%-1rem)] ml-2
@@ -319,11 +320,17 @@ function ModalAppointment({
   };
   const clickable = !!onClick;
 
+  // Same colour-coding contract as TimeGrid / ListView — accent
+  // border + faint tint for active bookings, untouched neutral grey
+  // for no-shows so the strike-through still reads as "wasted slot".
+  const color = isNoShow ? null : getServiceColor(apt);
   const baseClasses =
-    'absolute overflow-hidden rounded-sm p-2 shadow-sm transition-colors text-left';
+    'absolute overflow-hidden rounded-sm border-l-[3px] p-2 shadow-sm transition-colors text-left';
   const variantClasses = isNoShow
-    ? 'border-l-[3px] border-stone-400 bg-stone-50 opacity-60'
-    : 'border-l-[3px] border-stone-800 bg-stone-100';
+    ? 'border-stone-400 bg-stone-50 opacity-60'
+    : color
+      ? ''
+      : 'border-stone-800 bg-stone-100';
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : '';
@@ -342,6 +349,10 @@ function ModalAppointment({
         minHeight: MIN_PILL_HEIGHT_PX,
         left: `calc(${leftPct}% + 0.5rem)`,
         width: `calc(${widthPct}% - 1rem)`,
+        ...(color && {
+          borderLeftColor: color.accent,
+          backgroundColor: color.tint,
+        }),
       }}
     >
       <div

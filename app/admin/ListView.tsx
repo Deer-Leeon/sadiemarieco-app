@@ -3,7 +3,8 @@
 import { format, parseISO, startOfDay } from 'date-fns';
 
 import type { Appointment } from './types';
-import { cleanServiceName, clientDisplayName } from './helpers';
+import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import { getServiceColor } from './serviceColors';
 
 const TIME_FORMAT = 'h:mm a';
 const DAY_HEADER_FORMAT = 'EEEE, MMMM d';
@@ -111,11 +112,25 @@ function AppointmentRow({ appointment }: { appointment: Appointment }) {
   // out + struck through so the wasted slot is visible without
   // pretending it's bookable.
   const isNoShow = (appointment.status || '').toLowerCase() === 'no-show';
+  // Subtle service-type colour coding: 4px left accent + faint
+  // background tint. No-show rows skip the colour entirely — a
+  // wasted slot should read as "neutral grey" and the strike-through
+  // carries the meaning. Returns null for any service we haven't
+  // colour-coded yet (defaults to the unchanged white card).
+  const color = isNoShow ? null : getServiceColor(appointment);
+  const colorStyle = color
+    ? {
+        borderLeftWidth: '4px',
+        borderLeftColor: color.accent,
+        backgroundColor: color.tint,
+      }
+    : undefined;
   return (
     <li
       className={`grid grid-cols-[80px_1fr_auto] items-center gap-4 rounded-lg border border-stone-200 bg-white px-4 py-3 transition-shadow hover:shadow-sm ${
         isNoShow ? 'opacity-60' : ''
       }`}
+      style={colorStyle}
     >
       <span
         className={`font-serif text-base ${
@@ -140,7 +155,7 @@ function AppointmentRow({ appointment }: { appointment: Appointment }) {
             isNoShow ? 'text-gray-400 line-through' : 'text-stone-500'
           }`}
         >
-          {cleanServiceName(appointment.service_name)}
+          {appointmentServiceLabel(appointment)}
         </p>
       </div>
       <StatusPill status={appointment.status} />

@@ -9,7 +9,8 @@ import {
 } from 'date-fns';
 
 import type { Appointment } from './types';
-import { cleanServiceName, clientDisplayName } from './helpers';
+import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import { getServiceColor } from './serviceColors';
 import {
   HOURS,
   MIN_PILL_HEIGHT_PX,
@@ -305,7 +306,7 @@ function AppointmentBlock({
     : '';
 
   const name = clientDisplayName(apt.client_first_name, apt.client_last_name);
-  const service = cleanServiceName(apt.service_name);
+  const service = appointmentServiceLabel(apt);
 
   const widthPct = 100 / totalCols;
   const leftPct = col * widthPct;
@@ -320,11 +321,18 @@ function AppointmentBlock({
   };
   const clickable = !!onClick;
 
+  // Service-type colour coding for active rows. No-show pills keep
+  // the neutral grey treatment so the wasted slot reads as "this
+  // didn't happen" regardless of what was booked. Unmapped services
+  // fall back to the original stone palette.
+  const color = isNoShow ? null : getServiceColor(apt);
   const baseClasses =
-    'absolute overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left';
+    'absolute overflow-hidden rounded-sm border-l-[3px] p-1.5 shadow-sm transition-colors text-left';
   const variantClasses = isNoShow
-    ? 'border-l-[3px] border-stone-400 bg-stone-50 opacity-60'
-    : 'border-l-[3px] border-stone-800 bg-stone-100';
+    ? 'border-stone-400 bg-stone-50 opacity-60'
+    : color
+      ? ''
+      : 'border-stone-800 bg-stone-100';
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : 'pointer-events-none';
@@ -343,6 +351,10 @@ function AppointmentBlock({
         minHeight: MIN_PILL_HEIGHT_PX,
         left: `calc(${leftPct}% + 2px)`,
         width: `calc(${widthPct}% - 4px)`,
+        ...(color && {
+          borderLeftColor: color.accent,
+          backgroundColor: color.tint,
+        }),
       }}
     >
       <div

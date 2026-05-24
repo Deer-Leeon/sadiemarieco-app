@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 
 import type { Appointment, AppointmentStatus } from './types';
-import { cleanServiceName, clientDisplayName } from './helpers';
+import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import ClientProfileModal from './ClientProfileModal';
 
 // Cal.com embed namespace. Used both as the React component's
@@ -46,7 +46,50 @@ const CAL_USERNAME = 'mckenna-sadiemarie';
 interface Props {
   appointment: Appointment;
   onClose: () => void;
+  /**
+   * Set when this modal is rendered ON TOP of another modal — e.g.
+   * opened from the appointment-history list inside a
+   * ClientProfileModal. Two things change in that mode:
+   *
+   *   1. z-index bumps from z-60 to z-70 so the new shell stacks
+   *      visually above the underlying one (which sits at z-60).
+   *   2. ESC dispatches through a module-scope LIFO stack (see
+   *      `escStack` below) so a single keystroke only dismisses
+   *      the topmost modal, not every open modal in the tree.
+   *
+   * Body scroll lock is safe to leave unchanged: the snapshot
+   * pattern stores the parent's already-locked value on mount and
+   * restores it on unmount, so the outer modal's lock survives.
+   */
+  stacked?: boolean;
+  /**
+   * Fires immediately before `onClose` whenever the user actually
+   * mutated the appointment from inside the modal (status PATCH:
+   * no-show / cancel, OR a successful reschedule). NOT called when
+   * the user just opens and closes without changes — that means
+   * a parent rendering a list can skip the refetch in the
+   * just-looking case.
+   *
+   * router.refresh() is still fired by the modal itself for every
+   * mutation, so server components stay consistent regardless of
+   * whether the parent uses this callback.
+   */
+  onMutated?: () => void;
 }
+
+/**
+ * Module-scope LIFO stack of open AppointmentModal close handlers.
+ * Whenever an instance mounts it pushes its `onClose`; on unmount
+ * it removes itself. The keydown handler each instance registers
+ * only fires for the topmost entry, so a stack of N modals
+ * (e.g. dashboard → appointment → client → another appointment)
+ * dismisses one ESC press at a time.
+ *
+ * We keep this here (rather than a Context provider) because it's
+ * a cross-tree concern — a modal opened from inside another
+ * modal's body has no shared React parent that could mediate.
+ */
+const escStack: Array<() => void> = [];
 
 /**
  * The modal's top-level content swap. AppointmentModal owns the
@@ -91,7 +134,12 @@ type ModalView = 'appointment' | 'client';
  * previously-observed value on unmount, so the outer modal's lock is
  * re-applied correctly when this one closes.
  */
-export default function AppointmentModal({ appointment, onClose }: Props) {
+export default function AppointmentModal({
+  appointment,
+  onClose,
+  stacked = false,
+  onMutated,
+}: Props) {
   const router = useRouter();
 
   // Internal "what content is rendered inside the shell" state. The
@@ -171,6 +219,11 @@ export default function AppointmentModal({ appointment, onClose }: Props) {
         );
       }
       router.refresh();
+      // Signal mutation to any list rendering this appointment so
+      // it can refresh its own local copy (stale-while-revalidate).
+      // Called BEFORE onClose so the parent can capture state
+      // synchronously before this modal unmounts.
+      onMutated?.();
       onClose();
     } catch (err) {
       setStatusError(err instanceof Error ? err.message : String(err));
@@ -182,12 +235,25 @@ export default function AppointmentModal({ appointment, onClose }: Props) {
   // which child element has focus when the user hits the key. While
   // the reschedule embed is open we let the user bail with ESC too —
   // it's a less destructive "abort" than the explicit Back button.
+  //
+  // Stacking: each instance pushes its `onClose` onto `escStack`
+  // on mount, and the keydown handler only fires for the topmost
+  // entry. This means a stacked modal (e.g. an appointment opened
+  // from inside a ClientProfileModal's history list) eats one ESC
+  // press without also dismissing the modal underneath it.
   useEffect(() => {
+    escStack.push(onClose);
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      if (escStack[escStack.length - 1] !== onClose) return;
+      onClose();
     }
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      const i = escStack.lastIndexOf(onClose);
+      if (i >= 0) escStack.splice(i, 1);
+      window.removeEventListener('keydown', onKey);
+    };
   }, [onClose]);
 
   // Body scroll lock + restore. Snapshotting `previous` rather than
@@ -209,7 +275,9 @@ export default function AppointmentModal({ appointment, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-60 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm"
+      className={`fixed inset-0 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm ${
+        stacked ? 'z-70' : 'z-60'
+      }`}
       onClick={onClose}
       role="presentation"
     >
@@ -230,7 +298,14 @@ export default function AppointmentModal({ appointment, onClose }: Props) {
           <RescheduleView
             appointment={appointment}
             onBack={() => setIsRescheduling(false)}
-            onClose={onClose}
+            // RescheduleView only calls onClose after a successful
+            // reschedule (the Back button uses onBack instead), so
+            // wrapping with onMutated here is precise: it fires
+            // exactly when the booking actually changed time.
+            onClose={() => {
+              onMutated?.();
+              onClose();
+            }}
           />
         ) : view === 'appointment' ? (
           <>
@@ -259,7 +334,8 @@ export default function AppointmentModal({ appointment, onClose }: Props) {
         ) : (
           <ClientProfileModal
             appointment={appointment}
-            onBackToAppointment={() => setView('appointment')}
+            backLabel="Appointment"
+            onBack={() => setView('appointment')}
             onClose={onClose}
           />
         )}
@@ -452,11 +528,11 @@ function DateTimeBox({ appointment }: { appointment: Appointment }) {
 }
 
 function ServiceBox({ appointment }: { appointment: Appointment }) {
-  // The cleaned name is what the rest of the dashboard already shows
-  // — `cleanServiceName` strips Cal's "between X and Y" suffix. We
-  // reuse it here so the modal reads consistently with the timeline
-  // pills the editor clicked through from.
-  const title = cleanServiceName(appointment.service_name);
+  // Use the duration-aware label so a bare "Classic" appointment
+  // reads as "Classic 2 Week Fill" in the modal, matching the
+  // calendar / list view the editor clicked through from. Strips
+  // Cal's "between X and Y" suffix the same way.
+  const title = appointmentServiceLabel(appointment);
   const description = appointment.service_description;
   const price = appointment.service_price;
 

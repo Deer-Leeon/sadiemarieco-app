@@ -50,59 +50,96 @@ import {
   X,
 } from 'lucide-react';
 
-import type {
-  Appointment,
-  Client,
-  ClientAppointment,
-  ClientPhoto,
-} from './types';
-import { cleanServiceName, clientDisplayName } from './helpers';
+import type { Appointment, Client, ClientPhoto } from './types';
+import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import { getServiceColor } from './serviceColors';
+// Circular import: AppointmentModal imports ClientProfileModal (for the
+// "Client" tab) and ClientProfileModal imports AppointmentModal (for
+// the stacked "manage this appointment" overlay launched from the
+// appointment-history list). Both references are inside component
+// bodies (not module-init), so the bundler resolves them lazily on
+// first render and the cycle is harmless.
+import AppointmentModal from './AppointmentModal';
 
 // ─── PUBLIC TYPES ──────────────────────────────────────────────────────────
 
-interface Props {
-  /**
-   * The appointment we drilled in from. We use it as the source of
-   * truth for the client's phone (the CRM identifier) plus
-   * best-effort name/email fallbacks if this is a first-touch
-   * create.
-   */
-  appointment: Appointment;
-  /**
-   * "← Back to appointment" — restores the appointment detail view
-   * inside the parent modal shell without closing it.
-   */
-  onBackToAppointment: () => void;
+/**
+ * Common props shared by both entry-point variants.
+ *
+ * `backLabel` is required (rather than defaulted) so the caller
+ * has to explicitly choose what the back button reads as — it's
+ * the only visible chrome that telegraphs where the user came
+ * from, and a stale default would be worse than a build error.
+ */
+interface BaseProps {
+  /** Restores the previous view (typically by closing this modal). */
+  onBack: () => void;
+  /** Text on the back affordance, e.g. 'Appointment' or 'Clients'. */
+  backLabel: string;
   /** Closes the entire modal (parent's X handler). */
   onClose: () => void;
 }
+
+/**
+ * "From appointment" entry: the admin drilled in from an
+ * appointment row. The modal first-touch-upserts a `clients` row
+ * keyed by the appointment's phone so it works even on bookings
+ * that predate the CRM.
+ */
+interface FromAppointmentProps extends BaseProps {
+  appointment: Appointment;
+  initialClient?: never;
+}
+
+/**
+ * "From client directory" entry: the admin clicked a row in
+ * `/admin/clients`. We already have the canonical Client in hand,
+ * so the modal skips the first-touch upsert entirely and seeds
+ * state from the supplied row. The bootstrap effect is a no-op in
+ * this mode.
+ */
+interface FromClientProps extends BaseProps {
+  initialClient: Client;
+  appointment?: never;
+}
+
+type Props = FromAppointmentProps | FromClientProps;
 
 type ProfileView = 'overview' | 'appointments' | 'pictures' | 'edit_info';
 
 // ─── ROOT ───────────────────────────────────────────────────────────────────
 
-export default function ClientProfileModal({
-  appointment,
-  onBackToAppointment,
-  onClose,
-}: Props) {
+export default function ClientProfileModal(props: Props) {
+  const { onBack, backLabel, onClose } = props;
+  const appointment = props.appointment;
+  const initialClient = props.initialClient;
+
   const [view, setView] = useState<ProfileView>('overview');
 
-  // The Client record we're working with. Null while the first
-  // POST is in flight. After mount this is the SINGLE source of
-  // truth for the modal's identity boxes; PATCH responses replace
-  // it in place so the UI reflects edits immediately.
-  const [client, setClient] = useState<Client | null>(null);
+  // The Client record we're working with. When entering from the
+  // directory we seed this immediately from `initialClient` and
+  // skip the bootstrap roundtrip — the source of truth already
+  // exists in props. When entering from an appointment we leave
+  // it null until the first-touch POST resolves.
+  const [client, setClient] = useState<Client | null>(initialClient ?? null);
   const [clientErr, setClientErr] = useState<string | null>(null);
-  const [bootstrapping, setBootstrapping] = useState(true);
+  const [bootstrapping, setBootstrapping] = useState(
+    initialClient ? false : true
+  );
 
-  // First-touch upsert. We POST the appointment's contact info — the
-  // API will either return the existing row (if a clients record
-  // already exists for this phone) or create one. Either way we get
-  // back a Client we can render.
+  // First-touch upsert — appointment-entry only. We POST the
+  // appointment's contact info; the API either returns the
+  // existing row (if a clients record already exists for this
+  // phone) or creates one. Either way we get back a Client we can
+  // render. Skipped when `initialClient` was provided.
   useEffect(() => {
+    if (!appointment) return; // directory entry — nothing to bootstrap
     let cancelled = false;
     async function bootstrap() {
+      // Narrowing for the closure — TypeScript can't see through
+      // the outer guard when the effect body re-references the
+      // captured variable.
+      if (!appointment) return;
       setBootstrapping(true);
       setClientErr(null);
       try {
@@ -139,11 +176,26 @@ export default function ClientProfileModal({
     // doesn't happen mid-modal but keeps the effect honest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    appointment.client_phone,
-    appointment.client_first_name,
-    appointment.client_last_name,
-    appointment.client_email,
+    appointment?.client_phone,
+    appointment?.client_first_name,
+    appointment?.client_last_name,
+    appointment?.client_email,
   ]);
+
+  // Header fallback name — only used in the brief bootstrap
+  // window when `client` is still null. From the appointment
+  // entry we have name fields on the appointment; from the
+  // directory we always have `initialClient` so this never
+  // shows the fallback.
+  const fallbackName = appointment
+    ? clientDisplayName(
+        appointment.client_first_name,
+        appointment.client_last_name
+      )
+    : clientDisplayName(
+        initialClient?.first_name ?? null,
+        initialClient?.last_name ?? null
+      );
 
   // Body sub-views need to push a "back" button when they're not at
   // the root. Centralising the header here keeps the chrome
@@ -154,15 +206,11 @@ export default function ClientProfileModal({
   return (
     <>
       <ProfileHeader
-        appointment={appointment}
+        fallbackName={fallbackName}
         client={client}
         view={view}
-        onBack={
-          isRoot
-            ? onBackToAppointment
-            : () => setView('overview')
-        }
-        backLabel={isRoot ? 'Appointment' : 'Profile'}
+        onBack={isRoot ? onBack : () => setView('overview')}
+        backLabel={isRoot ? backLabel : 'Profile'}
         onClose={onClose}
       />
 
@@ -199,29 +247,33 @@ export default function ClientProfileModal({
 // ─── HEADER ─────────────────────────────────────────────────────────────────
 
 function ProfileHeader({
-  appointment,
+  fallbackName,
   client,
   view,
   onBack,
   backLabel,
   onClose,
 }: {
-  appointment: Appointment;
+  /**
+   * Displayed in the header title while `client` is still null
+   * (the brief bootstrap window when entering from an
+   * appointment). Once `client` resolves we always prefer its
+   * canonical name. Caller is responsible for composing a sensible
+   * fallback — see the parent's `fallbackName` derivation.
+   */
+  fallbackName: string;
   client: Client | null;
   view: ProfileView;
   onBack: () => void;
   backLabel: string;
   onClose: () => void;
 }) {
-  // Title: while bootstrapping we fall back to the appointment's name
+  // Title: while bootstrapping we fall back to the supplied name
   // so the header doesn't flash "Unknown". Subtitle adapts to the
   // current view so the admin always knows where they are.
   const displayName = client
     ? clientDisplayName(client.first_name, client.last_name)
-    : clientDisplayName(
-        appointment.client_first_name,
-        appointment.client_last_name
-      );
+    : fallbackName;
 
   const subtitle = (
     {
@@ -443,9 +495,30 @@ function ActionBox({
 // ─── APPOINTMENTS ───────────────────────────────────────────────────────────
 
 function AppointmentsView({ client }: { client: Client }) {
-  const [appts, setAppts] = useState<ClientAppointment[] | null>(null);
+  const [appts, setAppts] = useState<Appointment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // The appointment currently open in the stacked AppointmentModal,
+  // or null when no modal is up. Clicking any history row sets this;
+  // the modal closing clears it.
+  const [openAppointment, setOpenAppointment] = useState<Appointment | null>(
+    null
+  );
+  // Bumped whenever an actual mutation happens inside the stacked
+  // modal (cancel / no-show / reschedule), which re-runs the fetch
+  // effect below. Just opening and closing an appointment without
+  // changes leaves this untouched — so the list stays exactly as it
+  // was and no network roundtrip happens at all.
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Set by the stacked AppointmentModal's onMutated callback when
+  // the admin actually changes the booking (cancel / no-show /
+  // reschedule). Read by `handleCloseStacked` below to decide
+  // whether to bump `refreshKey`. Declared with the other hooks so
+  // it stays above the early returns further down — moving it past
+  // them is a Rules-of-Hooks violation and caused an infinite
+  // remount + refetch loop in an earlier iteration.
+  const mutatedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -457,7 +530,7 @@ function AppointmentsView({ client }: { client: Client }) {
           const text = await res.text();
           throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
         }
-        return res.json() as Promise<{ appointments: ClientAppointment[] }>;
+        return res.json() as Promise<{ appointments: Appointment[] }>;
       })
       .then((data) => {
         if (!cancelled) setAppts(data.appointments);
@@ -473,7 +546,7 @@ function AppointmentsView({ client }: { client: Client }) {
     return () => {
       cancelled = true;
     };
-  }, [client.id]);
+  }, [client.id, refreshKey]);
 
   if (loading) return <CenteredSpinner label="Loading history…" />;
   if (error) return <InlineError message={error} />;
@@ -492,8 +565,8 @@ function AppointmentsView({ client }: { client: Client }) {
   // bookings are the most useful at a glance, so they sit on top
   // and we leave a subtle divider before the historical rows.
   const now = Date.now();
-  const upcoming: ClientAppointment[] = [];
-  const past: ClientAppointment[] = [];
+  const upcoming: Appointment[] = [];
+  const past: Appointment[] = [];
   for (const a of appts) {
     const t = a.booking_time ? parseISO(a.booking_time).getTime() : NaN;
     if (Number.isFinite(t) && t >= now) {
@@ -510,13 +583,31 @@ function AppointmentsView({ client }: { client: Client }) {
     return ta - tb;
   });
 
+  const handleSelect = (a: Appointment) => setOpenAppointment(a);
+
+  const handleCloseStacked = () => {
+    setOpenAppointment(null);
+    // Only refetch when the booking actually changed. A pure
+    // open-and-close (admin just peeked at details) skips the
+    // network roundtrip entirely and snaps straight back to the
+    // already-rendered list — no spinner, no flicker.
+    if (mutatedRef.current) {
+      setRefreshKey((k) => k + 1);
+      mutatedRef.current = false;
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4">
       {upcoming.length > 0 && (
         <Section label="Upcoming">
           <div className="flex flex-col gap-2">
             {upcoming.map((a) => (
-              <AppointmentRow key={a.id} appointment={a} />
+              <AppointmentRow
+                key={a.id}
+                appointment={a}
+                onSelect={() => handleSelect(a)}
+              />
             ))}
           </div>
         </Section>
@@ -525,10 +616,25 @@ function AppointmentsView({ client }: { client: Client }) {
         <Section label="Past">
           <div className="flex flex-col gap-2">
             {past.map((a) => (
-              <AppointmentRow key={a.id} appointment={a} />
+              <AppointmentRow
+                key={a.id}
+                appointment={a}
+                onSelect={() => handleSelect(a)}
+              />
             ))}
           </div>
         </Section>
+      )}
+
+      {openAppointment && (
+        <AppointmentModal
+          appointment={openAppointment}
+          onClose={handleCloseStacked}
+          onMutated={() => {
+            mutatedRef.current = true;
+          }}
+          stacked
+        />
       )}
     </div>
   );
@@ -551,7 +657,13 @@ function Section({
   );
 }
 
-function AppointmentRow({ appointment }: { appointment: ClientAppointment }) {
+function AppointmentRow({
+  appointment,
+  onSelect,
+}: {
+  appointment: Appointment;
+  onSelect: () => void;
+}) {
   const start = appointment.booking_time
     ? parseISO(appointment.booking_time)
     : null;
@@ -567,12 +679,28 @@ function AppointmentRow({ appointment }: { appointment: ClientAppointment }) {
   // bookings (cancellations, no-shows, etc.).
   const badge = describeRowBadge(appointment.status);
   const dim = badge !== null;
+  // Service-type accent + tint. Suppressed for any non-confirmed
+  // row (cancelled/no-show) so the existing dimmed-grey status
+  // treatment isn't overpowered — the colour rail belongs to live
+  // bookings only, the badge carries the meaning otherwise.
+  const color = dim ? null : getServiceColor(appointment);
+  const colorStyle = color
+    ? {
+        borderLeftWidth: '4px',
+        borderLeftColor: color.accent,
+        backgroundColor: color.tint,
+      }
+    : undefined;
 
   return (
-    <div
-      className={`rounded-lg border border-stone-200 bg-white p-3 ${
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-label={`Open appointment · ${appointmentServiceLabel(appointment)}`}
+      className={`group w-full rounded-lg border border-stone-200 bg-white p-3 text-left transition-shadow hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FAF9F6] ${
         dim ? 'opacity-70' : ''
       }`}
+      style={colorStyle}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
@@ -583,7 +711,7 @@ function AppointmentRow({ appointment }: { appointment: ClientAppointment }) {
                 : 'text-stone-900'
             }`}
           >
-            {cleanServiceName(appointment.service_name)}
+            {appointmentServiceLabel(appointment)}
           </p>
           <p className="mt-1 text-xs text-stone-500">
             {hasStart
@@ -595,15 +723,21 @@ function AppointmentRow({ appointment }: { appointment: ClientAppointment }) {
               : 'No time scheduled'}
           </p>
         </div>
-        {badge !== null && (
-          <span
-            className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.18em] ${badge.className}`}
-          >
-            {badge.label}
-          </span>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {badge !== null && (
+            <span
+              className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.18em] ${badge.className}`}
+            >
+              {badge.label}
+            </span>
+          )}
+          <ChevronRight
+            aria-hidden="true"
+            className="h-4 w-4 text-stone-300 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-stone-600"
+          />
+        </div>
       </div>
-    </div>
+    </button>
   );
 }
 

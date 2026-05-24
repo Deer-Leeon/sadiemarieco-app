@@ -14,7 +14,8 @@ import {
 } from 'date-fns';
 
 import type { Appointment } from './types';
-import { cleanServiceName, clientDisplayName } from './helpers';
+import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import { getServiceColor } from './serviceColors';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Constants
@@ -276,12 +277,24 @@ function AppointmentPill({
     appointment.client_first_name,
     appointment.client_last_name
   );
-  const service = cleanServiceName(appointment.service_name);
+  const service = appointmentServiceLabel(appointment);
 
   // The pill is already a <button>; we just bind the click. No
   // stopPropagation needed in the month view because the parent cell
   // doesn't have its own click handler (unlike the time-grid columns).
   const handleClick = () => onClick?.(appointment);
+
+  // Month-grid pills are 10px tall one-liners — a 3px accent border
+  // would eat the row visually, so colour-coded pills get a coloured
+  // tint background + a left-border bar via box-shadow inset (which
+  // doesn't disturb the truncation layout the way `border-left` would).
+  const color = isNoShow ? null : getServiceColor(appointment);
+  const colorStyle = color
+    ? {
+        backgroundColor: color.tint,
+        boxShadow: `inset 3px 0 0 0 ${color.accent}`,
+      }
+    : undefined;
 
   return (
     <button
@@ -292,8 +305,11 @@ function AppointmentPill({
       className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] transition-colors ${
         isNoShow
           ? 'bg-stone-50 text-gray-400 line-through opacity-60 hover:bg-stone-100'
-          : 'bg-stone-100 text-stone-800 hover:bg-stone-200'
+          : color
+            ? 'text-stone-800 hover:brightness-95'
+            : 'bg-stone-100 text-stone-800 hover:bg-stone-200'
       } ${onClick ? 'cursor-pointer' : ''}`}
+      style={colorStyle}
     >
       <span className="font-medium">{time}</span>{' '}
       <span className={isNoShow ? 'text-gray-400' : 'text-stone-600'}>

@@ -28,7 +28,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
-import type { ClientAppointment } from '@/app/admin/types';
+import type { Appointment } from '@/app/admin/types';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -36,21 +36,64 @@ export const revalidate = 0;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Row shape mirrors what the dashboard's main appointments query in
+ * `app/admin/page.tsx` returns. We pull the same superset of fields
+ * so a row clicked here can be dropped straight into the existing
+ * `<AppointmentModal />` (cancel / no-show / reschedule) without an
+ * extra round-trip to re-enrich it.
+ */
 interface AppointmentRow {
   id: string;
+  // appointments.cal_event_id — actually stores the Cal.com booking
+  // UID. Surfaced as `cal_uid` on the wire to match the type.
+  cal_event_id: string | null;
+  // site_services.slug — joined in below. Required by the reschedule
+  // embed; the cancel/no-show paths don't need it.
+  service_slug: string | null;
+  client_first_name: string | null;
+  client_last_name: string | null;
+  // TIMESTAMPTZ arrives as Date in some environments, ISO string in
+  // others. We normalise both to ISO string below.
+  booking_time: Date | string | null;
+  end_time: Date | string | null;
   service_name: string | null;
-  booking_time: string | null;
-  end_time: string | null;
   status: string | null;
+  client_phone: string | null;
+  client_email: string | null;
+  // NUMERIC arrives stringified — coerced to number below.
+  service_price: string | null;
+  service_description: string | null;
 }
 
-function rowToAppointment(row: AppointmentRow): ClientAppointment {
+function serializeDate(value: Date | string | null): string | null {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function rowToAppointment(row: AppointmentRow): Appointment {
   return {
     id: row.id,
+    cal_uid: row.cal_event_id,
+    client_first_name: row.client_first_name,
+    client_last_name: row.client_last_name,
+    booking_time: serializeDate(row.booking_time),
+    end_time: serializeDate(row.end_time),
     service_name: row.service_name,
-    booking_time: row.booking_time,
-    end_time: row.end_time,
     status: row.status,
+    client_phone: row.client_phone,
+    client_email: row.client_email,
+    service_price:
+      row.service_price === null
+        ? null
+        : (() => {
+            const n = Number(row.service_price);
+            return Number.isFinite(n) ? n : null;
+          })(),
+    service_description: row.service_description,
+    service_slug: row.service_slug,
   };
 }
 
@@ -102,22 +145,60 @@ export async function GET(
     // row has one of them blank. Postgres' NULL semantics mean
     // `LOWER(...) = NULL` is NULL (falsy), so a missing email on
     // either side just falls through to the other matchers.
+    //
+    // LEFT JOIN to site_services mirrors the dashboard's main
+    // appointments query (see `app/admin/page.tsx`) so rows pulled
+    // here are immediately usable in <AppointmentModal /> without a
+    // second roundtrip. The JOIN is on the cleaned service title
+    // (Cal.com pads it with "between …" suffixes) and filters to
+    // active services so a soft-deleted CMS row doesn't keep
+    // enriching new appointments after it's been retired.
+    // LEFT JOIN LATERAL (LIMIT 1) instead of a plain equality LEFT JOIN
+    // — site_services can hold multiple rows with the same title
+    // ("Classic" / "Hybrid" / "Volume" live as children under each of
+    // the 2-/3-/4-Week Fill groups), and a plain join would multiply
+    // every appointment row by the match count. That bug manifests as
+    // (1) duplicate React keys in the appointment-history list, and
+    // (2) the same booking appearing 2–3× in a client's history.
+    // Picking the most-recently-touched match keeps the price / slug
+    // we surface as fresh as possible without dragging the wrong row.
     const { rows } = await sql<AppointmentRow>`
-      SELECT id, service_name, booking_time, end_time, status
-      FROM appointments
+      SELECT
+        a.id,
+        a.cal_event_id,
+        a.client_first_name,
+        a.client_last_name,
+        a.booking_time,
+        a.end_time,
+        a.service_name,
+        a.status,
+        a.client_phone,
+        a.client_email,
+        s.price       AS service_price,
+        s.description AS service_description,
+        s.slug        AS service_slug
+      FROM appointments a
+      LEFT JOIN LATERAL (
+        SELECT s.price, s.description, s.slug
+        FROM site_services s
+        WHERE s.title = split_part(a.service_name, ' between ', 1)
+          AND s.is_active = TRUE
+        ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
+        LIMIT 1
+      ) s ON TRUE
       WHERE
-            client_id = ${client.id}::uuid
+            a.client_id = ${client.id}::uuid
          OR (
               ${client.email}::text IS NOT NULL
-              AND client_email IS NOT NULL
-              AND LOWER(TRIM(client_email)) = LOWER(TRIM(${client.email}))
+              AND a.client_email IS NOT NULL
+              AND LOWER(TRIM(a.client_email)) = LOWER(TRIM(${client.email}))
             )
          OR (
               ${client.phone}::text IS NOT NULL
-              AND client_phone IS NOT NULL
-              AND regexp_replace(client_phone, '\D', '', 'g') = ${client.phone}
+              AND a.client_phone IS NOT NULL
+              AND regexp_replace(a.client_phone, '\D', '', 'g') = ${client.phone}
             )
-      ORDER BY booking_time DESC NULLS LAST, id DESC
+      ORDER BY a.booking_time DESC NULLS LAST, a.id DESC
       LIMIT 500
     `;
     return NextResponse.json({ appointments: rows.map(rowToAppointment) });
