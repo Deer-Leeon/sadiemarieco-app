@@ -685,6 +685,9 @@ nav.scrolled { padding: 16px 64px; }
 .about-outer {
   display: grid;
   grid-template-columns: 5fr 7fr;
+  /* Editorial gutter between portrait + copy — keeps the layout
+     airy on wide screens without stretching body text. */
+  column-gap: clamp(3rem, 5vw, 6rem);
   min-height: 700px;
   position: relative;
 }
@@ -700,46 +703,21 @@ nav.scrolled { padding: 16px 64px; }
   display: block;
   filter: saturate(0.85) contrast(1.02);
 }
-.about-overlap-box {
-  position: absolute;
-  bottom: 60px;
-  right: -80px;
-  width: 280px;
-  background: var(--navy);
-  color: var(--off-white);
-  padding: 32px 32px 32px 36px;
-  z-index: 10;
-}
-.about-overlap-box blockquote {
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: 1.05rem;
-  line-height: 1.7;
-  font-weight: 400;
-  opacity: 0.9;
-}
-.about-overlap-box cite {
-  display: block;
-  margin-top: 14px;
-  font-family: var(--sans);
-  font-size: 0.56rem;
-  font-weight: 300;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  opacity: 0.45;
-  font-style: normal;
-}
 .about-content-panel {
-  padding: 100px 80px 80px 120px;
+  /* Left padding eases slightly — column-gap now carries the
+     separation from the photo on desktop. */
+  padding: 100px clamp(40px, 5vw, 72px) 80px clamp(48px, 6vw, 96px);
   background: var(--cloud);
   position: relative;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  min-width: 0;
 }
 .about-bg-word {
   position: absolute;
-  top: 10px; left: -20px;
+  top: 12px;
+  left: clamp(0px, 1vw, 16px);
   font-family: var(--serif);
   font-size: clamp(7rem, 14vw, 18rem);
   font-weight: 700;
@@ -755,7 +733,7 @@ nav.scrolled { padding: 16px 64px; }
   font-weight: 400;
   line-height: 1.1;
   color: var(--navy);
-  margin-bottom: 32px;
+  margin-bottom: 12px;
   position: relative;
   -webkit-text-stroke: 1px var(--navy);
 }
@@ -763,26 +741,107 @@ nav.scrolled { padding: 16px 64px; }
   font-style: italic;
   -webkit-text-stroke: 1px var(--navy);
 }
+/* Role line — must read clearly as McKenna's title, separate from the
+   "why we named the studio" story below. */
+.about-role-block {
+  margin: 8px 0 0;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--cloud-mid);
+  position: relative;
+  max-width: 28em;
+}
+.about-role {
+  font-family: var(--serif);
+  font-size: clamp(1.65rem, 2.8vw, 2.35rem);
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  color: var(--navy);
+  margin: 0;
+  -webkit-text-stroke: 0.5px var(--navy);
+}
+.about-role em {
+  font-style: italic;
+  font-weight: 400;
+}
+/* "The name" bridges Owner → origin story so readers know the
+   next block explains Sadie Marie, not McKenna's credentials. */
+.about-name-origin {
+  margin-top: 36px;
+  margin-bottom: 28px;
+  position: relative;
+  max-width: 36em;
+}
+.about-origin-label {
+  display: block;
+  font-family: var(--sans);
+  font-size: 0.58rem;
+  font-weight: 300;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--mist);
+  margin-bottom: 14px;
+}
 .about-intro {
   font-family: var(--serif-alt);
   font-style: italic;
-  font-size: 1.12rem;
+  font-size: 1.05rem;
   font-weight: 400;
-  color: var(--ink);
-  line-height: 1.8;
-  margin-bottom: 24px;
+  color: #4a5468;
+  line-height: 1.9;
+  margin: 0;
   position: relative;
-  border-left: 3px solid var(--navy);
-  padding-left: 22px;
+  border-left: 2px solid rgba(13, 27, 42, 0.22);
+  padding-left: 20px;
+}
+.about-intro em {
+  font-style: italic;
+  font-weight: 500;
+  color: var(--navy);
+  letter-spacing: 0.02em;
+}
+.about-phonetic {
+  font-family: var(--sans);
+  font-style: normal;
+  font-size: 0.72em;
+  font-weight: 300;
+  letter-spacing: 0.12em;
+  color: var(--mist);
+  margin-left: 0.15em;
+  white-space: nowrap;
+}
+/* Magazine-column measure for credentials + studio promise —
+   prevents long horizontal lines on wide viewports. */
+.about-bio {
+  max-width: 32rem;
+  margin-top: 4px;
+  position: relative;
 }
 .about-body {
   font-family: var(--sans);
   font-size: 0.86rem;
   font-weight: 300;
-  line-height: 2;
+  line-height: 1.95;
   color: #3a4250;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
   position: relative;
+  max-width: none;
+}
+.about-body:last-child {
+  margin-bottom: 0;
+}
+.about-closing {
+  font-family: var(--serif);
+  font-size: clamp(1.35rem, 2vw, 1.65rem);
+  font-weight: 400;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--navy);
+  margin-top: 40px;
+  padding-top: 32px;
+  border-top: 1px solid var(--cloud-mid);
+  position: relative;
+  max-width: 32rem;
 }
 .about-stats {
   display: grid;
@@ -1339,8 +1398,11 @@ footer {
   .services-cols { grid-template-columns: 1fr 1px 1fr; }
   .services-cols .col-rule:last-of-type { display: none; }
   .services-cols > div:last-child { grid-column: 1 / -1; }
-  .about-content-panel { padding: 80px 50px 60px 80px; }
-  .about-bg-word { font-size: 10rem; }
+  .about-outer { column-gap: 2.5rem; }
+  .about-content-panel { padding: 80px 40px 60px 56px; }
+  .about-bg-word { font-size: 10rem; left: 0; }
+  .about-bio,
+  .about-closing { max-width: 100%; }
   #portfolio { padding: 80px 36px; }
   .portfolio-collage { grid-template-rows: 260px 200px; }
   #policies { padding: 90px 36px; }
@@ -1370,13 +1432,13 @@ footer {
   .services-note { text-align: left; max-width: none; }
   .services-cols { grid-template-columns: 1fr; }
   .col-rule { display: none; }
-  .about-outer { grid-template-columns: 1fr; }
+  .about-outer {
+    grid-template-columns: 1fr;
+    column-gap: 0;
+  }
   .about-img-panel { min-height: 70vw; }
-  .about-overlap-box { display: none; }
   .about-content-panel { padding: 60px 24px 60px; }
   .about-bg-word { display: none; }
-  .about-stats { grid-template-columns: 1fr 1fr; }
-  .about-stats .stat:last-child { display: none; }
   #portfolio { padding: 80px 24px; }
   .portfolio-masthead { flex-direction: column; align-items: flex-start; gap: 16px; }
   .p-item-1 { grid-column: 1 / 13; grid-row: 1; }

@@ -106,14 +106,21 @@ interface SiteServiceRow {
   parent_id: number | null;
 }
 
-// Module-scope cache for the static HTML. Safe because the file only
-// changes on deploy (which spins up a fresh serverless instance with an
-// empty cache). In dev, Next's HMR re-evaluates this module on file
-// change so the cache resets automatically.
+// Module-scope cache for the static HTML. Safe in production because
+// the file only changes on deploy (which spins up a fresh serverless
+// instance with an empty cache).
+//
+// In development we deliberately skip the cache: files under `public/`
+// are static assets, not part of the React module graph, so Next's HMR
+// does NOT re-evaluate this route module when index.html changes.
+// Without a re-read on every dev request, edits to the marketing HTML
+// would only appear after a full dev-server restart — surprising and
+// easy to mistake for a code bug. The re-read is a single ~25KB disk
+// hit, negligible at dev volumes.
 let cachedHtml: string | null = null;
 
 async function loadIndexHtml(): Promise<string> {
-  if (cachedHtml) return cachedHtml;
+  if (cachedHtml && process.env.NODE_ENV === 'production') return cachedHtml;
   const filePath = path.join(process.cwd(), 'public', 'index.html');
   cachedHtml = await fs.readFile(filePath, 'utf-8');
   return cachedHtml;
