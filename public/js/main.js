@@ -7,6 +7,49 @@
 (function () {
   'use strict';
 
+  // ── MARQUEE (seamless infinite scroll) ──
+  // Clone the phrase group until the track is wider than the viewport so
+  // wide screens never show empty strip. Animate by exactly one group width
+  // (measured in px) so the loop resets without a gap or snap.
+  function initMarquee() {
+    const track = document.querySelector('.marquee-track');
+    if (!track) return;
+
+    const template = track.querySelector('.marquee-group');
+    if (!template) return;
+
+    let resizeTimer;
+
+    function rebuild() {
+      track.querySelectorAll('.marquee-group').forEach((group, index) => {
+        if (index > 0) group.remove();
+      });
+
+      const groupWidth = template.offsetWidth;
+      if (!groupWidth) return;
+
+      const minWidth = window.innerWidth + groupWidth * 2;
+      while (track.scrollWidth < minWidth) {
+        const clone = template.cloneNode(true);
+        clone.setAttribute('aria-hidden', 'true');
+        track.appendChild(clone);
+      }
+
+      track.style.setProperty('--marquee-shift', `${groupWidth}px`);
+      track.style.setProperty('--marquee-duration', `${Math.max(22, groupWidth / 42)}s`);
+      track.classList.add('marquee-ready');
+    }
+
+    rebuild();
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(rebuild, 150);
+    });
+    window.addEventListener('load', rebuild);
+  }
+
+  initMarquee();
+
   // ── NAVBAR SCROLL ──
   const navbar = document.getElementById('navbar');
   if (navbar) {
