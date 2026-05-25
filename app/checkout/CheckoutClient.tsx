@@ -1,7 +1,14 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import {
+  CHECKOUT_HOLD_MINUTES,
+  formatCountdownMmSs,
+  holdDeadlineMs,
+  HOLD_EXPIRED_MESSAGE,
+} from '@/lib/booking-hold';
 import { loadStripe, type Stripe, type StripeElementsOptions } from '@stripe/stripe-js';
 import {
   Elements,
@@ -118,7 +125,15 @@ const STRIPE_APPEARANCE: StripeElementsOptions['appearance'] = {
 // ──────────────────────────────────────────────────────────────────────────
 // Top-level client component
 // ──────────────────────────────────────────────────────────────────────────
-export default function CheckoutClient() {
+interface CheckoutClientProps {
+  initialHoldCreatedAt?: string | null;
+  initialHoldExpired?: boolean;
+}
+
+export default function CheckoutClient({
+  initialHoldCreatedAt = null,
+  initialHoldExpired = false,
+}: CheckoutClientProps) {
   const params = useSearchParams();
   // The Cal.com embed handler in `public/js/main.js` redirects here on
   // `bookingSuccessful` with whatever it could extract from the event
@@ -132,6 +147,71 @@ export default function CheckoutClient() {
 
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [holdCreatedAt, setHoldCreatedAt] = useState<string | null>(
+    initialHoldCreatedAt
+  );
+  const [holdExpired, setHoldExpired] = useState(initialHoldExpired);
+  const [countdownLabel, setCountdownLabel] = useState('');
+
+  // Poll the hold row so a cron-driven `canceled_by_system` flip disables
+  // checkout even if the local timer hasn't ticked yet.
+  useEffect(() => {
+    if (!uid) return;
+
+    let cancelled = false;
+
+    const refreshHold = async () => {
+      try {
+        const res = await fetch(
+          `/api/booking/hold?uid=${encodeURIComponent(uid)}`,
+          { headers: { Accept: 'application/json' } }
+        );
+        if (cancelled) return;
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          createdAt?: string | null;
+          expired?: boolean;
+        };
+        if (data.createdAt) setHoldCreatedAt(data.createdAt);
+        if (data.expired) setHoldExpired(true);
+      } catch {
+        // Non-fatal — the local countdown still enforces the window.
+      }
+    };
+
+    refreshHold();
+    const pollId = window.setInterval(refreshHold, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollId);
+    };
+  }, [uid]);
+
+  // 8-minute countdown from `appointments.created_at`.
+  useEffect(() => {
+    if (!holdCreatedAt) {
+      setCountdownLabel('');
+      return;
+    }
+    if (holdExpired) {
+      setCountdownLabel('00:00');
+      return;
+    }
+
+    const tick = () => {
+      const remaining = holdDeadlineMs(holdCreatedAt) - Date.now();
+      if (remaining <= 0) {
+        setHoldExpired(true);
+        setCountdownLabel('00:00');
+      } else {
+        setCountdownLabel(formatCountdownMmSs(remaining));
+      }
+    };
+
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [holdCreatedAt, holdExpired]);
 
   // Fetch a fresh SetupIntent client_secret on mount. We don't re-fetch
   // when the URL params change (they shouldn't — Cal lands once and
@@ -139,6 +219,8 @@ export default function CheckoutClient() {
   // /api route is cheap and a stale secret can land in an "expired"
   // state on retry.
   useEffect(() => {
+    if (holdExpired) return;
+
     if (!stripePromise) {
       setBootstrapError(
         'Payment system is not configured. Please contact the studio to confirm your booking.'
@@ -192,7 +274,7 @@ export default function CheckoutClient() {
     return () => {
       cancelled = true;
     };
-  }, [uid, email, name]);
+  }, [uid, email, name, holdExpired]);
 
   const elementsOptions: StripeElementsOptions | null = useMemo(
     () =>
@@ -207,13 +289,21 @@ export default function CheckoutClient() {
       <BrandHeader />
 
       <section className="mt-10 w-full max-w-md">
-        {bootstrapError ? (
+        {holdExpired ? (
+          <ExpiredHoldCard />
+        ) : bootstrapError ? (
           <ErrorCard message={bootstrapError} />
         ) : !elementsOptions || !stripePromise ? (
           <LoadingCard />
         ) : (
           <Elements stripe={stripePromise} options={elementsOptions}>
-            <CheckoutForm uid={uid} name={name} email={email} />
+            <CheckoutForm
+              uid={uid}
+              name={name}
+              email={email}
+              holdExpired={holdExpired}
+              countdownLabel={countdownLabel}
+            />
           </Elements>
         )}
       </section>
@@ -255,9 +345,17 @@ interface FormProps {
   uid: string;
   name: string;
   email: string;
+  holdExpired: boolean;
+  countdownLabel: string;
 }
 
-function CheckoutForm({ uid, name, email }: FormProps) {
+function CheckoutForm({
+  uid,
+  name,
+  email,
+  holdExpired,
+  countdownLabel,
+}: FormProps) {
   const stripe = useStripe();
   const elements = useElements();
 
@@ -271,7 +369,7 @@ function CheckoutForm({ uid, name, email }: FormProps) {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!stripe || !elements || submitting) return;
+    if (holdExpired || !stripe || !elements || submitting) return;
 
     setSubmitting(true);
     setSubmitError(null);
@@ -331,6 +429,9 @@ function CheckoutForm({ uid, name, email }: FormProps) {
         const payload = (await res.json().catch(() => null)) as
           | { error?: string; message?: string }
           | null;
+        if (payload?.error === 'cart_hold_expired') {
+          throw new Error(payload.message ?? HOLD_EXPIRED_MESSAGE);
+        }
         throw new Error(
           payload?.message ??
             payload?.error ??
@@ -372,6 +473,26 @@ function CheckoutForm({ uid, name, email }: FormProps) {
         </span>
       </p>
 
+      {countdownLabel && (
+        <div
+          className="mt-5 flex items-center justify-between rounded-md border border-stone-200 bg-stone-50 px-4 py-3"
+          aria-live="polite"
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+            Time remaining
+          </p>
+          <p className="font-mono text-lg font-medium tabular-nums text-stone-900">
+            {countdownLabel}
+          </p>
+        </div>
+      )}
+      {countdownLabel && (
+        <p className="mt-2 text-center text-[11px] text-stone-400">
+          Complete checkout within {CHECKOUT_HOLD_MINUTES} minutes to hold
+          your time slot.
+        </p>
+      )}
+
       {name && email && (
         <div className="mt-6 rounded-md border border-stone-200 bg-stone-50 px-4 py-3">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
@@ -382,7 +503,10 @@ function CheckoutForm({ uid, name, email }: FormProps) {
         </div>
       )}
 
-      <div className="mt-6">
+      <fieldset
+        disabled={holdExpired || submitting}
+        className="mt-6 disabled:pointer-events-none disabled:opacity-50"
+      >
         <PaymentElement
           options={{
             layout: { type: 'tabs', defaultCollapsed: false },
@@ -410,7 +534,7 @@ function CheckoutForm({ uid, name, email }: FormProps) {
             },
           }}
         />
-      </div>
+      </fieldset>
 
       {submitError && (
         <div
@@ -423,7 +547,7 @@ function CheckoutForm({ uid, name, email }: FormProps) {
 
       <button
         type="submit"
-        disabled={!ready || submitting}
+        disabled={!ready || submitting || holdExpired}
         className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-5 py-3 text-sm font-medium tracking-wide text-stone-50 shadow-none transition-colors hover:bg-stone-800 active:bg-stone-900 disabled:cursor-not-allowed disabled:bg-stone-400"
       >
         {submitting ? (
@@ -471,6 +595,25 @@ function ErrorCard({ message }: { message: string }) {
         We hit a snag
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-rose-800">{message}</p>
+    </div>
+  );
+}
+
+function ExpiredHoldCard() {
+  return (
+    <div className="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center shadow-sm shadow-stone-900/[0.03] sm:p-10">
+      <h2 className="font-serif text-2xl text-rose-900">
+        Booking window closed
+      </h2>
+      <p className="mt-3 text-sm leading-relaxed text-rose-800">
+        {HOLD_EXPIRED_MESSAGE}
+      </p>
+      <Link
+        href="/#services"
+        className="mt-8 inline-flex w-full items-center justify-center rounded-md bg-stone-900 px-5 py-3 text-sm font-medium tracking-wide text-stone-50 transition-colors hover:bg-stone-800"
+      >
+        Return to booking calendar
+      </Link>
     </div>
   );
 }

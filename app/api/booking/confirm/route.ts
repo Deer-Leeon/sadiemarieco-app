@@ -37,6 +37,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
+import { getAppointmentHoldByCalUid } from '@/lib/appointment-hold';
+import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
 import { stripe } from '@/lib/stripe';
 
 export const runtime = 'nodejs';
@@ -232,6 +234,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
   const { setupIntentId, email, name, calBookingUid } = parsed;
+
+  // ── 0. HOLD GATE — abort if the abandoned-cart sweep released the slot ─
+  try {
+    const hold = await getAppointmentHoldByCalUid(calBookingUid);
+    if (hold) {
+      const status = (hold.status || '').toLowerCase();
+      if (status === 'canceled_by_system' || isHoldExpired(hold.created_at)) {
+        return NextResponse.json(
+          {
+            error: 'cart_hold_expired',
+            message: HOLD_EXPIRED_MESSAGE,
+          },
+          { status: 400 }
+        );
+      }
+    }
+  } catch (err) {
+    const msg = errorMessage(err);
+    console.error('[api/booking/confirm] hold lookup failed:', msg);
+    return NextResponse.json(
+      { error: 'hold_lookup_failed', message: msg },
+      { status: 500 }
+    );
+  }
 
   // ── 1. STRIPE: verify SetupIntent succeeded ────────────────────────
   // We expand `payment_method` so the SDK returns the full

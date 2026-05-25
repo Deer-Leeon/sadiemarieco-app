@@ -19,6 +19,11 @@ import {
   X,
 } from 'lucide-react';
 
+import {
+  isSameAppointmentSlot,
+  RESCHEDULE_SAME_SLOT_MESSAGE,
+} from '@/lib/appointment-slot';
+
 import type { Appointment, AppointmentStatus } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import ClientProfileModal from './ClientProfileModal';
@@ -823,6 +828,17 @@ function RescheduleView({
       const newData = extractBookingDataFromEvent(event);
       if (!newData.uid || !newData.startTime) return false;
 
+      if (
+        isSameAppointmentSlot(
+          appointment.booking_time,
+          appointment.end_time,
+          newData.startTime,
+          newData.endTime
+        )
+      ) {
+        return false;
+      }
+
       const res = await fetch(
         `/api/admin/appointments/${appointment.id}/reschedule`,
         {
@@ -850,10 +866,40 @@ function RescheduleView({
 
     const handleSuccess = async (event: unknown) => {
       if (completedRef.current) return;
+
+      const newData = extractBookingDataFromEvent(event);
+      if (
+        newData.startTime &&
+        isSameAppointmentSlot(
+          appointment.booking_time,
+          appointment.end_time,
+          newData.startTime,
+          newData.endTime
+        )
+      ) {
+        setErrorMessage(RESCHEDULE_SAME_SLOT_MESSAGE);
+        setPhase('embed');
+        // Cal may have navigated to its success view — remount the embed
+        // so the picker is visible again with the warning banner above it.
+        setEmbedKey((k) => k + 1);
+        return;
+      }
+
       completedRef.current = true;
       setPhase('completing');
+      setErrorMessage(null);
 
-      await persistReschedule(event);
+      const saved = await persistReschedule(event);
+      if (!saved) {
+        completedRef.current = false;
+        setPhase('embed');
+        setErrorMessage(
+          RESCHEDULE_SAME_SLOT_MESSAGE +
+            ' If this keeps happening, try a different slot or open Cal.com directly.'
+        );
+        return;
+      }
+
       router.refresh();
       onClose();
     };
@@ -1062,6 +1108,12 @@ function RescheduleView({
                 Back to details
               </button>
             </div>
+          </div>
+        )}
+
+        {phase === 'embed' && errorMessage && (
+          <div className="mx-4 mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:mx-6">
+            {errorMessage}
           </div>
         )}
 

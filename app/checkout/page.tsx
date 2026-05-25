@@ -1,5 +1,8 @@
 import { Suspense } from 'react';
 
+import { getAppointmentHoldByCalUid } from '@/lib/appointment-hold';
+import { isHoldExpired } from '@/lib/booking-hold';
+
 import CheckoutClient from './CheckoutClient';
 
 export const metadata = {
@@ -8,12 +11,16 @@ export const metadata = {
     'Save a card on file to confirm your Sadie Marie Beauty Studio booking.',
 };
 
+type CheckoutPageProps = {
+  searchParams: Promise<{ uid?: string }>;
+};
+
 /**
  * Cal.com redirects clients here after they pick a slot. The booking is
  * created on Cal in PENDING status (configured on the event-type so it
- * requires confirmation), the client lands on this page to vault a card,
- * and our `/api/booking/confirm` route accepts the booking on Cal once
- * the card is saved.
+ * requires confirmation), the client lands on this page to vault a card
+ * within an 8-minute hold window, and our `/api/booking/confirm` route
+ * accepts the booking on Cal once the card is saved.
  *
  * Why this is a Server Component wrapping a Suspense:
  *   • `useSearchParams()` inside the client child suspends until the
@@ -27,10 +34,29 @@ export const metadata = {
  * The fallback is a minimal cream-on-cream skeleton so the page never
  * flashes a stark white screen between server paint and client mount.
  */
-export default function CheckoutPage() {
+export default async function CheckoutPage({ searchParams }: CheckoutPageProps) {
+  const sp = await searchParams;
+  const uid = sp.uid?.trim() ?? '';
+
+  let initialHoldCreatedAt: string | null = null;
+  let initialHoldExpired = false;
+
+  if (uid) {
+    const hold = await getAppointmentHoldByCalUid(uid);
+    if (hold) {
+      initialHoldCreatedAt = hold.created_at;
+      initialHoldExpired =
+        (hold.status || '').toLowerCase() === 'canceled_by_system' ||
+        isHoldExpired(hold.created_at);
+    }
+  }
+
   return (
     <Suspense fallback={<CheckoutSkeleton />}>
-      <CheckoutClient />
+      <CheckoutClient
+        initialHoldCreatedAt={initialHoldCreatedAt}
+        initialHoldExpired={initialHoldExpired}
+      />
     </Suspense>
   );
 }

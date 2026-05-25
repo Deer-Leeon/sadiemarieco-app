@@ -108,16 +108,11 @@ const FOOTER_NOTE = `(Note: This is an automated line. To reach the studio direc
 // Must stay in sync with `CAL_CANCEL_REASON` in
 // `app/api/cron/cleanup-abandoned/route.ts`. Cal echoes this string on
 // the BOOKING_CANCELLED webhook after our abandoned-checkout sweep.
-const SYSTEM_ABANDON_CANCEL_REASON = 'Checkout abandoned after 10 minutes.';
-const LEGACY_SYSTEM_ABANDON_CANCEL_REASON =
-  'Checkout abandoned after 15 minutes.';
+const SYSTEM_ABANDON_CANCEL_REASON = 'Checkout abandoned after 8 minutes.';
 
 const isSystemAbandonCancellation = (reason) => {
   const trimmed = typeof reason === 'string' ? reason.trim() : '';
-  return (
-    trimmed === SYSTEM_ABANDON_CANCEL_REASON ||
-    trimmed === LEGACY_SYSTEM_ABANDON_CANCEL_REASON
-  );
+  return trimmed === SYSTEM_ABANDON_CANCEL_REASON;
 };
 
 // Event types that should create / refresh a local appointments row.

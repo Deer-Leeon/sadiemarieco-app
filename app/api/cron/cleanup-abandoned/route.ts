@@ -18,7 +18,7 @@
  *      set so a one-off backlog can't blow up our request budget.
  *   3. For each row, POST Cal.com v2
  *      `/v2/bookings/<uid>/cancel` with Bearer auth and
- *      `{ cancellationReason: 'Checkout abandoned after 10 minutes.' }`.
+ *      `{ cancellationReason: 'Checkout abandoned after 8 minutes.' }`.
  *      Frees the slot back into Cal's availability (v1 is decommissioned).
  *   4. Flip the local row to 'canceled_by_system' so the admin
  *      dashboard hides it from the calendar / list views (still
@@ -45,16 +45,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
+import {
+  CAL_ABANDON_CANCEL_REASON,
+  CHECKOUT_HOLD_MINUTES,
+} from '@/lib/booking-hold';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const CAL_V2_BASE = 'https://api.cal.com/v2';
 const CAL_API_VERSION = '2024-08-13';
-const CAL_CANCEL_REASON = 'Checkout abandoned after 10 minutes.';
-// 10 minutes — long enough for a slow card fill-in (3DS, etc.) but
-// short enough that an abandoned slot returns to availability quickly.
-const ABANDONMENT_MINUTES = 10;
+const CAL_CANCEL_REASON = CAL_ABANDON_CANCEL_REASON;
+// CHECKOUT_HOLD_MINUTES — long enough for a slow card fill-in (3DS, etc.)
+// but short enough that an abandoned slot returns to availability quickly.
+const ABANDONMENT_MINUTES = CHECKOUT_HOLD_MINUTES;
 // Cap the work per cron tick so a backlog (cron paused for hours,
 // many simultaneous drop-offs after a marketing push) can't pin a
 // Vercel function on the request-budget ceiling. The next tick picks

@@ -133,6 +133,39 @@
     } catch (e) { return '—'; }
   };
 
+  const parseBookingTimesFromEvent = (event) => {
+    const payload =
+      (event && event.detail && event.detail.data) ||
+      (event && event.data) ||
+      {};
+    const booking = payload.booking || payload;
+    const start =
+      (typeof booking.startTime === 'string' && booking.startTime) ||
+      (typeof booking.start === 'string' && booking.start) ||
+      null;
+    const end =
+      (typeof booking.endTime === 'string' && booking.endTime) ||
+      (typeof booking.end === 'string' && booking.end) ||
+      null;
+    return { start, end };
+  };
+
+  const isSameAppointmentSlot = (existingStart, existingEnd, newStart, newEnd) => {
+    if (!existingStart || !newStart) return false;
+    const oldStartMs = new Date(existingStart).getTime();
+    const newStartMs = new Date(newStart).getTime();
+    if (!Number.isFinite(oldStartMs) || !Number.isFinite(newStartMs)) return false;
+    if (oldStartMs !== newStartMs) return false;
+    if (existingEnd && newEnd) {
+      const oldEndMs = new Date(existingEnd).getTime();
+      const newEndMs = new Date(newEnd).getTime();
+      if (Number.isFinite(oldEndMs) && Number.isFinite(newEndMs) && oldEndMs !== newEndMs) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   const formatDuration = (mins) => {
     if (!mins) return '—';
     if (mins < 60) return `${mins} minutes`;
@@ -256,15 +289,26 @@
       config: { layout: 'month_view' }
     });
     nsApi('ui', window.calUiConfig || { layout: 'month_view' });
-    nsApi('on', {
-      action: 'bookingSuccessful',
-      callback: () => {
-        // Once Cal confirms the new slot, refresh our details from the API
-        // and pop the user back to the details view. The booking UID
-        // typically stays the same across reschedules.
-        loadBooking(booking.uid);
+    const handleRescheduleSuccess = (event) => {
+      const { start, end } = parseBookingTimesFromEvent(event);
+      if (
+        start &&
+        isSameAppointmentSlot(booking.start, booking.end, start, end)
+      ) {
+        showError(
+          'Please choose a different date or time. This appointment is already scheduled for that slot.'
+        );
+        setState('reschedule');
+        return;
       }
-    });
+      loadBooking(booking.uid);
+    };
+
+    ['bookingSuccessful', 'bookingSuccessfulV2', 'rescheduleBookingSuccessful', 'rescheduleBookingSuccessfulV2'].forEach(
+      (action) => {
+        nsApi('on', { action, callback: handleRescheduleSuccess });
+      }
+    );
 
     rescheduleMounted = true;
   };

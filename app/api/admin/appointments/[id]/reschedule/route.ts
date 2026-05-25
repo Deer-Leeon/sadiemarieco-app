@@ -24,6 +24,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import {
+  isSameAppointmentSlot,
+  RESCHEDULE_SAME_SLOT_MESSAGE,
+} from '@/lib/appointment-slot';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -76,6 +80,11 @@ interface UpdatedRow {
   booking_time: Date | string | null;
   end_time: Date | string | null;
   status: string | null;
+}
+
+interface ExistingRow {
+  booking_time: Date | string | null;
+  end_time: Date | string | null;
 }
 
 function serialiseDate(value: Date | string | null): string | null {
@@ -143,6 +152,54 @@ export async function POST(
   }
 
   try {
+    let existing: ExistingRow | null = null;
+
+    if (isUuid) {
+      const found = await sql<ExistingRow>`
+        SELECT booking_time, end_time
+        FROM appointments
+        WHERE id = ${idParam}::uuid
+        LIMIT 1
+      `;
+      existing = found.rows[0] ?? null;
+    } else if (intId !== null) {
+      const found = await sql<ExistingRow>`
+        SELECT booking_time, end_time
+        FROM appointments
+        WHERE id = ${intId}
+        LIMIT 1
+      `;
+      existing = found.rows[0] ?? null;
+    }
+
+    if (!existing && oldCalUid) {
+      const found = await sql<ExistingRow>`
+        SELECT booking_time, end_time
+        FROM appointments
+        WHERE cal_event_id = ${oldCalUid}
+        LIMIT 1
+      `;
+      existing = found.rows[0] ?? null;
+    }
+
+    if (
+      existing &&
+      isSameAppointmentSlot(
+        existing.booking_time,
+        existing.end_time,
+        newBookingTime,
+        newEndTime
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error: 'same_slot',
+          message: RESCHEDULE_SAME_SLOT_MESSAGE,
+        },
+        { status: 400 }
+      );
+    }
+
     let rows: UpdatedRow[] = [];
 
     if (isUuid) {
