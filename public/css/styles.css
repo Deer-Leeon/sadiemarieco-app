@@ -1710,7 +1710,8 @@ footer {
   .policies-note { flex-direction: column; gap: 20px; }
   #contact { padding: 80px 24px 60px; }
   .contact-grid { grid-template-columns: 1fr; gap: 52px; }
-  .map-container { width: 100%; aspect-ratio: 5 / 4; align-self: auto; }
+  .contact-details { order: 1; }
+  .map-container { order: 2; width: 100%; aspect-ratio: 5 / 4; align-self: auto; }
   .contact-bg-word { display: none; }
   .faq-section { padding: 80px 24px; }
   .faq-inner { grid-template-columns: 1fr; gap: 40px; }
