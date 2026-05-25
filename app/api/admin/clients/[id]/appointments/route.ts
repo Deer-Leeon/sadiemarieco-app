@@ -161,15 +161,11 @@ export async function GET(
     // (Cal.com pads it with "between …" suffixes) and filters to
     // active services so a soft-deleted CMS row doesn't keep
     // enriching new appointments after it's been retired.
-    // LEFT JOIN LATERAL (LIMIT 1) instead of a plain equality LEFT JOIN
-    // — site_services can hold multiple rows with the same title
-    // ("Classic" / "Hybrid" / "Volume" live as children under each of
-    // the 2-/3-/4-Week Fill groups), and a plain join would multiply
-    // every appointment row by the match count. That bug manifests as
-    // (1) duplicate React keys in the appointment-history list, and
-    // (2) the same booking appearing 2–3× in a client's history.
-    // Picking the most-recently-touched match keeps the price / slug
-    // we surface as fresh as possible without dragging the wrong row.
+    // LEFT JOIN LATERAL (LIMIT 1) — same disambiguation as the dashboard
+    // query in `app/admin/page.tsx`: bare fill titles ("Classic" /
+    // "Hybrid" / "Volume") also require matching appointment duration
+    // to the child's duration_mins so 2-/3-/4-week fills keep distinct
+    // editor-assigned colours.
     const { rows } = await sql<AppointmentRow>`
       SELECT
         a.id,
@@ -193,6 +189,22 @@ export async function GET(
         FROM site_services s
         WHERE s.title = split_part(a.service_name, ' between ', 1)
           AND s.is_active = TRUE
+          AND (
+            lower(trim(split_part(a.service_name, ' between ', 1))) NOT IN (
+              'classic', 'hybrid', 'volume'
+            )
+            OR (
+              a.booking_time IS NOT NULL
+              AND a.end_time IS NOT NULL
+              AND s.duration_mins IS NOT NULL
+              AND s.duration_mins = GREATEST(
+                1,
+                ROUND(
+                  EXTRACT(EPOCH FROM (a.end_time - a.booking_time)) / 60.0
+                )
+              )::integer
+            )
+          )
         ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
         LIMIT 1
       ) s ON TRUE

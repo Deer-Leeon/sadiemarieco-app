@@ -128,13 +128,11 @@ export default async function AdminPage() {
     // LEFT JOIN LATERAL with LIMIT 1 instead of a plain LEFT JOIN: the
     // site_services table can hold multiple rows with the same title
     // (e.g. "Classic" / "Hybrid" / "Volume" exist as children under each
-    // of the 2-Week / 3-Week / 4-Week Fill groups). A naive equality
-    // join multiplies every appointment by the match count — same
-    // booking rendered three times in every calendar view, same `id`
-    // appearing as duplicate React keys (see browser console). The
-    // lateral keeps exactly one enrichment row per appointment,
-    // deterministically picking the most-recently-touched matching
-    // service so the price / slug we display is the freshest available.
+    // of the 2-Week / 3-Week / 4-Week Fill groups). A naive title-only
+    // join picked the same `site_services.color` for every fill week
+    // (always the most-recently-updated "Volume" row). For those bare
+    // fill titles we also match on appointment duration (120 / 150 /
+    // 180 min) so each week group keeps its editor-assigned hex.
     const { rows } = await sql<DbRow>`
       SELECT
         a.id,
@@ -158,6 +156,22 @@ export default async function AdminPage() {
         FROM site_services s
         WHERE s.title = split_part(a.service_name, ' between ', 1)
           AND s.is_active = TRUE
+          AND (
+            lower(trim(split_part(a.service_name, ' between ', 1))) NOT IN (
+              'classic', 'hybrid', 'volume'
+            )
+            OR (
+              a.booking_time IS NOT NULL
+              AND a.end_time IS NOT NULL
+              AND s.duration_mins IS NOT NULL
+              AND s.duration_mins = GREATEST(
+                1,
+                ROUND(
+                  EXTRACT(EPOCH FROM (a.end_time - a.booking_time)) / 60.0
+                )
+              )::integer
+            )
+          )
         ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
         LIMIT 1
       ) s ON TRUE

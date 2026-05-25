@@ -2,9 +2,14 @@
  * POST /api/webhook
  *
  * Receives Cal.com webhook events and dispatches on `triggerEvent`:
- *   - BOOKING_CREATED    → idempotent client + appointment upsert, schedule
- *                          24h reminder + 24h feedback via QStash, send
- *                          confirmation SMS via Twilio.
+ *   - BOOKING_REQUESTED  → client + appointment upsert as 'pending' (fires
+ *                          when the guest confirms a slot on event types
+ *                          that "Require confirmation" — this is the
+ *                          handoff moment before /checkout).
+ *   - BOOKING_CREATED    → same upsert path; may fire for auto-confirmed
+ *                          types or after upstream acceptance. SMS +
+ *                          QStash run only on BOOKING_CREATED so we don't
+ *                          text "confirmed" before card vaulting.
  *   - BOOKING_CANCELLED  → flip appointments.status to 'cancelled' so the
  *                          scheduled QStash jobs (api/remind, api/feedback)
  *                          see the status gate and skip their SMS.
@@ -15,8 +20,8 @@
  *                          end_time. Preserves the row's local id +
  *                          client_id (and therefore booking history /
  *                          CRM linkage) instead of creating a duplicate.
- *   - Anything else / missing triggerEvent → falls through to the creation
- *     flow for backward compatibility with the original single-event setup.
+ *   - Missing triggerEvent → treated as BOOKING_CREATED (legacy tests).
+ *   - Other triggers (MEETING_ENDED, BOOKING_REJECTED, …) → ignored.
  *
  * Always returns 200 OK — even on SMS or DB failure — so Cal won't time out
  * or retry the webhook indefinitely. Errors are logged for our own debugging.
@@ -100,6 +105,12 @@ const splitName = (fullName) => {
 const GOOGLE_VOICE_NUMBER = '[Insert Your Google Voice Number Here]';
 const FOOTER_NOTE = `(Note: This is an automated line. To reach the studio directly, please call or text ${GOOGLE_VOICE_NUMBER}).`;
 
+// Event types that should create / refresh a local appointments row.
+const APPOINTMENT_CREATION_EVENTS = new Set([
+  'BOOKING_REQUESTED',
+  'BOOKING_CREATED',
+]);
+
 const buildMessage = ({ clientName, serviceName, bookingUid }) => {
   const link = `${MANAGE_LINK_BASE}?uid=${encodeURIComponent(bookingUid)}`;
   return `Hi ${clientName}! 🤍 Your ${serviceName} at Sadie Marie is confirmed. To view policies, reschedule, or cancel, use your secure link: ${link}\n\n${FOOTER_NOTE}`;
@@ -142,7 +153,11 @@ module.exports = async function handler(req, res) {
   const bookingUid = unwrap(payload.uid);
 
   // Fields needed for the clients + appointments DB upserts.
-  const clientEmail = unwrap(attendee.email) || unwrap(responses.email);
+  const clientEmail =
+    unwrap(attendee.email) ||
+    unwrap(responses.email) ||
+    unwrap(responses.attendee_email) ||
+    unwrap(responses.email_address);
   const nameFallback = splitName(unwrap(attendee.name));
   const firstName = unwrap(attendee.firstName) || nameFallback.first || '';
   const lastName = unwrap(attendee.lastName) || nameFallback.last || '';
@@ -318,32 +333,70 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ ok: true, event: 'BOOKING_CANCELLED' });
   }
 
+  // Cal sends many webhook triggers we don't ingest. Only creation-style
+  // events (plus the legacy empty triggerEvent) reach the upsert path.
+  const isCreationEvent =
+    !triggerEvent ||
+    APPOINTMENT_CREATION_EVENTS.has(triggerEvent);
+  if (!isCreationEvent) {
+    console.log('[api/webhook] ignored trigger — no appointment upsert', {
+      triggerEvent,
+      bookingUid,
+    });
+    return res.status(200).json({ ok: true, skipped: 'ignored_event' });
+  }
+
   if (!clientEmail) {
     console.warn('[api/webhook] no email on payload — skipping', { bookingUid, triggerEvent });
     return res.status(200).json({ ok: true, skipped: 'no_email' });
   }
 
   // ── IDEMPOTENCY GATE ─────────────────────────────────────────────────────
-  // Cal.com sometimes re-delivers webhook events (retries on slow upstream,
-  // operator-triggered replays from the dashboard, etc.). Before consuming
-  // any Twilio quota OR doing duplicate DB writes, check whether we've
-  // already processed this booking_uid. On DB failure we still return 200 —
-  // never let infrastructure issues turn a single booking into a webhook
-  // retry storm.
-  try {
-    const { rows } = await sql`
-      SELECT 1 FROM webhook_events WHERE booking_uid = ${bookingUid} LIMIT 1
-    `;
-    if (rows.length > 0) {
-      console.log('[api/webhook] duplicate webhook — already processed', { bookingUid });
-      return res.status(200).json({ ok: true, skipped: 'duplicate' });
+  // BOOKING_REQUESTED: skip only if we already have a local row (embed
+  // init or a prior REQUESTED delivery). Do NOT use webhook_events here —
+  // a later BOOKING_CREATED must still be allowed to run SMS/QStash.
+  if (triggerEvent === 'BOOKING_REQUESTED') {
+    try {
+      const { rows: existing } = await sql`
+        SELECT status FROM appointments
+        WHERE cal_event_id = ${bookingUid}
+        LIMIT 1
+      `;
+      if (existing.length > 0) {
+        console.log(
+          '[api/webhook] BOOKING_REQUESTED duplicate — appointment already exists',
+          { bookingUid, status: existing[0].status }
+        );
+        return res.status(200).json({ ok: true, skipped: 'already_exists' });
+      }
+    } catch (err) {
+      console.error('[api/webhook] BOOKING_REQUESTED existence check failed:', {
+        bookingUid,
+        error: err && err.message,
+      });
+      return res.status(200).json({ ok: true, skipped: 'db_check_failed' });
     }
-  } catch (err) {
-    console.error('[api/webhook] idempotency check failed:', {
-      bookingUid,
-      error: err && err.message
-    });
-    return res.status(200).json({ ok: true, skipped: 'db_check_failed' });
+  } else {
+    // BOOKING_CREATED (and legacy empty triggerEvent): webhook_events
+    // dedupes SMS/QStash replays. Appointment upsert still runs on
+    // conflict — this gate is only about not texting twice.
+    try {
+      const { rows } = await sql`
+        SELECT 1 FROM webhook_events WHERE booking_uid = ${bookingUid} LIMIT 1
+      `;
+      if (rows.length > 0) {
+        console.log('[api/webhook] duplicate webhook — already processed', {
+          bookingUid,
+        });
+        return res.status(200).json({ ok: true, skipped: 'duplicate' });
+      }
+    } catch (err) {
+      console.error('[api/webhook] idempotency check failed:', {
+        bookingUid,
+        error: err && err.message,
+      });
+      return res.status(200).json({ ok: true, skipped: 'db_check_failed' });
+    }
   }
 
   // ── CLIENT UPSERT ────────────────────────────────────────────────────────
@@ -456,6 +509,18 @@ module.exports = async function handler(req, res) {
       error: err && err.message
     });
     return res.status(200).json({ ok: true, skipped: 'appointment_upsert_failed' });
+  }
+
+  if (triggerEvent === 'BOOKING_REQUESTED') {
+    console.log('[api/webhook] BOOKING_REQUESTED: pending appointment stored', {
+      bookingUid,
+    });
+    return res.status(200).json({
+      ok: true,
+      event: 'BOOKING_REQUESTED',
+      status: 'pending',
+      dbWritten: true,
+    });
   }
 
   // ── QSTASH SCHEDULE: REMINDER + FEEDBACK ────────────────────────────────

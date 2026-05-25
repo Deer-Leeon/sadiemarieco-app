@@ -154,7 +154,7 @@
         nsApi('ui', window.calUiConfig || { layout: 'month_view' });
         nsApi('on', {
           action: 'bookingSuccessful',
-          callback: (event) => {
+          callback: async (event) => {
             // The just-booked iframe is parked on the confirmation
             // screen; reopening should restart fresh.
             staleLinks.add(link);
@@ -207,6 +207,49 @@
                   event
                 );
                 return;
+              }
+
+              const serviceName =
+                (typeof booking.title === 'string' && booking.title) ||
+                (typeof booking.eventTitle === 'string' && booking.eventTitle) ||
+                '';
+              const bookingTime =
+                (typeof booking.startTime === 'string' && booking.startTime) ||
+                (typeof booking.start === 'string' && booking.start) ||
+                null;
+              const endTime =
+                (typeof booking.endTime === 'string' && booking.endTime) ||
+                (typeof booking.end === 'string' && booking.end) ||
+                null;
+              const phone =
+                (typeof attendee.phoneNumber === 'string' &&
+                  attendee.phoneNumber) ||
+                '';
+
+              // Create the local `pending` row immediately. Cal.com
+              // "Requires confirmation" types fire BOOKING_REQUESTED
+              // (not BOOKING_CREATED) and many webhook configs never
+              // subscribe to that event — without this call the admin
+              // DB stays empty until /api/booking/confirm runs.
+              try {
+                await fetch('/api/booking/init', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    calBookingUid: uid,
+                    name,
+                    email,
+                    serviceName,
+                    bookingTime,
+                    endTime,
+                    phone,
+                  }),
+                });
+              } catch (initErr) {
+                console.warn(
+                  '[booking] /api/booking/init failed (checkout will still run)',
+                  initErr
+                );
               }
 
               // Build the query string only from params we actually

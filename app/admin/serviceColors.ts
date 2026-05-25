@@ -11,6 +11,9 @@
  *   editor picks it in /admin/services and it travels onto each
  *   appointment row via the LEFT JOIN LATERAL in
  *   `app/admin/page.tsx` and `/api/admin/clients/[id]/appointments`.
+ *   Bare fill children ("Classic" / "Hybrid" / "Volume") are matched
+ *   by title AND appointment duration so 2-/3-/4-week fills each keep
+ *   their own hex (see `appointmentServiceLabel` in helpers.ts).
  *   There is intentionally NO fallback heuristic any more — the
  *   studio asked for full manual control over which service gets
  *   which colour, so an unset service renders the original neutral
