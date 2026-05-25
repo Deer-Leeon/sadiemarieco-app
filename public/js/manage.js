@@ -296,7 +296,7 @@
         isSameAppointmentSlot(booking.start, booking.end, start, end)
       ) {
         showError(
-          'Please choose a different date or time. This appointment is already scheduled for that slot.'
+          "You're already booked for this time. Choose a different date or time to move your appointment."
         );
         setState('reschedule');
         return;

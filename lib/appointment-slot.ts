@@ -29,5 +29,17 @@ export function isSameAppointmentSlot(
   return true;
 }
 
+/** Short line for API responses and client-side toasts. */
 export const RESCHEDULE_SAME_SLOT_MESSAGE =
-  'Please choose a different date or time. This appointment is already scheduled for that slot.';
+  "You're already booked for this time. Choose a different date or time to move your appointment.";
+
+/** Admin reschedule overlay — warmer, studio-toned copy. */
+export function rescheduleSameSlotNotice(currentSlotLabel: string): {
+  title: string;
+  body: string;
+} {
+  return {
+    title: 'This is already your appointment time',
+    body: `Your booking is set for ${currentSlotLabel}. To reschedule, pick a different date or time in the calendar, then confirm your new slot.`,
+  };
+}

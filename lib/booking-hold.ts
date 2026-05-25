@@ -9,8 +9,7 @@ export const CHECKOUT_HOLD_MS = CHECKOUT_HOLD_MINUTES * 60 * 1000;
 
 export const CAL_ABANDON_CANCEL_REASON = `Checkout abandoned after ${CHECKOUT_HOLD_MINUTES} minutes.`;
 
-export const HOLD_EXPIRED_MESSAGE =
-  'Your time to complete this booking has expired. This time slot has been released.';
+export const HOLD_EXPIRED_MESSAGE = `Your ${CHECKOUT_HOLD_MINUTES}-minute hold has expired. To re-book this exact time, please check the calendar again in 2 minutes.`;
 
 export function holdDeadlineMs(createdAt: Date | string): number {
   const start =

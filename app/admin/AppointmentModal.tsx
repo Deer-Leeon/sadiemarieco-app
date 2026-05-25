@@ -21,7 +21,7 @@ import {
 
 import {
   isSameAppointmentSlot,
-  RESCHEDULE_SAME_SLOT_MESSAGE,
+  rescheduleSameSlotNotice,
 } from '@/lib/appointment-slot';
 
 import type { Appointment, AppointmentStatus } from './types';
@@ -812,10 +812,14 @@ function RescheduleView({
   const [phase, setPhase] = useState<ReschedulePhase>('embed');
   const [embedKey, setEmbedKey] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sameSlotNotice, setSameSlotNotice] = useState(false);
 
   // Cal fires multiple success events in quick succession; guard so we
   // only apply the DB update + close once.
   const completedRef = useRef(false);
+  // After blocking a no-op reschedule, Cal sometimes emits linkFailed
+  // while its iframe settles — ignore those for a few seconds.
+  const ignoreLinkFailedRef = useRef(false);
 
   useEffect(() => {
     if (!serviceSlug || phase !== 'embed') return;
@@ -877,26 +881,25 @@ function RescheduleView({
           newData.endTime
         )
       ) {
-        setErrorMessage(RESCHEDULE_SAME_SLOT_MESSAGE);
+        ignoreLinkFailedRef.current = true;
+        window.setTimeout(() => {
+          ignoreLinkFailedRef.current = false;
+        }, 4000);
+        setSameSlotNotice(true);
         setPhase('embed');
-        // Cal may have navigated to its success view — remount the embed
-        // so the picker is visible again with the warning banner above it.
-        setEmbedKey((k) => k + 1);
         return;
       }
 
       completedRef.current = true;
       setPhase('completing');
       setErrorMessage(null);
+      setSameSlotNotice(false);
 
       const saved = await persistReschedule(event);
       if (!saved) {
         completedRef.current = false;
         setPhase('embed');
-        setErrorMessage(
-          RESCHEDULE_SAME_SLOT_MESSAGE +
-            ' If this keeps happening, try a different slot or open Cal.com directly.'
-        );
+        setSameSlotNotice(true);
         return;
       }
 
@@ -905,7 +908,9 @@ function RescheduleView({
     };
 
     const handleLinkFailed = (e: EmbedEvent<'linkFailed'>) => {
-      if (cancelled || completedRef.current) return;
+      if (cancelled || completedRef.current || ignoreLinkFailedRef.current) {
+        return;
+      }
       const code = e.detail?.data?.code ?? 'unknown';
       if (embedMode === 'reschedule') {
         setErrorMessage(
@@ -993,19 +998,34 @@ function RescheduleView({
 
   const retryAsNewSlot = () => {
     completedRef.current = false;
+    ignoreLinkFailedRef.current = false;
     setEmbedMode('new_slot');
     setErrorMessage(null);
+    setSameSlotNotice(false);
     setPhase('embed');
     setEmbedKey((k) => k + 1);
   };
 
   const retryReschedule = () => {
     completedRef.current = false;
+    ignoreLinkFailedRef.current = false;
     setEmbedMode('reschedule');
     setErrorMessage(null);
+    setSameSlotNotice(false);
     setPhase('embed');
     setEmbedKey((k) => k + 1);
   };
+
+  const currentSlotLabel = (() => {
+    if (!appointment.booking_time) return 'this time';
+    try {
+      return format(parseISO(appointment.booking_time), 'EEEE, MMMM d · h:mm a');
+    } catch {
+      return 'this time';
+    }
+  })();
+
+  const sameSlotCopy = rescheduleSameSlotNotice(currentSlotLabel);
 
   const calLink =
     serviceSlug != null
@@ -1111,15 +1131,15 @@ function RescheduleView({
           </div>
         )}
 
-        {phase === 'embed' && errorMessage && (
-          <div className="mx-4 mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:mx-6">
-            {errorMessage}
-          </div>
-        )}
-
         {phase === 'embed' && calLink && (
-          <div className="flex min-h-0 flex-1 overflow-hidden p-4 sm:p-6">
-            <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 sm:p-6">
+            {!sameSlotNotice && (
+              <p className="mb-3 text-center text-xs leading-relaxed text-stone-500">
+                Pick a new date or time below — your current booking stays
+                until you confirm a different slot.
+              </p>
+            )}
+            <div className="relative flex min-h-0 flex-1 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
               <Cal
                 key={embedKey}
                 namespace={CAL_RESCHEDULE_NAMESPACE}
@@ -1131,6 +1151,38 @@ function RescheduleView({
                 }}
                 config={{ layout: 'month_view', theme: 'light' }}
               />
+              {sameSlotNotice && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#FAF9F6]/90 p-6 backdrop-blur-[2px]">
+                  <div className="max-w-sm rounded-2xl border border-stone-200 bg-white px-6 py-7 text-center shadow-sm">
+                    <div className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-stone-100 text-stone-600">
+                      <Calendar className="h-5 w-5" aria-hidden="true" />
+                    </div>
+                    <h3 className="font-serif text-lg text-stone-900">
+                      {sameSlotCopy.title}
+                    </h3>
+                    <p className="mt-2 text-sm leading-relaxed text-stone-600">
+                      {sameSlotCopy.body}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSameSlotNotice(false);
+                        retryReschedule();
+                      }}
+                      className="mt-6 w-full rounded-full border border-stone-900 bg-stone-900 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.18em] text-stone-50 transition-colors hover:bg-stone-800"
+                    >
+                      Choose another time
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSameSlotNotice(false)}
+                      className="mt-3 w-full text-xs font-medium uppercase tracking-[0.16em] text-stone-500 transition-colors hover:text-stone-800"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
