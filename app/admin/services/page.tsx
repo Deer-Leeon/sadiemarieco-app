@@ -119,14 +119,29 @@ export default async function ServicesPage() {
         */}
         {services.length > 0 && (
           <div className="rounded-md border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">
-            <span className="font-medium text-stone-900">Heads up:</span>{' '}
-            New services collect{' '}
-            <span className="font-medium">First name, Last name, and Phone</span>{' '}
-            up front, with email required by default. To make email optional on
-            any service, click{' '}
-            <span className="font-medium">Open in Cal</span> on its card and
-            toggle the email field in Cal's Booking Questions tab — this isn't
-            available through the API on the current account tier.
+            <p>
+              <span className="font-medium text-stone-900">Heads up:</span>{' '}
+              New services collect{' '}
+              <span className="font-medium">First name, Last name, and Phone</span>{' '}
+              up front, with email required by default. To make email optional on
+              any service, click{' '}
+              <span className="font-medium">Open in Cal</span> on its card and
+              toggle the email field in Cal's Booking Questions tab — this isn't
+              available through the API on the current account tier.
+            </p>
+            <p className="mt-2">
+              Every new service automatically gets a{' '}
+              <span className="font-medium text-stone-900">
+                15-minute buffer after each booking
+              </span>{' '}
+              on the calendar (room turnover + notes), a{' '}
+              <span className="font-medium text-stone-900">
+                30-minute minimum lead time
+              </span>{' '}
+              before any slot is bookable, and is hidden from the public
+              cal.com/sadiemarie page so this site stays the single source of
+              truth for the menu.
+            </p>
           </div>
         )}
 

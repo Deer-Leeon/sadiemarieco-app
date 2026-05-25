@@ -1226,6 +1226,7 @@ function SlideOverForm({
                   label="Duration (min)"
                   htmlFor="svc-length"
                   required
+                  hint="Cal.com adds a mandatory 15-minute buffer after every booking on top of this duration."
                 >
                   <input
                     id="svc-length"
