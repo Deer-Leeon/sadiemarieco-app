@@ -5,9 +5,10 @@
  * has collected a card via `stripe.confirmSetup()`. Wires three
  * external systems together in a deliberate order:
  *
- *   1. Stripe — verify the SetupIntent actually succeeded, then
- *      create a Customer and attach the resulting PaymentMethod so
- *      we can charge it off-session for late-cancel / no-show fees.
+ *   1. Stripe — verify the SetupIntent actually succeeded, attach the
+ *      vaulted PaymentMethod to the Customer created during
+ *      `/api/stripe/create-setup-intent`, and set it as the default
+ *      for future off-session charges (no-show / late-cancel fees).
  *   2. Postgres — write the new Customer id onto the appointments
  *      row, linking the booking to its vaulted card. Lookup is by
  *      Cal booking UID (stored on `appointments.cal_event_id`).
@@ -38,6 +39,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { getAppointmentHoldByCalUid } from '@/lib/appointment-hold';
+import {
+  getAppointmentStripeByCalUid,
+  STRIPE_CUSTOMER_ID_RE,
+} from '@/lib/appointment-stripe';
 import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
 import { stripe } from '@/lib/stripe';
 
@@ -48,8 +53,6 @@ export const revalidate = 0;
 const CAL_V1_BASE = 'https://api.cal.com/v1';
 const CAL_V2_BASE = 'https://api.cal.com/v2';
 const CAL_API_VERSION = '2024-08-13';
-const STRIPE_CUSTOMER_ID_RE = /^cus_[A-Za-z0-9]+$/;
-
 interface ConfirmBody {
   setupIntentId?: unknown;
   email?: unknown;
@@ -273,9 +276,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     name: string | null;
     email: string | null;
   } = { name: null, email: null };
+  let setupIntent: Awaited<
+    ReturnType<NonNullable<typeof stripe>['setupIntents']['retrieve']>
+  >;
   try {
-    const setupIntent = await stripe.setupIntents.retrieve(setupIntentId, {
-      expand: ['payment_method'],
+    setupIntent = await stripe.setupIntents.retrieve(setupIntentId, {
+      expand: ['payment_method', 'customer'],
     });
     if (setupIntent.status !== 'succeeded') {
       return NextResponse.json(
@@ -333,32 +339,49 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ? pmBilling.name.trim().slice(0, 200)
       : '');
 
-  // ── 2. STRIPE: create Customer + attach PaymentMethod ──────────────
-  let stripeCustomerId: string;
+  // ── 2. STRIPE: attach PaymentMethod to vault Customer ─────────────
+  const existingStripe = await getAppointmentStripeByCalUid(calBookingUid);
+  const customerFromIntent =
+    typeof setupIntent.customer === 'string'
+      ? setupIntent.customer
+      : setupIntent.customer &&
+          typeof setupIntent.customer === 'object' &&
+          'id' in setupIntent.customer &&
+          typeof setupIntent.customer.id === 'string'
+        ? setupIntent.customer.id
+        : null;
+
+  let stripeCustomerId =
+    (customerFromIntent && STRIPE_CUSTOMER_ID_RE.test(customerFromIntent)
+      ? customerFromIntent
+      : null) ||
+    (existingStripe?.stripe_customer_id &&
+    STRIPE_CUSTOMER_ID_RE.test(existingStripe.stripe_customer_id)
+      ? existingStripe.stripe_customer_id
+      : null);
+
   try {
-    const customer = await stripe.customers.create({
-      // Pass undefined (not empty string) so Stripe stores NULL rather
-      // than an empty literal — empty-string emails come back in the
-      // dashboard search as "no email" with a confusing placeholder.
-      email: resolvedEmail || undefined,
-      name: resolvedName || undefined,
-      // Tag the Customer with the Cal booking UID so a later support
-      // request ("which Cal appointment did this card belong to?")
-      // can be answered directly from Stripe's dashboard without
-      // touching our DB.
-      metadata: { cal_booking_uid: calBookingUid },
-    });
-    stripeCustomerId = customer.id;
+    if (!stripeCustomerId) {
+      const customer = await stripe.customers.create({
+        email: resolvedEmail || undefined,
+        name: resolvedName || undefined,
+        metadata: { cal_booking_uid: calBookingUid },
+      });
+      stripeCustomerId = customer.id;
+    } else if (resolvedEmail || resolvedName) {
+      await stripe.customers.update(stripeCustomerId, {
+        email: resolvedEmail || undefined,
+        name: resolvedName || undefined,
+      });
+    }
 
-    await stripe.paymentMethods.attach(paymentMethodId, {
-      customer: stripeCustomerId,
-    });
+    const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+    if (pm.customer !== stripeCustomerId) {
+      await stripe.paymentMethods.attach(paymentMethodId, {
+        customer: stripeCustomerId,
+      });
+    }
 
-    // Make the just-attached PaymentMethod the default for INVOICES.
-    // (For off-session PaymentIntents we'll pass `payment_method`
-    // explicitly later; setting it here is a convenience for any
-    // future invoice-style charges and keeps the Stripe dashboard
-    // showing the correct card as "default".)
     await stripe.customers.update(stripeCustomerId, {
       invoice_settings: { default_payment_method: paymentMethodId },
     });
@@ -366,21 +389,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const msg = errorMessage(err);
     console.error('[api/booking/confirm] stripe customer/attach failed:', msg);
     return NextResponse.json(
-      { error: 'stripe_customer_create_failed', message: msg },
+      { error: 'stripe_customer_attach_failed', message: msg },
       { status: 502 }
     );
   }
 
-  // Belt-and-braces: validate the customer id matches the column's
-  // CHECK constraint before we attempt the UPDATE. If Stripe ever
-  // changes the id prefix the UPDATE would explode with a constraint
-  // violation; catching it here gives the client a structured error
-  // instead of a 500.
-  if (!STRIPE_CUSTOMER_ID_RE.test(stripeCustomerId)) {
-    console.error(
-      '[api/booking/confirm] Stripe returned customer id with unexpected shape',
-      { stripeCustomerId }
-    );
+  if (!stripeCustomerId || !STRIPE_CUSTOMER_ID_RE.test(stripeCustomerId)) {
     return NextResponse.json(
       { error: 'invalid_stripe_customer_id' },
       { status: 502 }

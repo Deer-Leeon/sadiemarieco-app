@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   CHECKOUT_HOLD_MINUTES,
@@ -55,6 +55,71 @@ const stripePromise: Promise<Stripe | null> | null = STRIPE_PK
  *   stone-50:  #fafaf9  — selected-tab background
  *   rose-700:  #b91c1c  — validation errors (matches our admin error family)
  */
+/** Strip Stripe 3DS redirect params while keeping the Cal booking context. */
+function clearStripeRedirectParams(uid: string, name: string, email: string) {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('setup_intent');
+  url.searchParams.delete('setup_intent_client_secret');
+  url.searchParams.delete('redirect_status');
+  url.searchParams.set('uid', uid);
+  if (name) url.searchParams.set('name', name);
+  else url.searchParams.delete('name');
+  if (email) url.searchParams.set('email', email);
+  else url.searchParams.delete('email');
+  const search = url.searchParams.toString();
+  window.history.replaceState(
+    {},
+    '',
+    search ? `${url.pathname}?${search}` : url.pathname
+  );
+}
+
+async function callBookingConfirm(params: {
+  setupIntentId: string;
+  calBookingUid: string;
+  name: string;
+  email: string;
+}): Promise<{ calWarning: string | null }> {
+  const res = await fetch('/api/booking/confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      setupIntentId: params.setupIntentId,
+      calBookingUid: params.calBookingUid,
+      ...(params.name ? { name: params.name } : {}),
+      ...(params.email ? { email: params.email } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as
+      | { error?: string; message?: string }
+      | null;
+    if (payload?.error === 'cart_hold_expired') {
+      throw new Error(payload.message ?? HOLD_EXPIRED_MESSAGE);
+    }
+    throw new Error(
+      payload?.message ??
+        payload?.error ??
+        `Could not finalise your appointment (HTTP ${res.status})`
+    );
+  }
+
+  const data = (await res.json()) as {
+    ok?: boolean;
+    cal_accept_error?: string | null;
+  };
+  return { calWarning: data.cal_accept_error ?? null };
+}
+
+function readThreeDsSetupIntentId(
+  params: ReturnType<typeof useSearchParams>
+): string | null {
+  if (params.get('redirect_status') !== 'succeeded') return null;
+  const id = params.get('setup_intent')?.trim() ?? '';
+  return id.startsWith('seti_') ? id : null;
+}
+
 const STRIPE_APPEARANCE: StripeElementsOptions['appearance'] = {
   theme: 'flat',
   variables: {
@@ -144,6 +209,10 @@ export default function CheckoutClient({
   const uid = params.get('uid')?.trim() ?? '';
   const name = params.get('name')?.trim() ?? '';
   const email = params.get('email')?.trim() ?? '';
+  const threeDsSetupIntentId = useMemo(
+    () => readThreeDsSetupIntentId(params),
+    [params]
+  );
 
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -219,7 +288,10 @@ export default function CheckoutClient({
   // /api route is cheap and a stale secret can land in an "expired"
   // state on retry.
   useEffect(() => {
-    if (holdExpired) return;
+    // Returning from a 3DS challenge — the URL carries the succeeded
+    // SetupIntent id; CheckoutThreeDSResume finalises without minting
+    // a fresh intent (which would orphan the authenticated vault).
+    if (holdExpired || threeDsSetupIntentId) return;
 
     if (!stripePromise) {
       setBootstrapError(
@@ -240,10 +312,11 @@ export default function CheckoutClient({
         const res = await fetch('/api/stripe/create-setup-intent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          // Empty body — the server doesn't require one. Sending an
-          // explicit `{}` keeps the request well-formed for any
-          // upstream proxy that's strict about Content-Length.
-          body: JSON.stringify({}),
+          body: JSON.stringify({
+            calBookingUid: uid,
+            ...(name ? { name } : {}),
+            ...(email ? { email } : {}),
+          }),
         });
         if (!res.ok) {
           const payload = (await res.json().catch(() => null)) as
@@ -274,7 +347,7 @@ export default function CheckoutClient({
     return () => {
       cancelled = true;
     };
-  }, [uid, email, name, holdExpired]);
+  }, [uid, email, name, holdExpired, threeDsSetupIntentId]);
 
   const elementsOptions: StripeElementsOptions | null = useMemo(
     () =>
@@ -291,6 +364,13 @@ export default function CheckoutClient({
       <section className="mt-10 w-full max-w-md">
         {holdExpired ? (
           <ExpiredHoldCard />
+        ) : threeDsSetupIntentId ? (
+          <CheckoutThreeDSResume
+            uid={uid}
+            name={name}
+            email={email}
+            setupIntentId={threeDsSetupIntentId}
+          />
         ) : bootstrapError ? (
           <ErrorCard message={bootstrapError} />
         ) : !elementsOptions || !stripePromise ? (
@@ -339,6 +419,68 @@ function Footnote() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// 3DS return — auto-finalise after Stripe redirect (no second submit)
+// ──────────────────────────────────────────────────────────────────────────
+function CheckoutThreeDSResume({
+  uid,
+  name,
+  email,
+  setupIntentId,
+}: {
+  uid: string;
+  name: string;
+  email: string;
+  setupIntentId: string;
+}) {
+  const [submitting, setSubmitting] = useState(true);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState<{
+    calWarning: string | null;
+  } | null>(null);
+  const resumeStartedRef = useRef(false);
+
+  useEffect(() => {
+    if (!uid || resumeStartedRef.current) return;
+    resumeStartedRef.current = true;
+
+    (async () => {
+      try {
+        const result = await callBookingConfirm({
+          setupIntentId,
+          calBookingUid: uid,
+          name,
+          email,
+        });
+        clearStripeRedirectParams(uid, name, email);
+        setConfirmed({ calWarning: result.calWarning });
+      } catch (err) {
+        setSubmitError(
+          err instanceof Error
+            ? err.message
+            : 'Your card was saved but we could not finalise the appointment. Please contact the studio.'
+        );
+      } finally {
+        setSubmitting(false);
+      }
+    })();
+  }, [uid, name, email, setupIntentId]);
+
+  if (confirmed) {
+    return <SuccessCard name={name} calWarning={confirmed.calWarning} />;
+  }
+
+  if (submitError) {
+    return <ErrorCard message={submitError} />;
+  }
+
+  if (submitting) {
+    return <LoadingCard label="Confirming your appointment…" />;
+  }
+
+  return null;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Form (inside Elements provider) — owns confirmSetup + /api/booking/confirm
 // ──────────────────────────────────────────────────────────────────────────
 interface FormProps {
@@ -366,6 +508,54 @@ function CheckoutForm({
   } | null>(null);
 
   const ready = stripe !== null && elements !== null;
+  const searchParams = useSearchParams();
+  const resumeStartedRef = useRef(false);
+
+  const finalizeBooking = useCallback(
+    async (setupIntentId: string) => {
+      setSubmitting(true);
+      setSubmitError(null);
+      try {
+        const result = await callBookingConfirm({
+          setupIntentId,
+          calBookingUid: uid,
+          name,
+          email,
+        });
+        clearStripeRedirectParams(uid, name, email);
+        setConfirmed({ calWarning: result.calWarning });
+      } catch (err) {
+        setSubmitError(
+          err instanceof Error
+            ? err.message
+            : 'Your card was saved but we could not finalise the appointment. Please contact the studio.'
+        );
+        setSubmitting(false);
+      }
+    },
+    [uid, name, email]
+  );
+
+  // In-page 3DS return (rare) or bookmarked return URL — same auto-finalise
+  // path as the full-page redirect handled by CheckoutThreeDSResume.
+  useEffect(() => {
+    if (holdExpired || !uid || resumeStartedRef.current || confirmed) {
+      return;
+    }
+    const redirectStatus = searchParams.get('redirect_status');
+    const setupIntentId = searchParams.get('setup_intent')?.trim() ?? '';
+    if (redirectStatus !== 'succeeded' || !setupIntentId.startsWith('seti_')) {
+      return;
+    }
+    resumeStartedRef.current = true;
+    void finalizeBooking(setupIntentId);
+  }, [
+    holdExpired,
+    uid,
+    confirmed,
+    searchParams,
+    finalizeBooking,
+  ]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -374,16 +564,16 @@ function CheckoutForm({
     setSubmitting(true);
     setSubmitError(null);
 
-    // `redirect: 'if_required'` keeps the flow in-page for vanilla cards
-    // and only navigates away when the issuer demands a 3DS challenge
-    // page (rare on US cards, common on EU). When the challenge ends
-    // Stripe brings the user back to the current URL with `?setup_intent=…`
-    // appended; this page's URL already contains the booking context so
-    // a future enhancement can read those query params to auto-resume.
-    // For now the spec scope is "happy path no-redirect", which this
-    // configuration delivers.
+    const returnUrl = new URL('/checkout', window.location.origin);
+    returnUrl.searchParams.set('uid', uid);
+    if (name) returnUrl.searchParams.set('name', name);
+    if (email) returnUrl.searchParams.set('email', email);
+
     const { error, setupIntent } = await stripe.confirmSetup({
       elements,
+      confirmParams: {
+        return_url: returnUrl.toString(),
+      },
       redirect: 'if_required',
     });
 
@@ -403,55 +593,7 @@ function CheckoutForm({
       return;
     }
 
-    // Card vaulted on Stripe — hand off to our server to attach it to a
-    // Customer, link to the appointments row, and accept the booking on
-    // Cal.com. We swallow Cal failures here (the server returns them as
-    // a non-blocking `cal_accept_error`) because the card is already
-    // saved and the admin can confirm manually if needed.
-    try {
-      const res = await fetch('/api/booking/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          setupIntentId: setupIntent.id,
-          // name + email are best-effort here — the server re-derives
-          // them from the PaymentMethod's billing_details when these
-          // aren't passed or aren't usable. Sending empty strings as
-          // omitted keys keeps the request body small and lets the
-          // server treat "absent" and "blank" identically.
-          ...(name ? { name } : {}),
-          ...(email ? { email } : {}),
-          calBookingUid: uid,
-        }),
-      });
-
-      if (!res.ok) {
-        const payload = (await res.json().catch(() => null)) as
-          | { error?: string; message?: string }
-          | null;
-        if (payload?.error === 'cart_hold_expired') {
-          throw new Error(payload.message ?? HOLD_EXPIRED_MESSAGE);
-        }
-        throw new Error(
-          payload?.message ??
-            payload?.error ??
-            `Could not finalise your appointment (HTTP ${res.status})`
-        );
-      }
-
-      const data = (await res.json()) as {
-        ok?: boolean;
-        cal_accept_error?: string | null;
-      };
-      setConfirmed({ calWarning: data.cal_accept_error ?? null });
-    } catch (err) {
-      setSubmitError(
-        err instanceof Error
-          ? err.message
-          : 'Your card was saved but we could not finalise the appointment. Please contact the studio.'
-      );
-      setSubmitting(false);
-    }
+    await finalizeBooking(setupIntent.id);
   }
 
   if (confirmed) {
@@ -574,7 +716,7 @@ function CheckoutForm({
 // ──────────────────────────────────────────────────────────────────────────
 // State cards
 // ──────────────────────────────────────────────────────────────────────────
-function LoadingCard() {
+function LoadingCard({ label = 'Preparing your secure checkout' }: { label?: string }) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-2xl border border-stone-200 bg-white p-10 text-center shadow-sm shadow-stone-900/[0.03]">
       <Loader2
@@ -582,7 +724,7 @@ function LoadingCard() {
         aria-hidden="true"
       />
       <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-400">
-        Preparing your secure checkout
+        {label}
       </p>
     </div>
   );

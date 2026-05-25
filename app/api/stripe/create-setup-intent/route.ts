@@ -1,45 +1,67 @@
 /**
  * POST /api/stripe/create-setup-intent
  *
- * Initialises a Stripe SetupIntent used by the /checkout page to vault
- * a client's card BEFORE the booking is finalised. The Element on the
- * page collects the card, calls `stripe.confirmSetup()` against the
- * client_secret we return here, and the resulting PaymentMethod is
- * attached to a Customer in the subsequent `/api/booking/confirm` call.
- *
- * `usage: 'off_session'` is the load-bearing setting:
- *   • Tells Stripe to capture all extra authentication factors NOW
- *     (3DS challenge if the issuer needs one, CVC, address-verification
- *     mandate text on EU cards) so we can charge later without the
- *     client present.
- *   • The PaymentMethod returned satisfies SCA "mandate" rules in the
- *     EU and unlocks `confirm({ off_session: true })` on subsequent
- *     PaymentIntents (no-show / late-cancel fees).
- *
- * No body required — the SetupIntent isn't associated with a customer
- * here (Stripe lets us attach to one at confirm time on the next route).
- * If we ever need to dedupe cards per-client across multiple bookings,
- * accept an optional `customerId` in the body and pass it as `customer`
- * to setupIntents.create — but for v1 we explicitly want a new vault
- * per booking so admin re-issue of a card-on-file stays isolated.
- *
- * Returns `{ clientSecret }`. Errors return a JSON shape consistent
- * with the rest of the admin API (`{ error: 'code', message?: string }`)
- * so the client can branch deterministically.
+ * Card-vault bootstrap for /checkout:
+ *   1. Resolve (or create) a Stripe Customer from the Cal booking context.
+ *   2. Create a SetupIntent (`usage: 'off_session'`) bound to that customer.
+ *   3. Persist `stripe_customer_id` + `stripe_setup_intent_id` on the
+ *      pending `appointments` row (when it exists).
+ *   4. Return `{ clientSecret }` for Stripe Elements + `confirmSetup()`.
  */
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  getAppointmentStripeByCalUid,
+  saveAppointmentStripeVault,
+  STRIPE_CUSTOMER_ID_RE,
+  STRIPE_SETUP_INTENT_ID_RE,
+} from '@/lib/appointment-stripe';
 import { stripe } from '@/lib/stripe';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+interface CreateSetupIntentBody {
+  calBookingUid?: unknown;
+  email?: unknown;
+  name?: unknown;
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export async function POST(): Promise<NextResponse> {
+function isUsableEmail(value: string): boolean {
+  return value.length > 0 && value.includes('@') && value.length <= 254;
+}
+
+function parseBody(input: unknown): {
+  calBookingUid: string;
+  email: string;
+  name: string;
+} | { error: string } {
+  if (!input || typeof input !== 'object') {
+    return { error: 'invalid_body' };
+  }
+  const body = input as CreateSetupIntentBody;
+  const calBookingUid =
+    typeof body.calBookingUid === 'string' ? body.calBookingUid.trim() : '';
+  const rawEmail = typeof body.email === 'string' ? body.email.trim() : '';
+  const rawName = typeof body.name === 'string' ? body.name.trim() : '';
+
+  if (!calBookingUid || calBookingUid.length > 200) {
+    return { error: 'invalid_cal_booking_uid' };
+  }
+
+  return {
+    calBookingUid,
+    email: isUsableEmail(rawEmail) ? rawEmail : '',
+    name: rawName.length > 0 && rawName.length <= 200 ? rawName : '',
+  };
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!stripe) {
     return NextResponse.json(
       {
@@ -51,22 +73,58 @@ export async function POST(): Promise<NextResponse> {
     );
   }
 
+  let raw: unknown;
   try {
+    raw = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
+  }
+
+  const parsed = parseBody(raw);
+  if ('error' in parsed) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+
+  const { calBookingUid, email, name } = parsed;
+
+  try {
+    const existing = await getAppointmentStripeByCalUid(calBookingUid);
+
+    let stripeCustomerId =
+      existing?.stripe_customer_id &&
+      STRIPE_CUSTOMER_ID_RE.test(existing.stripe_customer_id)
+        ? existing.stripe_customer_id
+        : null;
+
+    if (!stripeCustomerId) {
+      const customer = await stripe.customers.create({
+        email: email || undefined,
+        name: name || undefined,
+        metadata: { cal_booking_uid: calBookingUid },
+      });
+      stripeCustomerId = customer.id;
+    } else if (email || name) {
+      await stripe.customers.update(stripeCustomerId, {
+        email: email || undefined,
+        name: name || undefined,
+      });
+    }
+
+    if (!STRIPE_CUSTOMER_ID_RE.test(stripeCustomerId)) {
+      return NextResponse.json(
+        { error: 'invalid_stripe_customer_id' },
+        { status: 502 }
+      );
+    }
+
     const setupIntent = await stripe.setupIntents.create({
+      customer: stripeCustomerId,
       usage: 'off_session',
-      // Restrict to card. The PaymentElement defaults to "every method
-      // enabled on the dashboard"; pinning to card here means a stray
-      // Klarna/Affirm toggle in the Stripe UI can't suddenly let a
-      // client "vault" a non-vaultable method that we then can't use
-      // off-session for cancellation fees.
       payment_method_types: ['card'],
+      metadata: { cal_booking_uid: calBookingUid },
     });
 
     if (!setupIntent.client_secret) {
-      // Defensive — Stripe's SDK types client_secret as `string | null`
-      // but in practice it's only null for archived/expired intents
-      // (which a fresh create can't return). Treat as a server fault
-      // so the client doesn't get a half-baked Element session.
       console.error(
         '[api/stripe/create-setup-intent] SetupIntent created without client_secret',
         { id: setupIntent.id }
@@ -77,7 +135,32 @@ export async function POST(): Promise<NextResponse> {
       );
     }
 
-    return NextResponse.json({ clientSecret: setupIntent.client_secret });
+    if (!STRIPE_SETUP_INTENT_ID_RE.test(setupIntent.id)) {
+      return NextResponse.json(
+        { error: 'invalid_stripe_setup_intent_id' },
+        { status: 502 }
+      );
+    }
+
+    const dbLinked = await saveAppointmentStripeVault({
+      calBookingUid,
+      stripeCustomerId,
+      stripeSetupIntentId: setupIntent.id,
+    });
+
+    if (!dbLinked) {
+      console.warn(
+        '[api/stripe/create-setup-intent] no pending appointment row to link Stripe ids',
+        { calBookingUid, stripeCustomerId, setupIntentId: setupIntent.id }
+      );
+    }
+
+    return NextResponse.json({
+      clientSecret: setupIntent.client_secret,
+      stripeCustomerId,
+      setupIntentId: setupIntent.id,
+      dbLinked,
+    });
   } catch (err) {
     const msg = errorMessage(err);
     console.error(
