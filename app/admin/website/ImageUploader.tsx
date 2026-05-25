@@ -396,7 +396,7 @@ export default function ImageUploader({
       disabled={isUploading || !!imageToCrop}
       aria-label={`Replace ${label}`}
       className={`group relative block w-full cursor-pointer overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 disabled:cursor-progress ${
-        isCard ? 'rounded-md' : 'h-full'
+        isCard ? 'rounded-md' : 'h-full max-[860px]:h-auto'
       }`}
     >
       {displayUrl ? (
@@ -404,16 +404,18 @@ export default function ImageUploader({
         <img
           src={displayUrl}
           alt={label}
-          className={`${aspectClass} block w-full object-cover ${
+          className={`block w-full object-cover ${
             isCard
-              ? 'bg-stone-100'
-              : 'h-full saturate-[0.82] transition-transform duration-900 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] group-hover:scale-[1.06] group-focus-visible:scale-[1.06]'
+              ? `${aspectClass} bg-stone-100`
+              : 'h-full max-[860px]:aspect-video max-[860px]:h-auto saturate-[0.82] transition-transform duration-900 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] group-hover:scale-[1.06] group-focus-visible:scale-[1.06]'
           }`}
         />
       ) : (
         <div
-          className={`flex ${aspectClass} w-full items-center justify-center ${
-            isCard ? 'bg-stone-100' : 'h-full bg-[#1C2E42]'
+          className={`flex w-full items-center justify-center ${
+            isCard
+              ? `${aspectClass} bg-stone-100`
+              : 'h-full max-[860px]:aspect-video max-[860px]:h-auto bg-[#1C2E42]'
           }`}
         >
           <ImageIcon
@@ -474,7 +476,7 @@ export default function ImageUploader({
             low opacity, brightens on hover so the cursor target is
             unambiguous.
           */}
-          <div className="pointer-events-none absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 opacity-70 backdrop-blur-sm transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
+          <div className="pointer-events-none absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 opacity-70 backdrop-blur-sm transition-opacity duration-200 max-[860px]:opacity-100 group-hover:opacity-100 group-focus-visible:opacity-100">
             <Pencil className="h-3.5 w-3.5 text-white" aria-hidden="true" />
           </div>
         </>

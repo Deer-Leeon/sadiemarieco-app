@@ -203,21 +203,10 @@ export default async function WebsiteEditorPage() {
         </section>
 
         {/* ── SECTION 2 — Portfolio & Gallery Collage ───────────────
-            Live-site geometry (12-col, 320px + 240px rows, 10px gap,
-            p-item-1: 5/12, p-item-2: 7/12, p-item-3/4/5: 4/12 each on
-            row 2) preserved verbatim. What changed from the previous
-            full-bleed treatment:
-
-              • The whole section now lives inside the same max-w-6xl
-                column as Core Pages, so horizontal alignment is
-                consistent between sections.
-              • The grid is wrapped in a white card whose padding
-                exactly equals the inter-tile gap (`p-[10px]`,
-                `gap-[10px]`), so every tile sits at the same 10px
-                inset from any neighbour — card edge or sibling.
-                Reads as one uniform mosaic.
-              • The 860px-and-below reflow (p-item-1 / p-item-2 each
-                taking their own row) is preserved.                          */}
+            Desktop: 12-col editorial grid (matches live site >860px).
+            Mobile: micro-collage flex stack (65% width, 16:9, zig-zag)
+            — same geometry as `public/index.html` `.portfolio-collage`
+            at the 860px breakpoint so phone edits are WYSIWYG.           */}
         <section>
           <h2 className="mb-6 font-serif text-xl text-stone-900">
             Portfolio &amp; Gallery Collage
@@ -225,19 +214,14 @@ export default async function WebsiteEditorPage() {
           <div className="rounded-xl border border-stone-200 bg-white p-[10px] shadow-sm">
             <div
               className="
-                grid gap-[10px]
-                grid-cols-12 grid-rows-[280px_220px]
-                max-[860px]:grid-rows-[260px_220px_180px]
+                grid grid-cols-12 grid-rows-[280px_220px] gap-[10px]
+                max-[860px]:flex max-[860px]:flex-col max-[860px]:gap-2
               "
             >
               {/*
                 Labels are the exact `.p-tag` strings hard-coded in
-                public/index.html (lines 257, 262, 267, 272, 277).
-                Using them here rather than admin-only slot names makes
-                the editor a true 1:1 visual preview — hovering a tile
-                reveals the same caption that will read on the live
-                site. The slot identity is still unambiguous because
-                the grid order matches the live site exactly.
+                public/index.html. Order matches the live collage; mobile
+                stagger alternates self-start / self-end by index.
               */}
               <ImageUploader
                 variant="tile"
@@ -245,7 +229,7 @@ export default async function WebsiteEditorPage() {
                 label="Classic Lashes"
                 currentUrl={urlFor('portfolio_1')}
                 initialCaption={captionFor('portfolio_1')}
-                className="col-span-5 row-start-1 max-[860px]:col-span-12 max-[860px]:row-start-1"
+                className="col-span-5 row-start-1 max-[860px]:w-[65%] max-[860px]:self-start"
               />
               <ImageUploader
                 variant="tile"
@@ -253,7 +237,7 @@ export default async function WebsiteEditorPage() {
                 label="Glow Facial"
                 currentUrl={urlFor('portfolio_2')}
                 initialCaption={captionFor('portfolio_2')}
-                className="col-span-7 row-start-1 max-[860px]:col-span-12 max-[860px]:row-start-2"
+                className="col-span-7 row-start-1 max-[860px]:w-[65%] max-[860px]:self-end"
               />
               <ImageUploader
                 variant="tile"
@@ -261,7 +245,7 @@ export default async function WebsiteEditorPage() {
                 label="Brow Lamination"
                 currentUrl={urlFor('portfolio_3')}
                 initialCaption={captionFor('portfolio_3')}
-                className="col-span-4 row-start-2 max-[860px]:row-start-3"
+                className="col-span-4 row-start-2 max-[860px]:w-[65%] max-[860px]:self-start"
               />
               <ImageUploader
                 variant="tile"
@@ -269,7 +253,7 @@ export default async function WebsiteEditorPage() {
                 label="Volume Set"
                 currentUrl={urlFor('portfolio_4')}
                 initialCaption={captionFor('portfolio_4')}
-                className="col-span-4 row-start-2 max-[860px]:row-start-3"
+                className="col-span-4 row-start-2 max-[860px]:w-[65%] max-[860px]:self-end"
               />
               <ImageUploader
                 variant="tile"
@@ -277,7 +261,7 @@ export default async function WebsiteEditorPage() {
                 label="Skin Treatment"
                 currentUrl={urlFor('portfolio_5')}
                 initialCaption={captionFor('portfolio_5')}
-                className="col-span-4 row-start-2 max-[860px]:row-start-3"
+                className="col-span-4 row-start-2 max-[860px]:w-[65%] max-[860px]:self-start"
               />
             </div>
           </div>

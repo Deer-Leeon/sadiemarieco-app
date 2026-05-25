@@ -30,7 +30,8 @@
  * success state inline on a sticky save bar so the editor never has
  * to chase a corner of the screen for confirmation.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Calendar, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 
 import {
@@ -303,7 +304,7 @@ export default function AvailabilityClient({ initial }: Props) {
   }
 
   return (
-    <div className="space-y-8 pb-24">
+    <div className="space-y-8 pb-[calc(6.5rem+env(safe-area-inset-bottom,0))] max-md:pb-[calc(9rem+env(safe-area-inset-bottom,0))]">
       {/* ── Weekly Hours card ─────────────────────────────────────────── */}
       <section className="rounded-xl border border-stone-200 bg-white p-6 shadow-sm">
         <header className="mb-5 flex items-baseline justify-between border-b border-stone-100 pb-4">
@@ -403,18 +404,65 @@ export default function AvailabilityClient({ initial }: Props) {
         )}
       </section>
 
-      {/* ── Sticky save bar ───────────────────────────────────────────── */}
-      <div className="fixed inset-x-0 bottom-4 z-40 mx-auto flex max-w-3xl items-center justify-between gap-3 rounded-full border border-stone-200 bg-white/95 px-5 py-3 shadow-lg backdrop-blur">
-        <StatusLine
-          savedAt={savedAt}
-          error={error}
-          validationErrors={validationErrors}
-        />
+      <DockedSaveBar
+        savedAt={savedAt}
+        error={error}
+        validationErrors={validationErrors}
+        isSaving={isSaving}
+        onSave={handleSave}
+      />
+
+      <p className="text-center text-[10px] uppercase tracking-[0.22em] text-stone-400">
+        All times in {STUDIO_TIMEZONE.replace('_', ' ')}.
+      </p>
+    </div>
+  );
+}
+
+// ─── Subcomponents ────────────────────────────────────────────────────────
+
+/**
+ * Rendered via portal on `document.body` so `position: fixed` always
+ * anchors to the viewport (not a scroll parent). On mobile the bar is
+ * flush to the physical bottom with only safe-area inset padding.
+ */
+function DockedSaveBar({
+  savedAt,
+  error,
+  validationErrors,
+  isSaving,
+  onSave,
+}: {
+  savedAt: number | null;
+  error: string | null;
+  validationErrors: string[];
+  isSaving: boolean;
+  onSave: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <div
+      role="region"
+      aria-label="Save availability"
+      className="fixed right-0 bottom-0 left-0 z-100 border-t border-stone-200 bg-[#FAF9F6] shadow-[0_-8px_30px_-12px_rgba(28,25,23,0.18)] max-md:pb-[env(safe-area-inset-bottom)] md:bg-[#FAF9F6]/95 md:backdrop-blur-md"
+    >
+      <div className="mx-auto flex max-w-4xl flex-col gap-2 px-4 pt-2.5 pb-3 max-md:gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-6">
+        <div className="min-w-0 flex-1">
+          <StatusLine
+            savedAt={savedAt}
+            error={error}
+            validationErrors={validationErrors}
+          />
+        </div>
         <button
           type="button"
-          onClick={handleSave}
+          onClick={onSave}
           disabled={isSaving || validationErrors.length > 0}
-          className="inline-flex items-center gap-2 rounded-full bg-stone-900 px-5 py-2 text-xs font-medium uppercase tracking-[0.18em] text-[#FAF9F6] transition-colors hover:bg-stone-700 disabled:opacity-50"
+          className="inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-full bg-stone-900 px-5 py-2.5 text-xs font-medium uppercase tracking-[0.18em] text-[#FAF9F6] transition-colors hover:bg-stone-700 disabled:opacity-50 sm:w-auto"
         >
           {isSaving ? (
             <>
@@ -429,15 +477,10 @@ export default function AvailabilityClient({ initial }: Props) {
           )}
         </button>
       </div>
-
-      <p className="text-center text-[10px] uppercase tracking-[0.22em] text-stone-400">
-        All times in {STUDIO_TIMEZONE.replace('_', ' ')}.
-      </p>
-    </div>
+    </div>,
+    document.body
   );
 }
-
-// ─── Subcomponents ────────────────────────────────────────────────────────
 
 function StatusLine({
   savedAt,
@@ -464,7 +507,7 @@ function StatusLine({
     );
   }
   return (
-    <p className="truncate text-xs text-stone-500">
+    <p className="text-xs leading-snug text-stone-500 max-md:line-clamp-2 sm:truncate">
       Changes will sync to Cal.com on save.
     </p>
   );

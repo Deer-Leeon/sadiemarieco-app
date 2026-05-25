@@ -825,7 +825,7 @@ function ServiceCard({
         </p>
       )}
 
-      <div className="mt-5 flex items-center justify-between gap-2 border-t border-stone-100 pt-3">
+      <div className="mt-5 flex flex-col gap-3 border-t border-stone-100 pt-3 max-md:gap-2 md:flex-row md:items-center md:justify-between md:gap-2">
         {/*
           Left dock: calendar-colour chip + Cal.com deep-link. Both
           are "context cues" rather than primary actions, so they
@@ -837,28 +837,30 @@ function ServiceCard({
           to compete for attention with a confirm-delete).
         */}
         {!isConfirmingDelete && !isGroup && (
-          <ServiceColorChip service={service} />
-        )}
-        {!isConfirmingDelete && !isGroup && service.cal_event_id !== null && (
-          <a
-            href={`https://app.cal.com/event-types/${service.cal_event_id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400 transition-colors hover:text-stone-700"
-          >
-            <ExternalLink className="h-3 w-3" />
-            Open in Cal
-          </a>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <ServiceColorChip service={service} />
+            {service.cal_event_id !== null && (
+              <a
+                href={`https://app.cal.com/event-types/${service.cal_event_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex max-w-full items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400 transition-colors hover:text-stone-700"
+              >
+                <ExternalLink className="h-3 w-3 shrink-0" />
+                Open in Cal
+              </a>
+            )}
+          </div>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="grid w-full min-w-0 grid-cols-2 gap-2 md:ml-auto md:flex md:w-auto md:flex-nowrap">
           {isConfirmingDelete ? (
             <>
               <button
                 type="button"
                 onClick={onCancelDelete}
                 disabled={isDeleting}
-                className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100 disabled:opacity-50"
+                className="inline-flex min-w-0 items-center justify-center rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100 disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -866,14 +868,16 @@ function ServiceCard({
                 type="button"
                 onClick={onConfirmDelete}
                 disabled={isDeleting}
-                className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-rose-700 disabled:opacity-50"
+                className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-rose-700 disabled:opacity-50"
               >
-                <Trash2 className="h-3 w-3" />
-                {isDeleting
-                  ? 'Removing…'
-                  : isGroup
-                    ? 'Confirm — removes children'
-                    : 'Confirm delete'}
+                <Trash2 className="h-3 w-3 shrink-0" />
+                <span className="truncate">
+                  {isDeleting
+                    ? 'Removing…'
+                    : isGroup
+                      ? 'Confirm — removes children'
+                      : 'Confirm delete'}
+                </span>
               </button>
             </>
           ) : (
@@ -881,17 +885,17 @@ function ServiceCard({
               <button
                 type="button"
                 onClick={onEdit}
-                className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100"
+                className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100"
               >
-                <Pencil className="h-3 w-3" />
+                <Pencil className="h-3 w-3 shrink-0" />
                 Edit
               </button>
               <button
                 type="button"
                 onClick={onPrimeDelete}
-                className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
               >
-                <Trash2 className="h-3 w-3" />
+                <Trash2 className="h-3 w-3 shrink-0" />
                 Delete
               </button>
             </>
@@ -1322,15 +1326,15 @@ function ServiceColorChip({ service }: { service: Service }) {
   if (!resolved) return null;
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500"
+      className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500"
       title={`Calendar colour ${resolved.accent}`}
     >
       <span
         aria-hidden="true"
-        className="inline-block h-3 w-3 rounded-full ring-1 ring-stone-300"
+        className="inline-block h-3 w-3 shrink-0 rounded-full ring-1 ring-stone-300"
         style={{ backgroundColor: resolved.accent }}
       />
-      <span className="font-mono normal-case tracking-wider text-stone-700">
+      <span className="truncate font-mono normal-case tracking-wider text-stone-700">
         {resolved.accent}
       </span>
     </span>
