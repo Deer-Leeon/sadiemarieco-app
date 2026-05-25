@@ -234,7 +234,15 @@ export type ViewMode = 'list' | 'month' | '3day' | 'week';
  * server→client convention as `Appointment` above. The client parses
  * with `date-fns/parseISO` where needed.
  */
-export interface Client {
+/** Aggregated CRM metrics (directory + profile header). */
+export interface ClientCrmStats {
+  total_bookings: number;
+  lifetime_value: number;
+  has_vaulted_card: boolean;
+  risk_flag: boolean;
+}
+
+export interface Client extends ClientCrmStats {
   id: string;
   phone: string | null;
   first_name: string | null;
@@ -243,6 +251,14 @@ export interface Client {
   /** ISO 8601 string. */
   created_at: string | null;
 }
+
+/** Default CRM stats when a row has no linked appointments yet. */
+export const EMPTY_CLIENT_CRM_STATS: ClientCrmStats = {
+  total_bookings: 0,
+  lifetime_value: 0,
+  has_vaulted_card: false,
+  risk_flag: false,
+};
 
 /**
  * Single row from the `client_photos` table — the photo gallery the

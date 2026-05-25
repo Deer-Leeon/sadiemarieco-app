@@ -32,7 +32,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
-import type { Client } from '@/app/admin/types';
+import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
 
 // We never want this cached. The admin dashboard expects every fetch
 // to reflect the latest writes (a name PATCH should be immediately
@@ -87,6 +87,7 @@ interface ClientRow {
 
 function rowToClient(row: ClientRow): Client {
   return {
+    ...EMPTY_CLIENT_CRM_STATS,
     id: row.id,
     phone: row.phone,
     first_name: row.first_name,

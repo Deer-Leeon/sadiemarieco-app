@@ -35,11 +35,11 @@ interface ClientRow {
   first_name: string | null;
   last_name: string | null;
   email: string | null;
-  // @vercel/postgres returns TIMESTAMPTZ as either a Date or an ISO
-  // string depending on environment. We normalise to an ISO string
-  // before crossing the server → client boundary so the wire format
-  // matches the `Client.created_at: string | null` contract.
   created_at: Date | string | null;
+  total_bookings: number | string | null;
+  lifetime_value: number | string | null;
+  has_vaulted_card: boolean | null;
+  risk_flag: boolean | null;
 }
 
 function serializeDate(value: Date | string | null): string | null {
@@ -49,10 +49,13 @@ function serializeDate(value: Date | string | null): string | null {
   return d.toISOString();
 }
 
+function toNumber(value: number | string | null): number {
+  if (value === null) return 0;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export default async function ClientsPage() {
-  // ── AUTH GATE ──────────────────────────────────────────────────────────
-  // Same allowlist as the other admin surfaces. Middleware enforces
-  // "signed in" for /admin/**; this gate adds "AND on the allowlist".
   const access = await getAdminAccess();
   if (!access.userId) redirect('/');
   if (!access.hasAccess) redirect('/');
@@ -60,19 +63,97 @@ export default async function ClientsPage() {
   const user = await currentUser();
   const displayName = user?.firstName || access.emails[0] || 'Admin';
 
-  // ── DATA FETCH ─────────────────────────────────────────────────────────
-  // ORDER BY first_name ASC per spec. NULLS LAST so legacy rows
-  // missing a first name fall to the bottom rather than sorting
-  // before "Aaron" (Postgres default puts NULLs first on ASC). The
-  // client side re-sorts only the filtered view, so this is the
-  // canonical order whenever the search box is empty.
   let clients: Client[] = [];
   let dbError: string | null = null;
   try {
     const { rows } = await sql<ClientRow>`
-      SELECT id, phone, first_name, last_name, email, created_at
-      FROM clients
-      ORDER BY first_name ASC NULLS LAST, last_name ASC NULLS LAST
+      SELECT
+        c.id,
+        c.phone,
+        c.first_name,
+        c.last_name,
+        c.email,
+        c.created_at,
+        COALESCE(stats.total_bookings, 0)::int AS total_bookings,
+        COALESCE(stats.lifetime_value, 0)::float AS lifetime_value,
+        COALESCE(stats.has_vaulted_card, FALSE) AS has_vaulted_card,
+        COALESCE(stats.risk_flag, FALSE) AS risk_flag
+      FROM clients c
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*) FILTER (
+            WHERE COALESCE(LOWER(TRIM(a.status)), '') NOT IN (
+              'pending',
+              'canceled_by_admin',
+              'canceled_by_client',
+              'canceled_by_client_late',
+              'canceled_by_system'
+            )
+          )::int AS total_bookings,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN a.booking_time IS NOT NULL
+                  AND a.booking_time < NOW()
+                  AND COALESCE(LOWER(TRIM(a.status)), '') IN (
+                    'confirmed',
+                    'no-show'
+                  )
+                THEN COALESCE(s.price::numeric, 0)
+                ELSE 0
+              END
+            ),
+            0
+          )::float AS lifetime_value,
+          BOOL_OR(
+            a.stripe_customer_id IS NOT NULL
+            AND TRIM(a.stripe_customer_id) <> ''
+          ) AS has_vaulted_card,
+          BOOL_OR(
+            COALESCE(LOWER(TRIM(a.status)), '') IN (
+              'no-show',
+              'canceled_by_client_late'
+            )
+          ) AS risk_flag
+        FROM appointments a
+        LEFT JOIN LATERAL (
+          SELECT s.price
+          FROM site_services s
+          WHERE s.title = split_part(a.service_name, ' between ', 1)
+            AND s.is_active = TRUE
+            AND (
+              lower(trim(split_part(a.service_name, ' between ', 1))) NOT IN (
+                'classic', 'hybrid', 'volume'
+              )
+              OR (
+                a.booking_time IS NOT NULL
+                AND a.end_time IS NOT NULL
+                AND s.duration_mins IS NOT NULL
+                AND s.duration_mins = GREATEST(
+                  1,
+                  ROUND(
+                    EXTRACT(EPOCH FROM (a.end_time - a.booking_time)) / 60.0
+                  )
+                )::integer
+              )
+            )
+          ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
+          LIMIT 1
+        ) s ON TRUE
+        WHERE
+          a.client_id = c.id
+          OR (
+            c.email IS NOT NULL
+            AND a.client_email IS NOT NULL
+            AND LOWER(TRIM(a.client_email)) = LOWER(TRIM(c.email))
+          )
+          OR (
+            c.phone IS NOT NULL
+            AND a.client_phone IS NOT NULL
+            AND regexp_replace(a.client_phone, '\D', '', 'g') = c.phone
+          )
+      ) stats ON TRUE
+      ORDER BY c.first_name ASC NULLS LAST, c.last_name ASC NULLS LAST
     `;
     clients = rows.map((r) => ({
       id: r.id,
@@ -81,6 +162,10 @@ export default async function ClientsPage() {
       last_name: r.last_name,
       email: r.email,
       created_at: serializeDate(r.created_at),
+      total_bookings: toNumber(r.total_bookings),
+      lifetime_value: toNumber(r.lifetime_value),
+      has_vaulted_card: Boolean(r.has_vaulted_card),
+      risk_flag: Boolean(r.risk_flag),
     }));
   } catch (err) {
     console.error('[admin/clients] clients query failed:', err);
@@ -89,15 +174,10 @@ export default async function ClientsPage() {
 
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-stone-900">
-      {/*
-        Shared header + tabs so the bar height + typographic register
-        stay pixel-identical between admin sections — only the body
-        below should change when switching tabs.
-      */}
       <AdminHeader title="Clients" displayName={displayName} />
       <AdminSectionTabs />
 
-      <main className="mx-auto max-w-3xl px-6 py-8">
+      <main className="mx-auto max-w-4xl px-6 py-8">
         {dbError && (
           <div className="mb-6 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
             Could not load clients: {dbError}. Try refreshing — if it

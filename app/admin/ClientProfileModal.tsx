@@ -38,6 +38,7 @@ import {
   Camera,
   ChevronRight,
   ClipboardCheck,
+  CreditCard,
   Loader2,
   Mail,
   Pencil,
@@ -50,8 +51,18 @@ import {
   X,
 } from 'lucide-react';
 
-import type { Appointment, Client, ClientPhoto } from './types';
-import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import type {
+  Appointment,
+  Client,
+  ClientCrmStats,
+  ClientPhoto,
+} from './types';
+import {
+  appointmentServiceLabel,
+  clientDisplayName,
+  computeCrmStatsFromAppointments,
+  formatLifetimeSpend,
+} from './helpers';
 import { getServiceColor } from './serviceColors';
 // Circular import: AppointmentModal imports ClientProfileModal (for the
 // "Client" tab) and ClientProfileModal imports AppointmentModal (for
@@ -365,30 +376,375 @@ function OverviewView({
   return (
     <div className="flex flex-col gap-4">
       <IdentityBox client={client} onEdit={() => onChangeView('edit_info')} />
+      <DossierSection client={client} onChangeView={onChangeView} />
+    </div>
+  );
+}
 
-      <ActionBox
-        icon={<Calendar className="h-3 w-3" />}
-        label="Appointments History"
-        helper="Past and upcoming bookings for this client."
-        onClick={() => onChangeView('appointments')}
-      />
-      <ActionBox
-        icon={<Camera className="h-3 w-3" />}
-        label="Photo Gallery"
-        helper="Reference photos for lash sets, brow shapes, and dye colours."
-        onClick={() => onChangeView('pictures')}
-      />
-      <ActionBox
-        icon={<ClipboardCheck className="h-3 w-3" />}
-        label="Consent Form"
-        helper="Digital intake & consent."
-        disabled
-        rightAccessory={
-          <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-400">
-            Coming soon
-          </span>
+/** Stats + notes + inline history + quick links (single-scroll dossier). */
+function DossierSection({
+  client,
+  onChangeView,
+}: {
+  client: Client;
+  onChangeView: (v: ProfileView) => void;
+}) {
+  const [appts, setAppts] = useState<Appointment[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [openAppointment, setOpenAppointment] = useState<Appointment | null>(
+    null
+  );
+  const [refreshKey, setRefreshKey] = useState(0);
+  const mutatedRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetch(`/api/admin/clients/${client.id}/appointments`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
         }
-      />
+        return res.json() as Promise<{ appointments: Appointment[] }>;
+      })
+      .then((data) => {
+        if (!cancelled) setAppts(data.appointments);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client.id, refreshKey]);
+
+  const stats: ClientCrmStats = appts
+    ? computeCrmStatsFromAppointments(appts)
+    : {
+        total_bookings: client.total_bookings,
+        lifetime_value: client.lifetime_value,
+        has_vaulted_card: client.has_vaulted_card,
+        risk_flag: client.risk_flag,
+      };
+
+  const handleCloseStacked = () => {
+    setOpenAppointment(null);
+    if (mutatedRef.current) {
+      setRefreshKey((k) => k + 1);
+      mutatedRef.current = false;
+    }
+  };
+
+  return (
+    <>
+      <CrmStatsBar stats={stats} />
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <ActionBox
+          icon={<Camera className="h-3 w-3" />}
+          label="Photo Gallery"
+          helper="Lash, brow, and colour reference shots."
+          onClick={() => onChangeView('pictures')}
+        />
+        <ActionBox
+          icon={<ClipboardCheck className="h-3 w-3" />}
+          label="Consent Form"
+          helper="Digital intake & consent."
+          disabled
+          rightAccessory={
+            <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-400">
+              Coming soon
+            </span>
+          }
+        />
+      </div>
+
+      <PrivateNotesSection clientId={client.id} />
+
+      {loading ? (
+        <CenteredSpinner label="Loading history…" />
+      ) : error ? (
+        <InlineError message={error} />
+      ) : (
+        <InlineHistoryTable
+          appointments={appts ?? []}
+          onSelect={setOpenAppointment}
+        />
+      )}
+
+      {openAppointment && (
+        <AppointmentModal
+          appointment={openAppointment}
+          onClose={handleCloseStacked}
+          onMutated={() => {
+            mutatedRef.current = true;
+          }}
+          stacked
+        />
+      )}
+    </>
+  );
+}
+
+function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
+  return (
+    <div className="grid grid-cols-3 gap-2 rounded-lg border border-stone-200 bg-white p-3">
+      <div className="text-center">
+        <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
+          Lifetime spend
+        </p>
+        <p className="mt-1 font-serif text-lg tabular-nums text-stone-900">
+          {formatLifetimeSpend(stats.lifetime_value)}
+        </p>
+      </div>
+      <div className="border-x border-stone-100 text-center">
+        <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
+          Bookings
+        </p>
+        <p className="mt-1 font-serif text-lg tabular-nums text-stone-900">
+          {stats.total_bookings}
+        </p>
+      </div>
+      <div className="text-center">
+        <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
+          Card vault
+        </p>
+        <p className="mt-1 flex items-center justify-center gap-1 text-sm text-stone-800">
+          {stats.has_vaulted_card ? (
+            <>
+              <CreditCard className="h-4 w-4 text-emerald-600" aria-hidden />
+              <span>On file</span>
+            </>
+          ) : (
+            <span className="text-stone-400">None</span>
+          )}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function PrivateNotesSection({ clientId }: { clientId: string }) {
+  const [notes, setNotes] = useState('');
+  const [savedNotes, setSavedNotes] = useState('');
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetch(`/api/admin/clients/${clientId}/notes`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+        }
+        return res.json() as Promise<{
+          notes: string;
+          updated_at: string | null;
+        }>;
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setNotes(data.notes ?? '');
+          setSavedNotes(data.notes ?? '');
+          setUpdatedAt(data.updated_at);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  const dirty = notes !== savedNotes;
+
+  const onSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/clients/${clientId}/notes`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      const data = (await res.json()) as {
+        notes: string;
+        updated_at: string | null;
+      };
+      setSavedNotes(data.notes);
+      setNotes(data.notes);
+      setUpdatedAt(data.updated_at);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+          Private notes
+        </p>
+        {updatedAt && !dirty && (
+          <p className="text-[10px] text-stone-400">
+            Saved {format(parseISO(updatedAt), 'MMM d, yyyy · h:mm a')}
+          </p>
+        )}
+      </div>
+      {loading ? (
+        <CenteredSpinner label="Loading notes…" />
+      ) : (
+        <>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={5}
+            placeholder="Formulas, sensitivities, preferences, patch-test results…"
+            className="w-full resize-y rounded-md border border-stone-200 bg-[#FAF9F6] px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+          />
+          {error && (
+            <p className="mt-2 text-xs text-rose-700">{error}</p>
+          )}
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving || !dirty}
+              className="inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                'Save notes'
+              )}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function InlineHistoryTable({
+  appointments,
+  onSelect,
+}: {
+  appointments: Appointment[];
+  onSelect: (a: Appointment) => void;
+}) {
+  const visible = appointments.filter(
+    (a) => (a.status || '').toLowerCase() !== 'pending'
+  );
+
+  if (visible.length === 0) {
+    return (
+      <div className="rounded-lg border border-stone-200 bg-white p-6 text-center">
+        <Calendar className="mx-auto mb-2 h-5 w-5 text-stone-400" />
+        <p className="text-sm text-stone-600">No appointment history yet.</p>
+      </div>
+    );
+  }
+
+  const now = Date.now();
+  const upcoming: Appointment[] = [];
+  const past: Appointment[] = [];
+  for (const a of visible) {
+    const t = a.booking_time ? parseISO(a.booking_time).getTime() : NaN;
+    if (Number.isFinite(t) && t >= now) upcoming.push(a);
+    else past.push(a);
+  }
+  upcoming.sort((a, b) => {
+    const ta = a.booking_time ? parseISO(a.booking_time).getTime() : 0;
+    const tb = b.booking_time ? parseISO(b.booking_time).getTime() : 0;
+    return ta - tb;
+  });
+
+  const renderRows = (list: Appointment[]) =>
+    list.map((a) => {
+      const badge = describeRowBadge(a.status);
+      const start = a.booking_time ? parseISO(a.booking_time) : null;
+      const dateLabel =
+        start && !Number.isNaN(start.getTime())
+          ? format(start, 'MMM d, yyyy · h:mm a')
+          : '—';
+      return (
+        <button
+          key={a.id}
+          type="button"
+          onClick={() => onSelect(a)}
+          className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-stone-100 px-3 py-2.5 text-left text-sm transition-colors last:border-b-0 hover:bg-stone-50"
+        >
+          <span className="min-w-0 truncate font-medium text-stone-900">
+            {appointmentServiceLabel(a)}
+          </span>
+          <span className="hidden shrink-0 text-xs text-stone-500 sm:inline">
+            {dateLabel}
+          </span>
+          {badge ? (
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] ${badge.className}`}
+            >
+              {badge.label}
+            </span>
+          ) : (
+            <span className="w-16 shrink-0" />
+          )}
+        </button>
+      );
+    });
+
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+      <p className="border-b border-stone-200 px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+        Appointment history
+      </p>
+      {upcoming.length > 0 && (
+        <div>
+          <p className="bg-stone-50 px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
+            Upcoming
+          </p>
+          {renderRows(upcoming)}
+        </div>
+      )}
+      {past.length > 0 && (
+        <div>
+          {upcoming.length > 0 && (
+            <p className="bg-stone-50 px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
+              Past
+            </p>
+          )}
+          {renderRows(past)}
+        </div>
+      )}
     </div>
   );
 }

@@ -16,10 +16,22 @@
  *     phone — same typographic register as the rest of the admin.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Mail, Phone, Search, UserRound } from 'lucide-react';
+import {
+  ChevronRight,
+  CreditCard,
+  Flag,
+  Mail,
+  Phone,
+  Search,
+  UserRound,
+} from 'lucide-react';
 
 import type { Client } from '../types';
-import { clientDisplayName, formatPhone } from '../helpers';
+import {
+  clientDisplayName,
+  formatLifetimeSpend,
+  formatPhone,
+} from '../helpers';
 import ClientProfileModal from '../ClientProfileModal';
 
 interface Props {
@@ -178,7 +190,7 @@ function ClientProfileOverlay({
       role="presentation"
     >
       <div
-        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-[#FAF9F6] shadow-2xl"
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-[#FAF9F6] shadow-2xl"
         onClick={stopProp}
         role="dialog"
         aria-modal="true"
@@ -273,14 +285,26 @@ function ClientCard({
   onOpen: () => void;
 }) {
   const fullName = clientDisplayName(client.first_name, client.last_name);
+  const bookingLabel =
+    client.total_bookings === 1 ? '1 booking' : `${client.total_bookings} bookings`;
+
   return (
     <li>
       <button
         type="button"
         onClick={onOpen}
         aria-label={`Open profile for ${fullName}`}
-        className="group grid w-full grid-cols-[auto_1fr_auto] items-center gap-4 rounded-lg border border-stone-200 bg-white px-4 py-3 text-left transition-shadow hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FAF9F6]"
+        className="group relative grid w-full grid-cols-[auto_1fr_auto] items-center gap-4 rounded-lg border border-stone-200 bg-white px-4 py-3 text-left transition-shadow hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FAF9F6]"
       >
+        {client.risk_flag && (
+          <span
+            className="absolute right-3 top-3 inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-amber-700 ring-1 ring-amber-200/80"
+            title="Past no-show or late cancellation"
+          >
+            <Flag className="h-3 w-3" aria-hidden="true" />
+            <span className="sr-only">Risk flag</span>
+          </span>
+        )}
         {/* Leading avatar token — neutral stone disk with the
             person icon. Keeps the row visually anchored on the
             left, mirroring the time column on the Bookings list. */}
@@ -319,13 +343,48 @@ function ClientCard({
               </span>
             )}
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-medium uppercase tracking-[0.14em] text-stone-500 sm:hidden">
+            <span>
+              {client.total_bookings} booking
+              {client.total_bookings === 1 ? '' : 's'}
+            </span>
+            <span>LTV {formatLifetimeSpend(client.lifetime_value)}</span>
+            {client.has_vaulted_card && (
+              <span className="inline-flex items-center gap-0.5 text-emerald-700">
+                <CreditCard className="h-3 w-3" aria-hidden />
+                Vaulted
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Chevron affordance — quiet at rest, slides slightly to
-            the right and brightens on hover so the click target is
-            obvious without shouting. Pinned to the right of the
-            row regardless of how much contact info sits in the
-            middle column. */}
+        <div className="hidden shrink-0 flex-col items-end gap-1.5 text-right sm:flex">
+          <div className="flex flex-col gap-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-500">
+            <span>
+              <span className="text-stone-400">Bookings</span>{' '}
+              <span className="tabular-nums text-stone-800">
+                {client.total_bookings}
+              </span>
+            </span>
+            <span>
+              <span className="text-stone-400">LTV</span>{' '}
+              <span className="tabular-nums text-stone-800">
+                {formatLifetimeSpend(client.lifetime_value)}
+              </span>
+            </span>
+          </div>
+          {client.has_vaulted_card && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-[0.14em] text-emerald-700"
+              title="Card on file"
+            >
+              <CreditCard className="h-3 w-3" aria-hidden="true" />
+              Vaulted
+            </span>
+          )}
+          <span className="sr-only">{bookingLabel}</span>
+        </div>
+
         <ChevronRight
           aria-hidden="true"
           className="h-5 w-5 shrink-0 text-stone-300 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-stone-600 group-focus-visible:translate-x-0.5 group-focus-visible:text-stone-600"
