@@ -28,6 +28,11 @@ interface AdminSection {
 
 const SECTIONS: AdminSection[] = [
   { href: '/admin', label: 'Bookings' },
+  // Availability sits next to Bookings: editors who land on /admin to see
+  // the calendar are exactly the audience for "this is when I'm bookable".
+  // Keeping the two adjacent matches the studio's mental model — set hours,
+  // see what got booked into them — without forcing the eye across the row.
+  { href: '/admin/availability', label: 'Availability' },
   { href: '/admin/clients', label: 'Clients' },
   { href: '/admin/website', label: 'Website' },
   { href: '/admin/services', label: 'Services' },
