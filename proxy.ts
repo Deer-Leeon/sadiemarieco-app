@@ -27,7 +27,7 @@ const isProtectedRoute = createRouteMatcher(['/admin(.*)']);
  *
  * Side effect — legacy handlers (lib/legacy-handlers/*, mounted at
  *   /api/webhook, /api/remind, /api/feedback, /api/cancel-booking,
- *   /api/booking via app/api/*/route.js) share the /api/* prefix and authenticate
+ *   /api/booking via app/api route wrappers) share the /api prefix and authenticate
  *   themselves via signature checks (QStash signature, Cal.com
  *   signature). With this matcher, requests to those URLs hit the
  *   Next.js proxy first, adding a few ms of Clerk context setup
