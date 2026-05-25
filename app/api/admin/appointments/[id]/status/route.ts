@@ -5,7 +5,12 @@
  * Body: { status: AppointmentStatus }
  *
  * Behaviours per target status:
- *   • 'confirmed' / 'no-show' / 'canceled_by_client'
+ *   • 'no-show'
+ *       → charge 50% of the matched service price off-session against
+ *         the vaulted card (`stripe_customer_id`), then flip local
+ *         status. If Stripe declines, the row stays unchanged.
+ *
+ *   • 'confirmed' / 'canceled_by_client'
  *       → local DB update only. (canceled_by_client is unusual from
  *         the admin surface — it normally arrives via the webhook —
  *         but we accept it for completeness so the admin can also
@@ -47,6 +52,7 @@ import {
   isAppointmentStatus,
   type AppointmentStatus,
 } from '@/app/admin/types';
+import { chargeNoShowPenalty } from '@/lib/no-show-charge';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -76,6 +82,15 @@ interface AppointmentRow {
   id: string | number;
   cal_event_id: string | null;
   status: string | null;
+}
+
+interface AppointmentForNoShow {
+  id: string | number;
+  cal_event_id: string | null;
+  status: string | null;
+  stripe_customer_id: string | null;
+  service_name: string | null;
+  service_price: string | null;
 }
 
 function errorMessage(err: unknown): string {
@@ -192,6 +207,91 @@ async function updateAppointmentStatus(
  * state. Separate from `updateAppointmentStatus` because we need
  * the UID BEFORE the write, not after.
  */
+async function findAppointmentForNoShow(
+  idParam: string
+): Promise<AppointmentForNoShow | null> {
+  if (UUID_RE.test(idParam)) {
+    const { rows } = await sql<AppointmentForNoShow>`
+      SELECT
+        a.id,
+        a.cal_event_id,
+        a.status,
+        a.stripe_customer_id,
+        a.service_name,
+        s.price AS service_price
+      FROM appointments a
+      LEFT JOIN LATERAL (
+        SELECT s.price
+        FROM site_services s
+        WHERE s.title = split_part(a.service_name, ' between ', 1)
+          AND s.is_active = TRUE
+          AND (
+            lower(trim(split_part(a.service_name, ' between ', 1))) NOT IN (
+              'classic', 'hybrid', 'volume'
+            )
+            OR (
+              a.booking_time IS NOT NULL
+              AND a.end_time IS NOT NULL
+              AND s.duration_mins IS NOT NULL
+              AND s.duration_mins = GREATEST(
+                1,
+                ROUND(
+                  EXTRACT(EPOCH FROM (a.end_time - a.booking_time)) / 60.0
+                )
+              )::integer
+            )
+          )
+        ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
+        LIMIT 1
+      ) s ON TRUE
+      WHERE a.id = ${idParam}::uuid
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+  const intId = parseIntegerId(idParam);
+  if (intId !== null) {
+    const { rows } = await sql<AppointmentForNoShow>`
+      SELECT
+        a.id,
+        a.cal_event_id,
+        a.status,
+        a.stripe_customer_id,
+        a.service_name,
+        s.price AS service_price
+      FROM appointments a
+      LEFT JOIN LATERAL (
+        SELECT s.price
+        FROM site_services s
+        WHERE s.title = split_part(a.service_name, ' between ', 1)
+          AND s.is_active = TRUE
+          AND (
+            lower(trim(split_part(a.service_name, ' between ', 1))) NOT IN (
+              'classic', 'hybrid', 'volume'
+            )
+            OR (
+              a.booking_time IS NOT NULL
+              AND a.end_time IS NOT NULL
+              AND s.duration_mins IS NOT NULL
+              AND s.duration_mins = GREATEST(
+                1,
+                ROUND(
+                  EXTRACT(EPOCH FROM (a.end_time - a.booking_time)) / 60.0
+                )
+              )::integer
+            )
+          )
+        ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
+        LIMIT 1
+      ) s ON TRUE
+      WHERE a.id = ${intId}
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+  return null;
+}
+
 async function findAppointmentCalUid(
   idParam: string
 ): Promise<{ id: string | number; cal_event_id: string | null } | null> {
@@ -258,6 +358,73 @@ export async function PATCH(
 
   try {
     let calCancelError: string | null = null;
+    let noShowCharge:
+      | {
+          payment_intent_id: string;
+          amount_cents: number;
+          currency: string;
+        }
+      | null = null;
+
+    if (targetStatus === 'no-show') {
+      const existing = await findAppointmentForNoShow(idParam);
+      if (existing === null) {
+        return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      }
+
+      if ((existing.status || '').toLowerCase() === 'no-show') {
+        return NextResponse.json(
+          {
+            error: 'already_no_show',
+            message: 'This appointment is already marked as a no-show.',
+          },
+          { status: 409 }
+        );
+      }
+
+      if (!existing.stripe_customer_id) {
+        return NextResponse.json(
+          {
+            error: 'no_vaulted_card',
+            message:
+              'No card on file for this client. They must complete checkout before a no-show fee can be charged.',
+          },
+          { status: 400 }
+        );
+      }
+
+      const priceRaw =
+        existing.service_price === null
+          ? NaN
+          : Number(existing.service_price);
+      const serviceLabel =
+        (existing.service_name || 'appointment').split(' between ')[0]?.trim() ||
+        'appointment';
+
+      const chargeResult = await chargeNoShowPenalty({
+        stripeCustomerId: existing.stripe_customer_id,
+        servicePriceDollars: priceRaw,
+        appointmentId: String(existing.id),
+        calBookingUid: existing.cal_event_id,
+        serviceLabel,
+      });
+
+      if (!('paymentIntentId' in chargeResult)) {
+        return NextResponse.json(
+          {
+            error: chargeResult.error,
+            message: chargeResult.message,
+          },
+          { status: chargeResult.status }
+        );
+      }
+
+      noShowCharge = {
+        payment_intent_id: chargeResult.paymentIntentId,
+        amount_cents: chargeResult.amountCents,
+        currency: chargeResult.currency,
+      };
+    }
 
     // ── Admin-cancel branch: hit Cal first ────────────────────────
     // We deliberately ignore the existing local status here — if the
@@ -299,6 +466,7 @@ export async function PATCH(
       // toast this so the admin knows the upstream calendar might
       // still show the booking.
       cal_cancel_error: calCancelError,
+      no_show_charge: noShowCharge,
     });
   } catch (err) {
     const msg = errorMessage(err);

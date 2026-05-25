@@ -169,8 +169,26 @@ export default function AppointmentModal({
   >(null);
   const [statusError, setStatusError] = useState<string | null>(null);
 
+  const canChargeNoShow =
+    Boolean(appointment.stripe_customer_id) &&
+    appointment.service_price != null &&
+    Number.isFinite(appointment.service_price) &&
+    appointment.service_price > 0;
+
   const handleStatusChange = async (next: AppointmentStatus) => {
     if (statusAction !== null) return;
+    if (next === 'no-show') {
+      if (!canChargeNoShow) {
+        setStatusError(
+          'No vaulted card or service price on file — a 50% no-show fee cannot be charged.'
+        );
+        return;
+      }
+      const confirmed = window.confirm(
+        "Are you sure you want to mark this as a No-Show? This will automatically charge the client's vaulted card for 50% of the service price."
+      );
+      if (!confirmed) return;
+    }
     if (next === 'canceled_by_admin') {
       const confirmed = window.confirm(
         'Are you sure you want to cancel this appointment? The client will be notified.'
@@ -190,16 +208,30 @@ export default function AppointmentModal({
           body: JSON.stringify({ status: next }),
         }
       );
+      const data = (await res.json().catch(() => null)) as {
+        message?: string;
+        error?: string;
+        cal_cancel_error?: string | null;
+        no_show_charge?: {
+          amount_cents?: number;
+          currency?: string;
+        } | null;
+      } | null;
+
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
         const msg =
-          (data && typeof data === 'object' && 'message' in data
-            ? (data as { message?: string }).message
-            : null) ||
-          (data && typeof data === 'object' && 'error' in data
-            ? (data as { error?: string }).error
-            : null) ||
+          (data && typeof data === 'object' && data.message) ||
+          (data && typeof data === 'object' && data.error) ||
           `HTTP ${res.status}`;
+        const code = data && typeof data === 'object' ? data.error : undefined;
+        if (
+          code === 'card_declined' ||
+          code === 'authentication_required' ||
+          code === 'no_payment_method' ||
+          code === 'no_vaulted_card'
+        ) {
+          alert(`Card charge failed:\n${msg}`);
+        }
         throw new Error(msg);
       }
       // Non-fatal Cal cancel error: the local DB row was updated but
@@ -207,9 +239,6 @@ export default function AppointmentModal({
       // warning rather than blocking the close, because the admin's
       // intent ("this is no longer on my calendar") is now reflected
       // locally. They can manually reconcile in Cal's dashboard.
-      const data = (await res.json().catch(() => null)) as
-        | { cal_cancel_error?: string | null }
-        | null;
       if (data?.cal_cancel_error) {
         console.warn(
           '[AppointmentModal] cal cancel warning',
@@ -329,6 +358,7 @@ export default function AppointmentModal({
 
             <ActionFooter
               canReschedule={Boolean(appointment.service_slug)}
+              canChargeNoShow={canChargeNoShow}
               onReschedule={() => setIsRescheduling(true)}
               onNoShow={() => handleStatusChange('no-show')}
               onCancel={() => handleStatusChange('canceled_by_admin')}
@@ -580,6 +610,7 @@ function ServiceBox({ appointment }: { appointment: Appointment }) {
 
 function ActionFooter({
   canReschedule,
+  canChargeNoShow,
   onReschedule,
   onNoShow,
   onCancel,
@@ -593,6 +624,8 @@ function ActionFooter({
    * than opening an empty embed.
    */
   canReschedule: boolean;
+  /** False when there is no vaulted card or resolvable service price. */
+  canChargeNoShow: boolean;
   onReschedule: () => void;
   onNoShow: () => void;
   onCancel: () => void;
@@ -634,13 +667,18 @@ function ActionFooter({
         <button
           type="button"
           onClick={onNoShow}
-          disabled={busy}
+          disabled={busy || !canChargeNoShow}
+          title={
+            canChargeNoShow
+              ? 'Charge 50% of the service price to the card on file and mark as no-show'
+              : 'Requires a vaulted card and a service price from checkout'
+          }
           className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white"
         >
           {statusAction === 'no-show' ? (
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
-              Saving
+              Charging
             </>
           ) : (
             'No-show'
