@@ -2,9 +2,9 @@
  * Service → colour mapping for appointment chrome across the admin
  * dashboard (list view, 3-day / week time grid, month grid, single-
  * day modal, client-profile history). The full appointment block is
- * painted in the service's colour with auto-contrasted text (white
- * on dark backgrounds, dark stone on pastels) chosen by YIQ
- * luminance so every hex stays legible.
+ * painted in the service's colour with white labels on top — the
+ * studio's chosen treatment, applied uniformly so every appointment
+ * pill reads with the same hierarchy regardless of background hex.
  *
  * Resolution strategy:
  *   The hex comes from `site_services.color` exclusively — the
@@ -24,14 +24,15 @@
 export interface ServiceColor {
   /** Solid hex painted as the appointment block's full background. */
   accent: string;
-  /** Primary text colour to use on top of `accent`. Auto-chosen per
-   *  background luminance so the saturated hot-pink and green blocks
-   *  flip to white text while the pastel pinks/blues/greens keep
-   *  the studio's default dark stone text. */
+  /** Primary text colour to use on top of `accent`. Pinned to white
+   *  so every appointment in the list / 3-day / week / month views
+   *  uses the same foreground regardless of the service hex. The
+   *  studio prefers a single, consistent text colour across the
+   *  catalogue and chooses pill backgrounds that read against white. */
   text: string;
   /** De-emphasised secondary text colour (timestamp lines, service
-   *  subtitles) — same luminance bucket as `text` but at ~75 % opacity
-   *  so the hierarchy survives the high-contrast colour shift. */
+   *  subtitles). Held to ~78 % white opacity so the title/subtitle
+   *  hierarchy survives even on the lightest pastel pills. */
   textMuted: string;
 }
 
@@ -39,28 +40,22 @@ const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 
 /**
  * Build a {@link ServiceColor} from a single source-of-truth hex.
- * Picks the foreground text colour based on the background's YIQ
- * luminance — the 150 threshold flips the deepest magentas /
- * forest-greens onto white text while leaving every pastel on
- * the standard dark stone, matching the rest of the admin chrome.
+ *
+ * Text is intentionally pinned to white (with a 78%-opacity white
+ * for the muted/subtitle tone) for every accent. We previously ran
+ * a YIQ luminance check that flipped pastel backgrounds to dark
+ * stone text, but the studio asked for a single, consistent text
+ * colour across every pill in the calendar views — easier to scan,
+ * and matches their styling preference of "white labels on coloured
+ * blocks". If a future service hex needs dark text again, lift the
+ * threshold back in and keep this helper as the single decision
+ * point.
  */
 function makeColor(hex: string): ServiceColor {
-  const { r, g, b } = hexToRgb(hex);
-  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
-  const isDark = yiq < 150;
   return {
     accent: hex,
-    text: isDark ? '#ffffff' : '#1c1917',
-    textMuted: isDark ? 'rgba(255, 255, 255, 0.78)' : 'rgba(28, 25, 23, 0.65)',
-  };
-}
-
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
-  const clean = hex.replace('#', '');
-  return {
-    r: parseInt(clean.slice(0, 2), 16),
-    g: parseInt(clean.slice(2, 4), 16),
-    b: parseInt(clean.slice(4, 6), 16),
+    text: '#ffffff',
+    textMuted: 'rgba(255, 255, 255, 0.78)',
   };
 }
 
