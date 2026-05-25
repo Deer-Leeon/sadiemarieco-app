@@ -105,6 +105,21 @@ const splitName = (fullName) => {
 const GOOGLE_VOICE_NUMBER = '[Insert Your Google Voice Number Here]';
 const FOOTER_NOTE = `(Note: This is an automated line. To reach the studio directly, please call or text ${GOOGLE_VOICE_NUMBER}).`;
 
+// Must stay in sync with `CAL_CANCEL_REASON` in
+// `app/api/cron/cleanup-abandoned/route.ts`. Cal echoes this string on
+// the BOOKING_CANCELLED webhook after our abandoned-checkout sweep.
+const SYSTEM_ABANDON_CANCEL_REASON = 'Checkout abandoned after 10 minutes.';
+const LEGACY_SYSTEM_ABANDON_CANCEL_REASON =
+  'Checkout abandoned after 15 minutes.';
+
+const isSystemAbandonCancellation = (reason) => {
+  const trimmed = typeof reason === 'string' ? reason.trim() : '';
+  return (
+    trimmed === SYSTEM_ABANDON_CANCEL_REASON ||
+    trimmed === LEGACY_SYSTEM_ABANDON_CANCEL_REASON
+  );
+};
+
 // Event types that should create / refresh a local appointments row.
 const APPOINTMENT_CREATION_EVENTS = new Set([
   'BOOKING_REQUESTED',
@@ -286,47 +301,64 @@ module.exports = async function handler(req, res) {
   }
 
   // ── BOOKING_CANCELLED BRANCH ────────────────────────────────────────────
-  // Mark the local row as 'canceled_by_client'. Cal fires this event for
-  // ANY cancellation — including the ones initiated from the admin
-  // dashboard's PATCH /api/admin/appointments/[id]/status route — so the
-  // WHERE clause explicitly preserves 'canceled_by_admin'. Without that
-  // guard, the late-arriving webhook would clobber the more specific
-  // admin-set status with the generic client-cancel one and the badge in
-  // the client profile would be wrong.
-  //
-  // Note on legacy values: rows still carrying the historical British
-  // spelling 'cancelled' are flipped to 'canceled_by_client' by the
-  // migration in `scripts/update_status_constraint.sql` before the
-  // CHECK constraint goes on; we don't need to handle that legacy value
-  // here.
-  //
-  // QStash reminder/feedback handlers already gate on
-  // status === 'confirmed', so the new value silences them too.
-  // Idempotency: re-running this UPDATE on an already-canceled row is
-  // a no-op, so duplicate webhook deliveries are harmless. We don't
-  // touch webhook_events — that table is for BOOKING_CREATED dedupe.
+  // Cal fires this for ANY cancellation. We map to the most specific
+  // local status:
+  //   • Our abandoned-checkout cron → 'canceled_by_system' (detected
+  //     via cancellationReason on the payload).
+  //   • Client / manage-portal cancels → 'canceled_by_client'.
+  //   • Admin-initiated cancels → preserve existing 'canceled_by_admin'.
+  // Never downgrade 'canceled_by_system' to 'canceled_by_client' when
+  // the late webhook arrives after the cron already flipped the row.
   //
   // Always returns 200 — DB failure must not cause Cal to retry indefinitely.
   if (triggerEvent === 'BOOKING_CANCELLED') {
+    const cancellationReason = unwrap(payload.cancellationReason);
+    const systemAbandon = isSystemAbandonCancellation(cancellationReason);
+
     try {
-      const { rows: updatedRows } = await sql`
-        UPDATE appointments
-        SET status = 'canceled_by_client'
-        WHERE cal_event_id = ${bookingUid}
-          AND (status IS NULL OR status <> 'canceled_by_admin')
-        RETURNING cal_event_id, status
-      `;
-      if (updatedRows.length === 0) {
-        console.warn(
-          '[api/webhook] BOOKING_CANCELLED: no matching appointment OR already canceled_by_admin (preserved)',
-          { bookingUid }
-        );
+      if (systemAbandon) {
+        const { rows: updatedRows } = await sql`
+          UPDATE appointments
+          SET status = 'canceled_by_system'
+          WHERE cal_event_id = ${bookingUid}
+            AND (status IS NULL OR status <> 'canceled_by_admin')
+          RETURNING cal_event_id, status
+        `;
+        if (updatedRows.length === 0) {
+          console.warn(
+            '[api/webhook] BOOKING_CANCELLED (system abandon): no row updated — preserved canceled_by_admin or missing',
+            { bookingUid, cancellationReason }
+          );
+        } else {
+          console.log(
+            '[api/webhook] BOOKING_CANCELLED: appointment marked canceled_by_system',
+            { bookingUid, cancellationReason }
+          );
+        }
       } else {
-        console.log('[api/webhook] BOOKING_CANCELLED: appointment marked canceled_by_client', { bookingUid });
+        const { rows: updatedRows } = await sql`
+          UPDATE appointments
+          SET status = 'canceled_by_client'
+          WHERE cal_event_id = ${bookingUid}
+            AND (status IS NULL OR status NOT IN ('canceled_by_admin', 'canceled_by_system'))
+          RETURNING cal_event_id, status
+        `;
+        if (updatedRows.length === 0) {
+          console.warn(
+            '[api/webhook] BOOKING_CANCELLED: no row updated — preserved admin/system status or missing',
+            { bookingUid, cancellationReason }
+          );
+        } else {
+          console.log(
+            '[api/webhook] BOOKING_CANCELLED: appointment marked canceled_by_client',
+            { bookingUid, cancellationReason }
+          );
+        }
       }
     } catch (err) {
       console.error('[api/webhook] BOOKING_CANCELLED: db update failed', {
         bookingUid,
+        cancellationReason,
         error: err && err.message,
       });
     }

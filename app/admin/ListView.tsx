@@ -235,12 +235,9 @@ function StatusPill({ status }: { status: string | null }) {
     );
   }
   if (s === 'canceled_by_system') {
-    // Quieter stone treatment than the user-driven cancel pills — the
-    // booking was never confirmed, so the admin shouldn't read this as
-    // "a real appointment got cancelled". It's just a released hold.
     return (
-      <span className="inline-flex items-center rounded-full border border-stone-300 bg-stone-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-600">
-        Released (Abandoned)
+      <span className="inline-flex items-center rounded-full border border-stone-300 bg-stone-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-500">
+        Cancelled by system
       </span>
     );
   }

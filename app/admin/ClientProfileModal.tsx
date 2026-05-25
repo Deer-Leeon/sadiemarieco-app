@@ -783,12 +783,11 @@ function describeRowBadge(
     };
   }
   if (s === 'canceled_by_system') {
-    // Booking never made it past the abandoned-checkout sweep. Quiet
-    // stone treatment — this isn't a real cancellation, just a hold
-    // that timed out before the client vaulted a card.
+    // Abandoned-checkout cron released the hold — not a manual cancel.
+    // Muted stone styling distinguishes this from client/admin cancels.
     return {
-      label: 'Released (Abandoned)',
-      className: 'bg-stone-100 text-stone-600 ring-1 ring-stone-300/70',
+      label: 'Cancelled by system',
+      className: 'bg-stone-100 text-stone-500 ring-1 ring-stone-300/60',
     };
   }
   if (s === 'no-show') {

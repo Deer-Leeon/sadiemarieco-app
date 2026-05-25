@@ -37,7 +37,7 @@
  *                             `/api/cron/cleanup-abandoned` route when
  *                             a 'pending' row has been sitting for
  *                             longer than the abandonment window
- *                             (15 minutes) without a card on file.
+ *                             (10 minutes) without a card on file.
  *                             Cal.com is rejected upstream so the slot
  *                             is bookable again, and the row stays in
  *                             the DB for audit / drop-off analytics.
