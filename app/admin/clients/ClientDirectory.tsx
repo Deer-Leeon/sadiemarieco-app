@@ -15,8 +15,10 @@
  *   - Stone-900 serif name, stone-500 supporting copy for email +
  *     phone — same typographic register as the rest of the admin.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Check,
+  ChevronDown,
   ChevronRight,
   CreditCard,
   Flag,
@@ -38,6 +40,65 @@ interface Props {
   clients: Client[];
 }
 
+type ClientSortKey = 'name' | 'ltv' | 'bookings' | 'recent';
+
+const CLIENT_SORT_OPTIONS: { value: ClientSortKey; label: string }[] = [
+  { value: 'name', label: 'Name' },
+  { value: 'recent', label: 'Recent booking' },
+  { value: 'ltv', label: 'Lifetime spend' },
+  { value: 'bookings', label: 'Total bookings' },
+];
+
+function compareClientsByRecentBooking(a: Client, b: Client): number {
+  const aTime = a.last_booked_at
+    ? new Date(a.last_booked_at).getTime()
+    : Number.NEGATIVE_INFINITY;
+  const bTime = b.last_booked_at
+    ? new Date(b.last_booked_at).getTime()
+    : Number.NEGATIVE_INFINITY;
+  if (!Number.isFinite(aTime) && !Number.isFinite(bTime)) return 0;
+  if (!Number.isFinite(aTime)) return 1;
+  if (!Number.isFinite(bTime)) return -1;
+  return bTime - aTime;
+}
+
+function compareClientsByName(a: Client, b: Client): number {
+  const aFirst = (a.first_name || '').trim().toLowerCase();
+  const bFirst = (b.first_name || '').trim().toLowerCase();
+  if (!aFirst && !bFirst) {
+    return (a.last_name || '')
+      .trim()
+      .toLowerCase()
+      .localeCompare((b.last_name || '').trim().toLowerCase());
+  }
+  if (!aFirst) return 1;
+  if (!bFirst) return -1;
+  const byFirst = aFirst.localeCompare(bFirst);
+  if (byFirst !== 0) return byFirst;
+  return (a.last_name || '')
+    .trim()
+    .toLowerCase()
+    .localeCompare((b.last_name || '').trim().toLowerCase());
+}
+
+function sortClients(list: Client[], sortBy: ClientSortKey): Client[] {
+  const sorted = [...list];
+  if (sortBy === 'ltv') {
+    sorted.sort((a, b) => b.lifetime_value - a.lifetime_value);
+    return sorted;
+  }
+  if (sortBy === 'bookings') {
+    sorted.sort((a, b) => b.total_bookings - a.total_bookings);
+    return sorted;
+  }
+  if (sortBy === 'recent') {
+    sorted.sort(compareClientsByRecentBooking);
+    return sorted;
+  }
+  sorted.sort(compareClientsByName);
+  return sorted;
+}
+
 export default function ClientDirectory({ clients }: Props) {
   // The client whose profile is currently open in the modal
   // overlay. Null = no modal. We keep this here (rather than
@@ -51,6 +112,7 @@ export default function ClientDirectory({ clients }: Props) {
   // introduce a perceptible lag that undermines the "real-time"
   // feel the spec asks for.
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<ClientSortKey>('name');
 
   // Pre-compute a lowercased searchable haystack per client so the
   // filter loop doesn't repeatedly lowercase the same strings on
@@ -75,27 +137,27 @@ export default function ClientDirectory({ clients }: Props) {
 
   const filteredClients = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase();
-    if (!needle) return clients;
-    // Search digits-only against the stored phone too, so an admin
-    // who types "555-123" matches the same row as "5551234". The
-    // haystack already holds the raw digits; we additionally strip
-    // non-digits from the needle and check against the raw phone
-    // when the needle is mostly digits.
-    const digitsOnly = needle.replace(/\D/g, '');
-    return searchableClients
-      .filter(({ client, haystack }) => {
-        if (haystack.includes(needle)) return true;
-        if (
-          digitsOnly.length >= 3 &&
-          client.phone &&
-          client.phone.includes(digitsOnly)
-        ) {
-          return true;
-        }
-        return false;
-      })
-      .map(({ client }) => client);
-  }, [searchQuery, searchableClients, clients]);
+    let list: Client[];
+    if (!needle) {
+      list = clients;
+    } else {
+      const digitsOnly = needle.replace(/\D/g, '');
+      list = searchableClients
+        .filter(({ client, haystack }) => {
+          if (haystack.includes(needle)) return true;
+          if (
+            digitsOnly.length >= 3 &&
+            client.phone &&
+            client.phone.includes(digitsOnly)
+          ) {
+            return true;
+          }
+          return false;
+        })
+        .map(({ client }) => client);
+    }
+    return sortClients(list, sortBy);
+  }, [searchQuery, searchableClients, clients, sortBy]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -105,7 +167,12 @@ export default function ClientDirectory({ clients }: Props) {
           We only render the count when there's something to count;
           an empty roster surfaces the dedicated empty state below. */}
       {clients.length > 0 && (
-        <ResultCount total={clients.length} filtered={filteredClients.length} />
+        <DirectoryToolbar
+          total={clients.length}
+          filtered={filteredClients.length}
+          sortBy={sortBy}
+          onSortChange={setSortBy}
+        />
       )}
 
       {clients.length === 0 ? (
@@ -239,22 +306,121 @@ function SearchBar({
   );
 }
 
-// ─── RESULT COUNT ──────────────────────────────────────────────────────────
+// ─── TOOLBAR (COUNT + SORT) ────────────────────────────────────────────────
 
-function ResultCount({
+function DirectoryToolbar({
   total,
   filtered,
+  sortBy,
+  onSortChange,
 }: {
   total: number;
   filtered: number;
+  sortBy: ClientSortKey;
+  onSortChange: (next: ClientSortKey) => void;
 }) {
   const isFiltered = filtered !== total;
   return (
-    <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-stone-500">
-      {isFiltered
-        ? `${filtered} of ${total} ${pluralise('client', total)}`
-        : `${total} ${pluralise('client', total)}`}
-    </p>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-stone-500">
+        {isFiltered
+          ? `${filtered} of ${total} ${pluralise('client', total)}`
+          : `${total} ${pluralise('client', total)}`}
+      </p>
+      <ClientSortControl value={sortBy} onChange={onSortChange} />
+    </div>
+  );
+}
+
+function ClientSortControl({
+  value,
+  onChange,
+}: {
+  value: ClientSortKey;
+  onChange: (next: ClientSortKey) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const active =
+    CLIENT_SORT_OPTIONS.find((opt) => opt.value === value) ??
+    CLIENT_SORT_OPTIONS[0];
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative flex items-center gap-2">
+      <span
+        id="client-directory-sort-label"
+        className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-400"
+      >
+        Sort by
+      </span>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-labelledby="client-directory-sort-label"
+        className="group inline-flex items-center gap-1 rounded-md py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-stone-800 transition-colors hover:text-stone-950 focus:outline-none focus-visible:ring-1 focus-visible:ring-stone-300/50"
+      >
+        {active.label}
+        <ChevronDown
+          aria-hidden="true"
+          className={`h-3 w-3 shrink-0 text-stone-400 transition-transform duration-200 group-hover:text-stone-600 ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open && (
+        <ul
+          role="listbox"
+          aria-label="Sort clients"
+          className="absolute right-0 top-full z-20 mt-2 min-w-44 overflow-hidden rounded-lg border border-stone-200 bg-white py-1 shadow-[0_4px_24px_-6px_rgba(28,25,23,0.14)]"
+        >
+          {CLIENT_SORT_OPTIONS.map((opt) => {
+            const selected = opt.value === value;
+            return (
+              <li key={opt.value} role="presentation">
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-[10px] font-medium uppercase tracking-[0.18em] transition-colors ${
+                    selected
+                      ? 'bg-stone-50 text-stone-900'
+                      : 'text-stone-500 hover:bg-stone-50/70 hover:text-stone-800'
+                  }`}
+                >
+                  {opt.label}
+                  {selected && (
+                    <Check
+                      className="h-3 w-3 shrink-0 text-stone-400"
+                      aria-hidden="true"
+                    />
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 

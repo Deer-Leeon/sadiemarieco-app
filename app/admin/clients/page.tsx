@@ -40,6 +40,7 @@ interface ClientRow {
   lifetime_value: number | string | null;
   has_vaulted_card: boolean | null;
   risk_flag: boolean | null;
+  last_booked_at: Date | string | null;
 }
 
 function serializeDate(value: Date | string | null): string | null {
@@ -77,10 +78,12 @@ export default async function ClientsPage() {
         COALESCE(stats.total_bookings, 0)::int AS total_bookings,
         COALESCE(stats.lifetime_value, 0)::float AS lifetime_value,
         COALESCE(stats.has_vaulted_card, FALSE) AS has_vaulted_card,
-        COALESCE(stats.risk_flag, FALSE) AS risk_flag
+        COALESCE(stats.risk_flag, FALSE) AS risk_flag,
+        stats.last_booked_at
       FROM clients c
       LEFT JOIN LATERAL (
         SELECT
+          MAX(a.created_at) AS last_booked_at,
           COUNT(*) FILTER (
             WHERE COALESCE(LOWER(TRIM(a.status)), '') NOT IN (
               'pending',
@@ -166,6 +169,7 @@ export default async function ClientsPage() {
       lifetime_value: toNumber(r.lifetime_value),
       has_vaulted_card: Boolean(r.has_vaulted_card),
       risk_flag: Boolean(r.risk_flag),
+      last_booked_at: serializeDate(r.last_booked_at),
     }));
   } catch (err) {
     console.error('[admin/clients] clients query failed:', err);

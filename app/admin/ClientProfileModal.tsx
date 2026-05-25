@@ -396,6 +396,7 @@ function DossierSection({
     lifetime_value: client.lifetime_value,
     has_vaulted_card: client.has_vaulted_card,
     risk_flag: client.risk_flag,
+    last_booked_at: client.last_booked_at,
   });
   const mutatedRef = useRef(false);
 

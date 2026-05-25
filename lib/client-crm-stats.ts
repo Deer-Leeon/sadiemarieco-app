@@ -62,6 +62,7 @@ export function computeCrmStatsFromAppointments(
     booking_time: string | null;
     service_price: number | null;
     stripe_customer_id: string | null;
+    created_at?: string | null;
   }>,
   options?: { includePendingAndCanceledForVault?: boolean }
 ): ClientCrmStats {
@@ -70,8 +71,13 @@ export function computeCrmStatsFromAppointments(
   let lifetime_value = 0;
   let has_vaulted_card = false;
   let risk_flag = false;
+  let lastBookedMs = Number.NEGATIVE_INFINITY;
 
   for (const a of appointments) {
+    if (a.created_at) {
+      const ms = Date.parse(a.created_at);
+      if (Number.isFinite(ms) && ms > lastBookedMs) lastBookedMs = ms;
+    }
     const status = normalizeAppointmentStatus(a.status);
 
     if (countsForRisk(a.status)) {
@@ -107,6 +113,10 @@ export function computeCrmStatsFromAppointments(
     lifetime_value,
     has_vaulted_card,
     risk_flag,
+    last_booked_at:
+      Number.isFinite(lastBookedMs) && lastBookedMs > Number.NEGATIVE_INFINITY
+        ? new Date(lastBookedMs).toISOString()
+        : null,
   };
 }
 
@@ -115,6 +125,7 @@ interface CrmStatsRow {
   lifetime_value: number | string | null;
   has_vaulted_card: boolean | null;
   risk_flag: boolean | null;
+  last_booked_at: Date | string | null;
 }
 
 function toNumber(value: number | string | null): number {
@@ -132,6 +143,7 @@ export async function fetchClientCrmStats(
 ): Promise<ClientCrmStats> {
   const { rows } = await sql<CrmStatsRow>`
     SELECT
+      MAX(a.created_at) AS last_booked_at,
       COUNT(*) FILTER (
         WHERE COALESCE(LOWER(TRIM(a.status)), '') NOT IN (
           'pending',
@@ -208,10 +220,19 @@ export async function fetchClientCrmStats(
   const row = rows[0];
   if (!row) return { ...EMPTY_CLIENT_CRM_STATS };
 
+  const lastBookedAt = row.last_booked_at;
+  let last_booked_at: string | null = null;
+  if (lastBookedAt) {
+    const d =
+      lastBookedAt instanceof Date ? lastBookedAt : new Date(lastBookedAt);
+    if (!Number.isNaN(d.getTime())) last_booked_at = d.toISOString();
+  }
+
   return {
     total_bookings: toNumber(row.total_bookings),
     lifetime_value: toNumber(row.lifetime_value),
     has_vaulted_card: Boolean(row.has_vaulted_card),
     risk_flag: Boolean(row.risk_flag),
+    last_booked_at,
   };
 }
