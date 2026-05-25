@@ -16,11 +16,10 @@
  *   2. SELECT all `appointments` rows with status='pending' older than
  *      the abandonment window (ABANDONMENT_MINUTES). Bound the result
  *      set so a one-off backlog can't blow up our request budget.
- *   3. For each row, PATCH Cal.com v1
- *      `/v1/bookings/<uid>?apiKey=<CAL_API_KEY>` with
- *      `{ status: 'REJECTED', rejectionReason: 'Checkout abandoned' }`.
- *      This is the documented "host rejects a pending booking" pattern
- *      and frees the slot back into Cal's availability.
+ *   3. For each row, POST Cal.com v2
+ *      `/v2/bookings/<uid>/cancel` with Bearer auth and
+ *      `{ cancellationReason: 'Checkout abandoned after 15 minutes.' }`.
+ *      Frees the slot back into Cal's availability (v1 is decommissioned).
  *   4. Flip the local row to 'canceled_by_system' so the admin
  *      dashboard hides it from the calendar / list views (still
  *      visible in the client-profile history for drop-off analytics).
@@ -33,7 +32,7 @@
  *     status as 'pending' so the next sweep retries; chronically-
  *     failing rows surface as `errors` in the JSON response.
  *   - Status-update on Cal failure: we do NOT flip to canceled_by_system
- *     if Cal rejected our PATCH for any reason other than 404, because
+ *     if Cal rejected our cancel for any reason other than 404, because
  *     the slot would then appear "free" in our DB but still "held" in
  *     Cal's calendar — exactly the bug this cron is meant to prevent.
  *
@@ -50,7 +49,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const CAL_V1_BASE = 'https://api.cal.com/v1';
+const CAL_V2_BASE = 'https://api.cal.com/v2';
+const CAL_API_VERSION = '2024-08-13';
+const CAL_CANCEL_REASON = 'Checkout abandoned after 15 minutes.';
 // 15 minutes mirrors the spec — long enough to allow for a slow card
 // fill-in (3DS challenge, copy-paste from a password manager, etc.)
 // but short enough that an abandoned slot is bookable again within a
@@ -67,7 +68,7 @@ interface PendingRow {
   cal_event_id: string | null;
 }
 
-interface CalRejectOutcome {
+interface CalCancelOutcome {
   ok: boolean;
   /** True for HTTP 404 — booking already gone, treat as success. */
   alreadyGone: boolean;
@@ -79,27 +80,25 @@ function errorMessage(err: unknown): string {
 }
 
 /**
- * Reject a single pending booking on Cal.com so the slot returns to
- * availability. Returns a structured outcome the caller folds into
- * the response summary.
+ * Cancel a single pending booking on Cal.com v2 so the slot returns
+ * to availability. Same endpoint shape as `api/cancel-booking.js`.
  */
-async function rejectOnCal(
-  uid: string,
+async function cancelOnCal(
+  calBookingUid: string,
   apiKey: string
-): Promise<CalRejectOutcome> {
+): Promise<CalCancelOutcome> {
   try {
     const upstream = await fetch(
-      `${CAL_V1_BASE}/bookings/${encodeURIComponent(uid)}?apiKey=${encodeURIComponent(apiKey)}`,
+      `${CAL_V2_BASE}/bookings/${encodeURIComponent(calBookingUid)}/cancel`,
       {
-        method: 'PATCH',
+        method: 'POST',
         headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'cal-api-version': CAL_API_VERSION,
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({
-          status: 'REJECTED',
-          rejectionReason: 'Checkout abandoned',
-        }),
+        body: JSON.stringify({ cancellationReason: CAL_CANCEL_REASON }),
       }
     );
 
@@ -232,10 +231,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       continue;
     }
 
-    const outcome = await rejectOnCal(row.cal_event_id, apiKey);
+    const outcome = await cancelOnCal(row.cal_event_id, apiKey);
     if (!outcome.ok) {
       console.error(
-        '[api/cron/cleanup-abandoned] Cal reject failed — leaving row as pending for next sweep',
+        '[api/cron/cleanup-abandoned] Cal cancel failed — leaving row as pending for next sweep',
         {
           appointmentId: row.id,
           calBookingUid: row.cal_event_id,
@@ -245,7 +244,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       errors.push({
         appointmentId: row.id,
         calBookingUid: row.cal_event_id,
-        reason: outcome.message ?? 'cal_reject_failed',
+        reason: outcome.message ?? 'cal_cancel_failed',
       });
       continue;
     }
@@ -254,13 +253,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (flipped) {
       releasedCount += 1;
     } else {
-      // Cal accepted the reject but our DB UPDATE didn't move a row.
+      // Cal accepted the cancel but our DB UPDATE didn't move a row.
       // Most likely cause: the row's status changed between SELECT and
       // UPDATE (e.g. admin manually cancelled it, or /api/booking/confirm
       // raced us and promoted it to 'confirmed'). Either way, log and
       // don't double-count — the slot is released upstream regardless.
       console.warn(
-        '[api/cron/cleanup-abandoned] Cal rejected but local row no longer pending — skipping count',
+        '[api/cron/cleanup-abandoned] Cal cancelled but local row no longer pending — skipping count',
         {
           appointmentId: row.id,
           calBookingUid: row.cal_event_id,
