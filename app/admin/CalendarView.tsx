@@ -71,10 +71,7 @@ interface MonthBlock {
  * double-render the same date in two adjacent month grids and looks
  * confusing once the grids butt up to each other vertically.
  */
-function buildMonths(
-  now: Date,
-  appointments: Appointment[]
-): MonthBlock[] {
+function buildMonths(now: Date, appointments: Appointment[]): MonthBlock[] {
   const nowMonthKey = format(now, 'yyyy-MM');
   const start = addMonths(startOfMonth(now), -MONTHS_BEFORE);
 
@@ -99,11 +96,7 @@ function buildMonths(
           parseISO(a.booking_time as string).getTime() -
           parseISO(b.booking_time as string).getTime()
       );
-      return {
-        date: d,
-        isToday: isToday(d),
-        appointments: buckets,
-      };
+      return { date: d, isToday: isToday(d), appointments: buckets };
     });
 
     return {
