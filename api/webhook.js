@@ -206,6 +206,13 @@ module.exports = async function handler(req, res) {
         .json({ ok: true, skipped: 'reschedule_no_old_uid' });
     }
 
+    // NOTE on status: a reschedule must NEVER promote a row's lifecycle
+    // state. If the client rescheduled a still-pending hold (i.e. they
+    // never finished the card-vault step at /checkout), the row must
+    // stay 'pending' so the cron sweep can release it. We only force
+    // back to 'confirmed' when the row was already in an active state
+    // (confirmed) or a cancelled-by-* terminal — in which case the
+    // reschedule effectively un-cancels and the slot is live again.
     try {
       const { rows: updatedRows } = await sql`
         UPDATE appointments
@@ -213,7 +220,10 @@ module.exports = async function handler(req, res) {
             booking_time = ${bookingTime},
             end_time     = ${endTime},
             service_name = ${serviceName},
-            status       = 'confirmed'
+            status       = CASE
+              WHEN status = 'pending' THEN 'pending'
+              ELSE 'confirmed'
+            END
         WHERE cal_event_id = ${oldUid}
         RETURNING id, cal_event_id
       `;
@@ -402,15 +412,32 @@ module.exports = async function handler(req, res) {
   // downstream scheduled jobs (api/remind, api/feedback) can look up everything
   // they need from a single row without a JOIN, and so the appointment remains
   // self-contained if the client row is ever deleted/anonymised.
+  //
+  // Status discipline (state machine):
+  //   • First-time INSERT lands as 'pending' — Cal.com is configured to
+  //     require confirmation, so every fresh booking is an unconfirmed
+  //     hold until the client completes the card-vault handoff at
+  //     /checkout. The dashboard's Month/Week/3-Day views hide pending
+  //     rows so an abandoned cart never squats on a slot visually.
+  //     /api/booking/confirm flips the row to 'confirmed' on a successful
+  //     Stripe SetupIntent.
+  //   • ON CONFLICT DO UPDATE DELIBERATELY does NOT touch `status`. A
+  //     duplicate webhook delivery (Cal retries, operator-triggered
+  //     replays from the dashboard, BOOKING_RESCHEDULED race with the
+  //     branch above) must not downgrade an already-confirmed row back
+  //     to pending. The webhook_events idempotency table catches most
+  //     replays before we get here, but this is belt-and-braces.
   try {
     await sql`
       INSERT INTO appointments (
         client_id, service_name, booking_time, end_time, cal_event_id,
-        client_first_name, client_last_name, client_email, client_phone
+        client_first_name, client_last_name, client_email, client_phone,
+        status
       )
       VALUES (
         ${clientId}, ${serviceName}, ${bookingTime}, ${endTime}, ${bookingUid},
-        ${firstName}, ${lastName}, ${clientEmail}, ${clientPhone || null}
+        ${firstName}, ${lastName}, ${clientEmail}, ${clientPhone || null},
+        'pending'
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,

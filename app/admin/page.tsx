@@ -53,6 +53,10 @@ interface DbRow {
   // set, the calendar uses this over the auto-matcher heuristics; see
   // `app/admin/serviceColors.ts` for the resolution order.
   service_color: string | null;
+  // Stripe Customer id (`cus_…`) for the vaulted card-on-file. Written
+  // by /api/booking/confirm after a successful SetupIntent on /checkout.
+  // Null for legacy / admin-created bookings — see types.ts.
+  stripe_customer_id: string | null;
 }
 
 function serializeDate(value: Date | string | null): string | null {
@@ -143,6 +147,7 @@ export default async function AdminPage() {
         a.status,
         a.client_phone,
         a.client_email,
+        a.stripe_customer_id,
         s.price       AS service_price,
         s.description AS service_description,
         s.slug        AS service_slug,
@@ -185,6 +190,7 @@ export default async function AdminPage() {
       service_description: r.service_description,
       service_slug: r.service_slug,
       service_color: r.service_color,
+      stripe_customer_id: r.stripe_customer_id,
     }));
   } catch (err) {
     console.error('[admin] appointments query failed:', err);

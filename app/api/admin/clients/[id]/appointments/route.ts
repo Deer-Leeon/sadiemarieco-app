@@ -67,6 +67,9 @@ interface AppointmentRow {
   // Editor-assigned hex from site_services.color; null = "no override,
   // fall back to the auto-matcher" — see app/admin/serviceColors.ts.
   service_color: string | null;
+  // Stripe Customer id (`cus_…`) for the vaulted card-on-file. Written
+  // by /api/booking/confirm after a successful SetupIntent on /checkout.
+  stripe_customer_id: string | null;
 }
 
 function serializeDate(value: Date | string | null): string | null {
@@ -98,6 +101,7 @@ function rowToAppointment(row: AppointmentRow): Appointment {
     service_description: row.service_description,
     service_slug: row.service_slug,
     service_color: row.service_color,
+    stripe_customer_id: row.stripe_customer_id,
   };
 }
 
@@ -178,6 +182,7 @@ export async function GET(
         a.status,
         a.client_phone,
         a.client_email,
+        a.stripe_customer_id,
         s.price       AS service_price,
         s.description AS service_description,
         s.slug        AS service_slug,

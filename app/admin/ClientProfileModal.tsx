@@ -760,6 +760,16 @@ function describeRowBadge(
   status: string | null
 ): { label: string; className: string } | null {
   const s = (status || '').toLowerCase();
+  if (s === 'pending') {
+    // Same amber register as the ListView "Awaiting Payment" pill so
+    // the client's history reads coherently with the booking dashboard.
+    // A pending row in the history means the client started a booking
+    // but never finished the /checkout card-vault handoff.
+    return {
+      label: 'Awaiting Payment',
+      className: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200/70',
+    };
+  }
   if (s === 'canceled_by_admin') {
     return {
       label: 'Cancelled by you',
@@ -770,6 +780,15 @@ function describeRowBadge(
     return {
       label: 'Cancelled by client',
       className: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200/70',
+    };
+  }
+  if (s === 'canceled_by_system') {
+    // Booking never made it past the abandoned-checkout sweep. Quiet
+    // stone treatment — this isn't a real cancellation, just a hold
+    // that timed out before the client vaulted a card.
+    return {
+      label: 'Released (Abandoned)',
+      className: 'bg-stone-100 text-stone-600 ring-1 ring-stone-300/70',
     };
   }
   if (s === 'no-show') {

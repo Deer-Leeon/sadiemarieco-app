@@ -108,18 +108,25 @@ function AppointmentRow({ appointment }: { appointment: Appointment }) {
     ? format(parseISO(appointment.booking_time), TIME_FORMAT)
     : '—';
   // DashboardUI filters out the two canceled statuses upstream, so
-  // the only special visual state this row needs is no-show: greyed
-  // out + struck through so the wasted slot is visible without
-  // pretending it's bookable.
-  const isNoShow = (appointment.status || '').toLowerCase() === 'no-show';
+  // the special visual states this row needs are:
+  //   • 'no-show'   — greyed out + struck through; wasted slot visible
+  //                   without pretending it's still bookable.
+  //   • 'pending'   — abandoned checkout (Cal webhook fired, client
+  //                   never finished /checkout). Rendered with a quiet
+  //                   neutral chrome + an "Awaiting Payment" pill so
+  //                   the admin can audit / reach out, but isn't
+  //                   tempted to treat it as a real booking.
+  const statusLower = (appointment.status || '').toLowerCase();
+  const isNoShow = statusLower === 'no-show';
+  const isPending = statusLower === 'pending';
   // Service-type colour coding: the WHOLE row is painted in the
   // assigned hex, with the foreground text auto-flipped to white or
   // dark stone based on the background's luminance (see makeColor in
-  // serviceColors.ts). No-show rows skip the colour entirely — a
-  // wasted slot should read as "neutral grey" and the strike-through
-  // carries the meaning. Returns null for any service we haven't
-  // colour-coded yet (defaults to the unchanged white card).
-  const color = isNoShow ? null : getServiceColor(appointment);
+  // serviceColors.ts). No-show AND pending rows skip the colour
+  // entirely — the visual hierarchy should treat them as "not on the
+  // schedule" so they don't compete with confirmed bookings for the
+  // admin's attention.
+  const color = isNoShow || isPending ? null : getServiceColor(appointment);
   const colorStyle = color
     ? { backgroundColor: color.accent, color: color.text }
     : undefined;
@@ -127,9 +134,11 @@ function AppointmentRow({ appointment }: { appointment: Appointment }) {
   const mutedColorStyle = color ? { color: color.textMuted } : undefined;
   return (
     <li
-      className={`grid grid-cols-[80px_1fr_auto] items-center gap-4 rounded-lg border border-stone-200 bg-white px-4 py-3 transition-shadow hover:shadow-sm ${
-        isNoShow ? 'opacity-60' : ''
-      }`}
+      className={`grid grid-cols-[80px_1fr_auto] items-center gap-4 rounded-lg border bg-white px-4 py-3 transition-shadow hover:shadow-sm ${
+        isPending
+          ? 'border-amber-200 bg-amber-50/40 opacity-90'
+          : 'border-stone-200'
+      } ${isNoShow ? 'opacity-60' : ''}`}
       style={colorStyle}
     >
       <span
@@ -187,6 +196,19 @@ function StatusPill({ status }: { status: string | null }) {
       </span>
     );
   }
+  if (s === 'pending') {
+    // Amber colour family signals "incomplete, needs attention" — same
+    // visual register the admin already uses for `canceled_by_client`
+    // pills, but on the warmer end of the palette so they don't read
+    // as alarming. The list view's row chrome is also lightly tinted
+    // amber (see `isPending` in AppointmentRow) so the row + pill
+    // read as a coherent "awaiting payment" state.
+    return (
+      <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-700">
+        Awaiting Payment
+      </span>
+    );
+  }
   if (s === 'no-show') {
     return (
       <span className="inline-flex items-center rounded-full border border-stone-300 bg-stone-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
@@ -209,6 +231,16 @@ function StatusPill({ status }: { status: string | null }) {
     return (
       <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-700">
         Cancelled by client
+      </span>
+    );
+  }
+  if (s === 'canceled_by_system') {
+    // Quieter stone treatment than the user-driven cancel pills — the
+    // booking was never confirmed, so the admin shouldn't read this as
+    // "a real appointment got cancelled". It's just a released hold.
+    return (
+      <span className="inline-flex items-center rounded-full border border-stone-300 bg-stone-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-600">
+        Released (Abandoned)
       </span>
     );
   }

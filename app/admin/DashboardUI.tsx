@@ -82,23 +82,47 @@ export default function DashboardUI({
 
   const showDateNav = view === '3day' || view === 'week';
 
-  // The calendar / list views show ONLY the bookings that are still
-  // operationally relevant. Canceled rows (admin- or client-initiated)
-  // disappear from view entirely — the studio doesn't want to see
-  // ghost slots on the calendar. The original Appointment records
-  // remain in the DB and surface in the client profile's history so
-  // McKenna can audit the cancellation later.
+  // The list view shows everything operationally relevant — confirmed,
+  // no-show, AND pending (with an "Awaiting Payment" badge so the admin
+  // can audit abandoned checkouts). Canceled rows (admin- or client-
+  // initiated) disappear entirely; the studio doesn't want to see ghost
+  // slots. The original Appointment records remain in the DB and
+  // surface in the client profile's history so McKenna can audit the
+  // cancellation later.
   //
-  // No-show rows DO render here, with a struck-through visual
-  // treatment defined in each child view, so a wasted slot stays
-  // visible at-a-glance without pretending the slot is still bookable.
+  // No-show rows render with a struck-through visual treatment defined
+  // in each child view, so a wasted slot stays visible at-a-glance
+  // without pretending the slot is still bookable.
   const visibleAppointments = useMemo(
     () =>
       appointments.filter((a) => {
         const s = (a.status || '').toLowerCase();
-        return s !== 'canceled_by_admin' && s !== 'canceled_by_client';
+        return (
+          s !== 'canceled_by_admin' &&
+          s !== 'canceled_by_client' &&
+          // System-released holds (abandoned-checkout sweep) are
+          // hidden here too — they never made it past 'pending', so
+          // surfacing them in the booking list would be noise for the
+          // admin. Still visible in a client's profile history via
+          // ClientProfileModal for drop-off analytics.
+          s !== 'canceled_by_system'
+        );
       }),
     [appointments]
+  );
+
+  // The Month/Week/3-Day time-grid views show only bookings that are
+  // actually on the schedule. 'pending' rows (Cal webhook fired but
+  // the client hasn't completed /checkout yet) are excluded so an
+  // abandoned cart never squats on a slot in the admin's visual
+  // schedule. The List view still shows them so the admin can spot
+  // the drop-off and reach out manually.
+  const calendarAppointments = useMemo(
+    () =>
+      visibleAppointments.filter(
+        (a) => (a.status || '').toLowerCase() !== 'pending'
+      ),
+    [visibleAppointments]
   );
 
   return (
@@ -139,12 +163,12 @@ export default function DashboardUI({
           )
         ) : view === 'month' ? (
           <CalendarView
-            appointments={visibleAppointments}
+            appointments={calendarAppointments}
             onAppointmentClick={setSelectedAppointment}
           />
         ) : view === '3day' ? (
           <TimeGrid
-            appointments={visibleAppointments}
+            appointments={calendarAppointments}
             currentDate={currentDate}
             daysToShow={3}
             onDayClick={setModalDate}
@@ -152,7 +176,7 @@ export default function DashboardUI({
           />
         ) : (
           <TimeGrid
-            appointments={visibleAppointments}
+            appointments={calendarAppointments}
             currentDate={currentDate}
             daysToShow={7}
             onDayClick={setModalDate}

@@ -16,6 +16,8 @@
   "dependencies": {
     "@calcom/embed-react": "^1.5.3",
     "@clerk/nextjs": "^7.3.7",
+    "@stripe/react-stripe-js": "^6.4.0",
+    "@stripe/stripe-js": "^9.6.0",
     "@upstash/qstash": "^2.11.0",
     "@vercel/blob": "^2.4.0",
     "@vercel/postgres": "^0.10.0",
@@ -31,6 +33,7 @@
     "react-dom": "^19.2.6",
     "react-easy-crop": "^5.5.7",
     "sharp": "^0.34.5",
+    "stripe": "^22.1.1",
     "tailwind-merge": "^3.6.0",
     "tailwindcss-animate": "^1.0.7",
     "twilio": "^5.13.1"

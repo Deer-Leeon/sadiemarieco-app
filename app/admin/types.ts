@@ -7,6 +7,16 @@
 /**
  * Lifecycle status for an appointment row.
  *
+ *   • 'pending'             — Cal.com webhook inserted the row but the
+ *                             client hasn't completed the card-vaulting
+ *                             handoff at /checkout yet. Hidden from the
+ *                             Month/Week/3-Day calendar views so an
+ *                             abandoned cart doesn't squat on a slot in
+ *                             the admin's visual schedule; still visible
+ *                             in List view with an "Awaiting Payment"
+ *                             badge so the admin can audit drop-offs.
+ *                             Transitions to 'confirmed' as soon as
+ *                             /api/booking/confirm finishes its work.
  *   • 'confirmed'           — booking is live and on the schedule.
  *   • 'no-show'             — booking happened but the client never
  *                             arrived. Stays visible on the calendar
@@ -22,17 +32,29 @@
  *                             or directly through Cal's confirmation
  *                             email. The webhook flips the row here.
  *                             Also disappears from calendar views.
+ *   • 'canceled_by_system'  — abandoned-checkout sweep released the
+ *                             hold automatically. Written by the
+ *                             `/api/cron/cleanup-abandoned` route when
+ *                             a 'pending' row has been sitting for
+ *                             longer than the abandonment window
+ *                             (15 minutes) without a card on file.
+ *                             Cal.com is rejected upstream so the slot
+ *                             is bookable again, and the row stays in
+ *                             the DB for audit / drop-off analytics.
  *
  * Mirrors the CHECK constraint added in
- * `scripts/update_status_constraint.sql`. If you add a new status,
- * update BOTH this union AND the SQL CHECK so the DB and the type
- * system stay aligned.
+ * `scripts/update_status_constraint.sql` and amended by
+ * `scripts/add_pending_status.sql` + `scripts/add_canceled_by_system_status.sql`.
+ * If you add a new status, update BOTH this union AND the SQL CHECK
+ * so the DB and the type system stay aligned.
  */
 export type AppointmentStatus =
+  | 'pending'
   | 'confirmed'
   | 'no-show'
   | 'canceled_by_admin'
-  | 'canceled_by_client';
+  | 'canceled_by_client'
+  | 'canceled_by_system';
 
 /**
  * Tuple form of `AppointmentStatus` for runtime validation in API
@@ -41,10 +63,12 @@ export type AppointmentStatus =
  * `AppointmentStatus` union when iterated.
  */
 export const APPOINTMENT_STATUSES: readonly AppointmentStatus[] = [
+  'pending',
   'confirmed',
   'no-show',
   'canceled_by_admin',
   'canceled_by_client',
+  'canceled_by_system',
 ] as const;
 
 /**
@@ -162,6 +186,21 @@ export interface Appointment {
    * form (enforced by the CHECK constraint on the column).
    */
   service_color: string | null;
+  /**
+   * Stripe Customer id (`cus_…`) for the vaulted card-on-file. Written
+   * by `/api/booking/confirm` after a successful SetupIntent on the
+   * `/checkout` page. Null when:
+   *   • Legacy booking created before card vaulting shipped, OR
+   *   • Booking flow that didn't route through /checkout (e.g. an
+   *     admin-created appointment).
+   *
+   * The PaymentMethod attached to this Customer is `off_session`-
+   * usable, so late-cancel / no-show fees can be charged without
+   * re-collecting the card. Mirrors the column added in
+   * `scripts/add_appointments_stripe_customer_id.sql` — keep the
+   * union here and the CHECK constraint there aligned.
+   */
+  stripe_customer_id: string | null;
 }
 
 /**

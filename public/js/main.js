@@ -154,7 +154,7 @@
         nsApi('ui', window.calUiConfig || { layout: 'month_view' });
         nsApi('on', {
           action: 'bookingSuccessful',
-          callback: () => {
+          callback: (event) => {
             // The just-booked iframe is parked on the confirmation
             // screen; reopening should restart fresh.
             staleLinks.add(link);
@@ -166,6 +166,69 @@
             mountsByLink.forEach((_, otherLink) => {
               if (otherLink !== link) staleLinks.add(otherLink);
             });
+
+            // ── CARD-VAULTING REDIRECT ────────────────────────────
+            // Cal.com's "Redirect after booking" feature is paywalled,
+            // so we hijack the success state from the embed side and
+            // route the visitor to our own /checkout page where we
+            // collect a card-on-file via Stripe SetupIntents.
+            //
+            // Cal's payload shape (confirmed against embed.js): the
+            // callback receives a CustomEvent-ish object with `detail`
+            // carrying `{ type, namespace, data }`. The booking uid
+            // and the first attendee's name/email are nested inside
+            // `data.booking`. Older embed.js versions delivered the
+            // payload directly on the first arg (no `.detail` layer),
+            // so we read defensively to survive a Cal SDK bump.
+            try {
+              const payload =
+                (event && event.detail && event.detail.data) ||
+                (event && event.data) ||
+                {};
+              const booking = payload.booking || {};
+              const uid = typeof booking.uid === 'string' ? booking.uid : '';
+              const attendees = Array.isArray(booking.attendees)
+                ? booking.attendees
+                : [];
+              const attendee = attendees[0] || {};
+              const name =
+                typeof attendee.name === 'string' ? attendee.name : '';
+              const email =
+                typeof attendee.email === 'string' ? attendee.email : '';
+
+              if (!uid) {
+                // Without a uid we can't accept the booking on Cal
+                // after vaulting the card. Stay on the confirmation
+                // screen and let McKenna reconcile manually — this
+                // path should be unreachable in practice (Cal always
+                // emits uid on bookingSuccessful).
+                console.warn(
+                  '[booking] bookingSuccessful fired without uid — skipping redirect',
+                  event
+                );
+                return;
+              }
+
+              // Build the query string only from params we actually
+              // have. /checkout treats name/email as optional and
+              // falls back to whatever the PaymentElement collects.
+              const search = new URLSearchParams({ uid });
+              if (name) search.set('name', name);
+              if (email) search.set('email', email);
+
+              // Hard navigate — the visitor was inside an iframe
+              // inside our drawer; replacing the top-level URL is
+              // the only way to land them on the Next.js /checkout
+              // route. (`router.push` from next/navigation isn't an
+              // option here: this file is the static homepage, not
+              // a React component.)
+              window.location.href = `/checkout?${search.toString()}`;
+            } catch (err) {
+              console.error(
+                '[booking] failed to redirect to /checkout after bookingSuccessful',
+                err
+              );
+            }
           }
         });
       }
