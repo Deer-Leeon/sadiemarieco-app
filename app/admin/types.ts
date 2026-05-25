@@ -32,6 +32,8 @@
  *                             or directly through Cal's confirmation
  *                             email. The webhook flips the row here.
  *                             Also disappears from calendar views.
+ *   • 'canceled_by_client_late' — client cancelled within 24h of start
+ *                             and the automated $20 late fee succeeded.
  *   • 'canceled_by_system'  — abandoned-checkout sweep released the
  *                             hold automatically. Written by the
  *                             `/api/cron/cleanup-abandoned` route when
@@ -44,7 +46,8 @@
  *
  * Mirrors the CHECK constraint added in
  * `scripts/update_status_constraint.sql` and amended by
- * `scripts/add_pending_status.sql` + `scripts/add_canceled_by_system_status.sql`.
+ * `scripts/add_pending_status.sql`, `scripts/add_canceled_by_system_status.sql`,
+ * and `scripts/add_canceled_by_client_late_status.sql`.
  * If you add a new status, update BOTH this union AND the SQL CHECK
  * so the DB and the type system stay aligned.
  */
@@ -54,6 +57,7 @@ export type AppointmentStatus =
   | 'no-show'
   | 'canceled_by_admin'
   | 'canceled_by_client'
+  | 'canceled_by_client_late'
   | 'canceled_by_system';
 
 /**
@@ -68,6 +72,7 @@ export const APPOINTMENT_STATUSES: readonly AppointmentStatus[] = [
   'no-show',
   'canceled_by_admin',
   'canceled_by_client',
+  'canceled_by_client_late',
   'canceled_by_system',
 ] as const;
 

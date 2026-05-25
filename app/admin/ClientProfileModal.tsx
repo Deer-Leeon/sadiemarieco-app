@@ -790,6 +790,12 @@ function describeRowBadge(
       className: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200/70',
     };
   }
+  if (s === 'canceled_by_client_late') {
+    return {
+      label: 'Late cancel ($20)',
+      className: 'bg-amber-50 text-amber-800 ring-1 ring-amber-300/70',
+    };
+  }
   if (s === 'canceled_by_system') {
     // Abandoned-checkout cron released the hold — not a manual cancel.
     // Muted stone styling distinguishes this from client/admin cancels.

@@ -41,6 +41,11 @@
 const twilio = require('twilio');
 const { sql } = require('@vercel/postgres');
 const { Client: QStashClient } = require('@upstash/qstash');
+const {
+  chargeLateCancelFee,
+  isLateCancellationWindow,
+  shouldSkipLateCancelPenalty,
+} = require('../lib/late-cancel-charge');
 
 const PUBLIC_BASE_URL =
   process.env.PUBLIC_BASE_URL || 'https://sadiemarieco.vercel.app';
@@ -298,19 +303,44 @@ module.exports = async function handler(req, res) {
   // ── BOOKING_CANCELLED BRANCH ────────────────────────────────────────────
   // Cal fires this for ANY cancellation. We map to the most specific
   // local status:
-  //   • Our abandoned-checkout cron → 'canceled_by_system' (detected
-  //     via cancellationReason on the payload).
-  //   • Client / manage-portal cancels → 'canceled_by_client'.
-  //   • Admin-initiated cancels → preserve existing 'canceled_by_admin'.
-  // Never downgrade 'canceled_by_system' to 'canceled_by_client' when
-  // the late webhook arrives after the cron already flipped the row.
+  //   • Abandoned-checkout cron → 'canceled_by_system' (cancellationReason).
+  //   • Admin dashboard cancel → preserve 'canceled_by_admin' (reason + row).
+  //   • Client cancel within 24h of start + vaulted card → charge $20,
+  //     then 'canceled_by_client_late' on success, else 'canceled_by_client'.
+  //   • Client cancel outside the window → 'canceled_by_client'.
   //
-  // Always returns 200 — DB failure must not cause Cal to retry indefinitely.
+  // Penalty guardrails: never charge for admin/system rows or system
+  // abandon reasons. Stripe/DB failures are logged; webhook still 200.
   if (triggerEvent === 'BOOKING_CANCELLED') {
     const cancellationReason = unwrap(payload.cancellationReason);
     const systemAbandon = isSystemAbandonCancellation(cancellationReason);
 
+    let lateCancelCharge = null;
+
     try {
+      const { rows: existingRows } = await sql`
+        SELECT
+          id,
+          status,
+          stripe_customer_id,
+          booking_time,
+          service_name
+        FROM appointments
+        WHERE cal_event_id = ${bookingUid}
+        LIMIT 1
+      `;
+      const existing = existingRows[0] || null;
+
+      if (!existing) {
+        console.warn(
+          '[api/webhook] BOOKING_CANCELLED: no appointment row for uid',
+          { bookingUid, cancellationReason }
+        );
+        return res.status(200).json({ ok: true, event: 'BOOKING_CANCELLED' });
+      }
+
+      const existingStatus = (existing.status || '').toLowerCase();
+
       if (systemAbandon) {
         const { rows: updatedRows } = await sql`
           UPDATE appointments
@@ -321,7 +351,7 @@ module.exports = async function handler(req, res) {
         `;
         if (updatedRows.length === 0) {
           console.warn(
-            '[api/webhook] BOOKING_CANCELLED (system abandon): no row updated — preserved canceled_by_admin or missing',
+            '[api/webhook] BOOKING_CANCELLED (system abandon): no row updated — preserved canceled_by_admin',
             { bookingUid, cancellationReason }
           );
         } else {
@@ -330,34 +360,150 @@ module.exports = async function handler(req, res) {
             { bookingUid, cancellationReason }
           );
         }
-      } else {
-        const { rows: updatedRows } = await sql`
-          UPDATE appointments
-          SET status = 'canceled_by_client'
-          WHERE cal_event_id = ${bookingUid}
-            AND (status IS NULL OR status NOT IN ('canceled_by_admin', 'canceled_by_system'))
-          RETURNING cal_event_id, status
-        `;
-        if (updatedRows.length === 0) {
-          console.warn(
-            '[api/webhook] BOOKING_CANCELLED: no row updated — preserved admin/system status or missing',
+        return res.status(200).json({ ok: true, event: 'BOOKING_CANCELLED' });
+      }
+
+      if (
+        shouldSkipLateCancelPenalty({
+          existingStatus,
+          cancellationReason,
+          systemAbandon: false,
+        })
+      ) {
+        if (existingStatus === 'canceled_by_admin') {
+          console.log(
+            '[api/webhook] BOOKING_CANCELLED: preserved canceled_by_admin (no late fee)',
             { bookingUid, cancellationReason }
+          );
+        } else if (existingStatus === 'canceled_by_system') {
+          console.log(
+            '[api/webhook] BOOKING_CANCELLED: preserved canceled_by_system (no late fee)',
+            { bookingUid, cancellationReason }
+          );
+        } else if (existingStatus === 'canceled_by_client_late') {
+          console.log(
+            '[api/webhook] BOOKING_CANCELLED: already canceled_by_client_late (no duplicate charge)',
+            { bookingUid }
           );
         } else {
-          console.log(
-            '[api/webhook] BOOKING_CANCELLED: appointment marked canceled_by_client',
-            { bookingUid, cancellationReason }
+          const { rows: updatedRows } = await sql`
+            UPDATE appointments
+            SET status = 'canceled_by_admin'
+            WHERE cal_event_id = ${bookingUid}
+              AND (status IS NULL OR status NOT IN ('canceled_by_admin', 'canceled_by_system'))
+            RETURNING cal_event_id, status
+          `;
+          if (updatedRows.length > 0) {
+            console.log(
+              '[api/webhook] BOOKING_CANCELLED: appointment marked canceled_by_admin',
+              { bookingUid, cancellationReason }
+            );
+          }
+        }
+        return res.status(200).json({ ok: true, event: 'BOOKING_CANCELLED' });
+      }
+
+      // Client-initiated cancellation — optional $20 late fee.
+      let targetStatus = 'canceled_by_client';
+      const serviceLabel =
+        (existing.service_name || 'appointment')
+          .split(' between ')[0]
+          ?.trim() || 'appointment';
+      const withinLateWindow = isLateCancellationWindow(existing.booking_time);
+      const hasVault =
+        typeof existing.stripe_customer_id === 'string' &&
+        existing.stripe_customer_id.length > 0;
+      const chargeEligible =
+        withinLateWindow &&
+        hasVault &&
+        (existingStatus === 'confirmed' ||
+          existingStatus === 'canceled_by_client');
+
+      if (chargeEligible) {
+        try {
+          const chargeResult = await chargeLateCancelFee({
+            stripeCustomerId: existing.stripe_customer_id,
+            appointmentId: existing.id,
+            calBookingUid: bookingUid,
+            serviceLabel,
+          });
+          if (chargeResult.ok) {
+            targetStatus = 'canceled_by_client_late';
+            lateCancelCharge = {
+              payment_intent_id: chargeResult.paymentIntentId,
+              amount_cents: chargeResult.amountCents,
+              currency: chargeResult.currency,
+            };
+            console.log(
+              '[api/webhook] BOOKING_CANCELLED: late cancel fee charged',
+              {
+                bookingUid,
+                paymentIntentId: chargeResult.paymentIntentId,
+                amountCents: chargeResult.amountCents,
+              }
+            );
+          } else {
+            console.warn(
+              '[api/webhook] BOOKING_CANCELLED: late cancel fee skipped',
+              {
+                bookingUid,
+                error: chargeResult.error,
+                message: chargeResult.message,
+              }
+            );
+          }
+        } catch (chargeErr) {
+          console.error(
+            '[api/webhook] BOOKING_CANCELLED: late cancel charge threw',
+            {
+              bookingUid,
+              error: chargeErr && chargeErr.message,
+            }
           );
         }
+      } else if (withinLateWindow && !hasVault) {
+        console.warn(
+          '[api/webhook] BOOKING_CANCELLED: late window but no stripe_customer_id — no fee',
+          { bookingUid, existingStatus }
+        );
+      }
+
+      const { rows: updatedRows } = await sql`
+        UPDATE appointments
+        SET status = ${targetStatus}
+        WHERE cal_event_id = ${bookingUid}
+          AND (status IS NULL OR status NOT IN ('canceled_by_admin', 'canceled_by_system'))
+        RETURNING cal_event_id, status
+      `;
+      if (updatedRows.length === 0) {
+        console.warn(
+          '[api/webhook] BOOKING_CANCELLED: client status not updated — preserved admin/system or missing',
+          { bookingUid, targetStatus, cancellationReason }
+        );
+      } else {
+        console.log(
+          '[api/webhook] BOOKING_CANCELLED: appointment marked',
+          {
+            bookingUid,
+            status: updatedRows[0].status,
+            cancellationReason,
+            lateFeeCharged: targetStatus === 'canceled_by_client_late',
+          }
+        );
       }
     } catch (err) {
-      console.error('[api/webhook] BOOKING_CANCELLED: db update failed', {
+      console.error('[api/webhook] BOOKING_CANCELLED: handler failed', {
         bookingUid,
         cancellationReason,
         error: err && err.message,
       });
     }
-    return res.status(200).json({ ok: true, event: 'BOOKING_CANCELLED' });
+
+    return res.status(200).json({
+      ok: true,
+      event: 'BOOKING_CANCELLED',
+      late_cancel_charge: lateCancelCharge,
+    });
   }
 
   // Cal sends many webhook triggers we don't ingest. Only creation-style

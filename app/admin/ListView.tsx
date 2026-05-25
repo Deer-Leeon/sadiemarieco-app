@@ -227,6 +227,13 @@ function StatusPill({ status }: { status: string | null }) {
       </span>
     );
   }
+  if (s === 'canceled_by_client_late') {
+    return (
+      <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-800">
+        Late cancel ($20)
+      </span>
+    );
+  }
   if (s === 'canceled_by_client' || s === 'cancelled') {
     return (
       <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-700">

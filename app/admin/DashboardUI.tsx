@@ -100,6 +100,7 @@ export default function DashboardUI({
         return (
           s !== 'canceled_by_admin' &&
           s !== 'canceled_by_client' &&
+          s !== 'canceled_by_client_late' &&
           // System-released holds (abandoned-checkout sweep) are
           // hidden here too — they never made it past 'pending', so
           // surfacing them in the booking list would be noise for the

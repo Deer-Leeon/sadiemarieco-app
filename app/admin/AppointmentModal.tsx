@@ -721,6 +721,11 @@ function describeHeaderStatus(status: string): {
       return { label: 'Cancelled by you', tone: 'text-rose-700' };
     case 'canceled_by_client':
       return { label: 'Cancelled by client', tone: 'text-amber-700' };
+    case 'canceled_by_client_late':
+      return {
+        label: 'Late cancel (fee charged)',
+        tone: 'text-amber-800',
+      };
     case 'no-show':
       return { label: 'No-show', tone: 'text-stone-500' };
     case 'confirmed':
