@@ -25,10 +25,9 @@ const isProtectedRoute = createRouteMatcher(['/admin(.*)']);
  *     protect /api/* — `isProtectedRoute` excludes those paths — it
  *     just wires up the Clerk request context.
  *
- * Side effect — legacy Vercel Serverless Functions:
- *   The standalone functions at the project root (api/webhook.js,
- *   api/remind.js, api/feedback.js, api/cancel-booking.js,
- *   api/booking.js) share the /api/* URL prefix and authenticate
+ * Side effect — legacy handlers (lib/legacy-handlers/*, mounted at
+ *   /api/webhook, /api/remind, /api/feedback, /api/cancel-booking,
+ *   /api/booking via app/api/*/route.js) share the /api/* prefix and authenticate
  *   themselves via signature checks (QStash signature, Cal.com
  *   signature). With this matcher, requests to those URLs hit the
  *   Next.js proxy first, adding a few ms of Clerk context setup
