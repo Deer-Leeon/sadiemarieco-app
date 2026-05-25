@@ -11,23 +11,16 @@
  *   2. Postgres — write the new Customer id onto the appointments
  *      row, linking the booking to its vaulted card. Lookup is by
  *      Cal booking UID (stored on `appointments.cal_event_id`).
- *   3. Cal.com — PATCH the booking with `{ status: 'ACCEPTED' }` to
- *      finalise the calendar invite. This is the last step because:
- *      • If we accepted on Cal first and Postgres failed, we'd have
- *        a confirmed booking with no record of the vaulted card.
- *      • If Stripe succeeds but Cal rejects, we still own the card
- *        and the admin can confirm manually in Cal's dashboard.
+ *   3. Cal.com — accept the pending booking upstream so Cal's
+ *      dashboard + attendee emails show "Confirmed" (not
+ *      "Unconfirmed"). Runs AFTER Postgres so a Cal hiccup never
+ *      blocks the card vault. Local DB is source of truth.
  *
- * Cal.com endpoint shape per the spec:
- *   PATCH https://api.cal.com/v1/bookings/<uid>?apiKey=...
- *   { "status": "ACCEPTED" }
- *
- * The rest of this codebase has moved to Cal v2 (Bearer token), but
- * the spec for THIS flow pins v1 because the documented "confirm a
- * pending booking" surface lives on v1 with the apiKey query-string
- * auth and the `status: 'ACCEPTED'` body shape. If v1 is sunset in
- * the future, swap to `POST /v2/bookings/<uid>/confirm` with a
- * Bearer token — same effect, different URL.
+ * Cal.com sync (tried in order):
+ *   1. PATCH v1 `/bookings/<uid>?apiKey=…` with `{ status: 'ACCEPTED' }`
+ *      — same pattern as `/api/cron/cleanup-abandoned` rejectOnCal.
+ *   2. If v1 fails, POST v2 `/bookings/<uid>/confirm` with Bearer
+ *      auth — same family as `api/cancel-booking.js`.
  *
  * Idempotency: the route is safe to retry on the same setupIntentId
  * if Cal or Postgres fail mid-flow. Stripe `customers.create` will
@@ -51,6 +44,8 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const CAL_V1_BASE = 'https://api.cal.com/v1';
+const CAL_V2_BASE = 'https://api.cal.com/v2';
+const CAL_API_VERSION = '2024-08-13';
 const STRIPE_CUSTOMER_ID_RE = /^cus_[A-Za-z0-9]+$/;
 
 interface ConfirmBody {
@@ -112,25 +107,40 @@ function parseBody(input: unknown): ParsedBody | { error: string } {
   return { setupIntentId, email, name, calBookingUid };
 }
 
+function calErrorMessage(payload: unknown, status: number): string {
+  return (
+    (payload && typeof payload === 'object'
+      ? ((payload as { message?: string; error?: string }).message ??
+        (payload as { message?: string; error?: string }).error)
+      : null) ?? `HTTP ${status}`
+  );
+}
+
 /**
- * Finalise the booking on Cal.com. Returns null on success, or a
- * human-readable error message on failure (caller folds into the
- * response so the UI can surface a non-blocking warning — Stripe
- * + DB have already succeeded by the time we get here, so a Cal
- * failure shouldn't unwind the rest of the flow).
+ * Accept a pending booking on Cal.com so it leaves "Unconfirmed".
+ * Returns null on success, or a human-readable error for the UI.
+ *
+ * Tries v1 PATCH first (matches cleanup cron), then v2 confirm
+ * (matches cancel-booking.js) because some accounts only honour
+ * one of the two surfaces for uid-based bookings.
  */
-async function acceptOnCal(uid: string): Promise<string | null> {
+async function acceptOnCal(calEventId: string): Promise<string | null> {
   const apiKey = process.env.CAL_API_KEY;
   if (!apiKey) {
+    console.error(
+      '[api/booking/confirm] CAL_API_KEY not set — skipping Cal accept'
+    );
     return 'CAL_API_KEY not configured on the server';
   }
 
+  // ── v1: PATCH { status: 'ACCEPTED' } (cleanup cron pattern) ───────
   try {
-    const upstream = await fetch(
-      `${CAL_V1_BASE}/bookings/${encodeURIComponent(uid)}?apiKey=${encodeURIComponent(apiKey)}`,
+    const v1 = await fetch(
+      `${CAL_V1_BASE}/bookings/${encodeURIComponent(calEventId)}?apiKey=${encodeURIComponent(apiKey)}`,
       {
         method: 'PATCH',
         headers: {
+          Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
@@ -138,26 +148,61 @@ async function acceptOnCal(uid: string): Promise<string | null> {
       }
     );
 
-    if (!upstream.ok) {
-      const payload = await upstream.json().catch(() => null);
-      const message =
-        (payload && typeof payload === 'object'
-          ? ((payload as { message?: string; error?: string }).message ??
-            (payload as { message?: string; error?: string }).error)
-          : null) ?? `HTTP ${upstream.status}`;
-      console.error('[api/booking/confirm] cal accept failed', {
-        uid,
-        status: upstream.status,
-        message,
+    if (v1.ok) {
+      console.log('[api/booking/confirm] Cal v1 accept succeeded', {
+        calEventId,
       });
-      return `Cal.com rejected the confirmation (${message})`;
+      return null;
     }
 
-    return null;
+    const v1Payload = await v1.json().catch(() => null);
+    const v1Message = calErrorMessage(v1Payload, v1.status);
+    console.warn('[api/booking/confirm] Cal v1 PATCH failed — trying v2', {
+      calEventId,
+      status: v1.status,
+      message: v1Message,
+    });
+  } catch (err) {
+    console.warn('[api/booking/confirm] Cal v1 PATCH network error — trying v2', {
+      calEventId,
+      error: errorMessage(err),
+    });
+  }
+
+  // ── v2: POST /bookings/:uid/confirm (cancel-booking.js pattern) ───
+  try {
+    const v2 = await fetch(
+      `${CAL_V2_BASE}/bookings/${encodeURIComponent(calEventId)}/confirm`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'cal-api-version': CAL_API_VERSION,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+      }
+    );
+
+    if (v2.ok) {
+      console.log('[api/booking/confirm] Cal v2 confirm succeeded', {
+        calEventId,
+      });
+      return null;
+    }
+
+    const v2Payload = await v2.json().catch(() => null);
+    const v2Message = calErrorMessage(v2Payload, v2.status);
+    console.error('[api/booking/confirm] Cal v2 confirm failed', {
+      calEventId,
+      status: v2.status,
+      message: v2Message,
+    });
+    return `Cal.com rejected the confirmation (${v2Message})`;
   } catch (err) {
     const msg = errorMessage(err);
-    console.error('[api/booking/confirm] cal accept network error', {
-      uid,
+    console.error('[api/booking/confirm] Cal v2 confirm network error', {
+      calEventId,
       error: msg,
     });
     return `Could not reach Cal.com (${msg})`;
@@ -379,7 +424,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // ── 4. CAL.COM: accept the pending booking ─────────────────────────
-  const calError = await acceptOnCal(calBookingUid);
+  // Local DB is already 'confirmed'. Sync upstream so Cal's UI +
+  // attendee-facing status match. Failures are logged and surfaced as
+  // a non-blocking warning — never roll back Stripe or Postgres.
+  let calError: string | null = null;
+  try {
+    calError = await acceptOnCal(calBookingUid);
+  } catch (err) {
+    const msg = errorMessage(err);
+    console.error('[api/booking/confirm] unexpected Cal accept error', {
+      calBookingUid,
+      error: msg,
+    });
+    calError = `Could not reach Cal.com (${msg})`;
+  }
 
   return NextResponse.json({
     ok: true,
