@@ -564,10 +564,27 @@ function AppointmentsView({ client }: { client: Client }) {
   // Split into upcoming vs past for a more scannable view. Future
   // bookings are the most useful at a glance, so they sit on top
   // and we leave a subtle divider before the historical rows.
+  //
+  // Pending rows (slot picked, checkout not finished) never belong in
+  // a client's history — only confirmed bookings and cancellations.
+  const visibleAppts = appts.filter(
+    (a) => (a.status || '').toLowerCase() !== 'pending'
+  );
+  if (visibleAppts.length === 0) {
+    return (
+      <div className="rounded-lg border border-stone-200 bg-white p-8 text-center">
+        <Calendar className="mx-auto mb-3 h-6 w-6 text-stone-400" />
+        <p className="text-sm text-stone-600">
+          No appointments on file for this client yet.
+        </p>
+      </div>
+    );
+  }
+
   const now = Date.now();
   const upcoming: Appointment[] = [];
   const past: Appointment[] = [];
-  for (const a of appts) {
+  for (const a of visibleAppts) {
     const t = a.booking_time ? parseISO(a.booking_time).getTime() : NaN;
     if (Number.isFinite(t) && t >= now) {
       upcoming.push(a);
@@ -760,16 +777,7 @@ function describeRowBadge(
   status: string | null
 ): { label: string; className: string } | null {
   const s = (status || '').toLowerCase();
-  if (s === 'pending') {
-    // Same amber register as the ListView "Awaiting Payment" pill so
-    // the client's history reads coherently with the booking dashboard.
-    // A pending row in the history means the client started a booking
-    // but never finished the /checkout card-vault handoff.
-    return {
-      label: 'Awaiting Payment',
-      className: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200/70',
-    };
-  }
+  // `pending` is filtered out of client history before rows render.
   if (s === 'canceled_by_admin') {
     return {
       label: 'Cancelled by you',

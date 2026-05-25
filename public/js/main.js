@@ -128,6 +128,123 @@
   // capping cross-user staleness to a single minute.
   const FRESHNESS_MS = 60 * 1000;
 
+  // Prevent double-redirect when both bookingSuccessfulV2 and the legacy
+  // bookingSuccessful event fire for the same booking.
+  const checkoutRedirectedUids = new Set();
+
+  const showCheckoutHandoff = () => {
+    if (drawer) drawer.classList.remove('drawer-open');
+    if (backdrop) backdrop.classList.remove('drawer-open');
+    const handoff = document.getElementById('checkout-handoff');
+    if (handoff) handoff.classList.add('is-active');
+  };
+
+  /** Cal v2 puts uid/title/startTime on `data`; legacy nests under `data.booking`. */
+  const parseBookingFromEvent = (event) => {
+    const payload =
+      (event && event.detail && event.detail.data) ||
+      (event && event.data) ||
+      {};
+    const booking = payload.booking || payload;
+    const uid = typeof booking.uid === 'string' ? booking.uid : '';
+    const attendees = Array.isArray(booking.attendees) ? booking.attendees : [];
+    const attendee = attendees[0] || {};
+    const name = typeof attendee.name === 'string' ? attendee.name : '';
+    const email = typeof attendee.email === 'string' ? attendee.email : '';
+    const serviceName =
+      (typeof booking.title === 'string' && booking.title) ||
+      (typeof booking.eventTitle === 'string' && booking.eventTitle) ||
+      '';
+    const bookingTime =
+      (typeof booking.startTime === 'string' && booking.startTime) ||
+      (typeof booking.start === 'string' && booking.start) ||
+      null;
+    const endTime =
+      (typeof booking.endTime === 'string' && booking.endTime) ||
+      (typeof booking.end === 'string' && booking.end) ||
+      null;
+    const phone =
+      (typeof attendee.phoneNumber === 'string' && attendee.phoneNumber) ||
+      '';
+    return { uid, name, email, serviceName, bookingTime, endTime, phone };
+  };
+
+  const redirectToCheckoutAfterBooking = (event, link) => {
+    staleLinks.add(link);
+    mountsByLink.forEach((_, otherLink) => {
+      if (otherLink !== link) staleLinks.add(otherLink);
+    });
+
+    try {
+      const {
+        uid,
+        name,
+        email,
+        serviceName,
+        bookingTime,
+        endTime,
+        phone
+      } = parseBookingFromEvent(event);
+
+      if (!uid) {
+        console.warn(
+          '[booking] booking success event without uid — skipping redirect',
+          event
+        );
+        return;
+      }
+
+      if (checkoutRedirectedUids.has(uid)) return;
+      checkoutRedirectedUids.add(uid);
+
+      // Hide the drawer and Cal iframe before navigation so the Cal
+      // "Your booking has been submitted" screen never flashes.
+      showCheckoutHandoff();
+
+      const search = new URLSearchParams({ uid });
+      if (name) search.set('name', name);
+      if (email) search.set('email', email);
+
+      // Do not await — navigation must start immediately. Init hydrates
+      // missing email/time from Cal when the embed omitted them (V2).
+      fetch('/api/booking/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          calBookingUid: uid,
+          name,
+          email,
+          serviceName,
+          bookingTime,
+          endTime,
+          phone
+        }),
+        keepalive: true
+      }).catch((initErr) => {
+        console.warn(
+          '[booking] /api/booking/init failed (checkout will still run)',
+          initErr
+        );
+      });
+
+      window.location.replace(`/checkout?${search.toString()}`);
+    } catch (err) {
+      console.error(
+        '[booking] failed to redirect to /checkout after booking success',
+        err
+      );
+    }
+  };
+
+  const registerBookingRedirectHandlers = (nsApi, link) => {
+    const onSuccess = (event) => redirectToCheckoutAfterBooking(event, link);
+    // V2 fires as soon as the booking is created (often before the Cal
+    // confirmation UI paints). Legacy event is kept for older embed.js.
+    ['bookingSuccessfulV2', 'bookingSuccessful'].forEach((action) => {
+      nsApi('on', { action, callback: onSuccess });
+    });
+  };
+
   const createCalMount = (link) => {
     if (!drawerContainer) return null;
     const idx = linkIndices.get(link);
@@ -152,128 +269,7 @@
           config: { layout: 'month_view' }
         });
         nsApi('ui', window.calUiConfig || { layout: 'month_view' });
-        nsApi('on', {
-          action: 'bookingSuccessful',
-          callback: async (event) => {
-            // The just-booked iframe is parked on the confirmation
-            // screen; reopening should restart fresh.
-            staleLinks.add(link);
-            // ALL other pre-rendered iframes are now showing at-least-
-            // one stale slot — the one McKenna just got booked into.
-            // Marking them stale (rather than rebuilding eagerly) keeps
-            // this cheap: the next time the visitor opens a different
-            // service, `ensureFreshMount` will rebuild it on demand.
-            mountsByLink.forEach((_, otherLink) => {
-              if (otherLink !== link) staleLinks.add(otherLink);
-            });
-
-            // ── CARD-VAULTING REDIRECT ────────────────────────────
-            // Cal.com's "Redirect after booking" feature is paywalled,
-            // so we hijack the success state from the embed side and
-            // route the visitor to our own /checkout page where we
-            // collect a card-on-file via Stripe SetupIntents.
-            //
-            // Cal's payload shape (confirmed against embed.js): the
-            // callback receives a CustomEvent-ish object with `detail`
-            // carrying `{ type, namespace, data }`. The booking uid
-            // and the first attendee's name/email are nested inside
-            // `data.booking`. Older embed.js versions delivered the
-            // payload directly on the first arg (no `.detail` layer),
-            // so we read defensively to survive a Cal SDK bump.
-            try {
-              const payload =
-                (event && event.detail && event.detail.data) ||
-                (event && event.data) ||
-                {};
-              const booking = payload.booking || {};
-              const uid = typeof booking.uid === 'string' ? booking.uid : '';
-              const attendees = Array.isArray(booking.attendees)
-                ? booking.attendees
-                : [];
-              const attendee = attendees[0] || {};
-              const name =
-                typeof attendee.name === 'string' ? attendee.name : '';
-              const email =
-                typeof attendee.email === 'string' ? attendee.email : '';
-
-              if (!uid) {
-                // Without a uid we can't accept the booking on Cal
-                // after vaulting the card. Stay on the confirmation
-                // screen and let McKenna reconcile manually — this
-                // path should be unreachable in practice (Cal always
-                // emits uid on bookingSuccessful).
-                console.warn(
-                  '[booking] bookingSuccessful fired without uid — skipping redirect',
-                  event
-                );
-                return;
-              }
-
-              const serviceName =
-                (typeof booking.title === 'string' && booking.title) ||
-                (typeof booking.eventTitle === 'string' && booking.eventTitle) ||
-                '';
-              const bookingTime =
-                (typeof booking.startTime === 'string' && booking.startTime) ||
-                (typeof booking.start === 'string' && booking.start) ||
-                null;
-              const endTime =
-                (typeof booking.endTime === 'string' && booking.endTime) ||
-                (typeof booking.end === 'string' && booking.end) ||
-                null;
-              const phone =
-                (typeof attendee.phoneNumber === 'string' &&
-                  attendee.phoneNumber) ||
-                '';
-
-              // Create the local `pending` row immediately. Cal.com
-              // "Requires confirmation" types fire BOOKING_REQUESTED
-              // (not BOOKING_CREATED) and many webhook configs never
-              // subscribe to that event — without this call the admin
-              // DB stays empty until /api/booking/confirm runs.
-              try {
-                await fetch('/api/booking/init', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    calBookingUid: uid,
-                    name,
-                    email,
-                    serviceName,
-                    bookingTime,
-                    endTime,
-                    phone,
-                  }),
-                });
-              } catch (initErr) {
-                console.warn(
-                  '[booking] /api/booking/init failed (checkout will still run)',
-                  initErr
-                );
-              }
-
-              // Build the query string only from params we actually
-              // have. /checkout treats name/email as optional and
-              // falls back to whatever the PaymentElement collects.
-              const search = new URLSearchParams({ uid });
-              if (name) search.set('name', name);
-              if (email) search.set('email', email);
-
-              // Hard navigate — the visitor was inside an iframe
-              // inside our drawer; replacing the top-level URL is
-              // the only way to land them on the Next.js /checkout
-              // route. (`router.push` from next/navigation isn't an
-              // option here: this file is the static homepage, not
-              // a React component.)
-              window.location.href = `/checkout?${search.toString()}`;
-            } catch (err) {
-              console.error(
-                '[booking] failed to redirect to /checkout after bookingSuccessful',
-                err
-              );
-            }
-          }
-        });
+        registerBookingRedirectHandlers(nsApi, link);
       }
     }
     return mount;

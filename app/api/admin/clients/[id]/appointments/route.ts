@@ -23,6 +23,11 @@
  *
  * Returns a flat list ordered booking_time DESC NULLS LAST so the
  * most recent / upcoming appointments are at the top of the modal.
+ *
+ * Rows with status `pending` are excluded: those are Cal holds created
+ * when a client picked a slot but has not finished Stripe checkout.
+ * They belong on the admin List view ("Awaiting Payment"), not in this
+ * client's booking history.
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
@@ -209,17 +214,20 @@ export async function GET(
         LIMIT 1
       ) s ON TRUE
       WHERE
-            a.client_id = ${client.id}::uuid
-         OR (
-              ${client.email}::text IS NOT NULL
-              AND a.client_email IS NOT NULL
-              AND LOWER(TRIM(a.client_email)) = LOWER(TRIM(${client.email}))
+            (
+              a.client_id = ${client.id}::uuid
+           OR (
+                ${client.email}::text IS NOT NULL
+                AND a.client_email IS NOT NULL
+                AND LOWER(TRIM(a.client_email)) = LOWER(TRIM(${client.email}))
+              )
+           OR (
+                ${client.phone}::text IS NOT NULL
+                AND a.client_phone IS NOT NULL
+                AND regexp_replace(a.client_phone, '\D', '', 'g') = ${client.phone}
+              )
             )
-         OR (
-              ${client.phone}::text IS NOT NULL
-              AND a.client_phone IS NOT NULL
-              AND regexp_replace(a.client_phone, '\D', '', 'g') = ${client.phone}
-            )
+        AND COALESCE(LOWER(TRIM(a.status)), '') <> 'pending'
       ORDER BY a.booking_time DESC NULLS LAST, a.id DESC
       LIMIT 500
     `;
