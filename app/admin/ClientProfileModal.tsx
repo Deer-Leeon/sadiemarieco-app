@@ -57,12 +57,7 @@ import type {
   ClientCrmStats,
   ClientPhoto,
 } from './types';
-import {
-  appointmentServiceLabel,
-  clientDisplayName,
-  computeCrmStatsFromAppointments,
-  formatLifetimeSpend,
-} from './helpers';
+import { appointmentServiceLabel, clientDisplayName, formatLifetimeSpend } from './helpers';
 import { getServiceColor } from './serviceColors';
 // Circular import: AppointmentModal imports ClientProfileModal (for the
 // "Client" tab) and ClientProfileModal imports AppointmentModal (for
@@ -396,6 +391,12 @@ function DossierSection({
     null
   );
   const [refreshKey, setRefreshKey] = useState(0);
+  const [crmStats, setCrmStats] = useState<ClientCrmStats>({
+    total_bookings: client.total_bookings,
+    lifetime_value: client.lifetime_value,
+    has_vaulted_card: client.has_vaulted_card,
+    risk_flag: client.risk_flag,
+  });
   const mutatedRef = useRef(false);
 
   useEffect(() => {
@@ -408,10 +409,16 @@ function DossierSection({
           const text = await res.text();
           throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
         }
-        return res.json() as Promise<{ appointments: Appointment[] }>;
+        return res.json() as Promise<{
+          appointments: Appointment[];
+          crm_stats: ClientCrmStats;
+        }>;
       })
       .then((data) => {
-        if (!cancelled) setAppts(data.appointments);
+        if (!cancelled) {
+          setAppts(data.appointments);
+          if (data.crm_stats) setCrmStats(data.crm_stats);
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -426,15 +433,6 @@ function DossierSection({
     };
   }, [client.id, refreshKey]);
 
-  const stats: ClientCrmStats = appts
-    ? computeCrmStatsFromAppointments(appts)
-    : {
-        total_bookings: client.total_bookings,
-        lifetime_value: client.lifetime_value,
-        has_vaulted_card: client.has_vaulted_card,
-        risk_flag: client.risk_flag,
-      };
-
   const handleCloseStacked = () => {
     setOpenAppointment(null);
     if (mutatedRef.current) {
@@ -445,7 +443,7 @@ function DossierSection({
 
   return (
     <>
-      <CrmStatsBar stats={stats} />
+      <CrmStatsBar stats={crmStats} />
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <ActionBox

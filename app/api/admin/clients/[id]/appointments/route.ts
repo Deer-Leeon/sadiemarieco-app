@@ -34,6 +34,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Appointment } from '@/app/admin/types';
+import { fetchClientCrmStats } from '@/lib/client-crm-stats';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -231,7 +232,15 @@ export async function GET(
       ORDER BY a.booking_time DESC NULLS LAST, a.id DESC
       LIMIT 500
     `;
-    return NextResponse.json({ appointments: rows.map(rowToAppointment) });
+    const crm_stats = await fetchClientCrmStats(client.id, {
+      email: client.email,
+      phone: client.phone,
+    });
+
+    return NextResponse.json({
+      appointments: rows.map(rowToAppointment),
+      crm_stats,
+    });
   } catch (err) {
     console.error(
       '[api/admin/clients/[id]/appointments] GET failed:',
