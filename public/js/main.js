@@ -60,19 +60,31 @@
   }
 
   // ── SCROLL REVEAL ──
+  // Matches the site's 860px mobile breakpoint in styles.css.
+  const MOBILE_LAYOUT_MAX_PX = 860;
   const reveals = document.querySelectorAll('.reveal');
-  if (reveals.length && 'IntersectionObserver' in window) {
-    const revealObs = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('visible');
-          revealObs.unobserve(entry.target);
-        }
-      });
-    }, { threshold: 0.05, rootMargin: '0px 0px 10% 0px' });
-    reveals.forEach((el) => revealObs.observe(el));
-  } else {
+  const showAllReveals = () => {
     reveals.forEach((el) => el.classList.add('visible'));
+  };
+  const isMobileInstantLayout = () =>
+    window.matchMedia(`(max-width: ${MOBILE_LAYOUT_MAX_PX}px)`).matches;
+
+  if (reveals.length) {
+    if (isMobileInstantLayout()) {
+      showAllReveals();
+    } else if ('IntersectionObserver' in window) {
+      const revealObs = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            revealObs.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.05, rootMargin: '0px 0px 10% 0px' });
+      reveals.forEach((el) => revealObs.observe(el));
+    } else {
+      showAllReveals();
+    }
   }
 
   // ── FAQ ACCORDION ──

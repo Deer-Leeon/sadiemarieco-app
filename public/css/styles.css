@@ -1725,6 +1725,27 @@ footer {
   .faq-big-title { font-size: clamp(3rem,12vw,5rem); }
   footer { padding: 28px 24px; flex-direction: column; gap: 18px; text-align: center; }
   .footer-links { flex-wrap: wrap; justify-content: center; }
+
+  /* Mobile only: full page visible on load — no hero fade or scroll reveal */
+  .fade-in,
+  .fade-in.delay-1,
+  .fade-in.delay-2,
+  .fade-in.delay-3,
+  .fade-in.delay-4 {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .reveal,
+  .reveal.reveal-delay-1,
+  .reveal.reveal-delay-2,
+  .reveal.reveal-delay-3,
+  .reveal.reveal-delay-4,
+  .reveal.visible {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
 }
 
 /* ==========================================================================
