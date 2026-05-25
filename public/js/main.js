@@ -391,4 +391,57 @@
       closeDrawer();
     }
   });
+
+  // ── PORTFOLIO LIGHTBOX ──
+  const portfolioLightbox = document.getElementById('portfolio-lightbox');
+  const portfolioLightboxImg = portfolioLightbox
+    ? portfolioLightbox.querySelector('img')
+    : null;
+  const portfolioLightboxClose = portfolioLightbox
+    ? portfolioLightbox.querySelector('.portfolio-lightbox-close')
+    : null;
+  let portfolioScrollLock = '';
+
+  const openPortfolioLightbox = (src, alt) => {
+    if (!portfolioLightbox || !portfolioLightboxImg) return;
+    portfolioLightboxImg.src = src;
+    portfolioLightboxImg.alt = alt || '';
+    portfolioLightbox.hidden = false;
+    portfolioLightbox.classList.add('is-open');
+    portfolioScrollLock = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  };
+
+  const closePortfolioLightbox = () => {
+    if (!portfolioLightbox || !portfolioLightboxImg) return;
+    portfolioLightbox.classList.remove('is-open');
+    portfolioLightbox.hidden = true;
+    portfolioLightboxImg.src = '';
+    portfolioLightboxImg.alt = '';
+    document.body.style.overflow = portfolioScrollLock;
+  };
+
+  document.querySelectorAll('#portfolio .p-item img').forEach((img) => {
+    img.addEventListener('click', () => {
+      openPortfolioLightbox(img.currentSrc || img.src, img.alt);
+    });
+  });
+
+  if (portfolioLightbox) {
+    portfolioLightbox.addEventListener('click', (event) => {
+      if (event.target === portfolioLightbox) closePortfolioLightbox();
+    });
+  }
+  if (portfolioLightboxClose) {
+    portfolioLightboxClose.addEventListener('click', closePortfolioLightbox);
+  }
+  document.addEventListener('keydown', (event) => {
+    if (
+      event.key === 'Escape' &&
+      portfolioLightbox &&
+      portfolioLightbox.classList.contains('is-open')
+    ) {
+      closePortfolioLightbox();
+    }
+  });
 })();
