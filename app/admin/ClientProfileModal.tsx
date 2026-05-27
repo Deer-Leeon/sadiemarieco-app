@@ -57,8 +57,8 @@ import type {
   ClientCrmStats,
   ClientPhoto,
 } from './types';
+import AppointmentHistoryList from './AppointmentHistoryList';
 import { appointmentServiceLabel, clientDisplayName, formatLifetimeSpend } from './helpers';
-import { getServiceColor } from './serviceColors';
 // Circular import: AppointmentModal imports ClientProfileModal (for the
 // "Client" tab) and ClientProfileModal imports AppointmentModal (for
 // the stacked "manage this appointment" overlay launched from the
@@ -687,63 +687,39 @@ function InlineHistoryTable({
     return ta - tb;
   });
 
-  const renderRows = (list: Appointment[]) =>
-    list.map((a) => {
-      const badge = describeRowBadge(a.status);
-      const start = a.booking_time ? parseISO(a.booking_time) : null;
-      const dateLabel =
-        start && !Number.isNaN(start.getTime())
-          ? format(start, 'MMM d, yyyy · h:mm a')
-          : '—';
-      return (
-        <button
-          key={a.id}
-          type="button"
-          onClick={() => onSelect(a)}
-          className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-stone-100 px-3 py-2.5 text-left text-sm transition-colors last:border-b-0 hover:bg-stone-50"
-        >
-          <span className="min-w-0 truncate font-medium text-stone-900">
-            {appointmentServiceLabel(a)}
-          </span>
-          <span className="hidden shrink-0 text-xs text-stone-500 sm:inline">
-            {dateLabel}
-          </span>
-          {badge ? (
-            <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] ${badge.className}`}
-            >
-              {badge.label}
-            </span>
-          ) : (
-            <span className="w-16 shrink-0" />
-          )}
-        </button>
-      );
-    });
-
   return (
-    <div className="rounded-lg border border-stone-200 bg-white overflow-hidden">
-      <p className="border-b border-stone-200 px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+    <div className="overflow-hidden rounded-lg border border-stone-200 bg-[#FAF9F6]">
+      <p className="border-b border-stone-200 bg-white px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
         Appointment history
       </p>
-      {upcoming.length > 0 && (
-        <div>
-          <p className="bg-stone-50 px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
-            Upcoming
-          </p>
-          {renderRows(upcoming)}
-        </div>
-      )}
-      {past.length > 0 && (
-        <div>
-          {upcoming.length > 0 && (
-            <p className="bg-stone-50 px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
-              Past
+      <div className="px-4 py-4">
+        {upcoming.length > 0 && (
+          <div className="mb-6">
+            <p className="mb-3 text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+              Upcoming
             </p>
-          )}
-          {renderRows(past)}
-        </div>
-      )}
+            <AppointmentHistoryList
+              appointments={upcoming}
+              dayOrder="asc"
+              onSelect={onSelect}
+            />
+          </div>
+        )}
+        {past.length > 0 && (
+          <div>
+            {upcoming.length > 0 && (
+              <p className="mb-3 text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+                Past
+              </p>
+            )}
+            <AppointmentHistoryList
+              appointments={past}
+              dayOrder="desc"
+              onSelect={onSelect}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -973,28 +949,20 @@ function AppointmentsView({ client }: { client: Client }) {
     <div className="flex flex-col gap-4">
       {upcoming.length > 0 && (
         <Section label="Upcoming">
-          <div className="flex flex-col gap-2">
-            {upcoming.map((a) => (
-              <AppointmentRow
-                key={a.id}
-                appointment={a}
-                onSelect={() => handleSelect(a)}
-              />
-            ))}
-          </div>
+          <AppointmentHistoryList
+            appointments={upcoming}
+            dayOrder="asc"
+            onSelect={handleSelect}
+          />
         </Section>
       )}
       {past.length > 0 && (
         <Section label="Past">
-          <div className="flex flex-col gap-2">
-            {past.map((a) => (
-              <AppointmentRow
-                key={a.id}
-                appointment={a}
-                onSelect={() => handleSelect(a)}
-              />
-            ))}
-          </div>
+          <AppointmentHistoryList
+            appointments={past}
+            dayOrder="desc"
+            onSelect={handleSelect}
+          />
         </Section>
       )}
 
@@ -1027,145 +995,6 @@ function Section({
       {children}
     </div>
   );
-}
-
-function AppointmentRow({
-  appointment,
-  onSelect,
-}: {
-  appointment: Appointment;
-  onSelect: () => void;
-}) {
-  const start = appointment.booking_time
-    ? parseISO(appointment.booking_time)
-    : null;
-  const end = appointment.end_time ? parseISO(appointment.end_time) : null;
-
-  const hasStart = start && !Number.isNaN(start.getTime());
-  const hasEnd = end && !Number.isNaN(end.getTime());
-
-  // In the CLIENT PROFILE we explicitly do NOT filter canceled/no-show
-  // rows — they're audit history. Each non-confirmed status gets its
-  // own colour-coded badge + a struck-through row so McKenna can see
-  // at a glance how this client has historically behaved with their
-  // bookings (cancellations, no-shows, etc.).
-  const badge = describeRowBadge(appointment.status);
-  const dim = badge !== null;
-  // Service-type colour coding in the client profile reads as a thin
-  // 4 px left accent only — the row body stays the standard white
-  // card so a single client's history scans as a calm list rather
-  // than a multi-coloured wall. The calendar views (list / 3-day /
-  // week / month / single-day) still paint the full block so the
-  // colour signal stays loud where the studio actually plans the
-  // day. Suppressed for any non-confirmed row (cancelled/no-show)
-  // so the existing dimmed-grey status treatment isn't overpowered —
-  // the colour belongs to live bookings only, the badge carries the
-  // meaning otherwise.
-  const color = dim ? null : getServiceColor(appointment);
-  const colorStyle = color
-    ? { borderLeftWidth: '4px', borderLeftColor: color.accent }
-    : undefined;
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-label={`Open appointment · ${appointmentServiceLabel(appointment)}`}
-      className={`group w-full rounded-lg border border-stone-200 bg-white p-3 text-left transition-shadow hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FAF9F6] ${
-        dim ? 'opacity-70' : ''
-      }`}
-      style={colorStyle}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p
-            className={`font-serif text-base leading-tight ${
-              dim
-                ? 'text-stone-500 line-through decoration-stone-400'
-                : 'text-stone-900'
-            }`}
-          >
-            {appointmentServiceLabel(appointment)}
-          </p>
-          <p className="mt-1 text-xs text-stone-500">
-            {hasStart
-              ? `${format(start!, 'EEE, MMM d, yyyy')} · ${
-                  hasEnd
-                    ? `${format(start!, 'h:mm a')} – ${format(end!, 'h:mm a')}`
-                    : format(start!, 'h:mm a')
-                }`
-              : 'No time scheduled'}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {badge !== null && (
-            <span
-              className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.18em] ${badge.className}`}
-            >
-              {badge.label}
-            </span>
-          )}
-          <ChevronRight
-            aria-hidden="true"
-            className="h-4 w-4 text-stone-300 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-stone-600"
-          />
-        </div>
-      </div>
-    </button>
-  );
-}
-
-/**
- * Map an appointment-history row's status to its badge label + style.
- * Returning `null` for 'confirmed' tells the renderer to render the row
- * undecorated, which is the right visual default for the most common
- * lifecycle state. Unknown / legacy values fall through to `null` too
- * — better than rendering a confusing "raw db value" pill.
- *
- * Legacy note: the British 'cancelled' value from before
- * `scripts/update_status_constraint.sql` ran is treated as
- * 'canceled_by_client' (which is what the migration converts it to)
- * so historical rows render correctly even if the migration hasn't
- * been applied to a particular environment yet.
- */
-function describeRowBadge(
-  status: string | null
-): { label: string; className: string } | null {
-  const s = (status || '').toLowerCase();
-  // `pending` is filtered out of client history before rows render.
-  if (s === 'canceled_by_admin') {
-    return {
-      label: 'Cancelled by you',
-      className: 'bg-rose-50 text-rose-700 ring-1 ring-rose-200/70',
-    };
-  }
-  if (s === 'canceled_by_client' || s === 'cancelled') {
-    return {
-      label: 'Cancelled by client',
-      className: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200/70',
-    };
-  }
-  if (s === 'canceled_by_client_late') {
-    return {
-      label: 'Late cancel ($20)',
-      className: 'bg-amber-50 text-amber-800 ring-1 ring-amber-300/70',
-    };
-  }
-  if (s === 'canceled_by_system') {
-    // Abandoned-checkout cron released the hold — not a manual cancel.
-    // Muted stone styling distinguishes this from client/admin cancels.
-    return {
-      label: 'Cancelled by system',
-      className: 'bg-stone-100 text-stone-500 ring-1 ring-stone-300/60',
-    };
-  }
-  if (s === 'no-show') {
-    return {
-      label: 'No-show',
-      className: 'bg-stone-100 text-stone-600 ring-1 ring-stone-300/70',
-    };
-  }
-  return null;
 }
 
 // ─── PICTURES (with lightbox) ──────────────────────────────────────────────
