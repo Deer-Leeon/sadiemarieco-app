@@ -130,6 +130,8 @@ export default function ImageUploader({
   // portrait, whatever the portfolio grid cell happens to be).
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSavingCaption, setIsSavingCaption] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Optimistic display URL — lets the tile swap to the freshly
@@ -168,12 +170,16 @@ export default function ImageUploader({
   // Cropper UI gates the input on this flag.
   const captionEditable = variant === 'tile';
 
-  // Text shown on the tile hover overlay. Custom caption wins; if
-  // none is set, fall back to the slot's default label so the
-  // hover tag is never blank.
-  const displayLabel = captionEditable
-    ? savedCaption?.trim() || label
+  // Tile hover overlay mirrors the public `.p-tag` contract:
+  //   • savedCaption === null → show the hardcoded default (`label`)
+  //   • savedCaption === ''   → hide overlay (explicit clear)
+  //   • non-empty string      → show the custom caption
+  const ptagText = captionEditable
+    ? savedCaption === null
+      ? label
+      : savedCaption.trim()
     : label;
+  const showPtagOverlay = captionEditable && ptagText.length > 0;
 
   // ── Cropper state ─────────────────────────────────────────────
   // `imageToCrop` is an object URL we own and must revoke when
@@ -203,9 +209,64 @@ export default function ImageUploader({
   }, [imageToCrop]);
 
   const triggerPicker = () => {
-    if (isUploading || imageToCrop) return;
+    if (isUploading || isSavingCaption || imageToCrop) return;
     inputRef.current?.click();
   };
+
+  const openEditModal = () => {
+    if (isUploading || isSavingCaption || imageToCrop) return;
+    setErrorMsg(null);
+    setCaptionDraft(
+      savedCaption === null || savedCaption === undefined ? '' : savedCaption
+    );
+    setEditOpen(true);
+  };
+
+  const closeEditModal = () => {
+    if (isUploading || isSavingCaption) return;
+    setEditOpen(false);
+  };
+
+  const saveCaptionOnly = useCallback(async () => {
+    setIsSavingCaption(true);
+    setErrorMsg(null);
+    try {
+      const trimmed = captionDraft.trim();
+      const res = await fetch('/api/admin/website/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: imageId,
+          caption: trimmed.length > 0 ? trimmed : '',
+        }),
+      });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          const body = (await res.json()) as { error?: string };
+          if (body?.error) detail = body.error;
+        } catch {
+          /* non-JSON */
+        }
+        throw new Error(detail || 'caption_save_failed');
+      }
+      const data = (await res.json()) as {
+        slot: { caption: string | null };
+      };
+      setSavedCaption(data.slot.caption);
+      setEditOpen(false);
+      router.refresh();
+    } catch (err) {
+      console.error('[ImageUploader] caption save failed:', err);
+      setErrorMsg(
+        err instanceof Error
+          ? humaniseUploadError(err.message)
+          : 'Could not save caption. Please try again.'
+      );
+    } finally {
+      setIsSavingCaption(false);
+    }
+  }, [captionDraft, imageId, router]);
 
   // STAGE 1: file picked → open cropper. NO upload here.
   // We measure the rendered slot's aspect ratio first so the
@@ -239,11 +300,13 @@ export default function ImageUploader({
     setCroppedAreaPixels(null);
 
     setOriginalFileName(file.name);
-    // Seed the caption input with whatever's persisted so the
-    // editor sees the current value and can tweak rather than
-    // retype from scratch. Cancelling the crop doesn't write back,
-    // so an unsaved draft can't leak across sessions.
-    setCaptionDraft(savedCaption ?? '');
+    // When the slot editor is open, keep the in-modal caption draft;
+    // otherwise seed from the persisted value for a standalone replace.
+    if (!editOpen) {
+      setCaptionDraft(
+        savedCaption === null || savedCaption === undefined ? '' : savedCaption
+      );
+    }
     setImageToCrop(URL.createObjectURL(file));
   };
 
@@ -345,13 +408,12 @@ export default function ImageUploader({
       // Same optimistic pattern for the caption: trust the server
       // echo (so a trimmed-to-empty draft correctly clears the
       // overlay) and resync from the prop after refresh.
-      if (captionEditable) {
-        setSavedCaption(result.caption ?? null);
+      if (captionEditable && result.caption !== undefined) {
+        setSavedCaption(result.caption);
       }
-      // Close the cropper. The useEffect cleanup on imageToCrop
-      // revokes the object URL we created in handleFileChange.
       setImageToCrop(null);
       setCroppedAreaPixels(null);
+      setEditOpen(false);
     } catch (err) {
       console.error('[ImageUploader] upload failed:', err);
       setErrorMsg(
@@ -388,17 +450,10 @@ export default function ImageUploader({
   //     we add on top of the live look, so the admin can still tell
   //     the tile is clickable. Sized/positioned to read as a corner
   //     UI affordance, not a content overlay.
-  const clickableImage = (
-    <button
-      type="button"
-      ref={buttonRef}
-      onClick={triggerPicker}
-      disabled={isUploading || !!imageToCrop}
-      aria-label={`Replace ${label}`}
-      className={`group relative block w-full cursor-pointer overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 disabled:cursor-progress ${
-        isCard ? 'rounded-md' : 'h-full max-[860px]:h-auto'
-      }`}
-    >
+  const tileBusy = isUploading || isSavingCaption || !!imageToCrop;
+
+  const imageSurface = (
+    <>
       {displayUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -427,68 +482,72 @@ export default function ImageUploader({
         </div>
       )}
 
-      {/*
-        Live-site chrome (nav band, gradient overlay, etc.). Rendered
-        UNDER the hover overlay so the editor sees the chrome at rest
-        and the chrome stays visible (slightly dimmed) when the user
-        hovers to click. `pointer-events-none` so it never steals the
-        click from the parent button.
-      */}
       {chromeOverlay && (
         <div className="pointer-events-none absolute inset-0">
           {chromeOverlay}
         </div>
       )}
 
-      {isCard ? (
-        // CARD variant: dark hover overlay with centered pencil. The
-        // card frame already carries the slot label in its header, so
-        // the overlay doesn't need to repeat it.
+      {isCard && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/0 transition-all duration-200 group-hover:bg-black/45 group-focus-visible:bg-black/45">
           <Pencil
             className="h-6 w-6 text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100"
             aria-hidden="true"
           />
         </div>
-      ) : (
-        <>
-          {/*
-            `.p-tag` clone — bottom gradient + small uppercase label,
-            fades + slides in from 6px down on hover. Values mirror
-            public/css/styles.css lines 713–727:
-              padding: 24px 18px 14px
-              font-size: 0.58rem (~9.28px)
-              letter-spacing: 0.22em
-              color: rgba(245,243,240,0.8)
-              background: linear-gradient(to top, rgba(13,27,42,0.85), transparent)
-              opacity 0 → 1, translateY 6px → 0 over 300ms
-          */}
-          <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 translate-y-[6px] bg-linear-to-t from-[rgba(13,27,42,0.85)] to-transparent px-[18px] pb-[14px] pt-[24px] font-sans text-[0.58rem] font-light uppercase tracking-[0.22em] text-[rgba(245,243,240,0.8)] opacity-0 transition-[opacity,transform] duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100"
-          >
-            {displayLabel}
-          </div>
-
-          {/*
-            Editor affordance — small pencil badge top-right. Sized
-            and positioned to read as UI chrome rather than content,
-            so it doesn't break the WYSIWYG feel. Always visible at
-            low opacity, brightens on hover so the cursor target is
-            unambiguous.
-          */}
-          <div className="pointer-events-none absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 opacity-70 backdrop-blur-sm transition-opacity duration-200 max-[860px]:opacity-100 group-hover:opacity-100 group-focus-visible:opacity-100">
-            <Pencil className="h-3.5 w-3.5 text-white" aria-hidden="true" />
-          </div>
-        </>
       )}
 
-      {/* Forced-on overlay while the request is in flight. */}
+      {!isCard && showPtagOverlay && (
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 translate-y-[6px] bg-linear-to-t from-[rgba(13,27,42,0.85)] to-transparent px-[18px] pb-[14px] pt-[24px] font-sans text-[0.58rem] font-light uppercase tracking-[0.22em] text-[rgba(245,243,240,0.8)] opacity-0 transition-[opacity,transform] duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100"
+        >
+          {ptagText}
+        </div>
+      )}
+
       {isUploading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/55 text-xs font-medium uppercase tracking-[0.2em] text-white">
           Uploading…
         </div>
       )}
+    </>
+  );
+
+  // Tile: pencil is a sibling button (never nested inside the image
+  // button — invalid HTML and a React hydration error).
+  const clickableImage = isCard ? (
+    <button
+      type="button"
+      ref={buttonRef}
+      onClick={triggerPicker}
+      disabled={tileBusy}
+      aria-label={`Replace ${label}`}
+      className="group relative block w-full cursor-pointer overflow-hidden rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 disabled:cursor-progress"
+    >
+      {imageSurface}
     </button>
+  ) : (
+    <div className="relative h-full w-full max-[860px]:h-auto">
+      <button
+        type="button"
+        ref={buttonRef}
+        onClick={openEditModal}
+        disabled={tileBusy}
+        aria-label={`Edit ${label}`}
+        className="group relative block h-full w-full cursor-pointer overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 disabled:cursor-progress"
+      >
+        {imageSurface}
+      </button>
+      <button
+        type="button"
+        onClick={openEditModal}
+        disabled={tileBusy}
+        aria-label={`Edit ${label}`}
+        className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 opacity-70 backdrop-blur-sm transition-opacity duration-200 hover:bg-black/55 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 max-[860px]:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <Pencil className="h-3.5 w-3.5 text-white" aria-hidden="true" />
+      </button>
+    </div>
   );
 
   // ── Hidden native file input (shared) ───────────────────────────────
@@ -520,12 +579,26 @@ export default function ImageUploader({
       onConfirm={handleConfirmCrop}
       isUploading={isUploading}
       canConfirm={!!croppedAreaPixels}
-      captionEditable={captionEditable}
-      captionDraft={captionDraft}
-      onCaptionDraftChange={setCaptionDraft}
-      captionPlaceholder={label}
     />
   );
+
+  const slotEditModal =
+    captionEditable &&
+    editOpen && (
+      <SlotEditModal
+        label={label}
+        displayUrl={displayUrl}
+        captionDraft={captionDraft}
+        onCaptionDraftChange={setCaptionDraft}
+        captionPlaceholder={label}
+        onClose={closeEditModal}
+        onChangeImage={triggerPicker}
+        onSaveCaption={saveCaptionOnly}
+        isSaving={isSavingCaption}
+        isUploading={isUploading}
+        errorMsg={errorMsg}
+      />
+    );
 
   // ── CARD variant ────────────────────────────────────────────────────
   if (isCard) {
@@ -546,6 +619,7 @@ export default function ImageUploader({
           </p>
         )}
         {cropOverlay}
+        {slotEditModal}
       </div>
     );
   }
@@ -569,6 +643,160 @@ export default function ImageUploader({
         </p>
       )}
       {cropOverlay}
+      {slotEditModal}
+    </div>
+  );
+}
+
+/**
+ * Portfolio tile editor — image swap + caption without forcing a crop
+ * when only the title changes. Opened from the pencil badge or by
+ * clicking the tile.
+ */
+function SlotEditModal({
+  label,
+  displayUrl,
+  captionDraft,
+  onCaptionDraftChange,
+  captionPlaceholder,
+  onClose,
+  onChangeImage,
+  onSaveCaption,
+  isSaving,
+  isUploading,
+  errorMsg,
+}: {
+  label: string;
+  displayUrl: string | null;
+  captionDraft: string;
+  onCaptionDraftChange: (next: string) => void;
+  captionPlaceholder: string;
+  onClose: () => void;
+  onChangeImage: () => void;
+  onSaveCaption: () => void;
+  isSaving: boolean;
+  isUploading: boolean;
+  errorMsg: string | null;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape' && e.key !== 'Esc') return;
+      if (isSaving || isUploading) return;
+      onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isSaving, isUploading, onClose]);
+
+  const busy = isSaving || isUploading;
+  const previewCaption = captionDraft.trim();
+
+  return (
+    <div
+      className="fixed inset-0 z-100 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Edit ${label}`}
+    >
+      <div className="flex w-full max-w-md flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-stone-200 px-4 py-3">
+          <h3 className="font-serif text-lg text-stone-900">Edit · {label}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            aria-label="Close editor"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 disabled:opacity-50"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="relative aspect-video w-full overflow-hidden bg-[#1C2E42]">
+          {displayUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={displayUrl}
+              alt={label}
+              className="h-full w-full object-cover saturate-[0.82]"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <ImageIcon className="h-10 w-10 text-white/30" aria-hidden="true" />
+            </div>
+          )}
+          {previewCaption.length > 0 && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 pb-3 pt-8 font-sans text-[0.58rem] font-light uppercase tracking-[0.22em] text-[#f5f3f0]/80">
+              {previewCaption}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4 px-4 py-4">
+          <button
+            type="button"
+            onClick={onChangeImage}
+            disabled={busy}
+            className="w-full rounded-md border border-stone-300 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-800 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Change image…
+          </button>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold uppercase tracking-wider text-stone-500">
+              Image Title / Caption
+            </span>
+            <input
+              type="text"
+              value={captionDraft}
+              onChange={(e) => onCaptionDraftChange(e.target.value)}
+              disabled={busy}
+              placeholder={captionPlaceholder}
+              maxLength={300}
+              className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500/40 disabled:opacity-50"
+            />
+            <span className="text-[11px] text-stone-500">
+              Shown on hover on the live site. Leave blank to hide the label
+              and gradient for this tile.
+            </span>
+          </label>
+
+          {errorMsg && (
+            <p className="text-xs text-rose-700" role="alert">
+              {errorMsg}
+            </p>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-stone-200 bg-stone-50 px-4 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onSaveCaption}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Saving…
+              </>
+            ) : (
+              <>
+                <Check className="h-4 w-4" strokeWidth={2} />
+                Save
+              </>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -597,10 +825,6 @@ function CropperOverlay({
   onConfirm,
   isUploading,
   canConfirm,
-  captionEditable,
-  captionDraft,
-  onCaptionDraftChange,
-  captionPlaceholder,
 }: {
   imageSrc: string;
   aspect: number;
@@ -614,10 +838,6 @@ function CropperOverlay({
   onConfirm: () => void;
   isUploading: boolean;
   canConfirm: boolean;
-  captionEditable: boolean;
-  captionDraft: string;
-  onCaptionDraftChange: (next: string) => void;
-  captionPlaceholder: string;
 }) {
   // ESC closes the cropper unless an upload is in flight — never
   // let the user dismiss UI while a network request is still
@@ -733,36 +953,6 @@ function CropperOverlay({
           </label>
         </div>
 
-        {/* Caption editor. Only rendered for tile-variant slots
-            (portfolio tiles) — Core Pages cards have no subtitle
-            on the public site. Leaving the field blank reverts the
-            slot to the hardcoded `.p-tag` text in
-            public/index.html, which is shown here as a placeholder
-            so the editor knows what they're falling back to. */}
-        {captionEditable && (
-          <div className="border-t border-stone-800/80 px-5 py-3.5">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
-                Subtitle
-              </span>
-              <input
-                type="text"
-                value={captionDraft}
-                onChange={(e) => onCaptionDraftChange(e.target.value)}
-                disabled={isUploading}
-                placeholder={captionPlaceholder}
-                maxLength={300}
-                aria-label="Image subtitle"
-                className="w-full rounded-md border border-stone-700 bg-stone-900 px-3 py-2 text-sm text-stone-100 placeholder:text-stone-500 transition-colors focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500/50 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-              <span className="text-[10px] text-stone-500">
-                Shown on hover over this tile. Leave blank to use the default
-                ({captionPlaceholder}).
-              </span>
-            </label>
-          </div>
-        )}
-
         {/* Footer — Cancel + Confirm. Cream primary on stone matches
             the admin's neutral aesthetic; no rose/blue accents. */}
         <div className="flex items-center justify-end gap-2 border-t border-stone-800/80 bg-stone-900/60 px-5 py-3">
@@ -822,6 +1012,11 @@ function humaniseUploadError(detail: string): string {
       return 'That image could not be processed. Try a different file.';
     case 'db_upsert_failed':
       return 'Upload saved but the website record did not update. Please try again.';
+    case 'caption_save_failed':
+    case 'db_update_failed':
+      return 'Could not save the caption. Please try again.';
+    case 'slot_not_found':
+      return 'Upload an image for this slot before saving a caption.';
     default:
       return `Upload failed (${detail}).`;
   }

@@ -1162,8 +1162,16 @@ a.service-item:focus-visible .service-action {
   filter: saturate(0.82);
 }
 .p-item:hover img { transform: scale(1.06); }
-.p-tag {
-  position: absolute; bottom: 0; left: 0; right: 0;
+
+/* Portfolio captions — desktop (md+ / min-width 861px): in-image hover overlay */
+.p-tag--mobile {
+  display: none;
+}
+.p-tag--desktop {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
   background: linear-gradient(to top, rgba(13,27,42,0.85) 0%, transparent 100%);
   padding: 24px 18px 14px;
   font-family: var(--sans);
@@ -1176,7 +1184,10 @@ a.service-item:focus-visible .service-action {
   transform: translateY(6px);
   transition: opacity 0.3s, transform 0.3s;
 }
-.p-item:hover .p-tag { opacity: 1; transform: translateY(0); }
+.p-item:hover .p-tag--desktop {
+  opacity: 1;
+  transform: translateY(0);
+}
 
 .p-item-1 { grid-column: 1 / 6; grid-row: 1; }
 .p-item-2 { grid-column: 6 / 13; grid-row: 1; }
@@ -1748,7 +1759,12 @@ footer {
   }
   .p-item {
     width: 65%;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: unset;
+    height: auto;
+    overflow: visible;
+    display: flex;
+    flex-direction: column;
+    background: transparent;
     grid-column: unset !important;
     grid-row: unset !important;
   }
@@ -1756,9 +1772,39 @@ footer {
   .p-item:nth-child(even) { align-self: flex-end; }
   .p-item img {
     width: 100%;
-    height: 100%;
+    aspect-ratio: 16 / 9;
+    height: auto;
     object-fit: cover;
     cursor: zoom-in;
+    background: var(--navy-mid);
+  }
+  /* Mobile captions — below image, always visible, no gradient */
+  .p-tag--desktop {
+    display: none;
+  }
+  .p-tag--mobile {
+    display: block;
+    position: static;
+    width: 100%;
+    margin-top: 12px;
+    padding: 0;
+    background: none;
+    font-family: var(--sans);
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #a8a29e;
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  /* Zig-zag: left tiles → caption flush left; right tiles → flush right */
+  .p-item:nth-child(odd) .p-tag--mobile {
+    text-align: left;
+  }
+  .p-item:nth-child(even) .p-tag--mobile {
+    text-align: right;
   }
   .portfolio-quote-card { display: none; }
   #policies { padding: 80px 24px; }

@@ -109,8 +109,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   //   • field absent  → leave existing caption untouched (we use
   //                     COALESCE in the upsert below to preserve the
   //                     stored value on partial updates).
-  //   • empty string  → explicit clear (NULL in DB), so the public
-  //                     site falls back to the hardcoded p-tag text.
+  //   • empty string  → explicit hide ('' in DB); no overlay on the
+  //                     public site for that tile.
   //   • non-empty     → store as-is, trimmed; the public renderer
   //                     escapes the value before injecting.
   // A 300-char cap is generous for an editorial subtitle while
@@ -133,7 +133,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 400 }
       );
     }
-    captionValue = trimmed.length > 0 ? trimmed : null;
+    captionValue = trimmed.length > 0 ? trimmed : '';
   }
 
   if (typeof id !== 'string' || !ID_REGEX.test(id)) {

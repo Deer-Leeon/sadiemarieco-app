@@ -85,8 +85,10 @@ interface SiteImageRow {
 /**
  * Render-time view of a site_images row. URL is required (a row
  * without one shouldn't exist — the upload route writes both in
- * the same upsert), caption is optional and falls back to the
- * hardcoded text in public/index.html when null/empty.
+ * the same upsert). Caption semantics on the public site:
+ *   • NULL  → keep hardcoded `.p-tag` text from `public/index.html`
+ *   • ''    → hide the tag and gradient overlay entirely
+ *   • text  → replace with the CMS value
  */
 interface SiteImage {
   url: string;
@@ -171,13 +173,12 @@ function injectImageUrls(
 }
 
 /**
- * Replace the text content of `<span ... data-caption-id="X" ...>`
- * tags with the caption stored in `imageMap` for slot X. Spans
- * without a matching DB row, or with a row whose caption is
- * null/empty, are left untouched — the hardcoded fallback in
- * `public/index.html` continues to render. This is the same
- * "keep the existing markup if there's nothing to inject"
- * contract as `injectImageUrls`.
+ * Replace or remove `<span ... data-caption-id="X" ...>` tags based on
+ * the caption stored in `imageMap` for slot X:
+ *   • No DB row          → leave hardcoded fallback text in place
+ *   • caption NULL       → same (editor never customised the caption)
+ *   • caption ''         → remove the span (no text, no gradient)
+ *   • non-empty caption  → inject escaped custom text
  *
  * Robustness notes mirror `injectImageUrls`:
  *   - Double-quoted attributes only.
@@ -195,8 +196,10 @@ function injectCaptions(
     /<span\s+([^>]*?)data-caption-id="([^"]+)"([^>]*)>([^<]*)<\/span>/g,
     (match, before: string, id: string, after: string, _text: string) => {
       const entry = imageMap[id];
-      const caption = entry?.caption?.trim();
-      if (!caption) return match;
+      if (!entry) return match;
+      if (entry.caption === null) return match;
+      const caption = entry.caption.trim();
+      if (caption.length === 0) return '';
       return `<span ${before}data-caption-id="${id}"${after}>${escapeHtml(caption)}</span>`;
     }
   );
