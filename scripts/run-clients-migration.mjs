@@ -95,6 +95,9 @@ const STATEMENTS = [
 
   `CREATE INDEX IF NOT EXISTS client_photos_client_id_idx
      ON client_photos (client_id)`,
+
+  // Phone is the CRM key; email is optional for admin-created clients.
+  `ALTER TABLE clients ALTER COLUMN email DROP NOT NULL`,
 ];
 
 for (const stmt of STATEMENTS) {

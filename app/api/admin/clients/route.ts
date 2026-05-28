@@ -33,6 +33,10 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
+import {
+  normaliseClientPhone,
+  parseOptionalClientEmail,
+} from '@/lib/client-identity';
 
 // We never want this cached. The admin dashboard expects every fetch
 // to reflect the latest writes (a name PATCH should be immediately
@@ -40,30 +44,7 @@ import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-/**
- * Digits-only phone normaliser. Matches the convention the API
- * contract documents and the migration backfill applies to legacy
- * rows. Returning null for empty/garbage input lets the caller
- * decide whether to 400 (required) or just continue (optional).
- */
-function normalisePhone(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
-  const digits = raw.replace(/\D/g, '');
-  return digits.length > 0 ? digits : null;
-}
-
-/**
- * Light email sanitiser: trims and lowercases. We don't validate
- * structure here because the webhook already accepts arbitrary
- * strings — the admin should be able to PATCH a typo without the
- * API rejecting on RFC 5322 nitpicks. The form does the
- * "looks-like-an-email" check client-side.
- */
-function sanitiseEmail(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim().toLowerCase();
-  return trimmed.length > 0 ? trimmed : null;
-}
+const normalisePhone = normaliseClientPhone;
 
 /** Trim a name field; null when empty. Avoids storing whitespace-only strings. */
 function sanitiseName(raw: unknown): string | null {
@@ -229,9 +210,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const firstName = sanitiseName(payload.first_name);
   const lastName = sanitiseName(payload.last_name);
-  const email = sanitiseEmail(payload.email);
+  const email = parseOptionalClientEmail(payload.email);
 
-  // Branch on whether an email-keyed row already exists.
+  // Phone is the CRM identifier. Email is optional.
   //
   // Why this branch matters:
   //   Pre-CRM, the webhook created clients keyed by email alone. After
@@ -251,6 +232,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // because phone IS NULL AND email IS NULL would match a soup of
   // partial rows we have no business merging into.
   try {
+    const existingByPhone = await selectClientByPhone(phone);
+    if (existingByPhone) {
+      return NextResponse.json({ client: rowToClient(existingByPhone) });
+    }
+
     if (email) {
       const adopted = await adoptLegacyEmailRow(phone, email);
       if (adopted) {
@@ -262,11 +248,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           adopted: true,
         });
       }
-    }
-
-    const existingByPhone = await selectClientByPhone(phone);
-    if (existingByPhone) {
-      return NextResponse.json({ client: rowToClient(existingByPhone) });
     }
 
     const { rows } = await sql<ClientRow>`
@@ -284,12 +265,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
     return NextResponse.json({ client: rowToClient(rows[0]) });
   } catch (err) {
-    // The most likely error here is a UNIQUE violation on
-    // `clients_email_key` — somebody booked under this email before
-    // (with no phone yet) and the adopt-step couldn't run because
-    // the supplied email differs from what's on file. Fall back to a
-    // pure phone-keyed insert with email=NULL so the CRM can still
-    // proceed; the admin can fix the email mismatch from the edit form.
+    // UNIQUE on email when the same inbox exists on a legacy row.
     const msg = errorMessage(err);
     const looksLikeEmailCollision =
       msg.includes('clients_email_key') ||
@@ -317,9 +293,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           }
 
           const byEmail = await selectClientByEmail(email);
-          if (byEmail) {
+          if (byEmail?.phone) {
+            return NextResponse.json({ client: rowToClient(byEmail) });
+          }
+
+          const { rows: phoneOnly } = await sql<ClientRow>`
+            INSERT INTO clients (phone, first_name, last_name, email)
+            VALUES (${phone}, ${firstName}, ${lastName}, NULL)
+            ON CONFLICT (phone) DO UPDATE
+              SET phone = clients.phone
+            RETURNING id, phone, first_name, last_name, email, created_at
+          `;
+          if (phoneOnly[0]) {
             return NextResponse.json({
-              client: rowToClient(byEmail),
+              client: rowToClient(phoneOnly[0]),
               email_collision: true,
             });
           }

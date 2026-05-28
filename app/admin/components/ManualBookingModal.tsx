@@ -24,6 +24,12 @@ const INPUT_CLASS =
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+function optionalEmailForApi(raw: string): string | null {
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed) return null;
+  return EMAIL_RE.test(trimmed) ? trimmed : null;
+}
+
 function ManualBookingCompletingOverlay() {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
@@ -90,7 +96,12 @@ export default function ManualBookingModal({
     const trimmedFirst = clientFirstName.trim();
     const trimmedLast = clientLastName.trim();
     const trimmedName = joinFullName(trimmedFirst, trimmedLast);
-    const trimmedEmail = clientEmail.trim();
+    const trimmedEmail = optionalEmailForApi(clientEmail);
+    if (clientEmail.trim().length > 0 && !trimmedEmail) {
+      setError('Enter a valid email address or leave email blank.');
+      setCompleting(false);
+      return;
+    }
     const trimmedPhone = clientPhone.trim();
 
     try {
@@ -178,8 +189,8 @@ export default function ManualBookingModal({
   const canAdvanceFromStep2 =
     clientFirstName.trim().length > 0 &&
     clientLastName.trim().length > 0 &&
-    EMAIL_RE.test(clientEmail.trim()) &&
-    clientPhone.trim().length > 0;
+    clientPhone.replace(/\D/g, '').length > 0 &&
+    (clientEmail.trim().length === 0 || EMAIL_RE.test(clientEmail.trim()));
   const canBook = selectedSlot !== null && !completing;
 
   const isScheduleStep = step === 3;
@@ -321,8 +332,8 @@ export default function ManualBookingModal({
             <div className="space-y-4">
               <p className="text-sm text-stone-300">Client details</p>
               <p className="text-xs text-stone-500">
-                Same fields as your Cal.com booking form — sent to Cal when you
-                book, not entered again on step 3.
+                Phone is required and identifies the client in your CRM. Email
+                is optional — you can add it later from the client profile.
               </p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
@@ -352,18 +363,6 @@ export default function ManualBookingModal({
               </div>
               <label className="block">
                 <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
-                  Email
-                </span>
-                <input
-                  type="email"
-                  value={clientEmail}
-                  onChange={(e) => setClientEmail(e.target.value)}
-                  autoComplete="email"
-                  className={INPUT_CLASS}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
                   Phone
                 </span>
                 <input
@@ -372,6 +371,19 @@ export default function ManualBookingModal({
                   onChange={(e) => setClientPhone(e.target.value)}
                   autoComplete="tel"
                   className={INPUT_CLASS}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
+                  Email <span className="normal-case tracking-normal text-stone-500">(optional)</span>
+                </span>
+                <input
+                  type="email"
+                  value={clientEmail}
+                  onChange={(e) => setClientEmail(e.target.value)}
+                  autoComplete="email"
+                  className={INPUT_CLASS}
+                  placeholder="Leave blank if unknown"
                 />
               </label>
             </div>

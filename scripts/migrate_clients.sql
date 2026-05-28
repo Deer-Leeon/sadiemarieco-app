@@ -11,7 +11,8 @@
 -- has the new columns/constraints in place.
 --
 -- Identifier discipline:
---   * `clients.email` keeps its existing UNIQUE NOT NULL — webhook-driven
+--   * `clients.email` keeps UNIQUE when set; nullable after
+--     scripts/clients_email_optional.sql (phone is the CRM key).
 --     creation still works exactly as before.
 --   * `clients.phone` is the NEW unique identifier the admin CRM uses.
 --     Nullable in the schema (legacy rows from before this feature

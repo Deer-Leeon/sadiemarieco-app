@@ -1713,12 +1713,12 @@ function EditInfoView({
           </div>
           <LabeledInput
             id="email"
-            label="Email"
+            label="Email (optional)"
             value={email}
             onChange={setEmail}
             type="email"
             autoComplete="email"
-            placeholder="client@example.com"
+            placeholder="Leave blank if unknown"
           />
           <p className="text-[11px] text-stone-500">
             Phone ({client.phone ? formatPhone(client.phone) : '—'}) is the

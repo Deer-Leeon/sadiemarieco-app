@@ -12,6 +12,11 @@ import {
   parseBookingStartForCal,
 } from '@/lib/cal-timezone';
 import {
+  calAttendeeEmailForBooking,
+  normaliseClientPhone,
+  parseOptionalClientEmail,
+} from '@/lib/client-identity';
+import {
   CAL_BOOKINGS_API_VERSION,
   confirmCalV2Booking,
   gateAdmin,
@@ -21,8 +26,6 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface CreateBody {
   eventTypeId?: unknown;
@@ -46,7 +49,7 @@ function parseCreateBody(input: unknown):
       clientFirstName: string;
       clientLastName: string;
       clientName: string;
-      clientEmail: string;
+      clientEmail: string | null;
       clientPhone: string;
     }
   | { error: string; message: string } {
@@ -69,10 +72,8 @@ function parseCreateBody(input: unknown):
     typeof body.clientLastName === 'string' ? body.clientLastName.trim() : '';
   const clientNameFromBody =
     typeof body.clientName === 'string' ? body.clientName.trim() : '';
-  const clientEmail =
-    typeof body.clientEmail === 'string' ? body.clientEmail.trim() : '';
-  const clientPhone =
-    typeof body.clientPhone === 'string' ? body.clientPhone.trim() : '';
+  const clientEmail = parseOptionalClientEmail(body.clientEmail);
+  const clientPhone = normaliseClientPhone(body.clientPhone);
 
   let clientFirst = clientFirstName;
   let clientLast = clientLastName;
@@ -107,10 +108,16 @@ function parseCreateBody(input: unknown):
   if (!clientName || clientName.length > 200) {
     return { error: 'invalid_client_name', message: 'clientName is required' };
   }
-  if (!clientEmail || !EMAIL_RE.test(clientEmail) || clientEmail.length > 254) {
+  if (
+    body.clientEmail !== undefined &&
+    body.clientEmail !== null &&
+    typeof body.clientEmail === 'string' &&
+    body.clientEmail.trim().length > 0 &&
+    !clientEmail
+  ) {
     return {
       error: 'invalid_client_email',
-      message: 'clientEmail must be a valid email address',
+      message: 'clientEmail must be a valid email address when provided',
     };
   }
   if (!clientPhone || clientPhone.length > 40) {
@@ -190,7 +197,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     start: startUtc.toISOString(),
     attendee: {
       name: parsed.clientName,
-      email: parsed.clientEmail,
+      email: calAttendeeEmailForBooking(parsed.clientPhone, parsed.clientEmail),
       phoneNumber: parsed.clientPhone,
       timeZone: STUDIO_TIMEZONE,
     },
