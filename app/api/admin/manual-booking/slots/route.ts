@@ -8,7 +8,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { syncCalEventTypeBookingPoliciesIfStale } from '@/app/admin/services/sync';
 import { STUDIO_TIMEZONE } from '@/lib/cal-config';
 import {
   CAL_SLOTS_API_VERSION,
@@ -60,9 +59,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       { status: 400 }
     );
   }
-
-  // Throttled sweep so legacy Cal event-types match lib/cal-config.ts policy.
-  await syncCalEventTypeBookingPoliciesIfStale();
 
   const result = await proxyCalV2Get(
     '/slots',

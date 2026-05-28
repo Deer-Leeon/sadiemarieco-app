@@ -39,11 +39,6 @@
  */
 import { sql } from '@vercel/postgres';
 
-import {
-  CAL_AFTER_EVENT_BUFFER_MIN,
-  CAL_SLOT_INTERVAL_MIN,
-} from '@/lib/cal-config';
-
 const CAL_API_BASE = 'https://api.cal.com/v2';
 
 // 2024-06-14 is the schema this code was written against
@@ -199,84 +194,6 @@ async function fetchCalEventTypeIds(
   }
 }
 
-/**
- * PATCH Cal event-types whose booking policy drifts from lib/cal-config.ts
- * (`afterEventBuffer`, `slotInterval`). Best-effort; per-event failures are logged.
- */
-/** At most one policy sweep per hour outside admin force-reconcile. */
-const BOOKING_POLICY_SYNC_TTL_MS = 60 * 60 * 1000;
-let lastBookingPolicySyncAt = 0;
-
-/**
- * Align legacy Cal event-types with studio booking policy (best-effort).
- * Throttled unless `force` — safe to call from manual-booking slot loads.
- */
-export async function syncCalEventTypeBookingPoliciesIfStale(
-  options: { force?: boolean } = {}
-): Promise<void> {
-  const apiKey = process.env.CAL_API_KEY;
-  if (!apiKey) return;
-
-  const now = Date.now();
-  if (!options.force && now - lastBookingPolicySyncAt < BOOKING_POLICY_SYNC_TTL_MS) {
-    return;
-  }
-  lastBookingPolicySyncAt = now;
-  await syncCalEventTypeBookingPolicies(apiKey);
-}
-
-/** @deprecated Use syncCalEventTypeBookingPoliciesIfStale */
-export const syncCalAfterEventBuffersIfStale = syncCalEventTypeBookingPoliciesIfStale;
-
-async function syncCalEventTypeBookingPolicies(apiKey: string): Promise<void> {
-  try {
-    const result = await callCal<{ status?: string; data?: unknown }>(
-      '/event-types',
-      apiKey,
-      { method: 'GET' }
-    );
-    const events = result.data;
-    if (!Array.isArray(events)) return;
-
-    for (const e of events) {
-      if (!isRecord(e) || typeof e.id !== 'number') continue;
-
-      const buf = e.afterEventBuffer;
-      const interval = e.slotInterval;
-      const needsBuffer =
-        typeof buf !== 'number' || buf !== CAL_AFTER_EVENT_BUFFER_MIN;
-      const needsInterval = interval !== CAL_SLOT_INTERVAL_MIN;
-      if (!needsBuffer && !needsInterval) continue;
-
-      const patch: { afterEventBuffer?: number; slotInterval?: number } = {};
-      if (needsBuffer) patch.afterEventBuffer = CAL_AFTER_EVENT_BUFFER_MIN;
-      if (needsInterval) patch.slotInterval = CAL_SLOT_INTERVAL_MIN;
-
-      try {
-        await callCal(`/event-types/${e.id}`, apiKey, {
-          method: 'PATCH',
-          body: JSON.stringify(patch),
-        });
-        console.log('[services/sync] applied event-type booking policy', {
-          calEventId: e.id,
-          patch,
-          was: { afterEventBuffer: buf, slotInterval: interval },
-        });
-      } catch (err) {
-        console.warn('[services/sync] booking policy PATCH failed', {
-          calEventId: e.id,
-          patch,
-          error: errorMessage(err),
-        });
-      }
-    }
-  } catch (err) {
-    console.warn('[services/sync] booking policy sync skipped', {
-      error: errorMessage(err),
-    });
-  }
-}
-
 // Module-scope timestamp of the last reconciliation pass that we
 // committed to running (set before the work so concurrent calls
 // don't all storm Cal at once). Per-instance — Vercel may have many
@@ -345,11 +262,6 @@ export async function reconcileWithCal(
 
   const apiKey = process.env.CAL_API_KEY;
   if (!apiKey) return;
-
-  if (options.force) {
-    lastBookingPolicySyncAt = Date.now();
-    await syncCalEventTypeBookingPolicies(apiKey);
-  }
 
   const validIds = await fetchCalEventTypeIds(apiKey);
   if (!validIds || validIds.size === 0) return;
