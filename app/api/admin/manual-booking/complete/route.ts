@@ -211,32 +211,96 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let clientId: string;
   try {
-    const { rows } = await sql<{ id: string }>`
-      INSERT INTO clients (first_name, last_name, email, phone)
-      VALUES (
-        ${first},
-        ${last},
-        ${parsed.clientEmail},
-        CASE
-          WHEN ${normPhone}::text IS NULL THEN NULL
-          WHEN EXISTS (SELECT 1 FROM clients WHERE phone = ${normPhone}) THEN NULL
-          ELSE ${normPhone}
-        END
-      )
-      ON CONFLICT (email) DO UPDATE SET
-        first_name = EXCLUDED.first_name,
-        last_name = EXCLUDED.last_name,
-        phone = COALESCE(clients.phone, EXCLUDED.phone)
-      RETURNING id
-    `;
-    const id = rows[0]?.id;
-    if (!id) {
-      return NextResponse.json(
-        { error: 'client_upsert_failed', message: 'Could not save client' },
-        { status: 500 }
-      );
+    if (normPhone) {
+      const { rows: byPhone } = await sql<{ id: string }>`
+        SELECT id FROM clients WHERE phone = ${normPhone} LIMIT 1
+      `;
+      if (byPhone[0]?.id) {
+        clientId = byPhone[0].id;
+        await sql`
+          UPDATE clients
+          SET
+            first_name = ${first},
+            last_name = ${last},
+            email = ${parsed.clientEmail}
+          WHERE id = ${clientId}
+        `;
+      } else {
+        const { rows: adopted } = await sql<{ id: string }>`
+          UPDATE clients c
+          SET
+            phone = ${normPhone},
+            first_name = ${first},
+            last_name = ${last}
+          WHERE c.phone IS NULL
+            AND c.email IS NOT NULL
+            AND LOWER(TRIM(c.email)) = LOWER(TRIM(${parsed.clientEmail}))
+            AND NOT EXISTS (
+              SELECT 1 FROM clients c2 WHERE c2.phone = ${normPhone}
+            )
+          RETURNING id
+        `;
+        if (adopted[0]?.id) {
+          clientId = adopted[0].id;
+        } else {
+          try {
+            const { rows: inserted } = await sql<{ id: string }>`
+              INSERT INTO clients (phone, first_name, last_name, email)
+              VALUES (${normPhone}, ${first}, ${last}, ${parsed.clientEmail})
+              ON CONFLICT (phone) DO UPDATE SET
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                email = EXCLUDED.email
+              RETURNING id
+            `;
+            const id = inserted[0]?.id;
+            if (!id) throw new Error('phone upsert returned no id');
+            clientId = id;
+          } catch (insertErr) {
+            const insertMsg = errorMessage(insertErr);
+            const emailTaken =
+              insertMsg.includes('clients_email_key') ||
+              (insertMsg.toLowerCase().includes('duplicate key') &&
+                insertMsg.includes('email'));
+            if (!emailTaken) throw insertErr;
+
+            const { rows } = await sql<{ id: string }>`
+              INSERT INTO clients (first_name, last_name, email, phone)
+              VALUES (
+                ${first},
+                ${last},
+                ${parsed.clientEmail},
+                CASE
+                  WHEN EXISTS (SELECT 1 FROM clients WHERE phone = ${normPhone})
+                    THEN NULL
+                  ELSE ${normPhone}
+                END
+              )
+              ON CONFLICT (email) DO UPDATE SET
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                phone = COALESCE(clients.phone, EXCLUDED.phone)
+              RETURNING id
+            `;
+            const id = rows[0]?.id;
+            if (!id) throw new Error('email fallback upsert returned no id');
+            clientId = id;
+          }
+        }
+      }
+    } else {
+      const { rows } = await sql<{ id: string }>`
+        INSERT INTO clients (first_name, last_name, email, phone)
+        VALUES (${first}, ${last}, ${parsed.clientEmail}, NULL)
+        ON CONFLICT (email) DO UPDATE SET
+          first_name = EXCLUDED.first_name,
+          last_name = EXCLUDED.last_name
+        RETURNING id
+      `;
+      const id = rows[0]?.id;
+      if (!id) throw new Error('email upsert returned no id');
+      clientId = id;
     }
-    clientId = id;
   } catch (err) {
     return NextResponse.json(
       { error: 'client_upsert_failed', message: errorMessage(err) },

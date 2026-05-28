@@ -97,6 +97,45 @@ function rowToClient(row: ClientRow): Client {
   };
 }
 
+async function selectClientByPhone(phone: string): Promise<ClientRow | null> {
+  const { rows } = await sql<ClientRow>`
+    SELECT id, phone, first_name, last_name, email, created_at
+    FROM clients
+    WHERE phone = ${phone}
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
+}
+
+async function selectClientByEmail(email: string): Promise<ClientRow | null> {
+  const { rows } = await sql<ClientRow>`
+    SELECT id, phone, first_name, last_name, email, created_at
+    FROM clients
+    WHERE email IS NOT NULL
+      AND LOWER(TRIM(email)) = LOWER(TRIM(${email}))
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
+}
+
+async function adoptLegacyEmailRow(
+  phone: string,
+  email: string
+): Promise<ClientRow | null> {
+  const { rows } = await sql<ClientRow>`
+    UPDATE clients c
+    SET phone = ${phone}
+    WHERE c.phone IS NULL
+      AND c.email IS NOT NULL
+      AND LOWER(TRIM(c.email)) = LOWER(TRIM(${email}))
+      AND NOT EXISTS (
+        SELECT 1 FROM clients c2 WHERE c2.phone = ${phone}
+      )
+    RETURNING id, phone, first_name, last_name, email, created_at
+  `;
+  return rows[0] ?? null;
+}
+
 // ─── GET ────────────────────────────────────────────────────────────────────
 //
 // Query by ?phone=… (normalised before lookup). 404 on miss — callers
@@ -213,30 +252,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // partial rows we have no business merging into.
   try {
     if (email) {
-      // Adopt step: only happens once per legacy row (the WHERE
-      // clause requires phone IS NULL so subsequent calls no-op).
-      // The NOT EXISTS guard ensures we never overwrite ourselves
-      // out of an existing phone-keyed row with the same number.
-      const { rows: adopted } = await sql<ClientRow>`
-        UPDATE clients c
-        SET phone = ${phone}
-        WHERE c.phone IS NULL
-          AND c.email IS NOT NULL
-          AND LOWER(TRIM(c.email)) = LOWER(TRIM(${email}))
-          AND NOT EXISTS (
-            SELECT 1 FROM clients c2 WHERE c2.phone = ${phone}
-          )
-        RETURNING id, phone, first_name, last_name, email, created_at
-      `;
-      if (adopted.length > 0) {
+      const adopted = await adoptLegacyEmailRow(phone, email);
+      if (adopted) {
         console.log('[api/admin/clients] POST: adopted legacy email-keyed row', {
-          id: adopted[0].id,
+          id: adopted.id,
         });
         return NextResponse.json({
-          client: rowToClient(adopted[0]),
+          client: rowToClient(adopted),
           adopted: true,
         });
       }
+    }
+
+    const existingByPhone = await selectClientByPhone(phone);
+    if (existingByPhone) {
+      return NextResponse.json({ client: rowToClient(existingByPhone) });
     }
 
     const { rows } = await sql<ClientRow>`
@@ -265,25 +295,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       msg.includes('clients_email_key') ||
       msg.toLowerCase().includes('duplicate key') && msg.includes('email');
     if (looksLikeEmailCollision) {
-      console.warn(
-        '[api/admin/clients] POST: email collision, retrying without email',
-        { phone, msg }
-      );
+      console.warn('[api/admin/clients] POST: email collision, resolving existing row', {
+        phone,
+        email,
+        msg,
+      });
       try {
-        const { rows } = await sql<ClientRow>`
-          INSERT INTO clients (phone, first_name, last_name, email)
-          VALUES (${phone}, ${firstName}, ${lastName}, NULL)
-          ON CONFLICT (phone) DO UPDATE
-            SET phone = clients.phone
-          RETURNING id, phone, first_name, last_name, email, created_at
-        `;
-        return NextResponse.json({
-          client: rowToClient(rows[0]),
-          email_collision: true,
-        });
+        const byPhone = await selectClientByPhone(phone);
+        if (byPhone) {
+          return NextResponse.json({ client: rowToClient(byPhone) });
+        }
+
+        if (email) {
+          const adopted = await adoptLegacyEmailRow(phone, email);
+          if (adopted) {
+            return NextResponse.json({
+              client: rowToClient(adopted),
+              adopted: true,
+              email_collision: true,
+            });
+          }
+
+          const byEmail = await selectClientByEmail(email);
+          if (byEmail) {
+            return NextResponse.json({
+              client: rowToClient(byEmail),
+              email_collision: true,
+            });
+          }
+        }
       } catch (retryErr) {
         console.error(
-          '[api/admin/clients] POST retry without email also failed:',
+          '[api/admin/clients] POST email-collision resolution failed:',
           errorMessage(retryErr)
         );
         return NextResponse.json(
