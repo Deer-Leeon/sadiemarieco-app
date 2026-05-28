@@ -7,6 +7,7 @@ import ManualBookingSlotPicker from './ManualBookingSlotPicker';
 import type { ManualBookingServiceOption } from './manual-booking-utils';
 import {
   extractCalBookingFromResponse,
+  joinFullName,
   slotToStudioLocalStart,
 } from './manual-booking-utils';
 
@@ -41,7 +42,8 @@ export default function ManualBookingModal({
   const [step, setStep] = useState<WizardStep>(1);
   const [selectedService, setSelectedService] =
     useState<ManualBookingServiceOption | null>(null);
-  const [clientName, setClientName] = useState('');
+  const [clientFirstName, setClientFirstName] = useState('');
+  const [clientLastName, setClientLastName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
@@ -85,7 +87,9 @@ export default function ManualBookingModal({
       return;
     }
 
-    const trimmedName = clientName.trim();
+    const trimmedFirst = clientFirstName.trim();
+    const trimmedLast = clientLastName.trim();
+    const trimmedName = joinFullName(trimmedFirst, trimmedLast);
     const trimmedEmail = clientEmail.trim();
     const trimmedPhone = clientPhone.trim();
 
@@ -96,6 +100,8 @@ export default function ManualBookingModal({
         body: JSON.stringify({
           eventTypeId: selectedService.eventTypeId,
           start,
+          clientFirstName: trimmedFirst,
+          clientLastName: trimmedLast,
           clientName: trimmedName,
           clientEmail: trimmedEmail,
           clientPhone: trimmedPhone,
@@ -170,7 +176,8 @@ export default function ManualBookingModal({
 
   const canAdvanceFromStep1 = selectedService !== null;
   const canAdvanceFromStep2 =
-    clientName.trim().length > 0 &&
+    clientFirstName.trim().length > 0 &&
+    clientLastName.trim().length > 0 &&
     EMAIL_RE.test(clientEmail.trim()) &&
     clientPhone.trim().length > 0;
   const canBook = selectedSlot !== null && !completing;
@@ -314,21 +321,35 @@ export default function ManualBookingModal({
             <div className="space-y-4">
               <p className="text-sm text-stone-300">Client details</p>
               <p className="text-xs text-stone-500">
-                Enter these once — step 3 is only picking a date and time from
-                Cal.com availability.
+                Same fields as your Cal.com booking form — sent to Cal when you
+                book, not entered again on step 3.
               </p>
-              <label className="block">
-                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
-                  Name
-                </span>
-                <input
-                  type="text"
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  autoComplete="name"
-                  className={INPUT_CLASS}
-                />
-              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
+                    First name
+                  </span>
+                  <input
+                    type="text"
+                    value={clientFirstName}
+                    onChange={(e) => setClientFirstName(e.target.value)}
+                    autoComplete="given-name"
+                    className={INPUT_CLASS}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
+                    Last name
+                  </span>
+                  <input
+                    type="text"
+                    value={clientLastName}
+                    onChange={(e) => setClientLastName(e.target.value)}
+                    autoComplete="family-name"
+                    className={INPUT_CLASS}
+                  />
+                </label>
+              </div>
               <label className="block">
                 <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
                   Email
@@ -363,7 +384,10 @@ export default function ManualBookingModal({
               ) : (
                 <ManualBookingSlotPicker
                   eventTypeId={selectedService.eventTypeId}
-                  clientName={clientName.trim()}
+                  clientName={joinFullName(
+                    clientFirstName.trim(),
+                    clientLastName.trim()
+                  )}
                   selectedSlot={selectedSlot}
                   onSelectSlot={setSelectedSlot}
                 />

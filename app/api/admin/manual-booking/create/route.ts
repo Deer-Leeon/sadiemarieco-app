@@ -27,15 +27,24 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 interface CreateBody {
   eventTypeId?: unknown;
   start?: unknown;
+  clientFirstName?: unknown;
+  clientLastName?: unknown;
   clientName?: unknown;
   clientEmail?: unknown;
   clientPhone?: unknown;
+}
+
+function splitName(fullName: string): { first: string; last: string } {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  return { first: parts[0] ?? '', last: parts.slice(1).join(' ') };
 }
 
 function parseCreateBody(input: unknown):
   | {
       eventTypeId: number;
       start: string;
+      clientFirstName: string;
+      clientLastName: string;
       clientName: string;
       clientEmail: string;
       clientPhone: string;
@@ -54,12 +63,25 @@ function parseCreateBody(input: unknown):
         : NaN;
 
   const start = typeof body.start === 'string' ? body.start.trim() : '';
-  const clientName =
+  const clientFirstName =
+    typeof body.clientFirstName === 'string' ? body.clientFirstName.trim() : '';
+  const clientLastName =
+    typeof body.clientLastName === 'string' ? body.clientLastName.trim() : '';
+  const clientNameFromBody =
     typeof body.clientName === 'string' ? body.clientName.trim() : '';
   const clientEmail =
     typeof body.clientEmail === 'string' ? body.clientEmail.trim() : '';
   const clientPhone =
     typeof body.clientPhone === 'string' ? body.clientPhone.trim() : '';
+
+  let clientFirst = clientFirstName;
+  let clientLast = clientLastName;
+  if (!clientFirst && !clientLast && clientNameFromBody) {
+    const split = splitName(clientNameFromBody);
+    clientFirst = split.first;
+    clientLast = split.last;
+  }
+  const clientName = [clientFirst, clientLast].filter(Boolean).join(' ');
 
   if (!Number.isInteger(eventTypeId) || eventTypeId <= 0) {
     return {
@@ -69,6 +91,18 @@ function parseCreateBody(input: unknown):
   }
   if (!start) {
     return { error: 'invalid_start', message: 'start is required' };
+  }
+  if (!clientFirst || clientFirst.length > 100) {
+    return {
+      error: 'invalid_client_first_name',
+      message: 'clientFirstName is required',
+    };
+  }
+  if (!clientLast || clientLast.length > 100) {
+    return {
+      error: 'invalid_client_last_name',
+      message: 'clientLastName is required',
+    };
   }
   if (!clientName || clientName.length > 200) {
     return { error: 'invalid_client_name', message: 'clientName is required' };
@@ -86,7 +120,15 @@ function parseCreateBody(input: unknown):
     };
   }
 
-  return { eventTypeId, start, clientName, clientEmail, clientPhone };
+  return {
+    eventTypeId,
+    start,
+    clientFirstName: clientFirst,
+    clientLastName: clientLast,
+    clientName,
+    clientEmail,
+    clientPhone,
+  };
 }
 
 function extractBooking(
@@ -151,6 +193,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       email: parsed.clientEmail,
       phoneNumber: parsed.clientPhone,
       timeZone: STUDIO_TIMEZONE,
+    },
+    bookingFieldsResponses: {
+      name: {
+        firstName: parsed.clientFirstName,
+        lastName: parsed.clientLastName,
+      },
+      attendeePhoneNumber: parsed.clientPhone,
     },
     metadata: {
       manual_admin_booking: true,

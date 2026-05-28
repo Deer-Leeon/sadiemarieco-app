@@ -99,6 +99,19 @@ export function todayInStudio(): string {
   }).format(new Date());
 }
 
+/** Split a full name — first token is first name, remainder is last name. */
+export function splitFullName(fullName: string): { first: string; last: string } {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  return {
+    first: parts[0] ?? '',
+    last: parts.slice(1).join(' '),
+  };
+}
+
+export function joinFullName(first: string, last: string): string {
+  return [first.trim(), last.trim()].filter(Boolean).join(' ');
+}
+
 /** Parse Cal v2 create-booking JSON for uid and times. */
 export function extractCalBookingFromResponse(payload: unknown): {
   uid: string | null;
