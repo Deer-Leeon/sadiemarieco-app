@@ -2,6 +2,8 @@ import { auth, currentUser } from '@clerk/nextjs/server';
 import { sql } from '@vercel/postgres';
 import { redirect } from 'next/navigation';
 
+import { loadCalEventTypeMaps } from '@/lib/cal-config';
+
 import DashboardUI from './DashboardUI';
 import type { Appointment } from './types';
 
@@ -108,6 +110,17 @@ export default async function AdminPage() {
   // surfacing the Next.js error boundary.
   let appointments: Appointment[] = [];
   let dbError: string | null = null;
+  let manualBookingServices: Awaited<
+    ReturnType<typeof loadCalEventTypeMaps>
+  >['services'] = [];
+
+  try {
+    const calMaps = await loadCalEventTypeMaps();
+    manualBookingServices = calMaps.services;
+  } catch (err) {
+    console.error('[admin] loadCalEventTypeMaps failed:', err);
+  }
+
   try {
     // LEFT JOIN to site_services on the cleaned service title so the
     // appointment-details modal can show the price + description
@@ -219,6 +232,7 @@ export default async function AdminPage() {
       appointments={appointments}
       dbError={dbError}
       displayName={displayName}
+      manualBookingServices={manualBookingServices}
     />
   );
 }

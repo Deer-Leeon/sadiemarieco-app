@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   addDays,
   addWeeks,
@@ -16,8 +17,11 @@ import {
   ChevronRight,
   Columns3,
   List,
+  Plus,
 } from 'lucide-react';
 
+import ManualBookingModal from './components/ManualBookingModal';
+import type { ManualBookingServiceOption } from './components/manual-booking-utils';
 import type { Appointment, ViewMode } from './types';
 import AdminHeader from './AdminHeader';
 import AdminSectionTabs from './AdminSectionTabs';
@@ -31,6 +35,7 @@ interface Props {
   appointments: Appointment[];
   dbError: string | null;
   displayName: string;
+  manualBookingServices: ManualBookingServiceOption[];
 }
 
 /**
@@ -59,7 +64,9 @@ export default function DashboardUI({
   appointments,
   dbError,
   displayName,
+  manualBookingServices,
 }: Props) {
+  const router = useRouter();
   // Default to the continuous-scroll month calendar. It surfaces both
   // the highest density of context (a full month of bookings at a
   // glance) and lands the user on "today" via the auto-scroll in
@@ -79,6 +86,8 @@ export default function DashboardUI({
   // beneath it (day modal, or the underlying calendar).
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
+  const [manualBookingOpen, setManualBookingOpen] = useState(false);
+  const [bookingToast, setBookingToast] = useState<string | null>(null);
 
   const showDateNav = view === '3day' || view === 'week';
 
@@ -129,6 +138,14 @@ export default function DashboardUI({
   return (
     <div className="h-screen w-full overflow-hidden flex flex-col bg-[#FAF9F6] text-stone-900 font-sans">
       <AdminHeader title="Bookings" displayName={displayName}>
+        <button
+          type="button"
+          onClick={() => setManualBookingOpen(true)}
+          className="inline-flex items-center gap-2 rounded-full bg-stone-900 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-[#FAF9F6] transition-colors hover:bg-stone-700"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          New booking
+        </button>
         <ViewToggle view={view} onChange={setView} />
       </AdminHeader>
 
@@ -210,6 +227,36 @@ export default function DashboardUI({
           appointment={selectedAppointment}
           onClose={() => setSelectedAppointment(null)}
         />
+      )}
+
+      {manualBookingOpen && (
+        <ManualBookingModal
+          services={manualBookingServices}
+          onClose={() => setManualBookingOpen(false)}
+          onSuccess={() => {
+            setManualBookingOpen(false);
+            setBookingToast('Appointment booked successfully.');
+            router.refresh();
+          }}
+        />
+      )}
+
+      {bookingToast && (
+        <div
+          role="status"
+          className="fixed top-4 left-1/2 z-[80] max-w-md -translate-x-1/2 rounded-full border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-sm text-emerald-900 shadow-lg"
+        >
+          <div className="flex items-center gap-3">
+            <span>{bookingToast}</span>
+            <button
+              type="button"
+              onClick={() => setBookingToast(null)}
+              className="text-emerald-700 underline-offset-2 hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
