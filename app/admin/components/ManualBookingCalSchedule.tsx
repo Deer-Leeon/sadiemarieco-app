@@ -5,8 +5,8 @@ import Cal, { getCalApi, type EmbedEvent } from '@calcom/embed-react';
 import { Loader2 } from 'lucide-react';
 
 import {
-  ADMIN_CAL_UI_CONFIG,
   CAL_USERNAME,
+  MANUAL_BOOKING_CAL_UI_CONFIG,
   calEmbedPhoneLocation,
   extractBookingDataFromEvent,
 } from '@/lib/cal-embed-shared';
@@ -15,7 +15,6 @@ const CAL_MANUAL_BOOKING_NAMESPACE = 'manual-booking';
 
 interface Props {
   serviceSlug: string;
-  serviceTitle: string;
   clientName: string;
   clientEmail: string;
   clientPhone: string;
@@ -29,7 +28,6 @@ interface Props {
 
 export default function ManualBookingCalSchedule({
   serviceSlug,
-  serviceTitle,
   clientName,
   clientEmail,
   clientPhone,
@@ -43,12 +41,13 @@ export default function ManualBookingCalSchedule({
 
   const embedConfig = useMemo(
     () => ({
-      layout: 'month_view' as const,
+      layout: 'column_view' as const,
       theme: 'light' as const,
       name: clientName,
       email: clientEmail,
       location: calEmbedPhoneLocation(clientPhone),
       'metadata[manual_admin_booking]': 'true',
+      'ui.autoscroll': 'false',
     }),
     [clientName, clientEmail, clientPhone]
   );
@@ -87,7 +86,7 @@ export default function ManualBookingCalSchedule({
         if (cancelled) return;
         api = resolved;
         try {
-          api('ui', ADMIN_CAL_UI_CONFIG);
+          api('ui', MANUAL_BOOKING_CAL_UI_CONFIG);
         } catch (uiErr) {
           console.warn('[ManualBookingCalSchedule] cal ui config failed', uiErr);
         }
@@ -127,14 +126,8 @@ export default function ManualBookingCalSchedule({
   }, [embedKey, serviceSlug, clientName, clientEmail, clientPhone]);
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-stone-300">
-        Pick a time for{' '}
-        <span className="text-stone-100">{serviceTitle}</span>. Only dates and
-        times Cal.com shows as open are bookable — same calendar your clients
-        see.
-      </p>
-      <div className="overflow-hidden rounded-xl border border-stone-600 bg-white shadow-sm">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-stone-600 bg-white">
         <Cal
           key={embedKey}
           namespace={CAL_MANUAL_BOOKING_NAMESPACE}
@@ -142,19 +135,15 @@ export default function ManualBookingCalSchedule({
           config={embedConfig}
           style={{
             width: '100%',
-            height: 'min(420px, 55vh)',
-            overflow: 'auto',
+            height: '100%',
+            overflow: 'hidden',
           }}
         />
       </div>
-      <p className="text-xs text-stone-500">
-        Client details are prefilled from the previous step. Confirm the slot in
-        Cal to finish — no card checkout.
-      </p>
       <button
         type="button"
         onClick={() => setEmbedKey((k) => k + 1)}
-        className="text-xs text-stone-400 underline-offset-2 hover:text-stone-200 hover:underline"
+        className="mt-2 shrink-0 self-center text-[11px] text-stone-500 underline-offset-2 hover:text-stone-300 hover:underline"
       >
         Reload calendar
       </button>
@@ -164,12 +153,9 @@ export default function ManualBookingCalSchedule({
 
 export function ManualBookingCompletingOverlay() {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-      <Loader2 className="h-8 w-8 animate-spin text-stone-300" />
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
+      <Loader2 className="h-7 w-7 animate-spin text-stone-300" />
       <p className="font-serif text-lg text-stone-100">Saving appointment…</p>
-      <p className="text-sm text-stone-400">
-        Confirming on Cal.com and updating your dashboard.
-      </p>
     </div>
   );
 }

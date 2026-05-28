@@ -106,34 +106,50 @@ export default function ManualBookingModal({
     EMAIL_RE.test(clientEmail.trim()) &&
     clientPhone.trim().length > 0;
 
-  const modalWidth =
-    step === 3 ? 'max-w-2xl' : 'max-w-lg';
+  const isScheduleStep = step === 3;
+  const modalWidth = isScheduleStep ? 'max-w-3xl' : 'max-w-lg';
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-stone-950/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-stone-950/50 p-3 backdrop-blur-sm sm:p-4"
       onClick={completing ? undefined : onClose}
       role="presentation"
     >
       <div
-        className={`flex max-h-[min(92vh,800px)] w-full ${modalWidth} flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-stone-900/95 text-stone-50 shadow-2xl shadow-stone-950/40`}
+        className={`flex w-full ${modalWidth} flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-stone-900/95 text-stone-50 shadow-2xl shadow-stone-950/40 ${
+          isScheduleStep ? 'h-[min(88vh,680px)]' : 'max-h-[min(88vh,640px)]'
+        }`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="manual-booking-title"
       >
-        <header className="flex items-start justify-between gap-4 border-b border-stone-700/80 px-6 py-5">
-          <div>
+        <header
+          className={`flex shrink-0 items-start justify-between gap-3 border-b border-stone-700/80 ${
+            isScheduleStep ? 'px-4 py-3' : 'px-6 py-5'
+          }`}
+        >
+          <div className="min-w-0">
             <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-400">
               Manual booking
             </p>
             <h2
               id="manual-booking-title"
-              className="mt-1 font-serif text-2xl leading-tight text-stone-50"
+              className={`font-serif leading-tight text-stone-50 ${
+                isScheduleStep
+                  ? 'mt-0.5 truncate text-xl'
+                  : 'mt-1 text-2xl'
+              }`}
             >
-              New appointment
+              {isScheduleStep && selectedService
+                ? selectedService.title
+                : 'New appointment'}
             </h2>
-            <p className="mt-1 text-xs text-stone-400">Step {step} of 3</p>
+            <p className="mt-0.5 text-xs text-stone-400">
+              {isScheduleStep
+                ? 'Pick an open date & time · Step 3 of 3'
+                : `Step ${step} of 3`}
+            </p>
           </div>
           <button
             type="button"
@@ -146,11 +162,19 @@ export default function ManualBookingModal({
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div
+          className={`flex min-h-0 flex-1 flex-col ${
+            isScheduleStep
+              ? 'overflow-hidden px-4 py-3'
+              : 'overflow-y-auto px-6 py-5'
+          }`}
+        >
           {error && (
             <div
               role="alert"
-              className="mb-4 rounded-md border border-rose-500/40 bg-rose-950/50 px-3 py-2 text-sm text-rose-200"
+              className={`shrink-0 rounded-md border border-rose-500/40 bg-rose-950/50 px-3 py-2 text-sm text-rose-200 ${
+                isScheduleStep ? 'mb-2' : 'mb-4'
+              }`}
             >
               {error}
             </div>
@@ -246,13 +270,12 @@ export default function ManualBookingModal({
           )}
 
           {step === 3 && selectedService && (
-            <>
+            <div className="flex min-h-0 flex-1 flex-col">
               {completing ? (
                 <ManualBookingCompletingOverlay />
               ) : (
                 <ManualBookingCalSchedule
                   serviceSlug={selectedService.slug}
-                  serviceTitle={selectedService.title}
                   clientName={clientName.trim()}
                   clientEmail={clientEmail.trim()}
                   clientPhone={clientPhone.trim()}
@@ -260,11 +283,15 @@ export default function ManualBookingModal({
                   onError={setError}
                 />
               )}
-            </>
+            </div>
           )}
         </div>
 
-        <footer className="flex items-center justify-between gap-3 border-t border-stone-700/80 px-6 py-4">
+        <footer
+          className={`flex shrink-0 items-center justify-between gap-3 border-t border-stone-700/80 ${
+            isScheduleStep ? 'px-4 py-2.5' : 'px-6 py-4'
+          }`}
+        >
           <button
             type="button"
             onClick={() => {
@@ -295,8 +322,8 @@ export default function ManualBookingModal({
               Continue
             </button>
           ) : (
-            <p className="text-xs text-stone-500">
-              Confirm a time in Cal to book
+            <p className="text-[11px] text-stone-500">
+              Confirm in Cal to book · no checkout
             </p>
           )}
         </footer>
