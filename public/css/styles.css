@@ -1487,10 +1487,25 @@ a.service-item:focus-visible .service-action {
 }
 .policies-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 48px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  align-items: stretch;
   position: relative;
   z-index: 2;
+}
+.policy-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 0 clamp(28px, 3.5vw, 44px);
+  border-right: 1px solid var(--cloud-mid);
+}
+.policy-card:last-child {
+  border-right: none;
+  padding-right: 0;
+}
+.policy-card:first-child {
+  padding-left: 0;
 }
 .policy-num {
   font-family: var(--serif);
@@ -1507,6 +1522,8 @@ a.service-item:focus-visible .service-action {
   font-weight: 400;
   color: var(--navy);
   margin-bottom: 14px;
+  min-height: 2.75em;
+  line-height: 1.25;
 }
 .policy-body {
   font-family: var(--sans);
@@ -1514,21 +1531,89 @@ a.service-item:focus-visible .service-action {
   font-weight: 300;
   line-height: 1.95;
   color: #4a5468;
+  flex: 1 1 auto;
+  margin: 0;
 }
 .policy-highlight {
-  display: block;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-top: auto;
+  min-height: 7.25rem;
   background: var(--cloud);
   border-left: 3px solid var(--navy);
-  padding: 14px 18px;
-  margin-top: 16px;
+  padding: 18px 20px;
   font-family: var(--serif-alt);
   font-style: italic;
   font-size: 0.84rem;
   line-height: 1.65;
   color: var(--ink);
 }
+/* Full-width referral callout — sits below the three policy columns */
+.policies-referral {
+  position: relative;
+  z-index: 2;
+  margin-top: 56px;
+  min-height: clamp(260px, 34vh, 380px);
+  display: flex;
+  align-items: center;
+  background: var(--navy);
+  color: var(--off-white);
+  padding: clamp(48px, 7vh, 72px) clamp(40px, 6vw, 72px);
+  overflow: hidden;
+  box-shadow:
+    0 28px 56px rgba(13, 27, 42, 0.22),
+    0 8px 24px rgba(13, 27, 42, 0.12);
+}
+.policies-referral-bg {
+  position: absolute;
+  right: clamp(-12px, 2vw, 48px);
+  top: 50%;
+  transform: translateY(-52%);
+  font-family: var(--serif);
+  font-size: clamp(7rem, 18vw, 14rem);
+  font-weight: 400;
+  line-height: 0.85;
+  letter-spacing: -0.04em;
+  color: rgba(245, 243, 240, 0.07);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.policies-referral-content {
+  position: relative;
+  z-index: 1;
+  max-width: 42rem;
+}
+.policies-referral-label {
+  color: rgba(245, 243, 240, 0.55);
+  margin-bottom: 14px;
+}
+.policies-referral-title {
+  font-family: var(--serif);
+  font-size: clamp(2.25rem, 4.5vw, 3.75rem);
+  font-weight: 400;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  margin-bottom: clamp(18px, 2.5vh, 28px);
+  -webkit-text-stroke: 0.5px var(--off-white);
+}
+.policies-referral-body {
+  font-family: var(--serif-alt);
+  font-style: italic;
+  font-size: clamp(1.05rem, 1.35vw, 1.28rem);
+  font-weight: 400;
+  line-height: 1.78;
+  color: rgba(245, 243, 240, 0.88);
+  max-width: 36em;
+}
+.policies-referral-body strong {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--off-white);
+  letter-spacing: 0.01em;
+}
 .policies-note {
-  margin-top: 60px;
+  margin-top: 48px;
   background: var(--navy);
   color: var(--off-white);
   padding: 36px 44px;
@@ -2021,6 +2106,32 @@ footer {
   .policies-masthead { flex-direction: column; align-items: flex-start; gap: 14px; }
   .policies-sub { text-align: left; max-width: none; }
   .policies-grid { grid-template-columns: 1fr; }
+  .policy-card {
+    padding: 0 0 32px;
+    border-right: none;
+    border-bottom: 1px solid var(--cloud-mid);
+  }
+  .policy-card:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+  .policy-title {
+    min-height: 0;
+  }
+  .policy-highlight {
+    min-height: 0;
+    margin-top: 16px;
+  }
+  .policies-referral {
+    margin-top: 40px;
+    min-height: clamp(260px, 42vh, 360px);
+    padding: 40px 28px;
+  }
+  .policies-referral-bg {
+    right: -8px;
+    font-size: clamp(5.5rem, 28vw, 8rem);
+    opacity: 0.9;
+  }
   .policies-note { flex-direction: column; gap: 20px; }
   #contact { padding: 80px 24px 60px; }
   .contact-grid { grid-template-columns: 1fr; gap: 52px; }
