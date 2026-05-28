@@ -941,10 +941,9 @@ a.service-item:focus-visible .service-action {
 }
 .about-copy {
   grid-column: 2;
-  /* Span masthead + image rows so copy uses full column height (row 1
-     was empty on the right — that wasted ~100px on short viewports). */
-  grid-row: 1 / -1;
-  align-self: start;
+  grid-row: 2;
+  /* Vertically centered against the portrait, not the masthead row */
+  align-self: center;
   min-width: 0;
   padding-left: clamp(40px, 5vw, 72px);
   /*
@@ -955,7 +954,7 @@ a.service-item:focus-visible .service-action {
   top: calc(var(--nav-block) + 16px);
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  justify-content: center;
 }
 /* Same scale as .portfolio-title — adapted for the cloud section */
 .about-section-title {
@@ -1773,6 +1772,7 @@ footer {
   }
   .about-copy {
     grid-row: auto;
+    align-self: stretch;
     position: static;
     max-height: none;
     display: block;
