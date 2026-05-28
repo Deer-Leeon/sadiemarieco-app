@@ -311,9 +311,13 @@ nav.scrolled { padding: 16px 64px; }
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
+  gap: 40px;
   border-bottom: 2px solid var(--navy);
   padding-bottom: 28px;
   margin-bottom: 60px;
+}
+.services-masthead > div:first-child {
+  flex-shrink: 0;
 }
 .services-title {
   font-family: var(--serif);
@@ -328,14 +332,99 @@ nav.scrolled { padding: 16px 64px; }
   font-style: italic;
   -webkit-text-stroke: 1px var(--navy);
 }
-.services-note {
+/* Referral — two-line masthead aside */
+.services-referral {
+  flex: 0 1 auto;
+  width: max-content;
+  max-width: min(58vw, 36rem);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  align-self: flex-end;
+  padding: 16px 20px 18px;
+  border: 1px solid rgba(245, 243, 240, 0.12);
+  background: var(--navy);
+  box-shadow: 0 12px 32px rgba(13, 27, 42, 0.12);
+}
+.services-referral-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 10px 14px;
+}
+.services-referral-line:first-child {
+  justify-content: center;
+  width: 100%;
+}
+.services-referral-line:last-child {
+  align-items: center;
+}
+.services-referral-label,
+.services-referral-hook {
+  font-family: var(--serif);
+  font-size: clamp(1.12rem, 1.5vw, 1.28rem);
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--off-white);
+}
+.services-referral-label {
+  margin: 0;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.services-referral-sep {
+  font-family: var(--serif);
+  font-size: clamp(1.12rem, 1.5vw, 1.28rem);
+  line-height: 1;
+  color: rgba(245, 243, 240, 0.35);
+  flex-shrink: 0;
+  user-select: none;
+}
+.services-referral-hook {
+  font-style: normal;
+  margin: 0;
+  white-space: nowrap;
+}
+.services-referral-hook em {
+  font-style: italic;
+  color: var(--cloud);
+}
+.services-referral-detail {
   font-family: var(--serif-alt);
   font-style: italic;
-  font-size: 0.88rem;
-  color: var(--mist);
-  max-width: 200px;
-  text-align: right;
-  line-height: 1.65;
+  font-size: 0.9rem;
+  font-weight: 400;
+  line-height: 1.35;
+  color: rgba(245, 243, 240, 0.78);
+  margin: 0;
+  white-space: nowrap;
+}
+.services-referral-both {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(245, 243, 240, 0.95);
+}
+.services-referral-link {
+  flex-shrink: 0;
+  display: inline-block;
+  font-family: var(--sans);
+  font-size: 0.56rem;
+  font-weight: 400;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--navy);
+  text-decoration: none;
+  background: var(--off-white);
+  padding: 10px 16px;
+  border: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.services-referral-link:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
 }
 .services-cols {
   display: grid;
@@ -1378,92 +1467,6 @@ a.service-item:focus-visible .service-action {
   font-weight: 400;
   color: var(--navy);
 }
-/* Referral — full-width callout between policies and booking note */
-.policies-referral {
-  margin-top: 48px;
-  padding: 44px 48px;
-  background: var(--navy);
-  color: var(--off-white);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 40px;
-  position: relative;
-  z-index: 2;
-  border: 1px solid rgba(245, 243, 240, 0.14);
-  box-shadow:
-    0 28px 56px rgba(13, 27, 42, 0.18),
-    inset 0 1px 0 rgba(245, 243, 240, 0.08);
-}
-.policies-referral::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: var(--off-white);
-  opacity: 0.35;
-}
-.policies-referral-copy {
-  flex: 1;
-  min-width: 0;
-  padding-left: 12px;
-}
-.policies-referral-eyebrow {
-  display: block;
-  font-family: var(--sans);
-  font-size: 0.62rem;
-  font-weight: 400;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  color: rgba(245, 243, 240, 0.55);
-  margin-bottom: 12px;
-}
-.policies-referral-title {
-  font-family: var(--serif);
-  font-size: clamp(1.75rem, 3vw, 2.5rem);
-  font-weight: 400;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  margin-bottom: 14px;
-  color: var(--off-white);
-}
-.policies-referral-title em {
-  font-style: italic;
-  color: var(--cloud);
-}
-.policies-referral-text {
-  font-family: var(--sans);
-  font-size: 0.88rem;
-  font-weight: 300;
-  line-height: 1.85;
-  color: rgba(245, 243, 240, 0.82);
-  max-width: 42rem;
-  margin: 0;
-}
-.policies-referral-text strong {
-  font-weight: 400;
-  color: var(--off-white);
-}
-.policies-referral-cta {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  text-align: center;
-}
-.policies-referral-badge {
-  font-family: var(--serif);
-  font-size: clamp(2.5rem, 4.5vw, 3.5rem);
-  font-weight: 400;
-  font-style: italic;
-  line-height: 1;
-  letter-spacing: -0.03em;
-  color: var(--off-white);
-  white-space: nowrap;
-}
 .policies-note {
   margin-top: 60px;
   background: var(--navy);
@@ -1839,7 +1842,26 @@ footer {
   .hero-scroll-hint { display: none; }
   #services { padding: 80px 24px; }
   .services-masthead { flex-direction: column; align-items: flex-start; gap: 14px; }
-  .services-note { text-align: left; max-width: none; }
+  .services-referral {
+    max-width: none;
+    align-items: flex-start;
+    align-self: stretch;
+    padding: 14px 16px 16px;
+  }
+  .services-referral-line {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .services-referral-line:first-child {
+    justify-content: center;
+  }
+  .services-referral-hook,
+  .services-referral-detail {
+    white-space: normal;
+  }
+  .services-referral-detail {
+    max-width: 22rem;
+  }
   .services-cols { grid-template-columns: 1fr; }
   .col-rule { display: none; }
   #about { padding: 72px 24px 64px; }
@@ -1935,18 +1957,6 @@ footer {
   .policies-masthead { flex-direction: column; align-items: flex-start; gap: 14px; }
   .policies-sub { text-align: left; max-width: none; }
   .policies-grid { grid-template-columns: 1fr; }
-  .policies-referral {
-    flex-direction: column;
-    align-items: flex-start;
-    padding: 36px 28px;
-    gap: 28px;
-  }
-  .policies-referral-cta {
-    width: 100%;
-    align-items: stretch;
-  }
-  .policies-referral-badge { align-self: center; }
-  .policies-referral-cta .btn-white { text-align: center; }
   .policies-note { flex-direction: column; gap: 20px; }
   #contact { padding: 80px 24px 60px; }
   .contact-grid { grid-template-columns: 1fr; gap: 52px; }
