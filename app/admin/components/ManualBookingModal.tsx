@@ -107,7 +107,7 @@ export default function ManualBookingModal({
     clientPhone.trim().length > 0;
 
   const isScheduleStep = step === 3;
-  const modalWidth = isScheduleStep ? 'max-w-[400px]' : 'max-w-lg';
+  const modalWidth = isScheduleStep ? 'max-w-[460px]' : 'max-w-lg';
 
   return (
     <div
@@ -117,7 +117,7 @@ export default function ManualBookingModal({
     >
       <div
         className={`flex w-full ${modalWidth} flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-stone-900/95 text-stone-50 shadow-2xl shadow-stone-950/40 ${
-          isScheduleStep ? 'max-h-[min(92vh,580px)]' : 'max-h-[min(88vh,640px)]'
+          isScheduleStep ? 'max-h-[92vh]' : 'max-h-[min(88vh,640px)]'
         }`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
@@ -165,7 +165,7 @@ export default function ManualBookingModal({
         <div
           className={
             isScheduleStep
-              ? 'overflow-hidden px-3 py-2'
+              ? 'shrink-0 overflow-hidden px-3 pb-2 pt-1'
               : 'flex-1 overflow-y-auto px-6 py-5'
           }
         >

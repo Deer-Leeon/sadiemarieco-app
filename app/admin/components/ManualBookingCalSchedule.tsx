@@ -13,11 +13,11 @@ import {
 
 const CAL_MANUAL_BOOKING_NAMESPACE = 'manual-booking';
 
-/** Cal booker intrinsic size before CSS scale (matches public drawer layout). */
-const CAL_EMBED_WIDTH_PX = 400;
-const CAL_EMBED_HEIGHT_PX = 540;
-/** Scale down so month + time slots fit inside the admin modal without scrolling. */
-const CAL_EMBED_SCALE = 0.7;
+/**
+ * Booker height tuned for month view + time slots (same layout as the public
+ * booking drawer). Width is always 100% of the modal content area.
+ */
+const CAL_EMBED_HEIGHT_PX = 620;
 
 interface Props {
   serviceSlug: string;
@@ -44,8 +44,6 @@ export default function ManualBookingCalSchedule({
   const [embedKey, setEmbedKey] = useState(0);
 
   const calLink = `${CAL_USERNAME}/${serviceSlug}`;
-
-  const scaledHeight = Math.round(CAL_EMBED_HEIGHT_PX * CAL_EMBED_SCALE);
 
   const embedConfig = useMemo(
     () => ({
@@ -136,34 +134,25 @@ export default function ManualBookingCalSchedule({
   return (
     <div className="shrink-0">
       <div
-        className="mx-auto overflow-hidden rounded-lg border border-stone-600 bg-white"
-        style={{ width: CAL_EMBED_WIDTH_PX * CAL_EMBED_SCALE, height: scaledHeight }}
+        className="w-full overflow-hidden rounded-lg border border-stone-600 bg-white"
+        style={{ height: CAL_EMBED_HEIGHT_PX }}
       >
-        <div
-          className="origin-top"
+        <Cal
+          key={embedKey}
+          namespace={CAL_MANUAL_BOOKING_NAMESPACE}
+          calLink={calLink}
+          config={embedConfig}
           style={{
-            width: CAL_EMBED_WIDTH_PX,
+            width: '100%',
             height: CAL_EMBED_HEIGHT_PX,
-            transform: `scale(${CAL_EMBED_SCALE})`,
+            overflow: 'hidden',
           }}
-        >
-          <Cal
-            key={embedKey}
-            namespace={CAL_MANUAL_BOOKING_NAMESPACE}
-            calLink={calLink}
-            config={embedConfig}
-            style={{
-              width: CAL_EMBED_WIDTH_PX,
-              height: CAL_EMBED_HEIGHT_PX,
-              overflow: 'hidden',
-            }}
-          />
-        </div>
+        />
       </div>
       <button
         type="button"
         onClick={() => setEmbedKey((k) => k + 1)}
-        className="mx-auto mt-1.5 block text-[10px] text-stone-500 underline-offset-2 hover:text-stone-300 hover:underline"
+        className="mx-auto mt-1 block text-[10px] text-stone-500 underline-offset-2 hover:text-stone-300 hover:underline"
       >
         Reload calendar
       </button>
