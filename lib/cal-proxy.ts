@@ -45,11 +45,14 @@ export function calUpstreamErrorMessage(payload: unknown, status: number): strin
   if (payload && typeof payload === 'object') {
     const p = payload as {
       message?: string;
-      error?: string;
+      error?: string | { message?: string; code?: string };
       errors?: Array<{ message?: string }>;
     };
     if (typeof p.message === 'string' && p.message) return p.message;
     if (typeof p.error === 'string' && p.error) return p.error;
+    if (p.error && typeof p.error === 'object' && typeof p.error.message === 'string') {
+      return p.error.message;
+    }
     const nested = p.errors?.[0]?.message;
     if (typeof nested === 'string' && nested) return nested;
   }

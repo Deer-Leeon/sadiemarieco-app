@@ -202,7 +202,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       attendeePhoneNumber: parsed.clientPhone,
     },
     metadata: {
-      manual_admin_booking: true,
+      manual_admin_booking: 'true',
     },
   };
 
