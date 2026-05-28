@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { getCalComApiKey } from '@/lib/cal-config';
+import { notifyBookingConfirmed } from '@/lib/booking-notifications';
 import {
   clientPhoneExistsInDb,
   findClientIdByPhone,
@@ -355,10 +356,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         status = 'confirmed'
     `;
 
+    const notifications = await notifyBookingConfirmed({
+      bookingUid: parsed.calBookingUid,
+      bookingTime: hydrated.bookingTime,
+      clientPhone: parsed.clientPhone,
+      clientName: parsed.clientName,
+      serviceName: hydrated.serviceName,
+      skipIfAlreadySent: true,
+    });
+
     return NextResponse.json({
       ok: true,
       calBookingUid: parsed.calBookingUid,
       status: 'confirmed',
+      notifications,
     });
   } catch (err) {
     return NextResponse.json(

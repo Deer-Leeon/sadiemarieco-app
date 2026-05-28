@@ -3,9 +3,8 @@
  *
  * Creates (or refreshes) a `pending` appointments row immediately after
  * the Cal.com embed fires `bookingSuccessful` — before the client reaches
- * /checkout. This mirrors the webhook insert path but does not depend on
- * Cal delivering BOOKING_REQUESTED (many Cal webhook configs only
- * subscribe to BOOKING_CREATED, which fires after host confirmation).
+ * /checkout. Clients are upserted by phone (CRM identifier); email is
+ * still required for Stripe checkout and receipts.
  *
  * Idempotent on `cal_event_id`. Never downgrades status on conflict.
  */
@@ -13,8 +12,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
-import { clientPhoneExistsInDb } from '@/lib/client-phone-db';
 import { normaliseClientPhoneForStorage } from '@/lib/client-identity';
+import { upsertClientByPhonePrimary } from '@/lib/client-upsert';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -187,7 +186,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   if (!isUsableEmail(data.email)) {
     return NextResponse.json(
-      { error: 'no_email', message: 'Email is required to create the appointment hold.' },
+      { error: 'no_email', message: 'Email is required for checkout and receipts.' },
       { status: 400 }
     );
   }
@@ -196,37 +195,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const firstName = nameParts.first;
   const lastName = nameParts.last;
   const normPhone = normaliseClientPhoneForStorage(data.phone);
-  const appointmentPhone = normPhone;
-  const phoneTaken = normPhone ? await clientPhoneExistsInDb(normPhone) : false;
+
+  if (!normPhone) {
+    return NextResponse.json(
+      {
+        error: 'no_phone',
+        message:
+          'A valid phone number is required. Please add your phone in the booking form and try again.',
+      },
+      { status: 400 }
+    );
+  }
 
   let clientId: string;
   try {
-    const { rows } = await sql<{ id: string }>`
-      INSERT INTO clients (first_name, last_name, email, phone)
-      VALUES (
-        ${firstName},
-        ${lastName},
-        ${data.email},
-        CASE
-          WHEN ${normPhone}::text IS NULL THEN NULL
-          WHEN ${phoneTaken} THEN NULL
-          ELSE ${normPhone}
-        END
-      )
-      ON CONFLICT (email) DO UPDATE SET
-        first_name = EXCLUDED.first_name,
-        last_name = EXCLUDED.last_name,
-        phone = COALESCE(clients.phone, EXCLUDED.phone)
-      RETURNING id
-    `;
-    const id = rows[0]?.id;
-    if (!id) {
-      return NextResponse.json(
-        { error: 'client_upsert_failed' },
-        { status: 500 }
-      );
-    }
-    clientId = id;
+    const upserted = await upsertClientByPhonePrimary({
+      firstName,
+      lastName,
+      email: data.email,
+      phoneRaw: data.phone,
+    });
+    clientId = upserted.clientId;
   } catch (err) {
     console.error('[api/booking/init] client upsert failed:', errorMessage(err));
     return NextResponse.json(
@@ -234,6 +223,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { status: 500 }
     );
   }
+
+  const appointmentPhone = normPhone;
 
   try {
     const { rowCount } = await sql`
