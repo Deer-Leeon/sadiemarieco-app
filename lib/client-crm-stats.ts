@@ -7,6 +7,8 @@
  */
 import { sql } from '@vercel/postgres';
 
+import { sqlPhoneVariants } from '@/lib/client-identity';
+
 import type { ClientCrmStats } from '@/app/admin/types';
 import { EMPTY_CLIENT_CRM_STATS } from '@/app/admin/types';
 
@@ -141,6 +143,9 @@ export async function fetchClientCrmStats(
   clientId: string,
   client: { email: string | null; phone: string | null }
 ): Promise<ClientCrmStats> {
+  const [phoneV0, phoneV1] = client.phone
+    ? sqlPhoneVariants(client.phone)
+    : ['', ''];
   const { rows } = await sql<CrmStatsRow>`
     SELECT
       MAX(a.created_at) AS last_booked_at,
@@ -213,7 +218,10 @@ export async function fetchClientCrmStats(
       OR (
         ${client.phone}::text IS NOT NULL
         AND a.client_phone IS NOT NULL
-        AND regexp_replace(a.client_phone, '\D', '', 'g') = ${client.phone}
+        AND (
+          regexp_replace(a.client_phone, '\D', '', 'g') = ${phoneV0}
+          OR regexp_replace(a.client_phone, '\D', '', 'g') = ${phoneV1}
+        )
       )
   `;
 

@@ -34,8 +34,13 @@ import { sql } from '@vercel/postgres';
 import { requireAdminUser } from '@/app/admin/auth';
 import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
 import {
+  findClientRowByPhone,
+  clientPhoneExistsInDb,
+} from '@/lib/client-phone-db';
+import {
   normaliseClientPhone,
   parseOptionalClientEmail,
+  sqlPhoneVariants,
 } from '@/lib/client-identity';
 
 // We never want this cached. The admin dashboard expects every fetch
@@ -78,16 +83,6 @@ function rowToClient(row: ClientRow): Client {
   };
 }
 
-async function selectClientByPhone(phone: string): Promise<ClientRow | null> {
-  const { rows } = await sql<ClientRow>`
-    SELECT id, phone, first_name, last_name, email, created_at
-    FROM clients
-    WHERE phone = ${phone}
-    LIMIT 1
-  `;
-  return rows[0] ?? null;
-}
-
 async function selectClientByEmail(email: string): Promise<ClientRow | null> {
   const { rows } = await sql<ClientRow>`
     SELECT id, phone, first_name, last_name, email, created_at
@@ -103,6 +98,7 @@ async function adoptLegacyEmailRow(
   phone: string,
   email: string
 ): Promise<ClientRow | null> {
+  const [pv0, pv1] = sqlPhoneVariants(phone);
   const { rows } = await sql<ClientRow>`
     UPDATE clients c
     SET phone = ${phone}
@@ -110,7 +106,8 @@ async function adoptLegacyEmailRow(
       AND c.email IS NOT NULL
       AND LOWER(TRIM(c.email)) = LOWER(TRIM(${email}))
       AND NOT EXISTS (
-        SELECT 1 FROM clients c2 WHERE c2.phone = ${phone}
+        SELECT 1 FROM clients c2
+        WHERE c2.phone = ${pv0} OR c2.phone = ${pv1}
       )
     RETURNING id, phone, first_name, last_name, email, created_at
   `;
@@ -146,16 +143,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const { rows } = await sql<ClientRow>`
-      SELECT id, phone, first_name, last_name, email, created_at
-      FROM clients
-      WHERE phone = ${phone}
-      LIMIT 1
-    `;
-    if (rows.length === 0) {
+    const row = await findClientRowByPhone(phone);
+    if (!row) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
-    return NextResponse.json({ client: rowToClient(rows[0]) });
+    return NextResponse.json({ client: rowToClient(row as ClientRow) });
   } catch (err) {
     console.error('[api/admin/clients] GET failed:', errorMessage(err));
     return NextResponse.json(
@@ -232,12 +224,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // because phone IS NULL AND email IS NULL would match a soup of
   // partial rows we have no business merging into.
   try {
-    const existingByPhone = await selectClientByPhone(phone);
+    const existingByPhone = await findClientRowByPhone(phone);
     if (existingByPhone) {
-      return NextResponse.json({ client: rowToClient(existingByPhone) });
+      await sql`
+        UPDATE clients SET phone = ${phone} WHERE id = ${existingByPhone.id}
+      `;
+      return NextResponse.json({
+        client: rowToClient({ ...existingByPhone, phone } as ClientRow),
+      });
     }
 
-    if (email) {
+    if (email && !(await clientPhoneExistsInDb(phone))) {
       const adopted = await adoptLegacyEmailRow(phone, email);
       if (adopted) {
         console.log('[api/admin/clients] POST: adopted legacy email-keyed row', {
@@ -277,9 +274,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         msg,
       });
       try {
-        const byPhone = await selectClientByPhone(phone);
+        const byPhone = await findClientRowByPhone(phone);
         if (byPhone) {
-          return NextResponse.json({ client: rowToClient(byPhone) });
+          return NextResponse.json({ client: rowToClient(byPhone as ClientRow) });
         }
 
         if (email) {

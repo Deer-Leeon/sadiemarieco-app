@@ -171,7 +171,18 @@ export async function GET(): Promise<NextResponse> {
           OR (
             c.phone IS NOT NULL
             AND a.client_phone IS NOT NULL
-            AND regexp_replace(a.client_phone, '\D', '', 'g') = c.phone
+            AND (
+              regexp_replace(a.client_phone, '\D', '', 'g') = c.phone
+              OR (
+                length(c.phone) = 11
+                AND left(c.phone, 1) = '1'
+                AND regexp_replace(a.client_phone, '\D', '', 'g') = substr(c.phone, 2)
+              )
+              OR (
+                length(c.phone) = 10
+                AND regexp_replace(a.client_phone, '\D', '', 'g') = '1' || c.phone
+              )
+            )
           )
       ) stats ON TRUE
       ORDER BY c.first_name ASC NULLS LAST, c.last_name ASC NULLS LAST

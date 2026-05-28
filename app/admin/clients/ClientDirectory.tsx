@@ -28,6 +28,11 @@ import {
   UserRound,
 } from 'lucide-react';
 
+import {
+  clientPhoneLookupVariants,
+  normaliseClientPhoneForStorage,
+} from '@/lib/client-identity';
+
 import type { Client } from '../types';
 import {
   clientDisplayName,
@@ -142,15 +147,22 @@ export default function ClientDirectory({ clients }: Props) {
       list = clients;
     } else {
       const digitsOnly = needle.replace(/\D/g, '');
+      const queryVariants =
+        digitsOnly.length >= 3
+          ? clientPhoneLookupVariants(
+              normaliseClientPhoneForStorage(digitsOnly) ?? digitsOnly
+            )
+          : [];
       list = searchableClients
         .filter(({ client, haystack }) => {
           if (haystack.includes(needle)) return true;
-          if (
-            digitsOnly.length >= 3 &&
-            client.phone &&
-            client.phone.includes(digitsOnly)
-          ) {
-            return true;
+          if (digitsOnly.length >= 3 && client.phone) {
+            const clientVariants = clientPhoneLookupVariants(
+              normaliseClientPhoneForStorage(client.phone) ?? client.phone
+            );
+            if (queryVariants.some((q) => clientVariants.includes(q))) {
+              return true;
+            }
           }
           return false;
         })

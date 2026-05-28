@@ -35,6 +35,7 @@ import { sql } from '@vercel/postgres';
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Appointment } from '@/app/admin/types';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
+import { sqlPhoneVariants } from '@/lib/client-identity';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -153,6 +154,9 @@ export async function GET(
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
     const client = clientRows[0];
+    const [phoneV0, phoneV1] = client.phone
+      ? sqlPhoneVariants(client.phone)
+      : ['', ''];
 
     // Three-way OR match. We pass NULL-fallbacks for the email/phone
     // comparison values so the SQL stays well-typed when the client
@@ -225,7 +229,10 @@ export async function GET(
            OR (
                 ${client.phone}::text IS NOT NULL
                 AND a.client_phone IS NOT NULL
-                AND regexp_replace(a.client_phone, '\D', '', 'g') = ${client.phone}
+                AND (
+                  regexp_replace(a.client_phone, '\D', '', 'g') = ${phoneV0}
+                  OR regexp_replace(a.client_phone, '\D', '', 'g') = ${phoneV1}
+                )
               )
             )
         AND COALESCE(LOWER(TRIM(a.status)), '') <> 'pending'

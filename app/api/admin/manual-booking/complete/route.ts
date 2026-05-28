@@ -10,9 +10,14 @@ import { sql } from '@vercel/postgres';
 
 import { getCalComApiKey } from '@/lib/cal-config';
 import {
+  clientPhoneExistsInDb,
+  findClientIdByPhone,
+} from '@/lib/client-phone-db';
+import {
   clientPhoneValidationMessage,
   parseClientPhone,
   parseOptionalClientEmail,
+  sqlPhoneVariants,
 } from '@/lib/client-identity';
 import {
   CAL_BOOKINGS_API_VERSION,
@@ -221,20 +226,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let clientId: string;
   try {
-    const { rows: byPhone } = await sql<{ id: string }>`
-      SELECT id FROM clients WHERE phone = ${normPhone} LIMIT 1
-    `;
-    if (byPhone[0]?.id) {
-      clientId = byPhone[0].id;
+    const existingId = await findClientIdByPhone(normPhone);
+    if (existingId) {
+      clientId = existingId;
       await sql`
         UPDATE clients
         SET
+          phone = ${normPhone},
           first_name = ${first},
           last_name = ${last},
           email = ${parsed.clientEmail}
         WHERE id = ${clientId}
       `;
-    } else if (parsed.clientEmail) {
+    } else if (parsed.clientEmail && !(await clientPhoneExistsInDb(normPhone))) {
+      const [pv0, pv1] = sqlPhoneVariants(normPhone);
       const { rows: adopted } = await sql<{ id: string }>`
         UPDATE clients c
         SET
@@ -245,52 +250,78 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           AND c.email IS NOT NULL
           AND LOWER(TRIM(c.email)) = LOWER(TRIM(${parsed.clientEmail}))
           AND NOT EXISTS (
-            SELECT 1 FROM clients c2 WHERE c2.phone = ${normPhone}
+            SELECT 1 FROM clients c2
+            WHERE c2.phone = ${pv0} OR c2.phone = ${pv1}
           )
         RETURNING id
       `;
       if (adopted[0]?.id) {
         clientId = adopted[0].id;
       } else {
-        try {
-          const { rows: inserted } = await sql<{ id: string }>`
-            INSERT INTO clients (phone, first_name, last_name, email)
-            VALUES (${normPhone}, ${first}, ${last}, ${parsed.clientEmail})
-            RETURNING id
-          `;
-          const id = inserted[0]?.id;
-          if (!id) throw new Error('phone insert returned no id');
-          clientId = id;
-        } catch (insertErr) {
-          const insertMsg = errorMessage(insertErr);
-          const emailTaken =
-            insertMsg.includes('clients_email_key') ||
-            (insertMsg.toLowerCase().includes('duplicate key') &&
-              insertMsg.includes('email'));
-          if (!emailTaken) throw insertErr;
+        const resolvedId = await findClientIdByPhone(normPhone);
+        if (resolvedId) {
+          clientId = resolvedId;
+        } else {
+          try {
+            const { rows: inserted } = await sql<{ id: string }>`
+              INSERT INTO clients (phone, first_name, last_name, email)
+              VALUES (${normPhone}, ${first}, ${last}, ${parsed.clientEmail})
+              ON CONFLICT (phone) DO UPDATE SET
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name
+              RETURNING id
+            `;
+            const id = inserted[0]?.id;
+            if (!id) throw new Error('phone upsert returned no id');
+            clientId = id;
+          } catch (insertErr) {
+            const insertMsg = errorMessage(insertErr);
+            const emailTaken =
+              insertMsg.includes('clients_email_key') ||
+              (insertMsg.toLowerCase().includes('duplicate key') &&
+                insertMsg.includes('email'));
+            if (!emailTaken) throw insertErr;
 
-          const { rows: phoneOnly } = await sql<{ id: string }>`
-            INSERT INTO clients (phone, first_name, last_name, email)
-            VALUES (${normPhone}, ${first}, ${last}, NULL)
-            RETURNING id
-          `;
-          const id = phoneOnly[0]?.id;
-          if (!id) throw new Error('phone-only insert returned no id');
-          clientId = id;
+            const { rows: phoneOnly } = await sql<{ id: string }>`
+              INSERT INTO clients (phone, first_name, last_name, email)
+              VALUES (${normPhone}, ${first}, ${last}, NULL)
+              ON CONFLICT (phone) DO UPDATE SET
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name
+              RETURNING id
+            `;
+            const id = phoneOnly[0]?.id;
+            if (!id) throw new Error('phone-only upsert returned no id');
+            clientId = id;
+          }
         }
       }
     } else {
-      const { rows: inserted } = await sql<{ id: string }>`
-        INSERT INTO clients (phone, first_name, last_name, email)
-        VALUES (${normPhone}, ${first}, ${last}, NULL)
-        ON CONFLICT (phone) DO UPDATE SET
-          first_name = EXCLUDED.first_name,
-          last_name = EXCLUDED.last_name
-        RETURNING id
-      `;
-      const id = inserted[0]?.id;
-      if (!id) throw new Error('phone insert returned no id');
-      clientId = id;
+      const resolvedId = await findClientIdByPhone(normPhone);
+      if (resolvedId) {
+        clientId = resolvedId;
+        await sql`
+          UPDATE clients
+          SET
+            phone = ${normPhone},
+            first_name = ${first},
+            last_name = ${last},
+            email = ${parsed.clientEmail}
+          WHERE id = ${clientId}
+        `;
+      } else {
+        const { rows: inserted } = await sql<{ id: string }>`
+          INSERT INTO clients (phone, first_name, last_name, email)
+          VALUES (${normPhone}, ${first}, ${last}, ${parsed.clientEmail})
+          ON CONFLICT (phone) DO UPDATE SET
+            first_name = EXCLUDED.first_name,
+            last_name = EXCLUDED.last_name
+          RETURNING id
+        `;
+        const id = inserted[0]?.id;
+        if (!id) throw new Error('phone upsert returned no id');
+        clientId = id;
+      }
     }
   } catch (err) {
     return NextResponse.json(

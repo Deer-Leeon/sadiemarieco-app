@@ -13,6 +13,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
+import { clientPhoneExistsInDb } from '@/lib/client-phone-db';
+import { normaliseClientPhoneForStorage } from '@/lib/client-identity';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -192,7 +195,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const nameParts = splitName(data.name);
   const firstName = nameParts.first;
   const lastName = nameParts.last;
-  const normPhone = data.phone.replace(/\D/g, '') || null;
+  const normPhone = normaliseClientPhoneForStorage(data.phone);
+  const appointmentPhone = normPhone;
+  const phoneTaken = normPhone ? await clientPhoneExistsInDb(normPhone) : false;
 
   let clientId: string;
   try {
@@ -204,7 +209,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ${data.email},
         CASE
           WHEN ${normPhone}::text IS NULL THEN NULL
-          WHEN EXISTS (SELECT 1 FROM clients WHERE phone = ${normPhone}) THEN NULL
+          WHEN ${phoneTaken} THEN NULL
           ELSE ${normPhone}
         END
       )
@@ -240,7 +245,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       VALUES (
         ${clientId}, ${data.serviceName}, ${data.bookingTime}, ${data.endTime},
         ${data.calBookingUid},
-        ${firstName}, ${lastName}, ${data.email}, ${data.phone || null},
+        ${firstName}, ${lastName}, ${data.email}, ${appointmentPhone},
         'pending'
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET
