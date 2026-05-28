@@ -14,10 +14,10 @@ import {
 const CAL_MANUAL_BOOKING_NAMESPACE = 'manual-booking';
 
 /**
- * Booker height tuned for month view + time slots (same layout as the public
- * booking drawer). Width is always 100% of the modal content area.
+ * Fixed iframe viewport. Cal runs in column_view so dates stay on the left and
+ * the time list scrolls on the right inside the iframe when there are many slots.
  */
-const CAL_EMBED_HEIGHT_PX = 620;
+const CAL_EMBED_HEIGHT_PX = 500;
 
 interface Props {
   serviceSlug: string;
@@ -47,13 +47,12 @@ export default function ManualBookingCalSchedule({
 
   const embedConfig = useMemo(
     () => ({
-      layout: 'month_view' as const,
+      layout: 'column_view' as const,
       theme: 'light' as const,
       name: clientName,
       email: clientEmail,
       location: calEmbedPhoneLocation(clientPhone),
       'metadata[manual_admin_booking]': 'true',
-      'ui.autoscroll': 'false',
     }),
     [clientName, clientEmail, clientPhone]
   );
@@ -145,14 +144,17 @@ export default function ManualBookingCalSchedule({
           style={{
             width: '100%',
             height: CAL_EMBED_HEIGHT_PX,
-            overflow: 'hidden',
+            overflow: 'auto',
           }}
         />
       </div>
+      <p className="mt-1 text-center text-[10px] text-stone-500">
+        Scroll the time list on the right if you don&apos;t see all slots.
+      </p>
       <button
         type="button"
         onClick={() => setEmbedKey((k) => k + 1)}
-        className="mx-auto mt-1 block text-[10px] text-stone-500 underline-offset-2 hover:text-stone-300 hover:underline"
+        className="mx-auto mt-0.5 block text-[10px] text-stone-500 underline-offset-2 hover:text-stone-300 hover:underline"
       >
         Reload calendar
       </button>
