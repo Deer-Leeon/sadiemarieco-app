@@ -13,11 +13,14 @@ import {
 
 const CAL_MANUAL_BOOKING_NAMESPACE = 'manual-booking';
 
-/**
- * Fixed iframe viewport. Cal runs in column_view so dates stay on the left and
- * the time list scrolls on the right inside the iframe when there are many slots.
- */
-const CAL_EMBED_HEIGHT_PX = 500;
+/** Intrinsic booker size before scale (month view + time list). */
+const CAL_EMBED_WIDTH_PX = 400;
+const CAL_EMBED_HEIGHT_PX = 580;
+/** Scales the embed down so calendar + slots fit the admin popup. */
+const CAL_EMBED_SCALE = 0.82;
+
+const SCALED_WIDTH_PX = Math.round(CAL_EMBED_WIDTH_PX * CAL_EMBED_SCALE);
+const SCALED_HEIGHT_PX = Math.round(CAL_EMBED_HEIGHT_PX * CAL_EMBED_SCALE);
 
 interface Props {
   serviceSlug: string;
@@ -47,7 +50,7 @@ export default function ManualBookingCalSchedule({
 
   const embedConfig = useMemo(
     () => ({
-      layout: 'column_view' as const,
+      layout: 'month_view' as const,
       theme: 'light' as const,
       name: clientName,
       email: clientEmail,
@@ -133,23 +136,32 @@ export default function ManualBookingCalSchedule({
   return (
     <div className="shrink-0">
       <div
-        className="w-full overflow-hidden rounded-lg border border-stone-600 bg-white"
-        style={{ height: CAL_EMBED_HEIGHT_PX }}
+        className="mx-auto overflow-hidden rounded-lg border border-stone-600 bg-white"
+        style={{ width: SCALED_WIDTH_PX, height: SCALED_HEIGHT_PX }}
       >
-        <Cal
-          key={embedKey}
-          namespace={CAL_MANUAL_BOOKING_NAMESPACE}
-          calLink={calLink}
-          config={embedConfig}
+        <div
+          className="origin-top"
           style={{
-            width: '100%',
+            width: CAL_EMBED_WIDTH_PX,
             height: CAL_EMBED_HEIGHT_PX,
-            overflow: 'auto',
+            transform: `scale(${CAL_EMBED_SCALE})`,
           }}
-        />
+        >
+          <Cal
+            key={embedKey}
+            namespace={CAL_MANUAL_BOOKING_NAMESPACE}
+            calLink={calLink}
+            config={embedConfig}
+            style={{
+              width: CAL_EMBED_WIDTH_PX,
+              height: CAL_EMBED_HEIGHT_PX,
+              overflow: 'auto',
+            }}
+          />
+        </div>
       </div>
-      <p className="mt-1 text-center text-[10px] text-stone-500">
-        Scroll the time list on the right if you don&apos;t see all slots.
+      <p className="mt-1 text-center text-[10px] leading-snug text-stone-500">
+        Scroll inside the picker if more times are below.
       </p>
       <button
         type="button"

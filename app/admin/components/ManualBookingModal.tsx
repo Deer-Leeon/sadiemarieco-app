@@ -107,7 +107,7 @@ export default function ManualBookingModal({
     clientPhone.trim().length > 0;
 
   const isScheduleStep = step === 3;
-  const modalWidth = isScheduleStep ? 'max-w-[520px]' : 'max-w-lg';
+  const modalWidth = isScheduleStep ? 'max-w-[420px]' : 'max-w-lg';
 
   return (
     <div
