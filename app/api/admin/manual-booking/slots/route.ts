@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { syncCalAfterEventBuffersIfStale } from '@/app/admin/services/sync';
 import { STUDIO_TIMEZONE } from '@/lib/cal-config';
 import {
   CAL_SLOTS_API_VERSION,
@@ -59,6 +60,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       { status: 400 }
     );
   }
+
+  // One-time (throttled) sweep so legacy Cal event-types lose the old 15m buffer.
+  await syncCalAfterEventBuffersIfStale();
 
   const result = await proxyCalV2Get(
     '/slots',

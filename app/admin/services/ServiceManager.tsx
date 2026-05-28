@@ -1230,7 +1230,7 @@ function SlideOverForm({
                   label="Duration (min)"
                   htmlFor="svc-length"
                   required
-                  hint="Cal.com adds a mandatory 15-minute buffer after every booking on top of this duration."
+                  hint="Slot length on the calendar matches this duration (back-to-back bookings allowed)."
                 >
                   <input
                     id="svc-length"

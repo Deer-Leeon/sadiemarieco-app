@@ -43,14 +43,10 @@
  *   that vocabulary predates v2 — we translate at the Cal boundary.
  *
  * Studio-policy fields applied to every bookable Cal event we create:
- *   • `afterEventBuffer: 15` — mandatory 15-minute reset window after
- *     each booking (room turnover, notes). Set from
- *     MANDATORY_AFTER_EVENT_BUFFER_MIN — not editable in the form, so
- *     no admin can publish a service that skips the buffer.
- *   • `minimumBookingNotice: 30` — mandatory 30-minute lead time
- *     before any slot is bookable. Customers can't snipe an
- *     appointment less than half an hour from now. Set from
- *     MANDATORY_MIN_BOOKING_NOTICE_MIN.
+ *   • `afterEventBuffer` — from `CAL_AFTER_EVENT_BUFFER_MIN` in
+ *     lib/cal-config.ts (0 = back-to-back slots).
+ *   • `minimumBookingNotice` — from `CAL_MIN_BOOKING_NOTICE_MIN` in
+ *     lib/cal-config.ts (30-minute lead time before any slot).
  *   • `hidden: true` — the cal.com/sadiemarie public profile is
  *     intentionally suppressed; this site's data-cal-link embeds are
  *     the canonical booking surface, and a second public menu on
@@ -61,6 +57,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import {
+  CAL_AFTER_EVENT_BUFFER_MIN,
+  CAL_MIN_BOOKING_NOTICE_MIN,
+} from '@/lib/cal-config';
 import {
   CalApiError,
   callCal,
@@ -79,38 +79,6 @@ const DESCRIPTION_MAX = 2000;
 const LENGTH_MIN = 5;
 const LENGTH_MAX = 600; // 10h ceiling — anything longer is almost certainly a typo
 const PRICE_MAX = 100000;
-
-/**
- * Mandatory post-event buffer applied to every bookable service we
- * create on Cal.com (v2 `afterEventBuffer`, in minutes). McKenna
- * needs a hard 15-minute reset between back-to-back appointments
- * for room turnover and notes — encoding it here (not in the
- * editor) means an admin can't accidentally publish a service that
- * skips the buffer. Cal.com applies it on top of the booked slot,
- * so a 60-minute service blocks a 75-minute window on the calendar.
- *
- * This value is NOT exposed in the create form. If we ever need
- * per-service buffer overrides, lift it into CreatePayload as an
- * optional field and surface a control in the slide-over; the
- * default would still be this constant.
- */
-const MANDATORY_AFTER_EVENT_BUFFER_MIN = 15;
-
-/**
- * Mandatory lead time for any booking (v2 `minimumBookingNotice`,
- * in minutes). Cal.com refuses to offer slots that start within
- * this many minutes of "now", so a walk-up customer can't snipe an
- * appointment McKenna doesn't have time to set up for. Aligned
- * with the 15-min post-event buffer above as a pair: together they
- * give the studio a predictable rhythm — at least 30 min of
- * warning before a slot starts, and at least 15 min of recovery
- * after it ends.
- *
- * Same encode-once policy as the buffer: not surfaced in the
- * editor, so no admin can ship a service that lets a customer
- * book five minutes from now.
- */
-const MANDATORY_MIN_BOOKING_NOTICE_MIN = 30;
 
 /**
  * Every event-type we create is marked hidden on Cal.com itself.
@@ -379,13 +347,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       description: payload.description,
       lengthInMinutes,
       slug,
-      // 15-minute mandatory post-event buffer for room turnover + notes.
-      // Studio policy — see the MANDATORY_AFTER_EVENT_BUFFER_MIN constant.
-      afterEventBuffer: MANDATORY_AFTER_EVENT_BUFFER_MIN,
-      // 30-minute mandatory lead time — Cal will refuse to offer any slot
-      // that starts within the next 30 minutes. See the
-      // MANDATORY_MIN_BOOKING_NOTICE_MIN constant for the rationale.
-      minimumBookingNotice: MANDATORY_MIN_BOOKING_NOTICE_MIN,
+      afterEventBuffer: CAL_AFTER_EVENT_BUFFER_MIN,
+      minimumBookingNotice: CAL_MIN_BOOKING_NOTICE_MIN,
       // Hide from cal.com/sadiemarie; this site is the only booking surface.
       hidden: HIDDEN_ON_CAL_DEFAULT,
     });
@@ -623,6 +586,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         title: payload.title,
         description: payload.description,
         lengthInMinutes,
+        afterEventBuffer: CAL_AFTER_EVENT_BUFFER_MIN,
       }),
     });
   } catch (err) {
@@ -930,23 +894,9 @@ interface CalCreateEventBody {
   description: string;
   lengthInMinutes: number;
   slug: string;
-  /**
-   * Minutes automatically blocked on the calendar AFTER each booking.
-   * Studio policy is a hard 15-minute reset window — see
-   * MANDATORY_AFTER_EVENT_BUFFER_MIN. The field name matches Cal v2's
-   * CreateEventTypeInput_2024_06_14.afterEventBuffer exactly so a
-   * future schema change shows up at the type boundary, not at the
-   * Cal.com 422.
-   */
+  /** Cal v2 `afterEventBuffer` — see `CAL_AFTER_EVENT_BUFFER_MIN`. */
   afterEventBuffer: number;
-  /**
-   * Minimum lead time (in minutes) before a slot may be booked.
-   * Cal refuses to offer any timeslot whose start is closer than
-   * this to "now". Pinned to MANDATORY_MIN_BOOKING_NOTICE_MIN so the
-   * 30-minute studio policy isn't bypassable from a malformed admin
-   * payload. Matches Cal v2's
-   * CreateEventTypeInput_2024_06_14.minimumBookingNotice.
-   */
+  /** Cal v2 `minimumBookingNotice` — see `CAL_MIN_BOOKING_NOTICE_MIN`. */
   minimumBookingNotice: number;
   /**
    * If true, the event-type does not appear on the user's public

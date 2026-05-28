@@ -11,6 +11,18 @@ export { STUDIO_TIMEZONE };
 
 export const CAL_V1_BASE = 'https://api.cal.com/v1';
 
+/**
+ * Minutes blocked on the Cal.com calendar after each booking ends.
+ * `0` allows back-to-back slots (60 min at 10:00 → next slot at 11:00).
+ * Applied on create/update via `/api/admin/services` and cleared on admin reconcile.
+ */
+export const CAL_AFTER_EVENT_BUFFER_MIN = 0;
+
+/**
+ * Minimum lead time before a slot may be booked (Cal v2 `minimumBookingNotice`).
+ */
+export const CAL_MIN_BOOKING_NOTICE_MIN = 30;
+
 /** Stable slug keys for bookable services (matches `site_services.slug`). */
 export type CalServiceSlug = string;
 

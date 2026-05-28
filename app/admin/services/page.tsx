@@ -130,17 +130,14 @@ export default async function ServicesPage() {
               available through the API on the current account tier.
             </p>
             <p className="mt-2">
-              Every new service automatically gets a{' '}
-              <span className="font-medium text-stone-900">
-                15-minute buffer after each booking
-              </span>{' '}
-              on the calendar (room turnover + notes), a{' '}
+              Every new service gets a{' '}
               <span className="font-medium text-stone-900">
                 30-minute minimum lead time
               </span>{' '}
-              before any slot is bookable, and is hidden from the public
-              cal.com/sadiemarie page so this site stays the single source of
-              truth for the menu.
+              before any slot is bookable, uses the duration you set for
+              calendar blocking (no extra post-appointment buffer), and is
+              hidden from the public cal.com/sadiemarie page so this site stays
+              the single source of truth for the menu.
             </p>
           </div>
         )}
