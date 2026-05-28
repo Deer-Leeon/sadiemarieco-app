@@ -107,7 +107,7 @@ export default function ManualBookingModal({
     clientPhone.trim().length > 0;
 
   const isScheduleStep = step === 3;
-  const modalWidth = isScheduleStep ? 'max-w-3xl' : 'max-w-lg';
+  const modalWidth = isScheduleStep ? 'max-w-[400px]' : 'max-w-lg';
 
   return (
     <div
@@ -117,7 +117,7 @@ export default function ManualBookingModal({
     >
       <div
         className={`flex w-full ${modalWidth} flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-stone-900/95 text-stone-50 shadow-2xl shadow-stone-950/40 ${
-          isScheduleStep ? 'h-[min(88vh,680px)]' : 'max-h-[min(88vh,640px)]'
+          isScheduleStep ? 'max-h-[min(92vh,580px)]' : 'max-h-[min(88vh,640px)]'
         }`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
@@ -163,11 +163,11 @@ export default function ManualBookingModal({
         </header>
 
         <div
-          className={`flex min-h-0 flex-1 flex-col ${
+          className={
             isScheduleStep
-              ? 'overflow-hidden px-4 py-3'
-              : 'overflow-y-auto px-6 py-5'
-          }`}
+              ? 'overflow-hidden px-3 py-2'
+              : 'flex-1 overflow-y-auto px-6 py-5'
+          }
         >
           {error && (
             <div
@@ -270,7 +270,7 @@ export default function ManualBookingModal({
           )}
 
           {step === 3 && selectedService && (
-            <div className="flex min-h-0 flex-1 flex-col">
+            <>
               {completing ? (
                 <ManualBookingCompletingOverlay />
               ) : (
@@ -283,7 +283,7 @@ export default function ManualBookingModal({
                   onError={setError}
                 />
               )}
-            </div>
+            </>
           )}
         </div>
 

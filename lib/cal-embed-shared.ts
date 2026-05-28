@@ -10,7 +10,7 @@ export const MANUAL_BOOKING_CAL_UI_CONFIG = {
   theme: 'light' as const,
   styles: { branding: { brandColor: '#292524' } },
   hideEventTypeDetails: true,
-  layout: 'column_view' as const,
+  layout: 'month_view' as const,
   disableAutoScroll: true,
   cssVarsPerTheme: {
     light: {
