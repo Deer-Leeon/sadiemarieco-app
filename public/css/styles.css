@@ -1332,10 +1332,20 @@ a.service-item:focus-visible .service-action {
 }
 .policies-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 48px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 28px;
   position: relative;
   z-index: 2;
+  align-items: stretch;
+}
+.policy-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 36px 32px 40px;
+  background: #fff;
+  border: 1px solid var(--cloud-mid);
+  box-shadow: 0 12px 32px rgba(13, 27, 42, 0.06);
 }
 .policy-num {
   font-family: var(--serif);
@@ -1351,7 +1361,9 @@ a.service-item:focus-visible .service-action {
   font-size: 1.22rem;
   font-weight: 400;
   color: var(--navy);
-  margin-bottom: 14px;
+  margin-bottom: 18px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
 }
 .policy-body {
   font-family: var(--sans);
@@ -1359,18 +1371,98 @@ a.service-item:focus-visible .service-action {
   font-weight: 300;
   line-height: 1.95;
   color: #4a5468;
+  margin: 0;
+  flex: 1;
 }
-.policy-highlight {
+.policy-body strong {
+  font-weight: 400;
+  color: var(--navy);
+}
+/* Referral — full-width callout between policies and booking note */
+.policies-referral {
+  margin-top: 48px;
+  padding: 44px 48px;
+  background: var(--navy);
+  color: var(--off-white);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 40px;
+  position: relative;
+  z-index: 2;
+  border: 1px solid rgba(245, 243, 240, 0.14);
+  box-shadow:
+    0 28px 56px rgba(13, 27, 42, 0.18),
+    inset 0 1px 0 rgba(245, 243, 240, 0.08);
+}
+.policies-referral::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--off-white);
+  opacity: 0.35;
+}
+.policies-referral-copy {
+  flex: 1;
+  min-width: 0;
+  padding-left: 12px;
+}
+.policies-referral-eyebrow {
   display: block;
-  background: var(--cloud);
-  border-left: 3px solid var(--navy);
-  padding: 14px 18px;
-  margin-top: 16px;
-  font-family: var(--serif-alt);
+  font-family: var(--sans);
+  font-size: 0.62rem;
+  font-weight: 400;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(245, 243, 240, 0.55);
+  margin-bottom: 12px;
+}
+.policies-referral-title {
+  font-family: var(--serif);
+  font-size: clamp(1.75rem, 3vw, 2.5rem);
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin-bottom: 14px;
+  color: var(--off-white);
+}
+.policies-referral-title em {
   font-style: italic;
-  font-size: 0.84rem;
-  line-height: 1.65;
-  color: var(--ink);
+  color: var(--cloud);
+}
+.policies-referral-text {
+  font-family: var(--sans);
+  font-size: 0.88rem;
+  font-weight: 300;
+  line-height: 1.85;
+  color: rgba(245, 243, 240, 0.82);
+  max-width: 42rem;
+  margin: 0;
+}
+.policies-referral-text strong {
+  font-weight: 400;
+  color: var(--off-white);
+}
+.policies-referral-cta {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  text-align: center;
+}
+.policies-referral-badge {
+  font-family: var(--serif);
+  font-size: clamp(2.5rem, 4.5vw, 3.5rem);
+  font-weight: 400;
+  font-style: italic;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--off-white);
+  white-space: nowrap;
 }
 .policies-note {
   margin-top: 60px;
@@ -1843,6 +1935,18 @@ footer {
   .policies-masthead { flex-direction: column; align-items: flex-start; gap: 14px; }
   .policies-sub { text-align: left; max-width: none; }
   .policies-grid { grid-template-columns: 1fr; }
+  .policies-referral {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 36px 28px;
+    gap: 28px;
+  }
+  .policies-referral-cta {
+    width: 100%;
+    align-items: stretch;
+  }
+  .policies-referral-badge { align-self: center; }
+  .policies-referral-cta .btn-white { text-align: center; }
   .policies-note { flex-direction: column; gap: 20px; }
   #contact { padding: 80px 24px 60px; }
   .contact-grid { grid-template-columns: 1fr; gap: 52px; }
