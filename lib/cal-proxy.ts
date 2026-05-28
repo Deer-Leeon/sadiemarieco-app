@@ -215,6 +215,58 @@ function slotItemToUtcIso(item: unknown, date: string): string | null {
   return null;
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function extractSlotsMap(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const root = payload as Record<string, unknown>;
+
+  if (root.slots && typeof root.slots === 'object') {
+    return root.slots as Record<string, unknown>;
+  }
+  if (root.data && typeof root.data === 'object') {
+    const data = root.data as Record<string, unknown>;
+    if (data.slots && typeof data.slots === 'object') {
+      return data.slots as Record<string, unknown>;
+    }
+    return data;
+  }
+
+  return null;
+}
+
+function normalizeDaySlots(
+  daySlots: unknown,
+  date: string
+): string[] {
+  if (!Array.isArray(daySlots)) return [];
+  return daySlots
+    .map((item) => slotItemToUtcIso(item, date))
+    .filter((t): t is string => t !== null);
+}
+
+/**
+ * Normalize a Cal.com v2 slots payload (single day or date range) to
+ * `{ slots: { "YYYY-MM-DD": ["…ISO…", …] } }` with only days that have times.
+ */
+export function normalizeCalSlotsPayload(
+  payload: unknown
+): { slots: Record<string, string[]> } {
+  const slotsMap = extractSlotsMap(payload);
+  if (!slotsMap) return { slots: {} };
+
+  const slots: Record<string, string[]> = {};
+
+  for (const [dateKey, daySlots] of Object.entries(slotsMap)) {
+    if (!ISO_DATE_RE.test(dateKey)) continue;
+    const times = normalizeDaySlots(daySlots, dateKey);
+    if (times.length > 0) slots[dateKey] = times;
+  }
+
+  return { slots };
+}
+
 /**
  * Normalize Cal.com v2 slots payloads to the v1-style shape the admin modal expects.
  */
@@ -222,32 +274,6 @@ export function normalizeCalSlotsForDate(
   payload: unknown,
   date: string
 ): { slots: Record<string, string[]> } {
-  if (!payload || typeof payload !== 'object') {
-    return { slots: { [date]: [] } };
-  }
-
-  const root = payload as Record<string, unknown>;
-  let slotsMap: Record<string, unknown> | null = null;
-
-  if (root.slots && typeof root.slots === 'object') {
-    slotsMap = root.slots as Record<string, unknown>;
-  } else if (root.data && typeof root.data === 'object') {
-    const data = root.data as Record<string, unknown>;
-    if (data.slots && typeof data.slots === 'object') {
-      slotsMap = data.slots as Record<string, unknown>;
-    } else {
-      slotsMap = data;
-    }
-  }
-
-  const daySlots = slotsMap?.[date];
-  if (!Array.isArray(daySlots)) {
-    return { slots: { [date]: [] } };
-  }
-
-  const times = daySlots
-    .map((item) => slotItemToUtcIso(item, date))
-    .filter((t): t is string => t !== null);
-
-  return { slots: { [date]: times } };
+  const { slots } = normalizeCalSlotsPayload(payload);
+  return { slots: { [date]: slots[date] ?? [] } };
 }

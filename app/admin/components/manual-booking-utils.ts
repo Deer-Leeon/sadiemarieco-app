@@ -11,6 +11,28 @@ export interface ManualBookingServiceOption {
   durationMins: number | null;
 }
 
+/** Dates (YYYY-MM-DD) that have at least one open slot in a normalized slots payload. */
+export function datesWithOpenSlots(
+  payload: unknown,
+  options?: { notBefore?: string }
+): string[] {
+  if (!payload || typeof payload !== 'object') return [];
+
+  const root = payload as Record<string, unknown>;
+  const slots = root.slots;
+  if (!slots || typeof slots !== 'object') return [];
+
+  const minDate = options?.notBefore ?? '';
+
+  return Object.entries(slots as Record<string, unknown>)
+    .filter(([date, times]) => {
+      if (minDate && date < minDate) return false;
+      return Array.isArray(times) && times.length > 0;
+    })
+    .map(([date]) => date)
+    .sort();
+}
+
 /** Parse Cal.com slots JSON (v1 shape or v2-normalized) into UTC ISO strings for the selected day. */
 export function parseCalSlotTimes(payload: unknown, date: string): string[] {
   if (!payload || typeof payload !== 'object') return [];

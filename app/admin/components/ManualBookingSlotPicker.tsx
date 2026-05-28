@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
 import {
+  datesWithOpenSlots,
   formatSlotInStudioTime,
   parseCalSlotTimes,
   STUDIO_TIMEZONE,
@@ -21,6 +22,10 @@ function studioDateString(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+function lastDayOfMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
 function monthLabel(year: number, month: number): string {
   return new Intl.DateTimeFormat('en-US', {
     timeZone: STUDIO_TIMEZONE,
@@ -31,7 +36,7 @@ function monthLabel(year: number, month: number): string {
 
 function buildMonthCells(year: number, month: number): Array<{ date: string; day: number } | null> {
   const firstDow = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const daysInMonth = lastDayOfMonth(year, month);
   const cells: Array<{ date: string; day: number } | null> = [];
 
   for (let i = 0; i < firstDow; i++) cells.push(null);
@@ -60,26 +65,41 @@ export default function ManualBookingSlotPicker({
   const [viewYear, setViewYear] = useState(initial.year);
   const [viewMonth, setViewMonth] = useState(initial.month);
   const [selectedDate, setSelectedDate] = useState(today);
-  const [slots, setSlots] = useState<string[]>([]);
-  const [slotsLoading, setSlotsLoading] = useState(false);
-  const [slotsError, setSlotsError] = useState<string | null>(null);
+  const [monthSlots, setMonthSlots] = useState<Record<string, string[]>>({});
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [monthLoading, setMonthLoading] = useState(true);
+  const [monthError, setMonthError] = useState<string | null>(null);
+
+  const availableSet = useMemo(() => new Set(availableDates), [availableDates]);
 
   const monthCells = useMemo(
     () => buildMonthCells(viewYear, viewMonth),
     [viewYear, viewMonth]
   );
 
-  const loadSlots = useCallback(
-    async (day: string) => {
-      setSlotsLoading(true);
-      setSlotsError(null);
-      setSlots([]);
+  const loadMonth = useCallback(
+    async (year: number, month: number) => {
+      setMonthLoading(true);
+      setMonthError(null);
+      setMonthSlots({});
+      setAvailableDates([]);
       onSelectSlot(null);
+
+      const rangeStart = studioDateString(year, month, 1);
+      const rangeEnd = studioDateString(year, month, lastDayOfMonth(year, month));
+      const queryStart = rangeStart < today ? today : rangeStart;
+
+      if (queryStart > rangeEnd) {
+        setMonthLoading(false);
+        setMonthError('No open days left this month.');
+        return;
+      }
 
       try {
         const params = new URLSearchParams({
           eventTypeId: String(eventTypeId),
-          date: day,
+          date: queryStart,
+          end: rangeEnd,
         });
         const res = await fetch(`/api/admin/manual-booking/slots?${params}`);
         const data: unknown = await res.json().catch(() => null);
@@ -91,30 +111,44 @@ export default function ManualBookingSlotPicker({
             'message' in data &&
             typeof (data as { message: unknown }).message === 'string'
               ? (data as { message: string }).message
-              : `Could not load times (HTTP ${res.status})`;
-          setSlotsError(message);
+              : `Could not load availability (HTTP ${res.status})`;
+          setMonthError(message);
           return;
         }
 
-        const times = parseCalSlotTimes(data, day);
-        setSlots(times);
-        if (times.length === 0) {
-          setSlotsError('No open times on this day. Try another date.');
+        const openDates = datesWithOpenSlots(data, { notBefore: today });
+        const slotsByDay: Record<string, string[]> = {};
+
+        for (const date of openDates) {
+          slotsByDay[date] = parseCalSlotTimes(data, date);
         }
+
+        setMonthSlots(slotsByDay);
+        setAvailableDates(openDates);
+
+        if (openDates.length === 0) {
+          setMonthError(`No open days in ${monthLabel(year, month)}. Try another month.`);
+          return;
+        }
+
+        setSelectedDate(openDates.find((d) => d >= today) ?? openDates[0]);
       } catch (err) {
-        setSlotsError(
-          err instanceof Error ? err.message : 'Failed to load available times'
+        setMonthError(
+          err instanceof Error ? err.message : 'Failed to load availability'
         );
       } finally {
-        setSlotsLoading(false);
+        setMonthLoading(false);
       }
     },
-    [eventTypeId, onSelectSlot]
+    [eventTypeId, onSelectSlot, today]
   );
 
   useEffect(() => {
-    void loadSlots(selectedDate);
-  }, [selectedDate, loadSlots]);
+    void loadMonth(viewYear, viewMonth);
+  }, [viewYear, viewMonth, loadMonth]);
+
+  const slots = monthSlots[selectedDate] ?? [];
+  const slotsLoading = monthLoading;
 
   function shiftMonth(delta: number) {
     let m = viewMonth + delta;
@@ -131,11 +165,9 @@ export default function ManualBookingSlotPicker({
   }
 
   function pickDate(date: string) {
-    if (date < today) return;
+    if (date < today || !availableSet.has(date)) return;
     setSelectedDate(date);
-    const { year, month } = parseStudioDate(date);
-    setViewYear(year);
-    setViewMonth(month);
+    onSelectSlot(null);
   }
 
   const selectedDayLabel = (() => {
@@ -164,7 +196,8 @@ export default function ManualBookingSlotPicker({
           <button
             type="button"
             onClick={() => shiftMonth(-1)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900"
+            disabled={monthLoading}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 disabled:opacity-40"
             aria-label="Previous month"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -173,7 +206,8 @@ export default function ManualBookingSlotPicker({
           <button
             type="button"
             onClick={() => shiftMonth(1)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900"
+            disabled={monthLoading}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 disabled:opacity-40"
             aria-label="Next month"
           >
             <ChevronRight className="h-4 w-4" />
@@ -188,32 +222,51 @@ export default function ManualBookingSlotPicker({
           ))}
         </div>
 
-        <div className="mt-1 grid grid-cols-7 gap-1">
-          {monthCells.map((cell, idx) => {
-            if (!cell) {
-              return <span key={`pad-${idx}`} aria-hidden />;
-            }
-            const isPast = cell.date < today;
-            const isSelected = cell.date === selectedDate;
-            return (
-              <button
-                key={cell.date}
-                type="button"
-                disabled={isPast}
-                onClick={() => pickDate(cell.date)}
-                className={`flex h-9 w-full items-center justify-center rounded-full text-sm transition-colors ${
-                  isSelected
-                    ? 'bg-stone-900 font-semibold text-stone-50'
-                    : isPast
-                      ? 'cursor-not-allowed text-stone-300'
-                      : 'text-stone-800 hover:bg-stone-100'
-                }`}
-              >
-                {cell.day}
-              </button>
-            );
-          })}
-        </div>
+        {monthLoading ? (
+          <div className="flex items-center justify-center gap-2 py-10 text-sm text-stone-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading open days…
+          </div>
+        ) : (
+          <div className="mt-1 grid grid-cols-7 gap-1">
+            {monthCells.map((cell, idx) => {
+              if (!cell) {
+                return <span key={`pad-${idx}`} aria-hidden />;
+              }
+              const isPast = cell.date < today;
+              const hasSlots = availableSet.has(cell.date);
+              const isSelectable = hasSlots && !isPast;
+              const isSelected = cell.date === selectedDate;
+
+              return (
+                <button
+                  key={cell.date}
+                  type="button"
+                  disabled={!isSelectable}
+                  onClick={() => pickDate(cell.date)}
+                  className={`flex h-9 w-full items-center justify-center rounded-full text-sm transition-colors ${
+                    isSelected
+                      ? 'bg-stone-900 font-semibold text-stone-50'
+                      : isSelectable
+                        ? 'font-semibold text-stone-900 hover:bg-stone-100'
+                        : 'cursor-default text-stone-300'
+                  }`}
+                  aria-label={
+                    isSelectable
+                      ? `${cell.day}, open`
+                      : `${cell.day}, unavailable`
+                  }
+                >
+                  {cell.day}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {monthError && !monthLoading && (
+          <p className="mt-3 text-center text-xs text-stone-500">{monthError}</p>
+        )}
       </div>
 
       <div className="rounded-xl border border-stone-200 bg-white p-3 shadow-sm">
@@ -257,12 +310,10 @@ export default function ManualBookingSlotPicker({
           </div>
         ) : (
           <p className="py-6 text-center text-sm text-stone-500">
-            {slotsError ?? 'No times to show.'}
+            {availableDates.length === 0
+              ? 'Pick a month with open days.'
+              : 'Select an open day above.'}
           </p>
-        )}
-
-        {slotsError && slots.length > 0 && (
-          <p className="mt-2 text-center text-xs text-amber-700">{slotsError}</p>
         )}
       </div>
     </div>
