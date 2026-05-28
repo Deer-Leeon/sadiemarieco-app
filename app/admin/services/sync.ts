@@ -39,7 +39,10 @@
  */
 import { sql } from '@vercel/postgres';
 
-import { CAL_AFTER_EVENT_BUFFER_MIN } from '@/lib/cal-config';
+import {
+  CAL_AFTER_EVENT_BUFFER_MIN,
+  CAL_SLOT_INTERVAL_MIN,
+} from '@/lib/cal-config';
 
 const CAL_API_BASE = 'https://api.cal.com/v2';
 
@@ -197,33 +200,35 @@ async function fetchCalEventTypeIds(
 }
 
 /**
- * PATCH any Cal event-types that still carry a post-booking buffer so
- * slots line up with service duration (back-to-back bookings).
- * Best-effort; failures are logged and skipped per event.
+ * PATCH Cal event-types whose booking policy drifts from lib/cal-config.ts
+ * (`afterEventBuffer`, `slotInterval`). Best-effort; per-event failures are logged.
  */
-/** At most one Cal buffer sweep per hour outside admin force-reconcile. */
-const BUFFER_SYNC_TTL_MS = 60 * 60 * 1000;
-let lastBufferSyncAt = 0;
+/** At most one policy sweep per hour outside admin force-reconcile. */
+const BOOKING_POLICY_SYNC_TTL_MS = 60 * 60 * 1000;
+let lastBookingPolicySyncAt = 0;
 
 /**
- * Clear legacy `afterEventBuffer` values on Cal event-types (best-effort).
+ * Align legacy Cal event-types with studio booking policy (best-effort).
  * Throttled unless `force` — safe to call from manual-booking slot loads.
  */
-export async function syncCalAfterEventBuffersIfStale(
+export async function syncCalEventTypeBookingPoliciesIfStale(
   options: { force?: boolean } = {}
 ): Promise<void> {
   const apiKey = process.env.CAL_API_KEY;
   if (!apiKey) return;
 
   const now = Date.now();
-  if (!options.force && now - lastBufferSyncAt < BUFFER_SYNC_TTL_MS) {
+  if (!options.force && now - lastBookingPolicySyncAt < BOOKING_POLICY_SYNC_TTL_MS) {
     return;
   }
-  lastBufferSyncAt = now;
-  await syncCalAfterEventBuffers(apiKey);
+  lastBookingPolicySyncAt = now;
+  await syncCalEventTypeBookingPolicies(apiKey);
 }
 
-async function syncCalAfterEventBuffers(apiKey: string): Promise<void> {
+/** @deprecated Use syncCalEventTypeBookingPoliciesIfStale */
+export const syncCalAfterEventBuffersIfStale = syncCalEventTypeBookingPoliciesIfStale;
+
+async function syncCalEventTypeBookingPolicies(apiKey: string): Promise<void> {
   try {
     const result = await callCal<{ status?: string; data?: unknown }>(
       '/event-types',
@@ -235,30 +240,38 @@ async function syncCalAfterEventBuffers(apiKey: string): Promise<void> {
 
     for (const e of events) {
       if (!isRecord(e) || typeof e.id !== 'number') continue;
+
       const buf = e.afterEventBuffer;
-      if (typeof buf !== 'number' || buf <= CAL_AFTER_EVENT_BUFFER_MIN) continue;
+      const interval = e.slotInterval;
+      const needsBuffer =
+        typeof buf !== 'number' || buf !== CAL_AFTER_EVENT_BUFFER_MIN;
+      const needsInterval = interval !== CAL_SLOT_INTERVAL_MIN;
+      if (!needsBuffer && !needsInterval) continue;
+
+      const patch: { afterEventBuffer?: number; slotInterval?: number } = {};
+      if (needsBuffer) patch.afterEventBuffer = CAL_AFTER_EVENT_BUFFER_MIN;
+      if (needsInterval) patch.slotInterval = CAL_SLOT_INTERVAL_MIN;
 
       try {
         await callCal(`/event-types/${e.id}`, apiKey, {
           method: 'PATCH',
-          body: JSON.stringify({
-            afterEventBuffer: CAL_AFTER_EVENT_BUFFER_MIN,
-          }),
+          body: JSON.stringify(patch),
         });
-        console.log('[services/sync] cleared afterEventBuffer', {
+        console.log('[services/sync] applied event-type booking policy', {
           calEventId: e.id,
-          was: buf,
-          now: CAL_AFTER_EVENT_BUFFER_MIN,
+          patch,
+          was: { afterEventBuffer: buf, slotInterval: interval },
         });
       } catch (err) {
-        console.warn('[services/sync] afterEventBuffer PATCH failed', {
+        console.warn('[services/sync] booking policy PATCH failed', {
           calEventId: e.id,
+          patch,
           error: errorMessage(err),
         });
       }
     }
   } catch (err) {
-    console.warn('[services/sync] afterEventBuffer sync skipped', {
+    console.warn('[services/sync] booking policy sync skipped', {
       error: errorMessage(err),
     });
   }
@@ -334,8 +347,8 @@ export async function reconcileWithCal(
   if (!apiKey) return;
 
   if (options.force) {
-    lastBufferSyncAt = Date.now();
-    await syncCalAfterEventBuffers(apiKey);
+    lastBookingPolicySyncAt = Date.now();
+    await syncCalEventTypeBookingPolicies(apiKey);
   }
 
   const validIds = await fetchCalEventTypeIds(apiKey);

@@ -1230,7 +1230,7 @@ function SlideOverForm({
                   label="Duration (min)"
                   htmlFor="svc-length"
                   required
-                  hint="Slot length on the calendar matches this duration (back-to-back bookings allowed)."
+                  hint="Service length for the appointment; bookable start times are offered every 30 minutes on the calendar."
                 >
                   <input
                     id="svc-length"

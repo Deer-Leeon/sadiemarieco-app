@@ -47,6 +47,8 @@
  *     lib/cal-config.ts (0 = back-to-back slots).
  *   • `minimumBookingNotice` — from `CAL_MIN_BOOKING_NOTICE_MIN` in
  *     lib/cal-config.ts (30-minute lead time before any slot).
+ *   • `slotInterval` — from `CAL_SLOT_INTERVAL_MIN` in lib/cal-config.ts
+ *     (30-minute start-time grid regardless of service duration).
  *   • `hidden: true` — the cal.com/sadiemarie public profile is
  *     intentionally suppressed; this site's data-cal-link embeds are
  *     the canonical booking surface, and a second public menu on
@@ -60,6 +62,7 @@ import { requireAdminUser } from '@/app/admin/auth';
 import {
   CAL_AFTER_EVENT_BUFFER_MIN,
   CAL_MIN_BOOKING_NOTICE_MIN,
+  CAL_SLOT_INTERVAL_MIN,
 } from '@/lib/cal-config';
 import {
   CalApiError,
@@ -349,6 +352,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       slug,
       afterEventBuffer: CAL_AFTER_EVENT_BUFFER_MIN,
       minimumBookingNotice: CAL_MIN_BOOKING_NOTICE_MIN,
+      slotInterval: CAL_SLOT_INTERVAL_MIN,
       // Hide from cal.com/sadiemarie; this site is the only booking surface.
       hidden: HIDDEN_ON_CAL_DEFAULT,
     });
@@ -587,6 +591,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         description: payload.description,
         lengthInMinutes,
         afterEventBuffer: CAL_AFTER_EVENT_BUFFER_MIN,
+        slotInterval: CAL_SLOT_INTERVAL_MIN,
       }),
     });
   } catch (err) {
@@ -898,6 +903,8 @@ interface CalCreateEventBody {
   afterEventBuffer: number;
   /** Cal v2 `minimumBookingNotice` — see `CAL_MIN_BOOKING_NOTICE_MIN`. */
   minimumBookingNotice: number;
+  /** Cal v2 `slotInterval` — see `CAL_SLOT_INTERVAL_MIN`. */
+  slotInterval: number;
   /**
    * If true, the event-type does not appear on the user's public
    * cal.com profile (cal.com/<username>). It remains bookable via its

@@ -23,6 +23,13 @@ export const CAL_AFTER_EVENT_BUFFER_MIN = 0;
  */
 export const CAL_MIN_BOOKING_NOTICE_MIN = 30;
 
+/**
+ * Spacing between offered start times (Cal v2 `slotInterval`), in minutes.
+ * Independent of `lengthInMinutes` — a 90-minute service still shows
+ * 10:00, 10:30, 11:00, …; Cal blocks overlapping slots when one is booked.
+ */
+export const CAL_SLOT_INTERVAL_MIN = 30;
+
 /** Stable slug keys for bookable services (matches `site_services.slug`). */
 export type CalServiceSlug = string;
 
