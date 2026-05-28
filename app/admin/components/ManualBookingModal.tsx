@@ -27,7 +27,13 @@ interface Props {
 }
 
 const INPUT_CLASS =
-  'block w-full rounded-md border border-stone-600 bg-stone-800/80 px-3 py-2 text-sm text-stone-50 placeholder:text-stone-500 transition-colors focus:border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-300/40';
+  'block w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 transition-colors focus:border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-200';
+
+const BTN_SECONDARY =
+  'rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 disabled:opacity-50';
+
+const BTN_PRIMARY =
+  'inline-flex items-center gap-2 rounded-full border border-stone-600 bg-stone-700 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-white transition-colors hover:border-stone-700 hover:bg-stone-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-300 disabled:border-stone-200 disabled:bg-stone-300 disabled:text-stone-500';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -217,91 +223,59 @@ export default function ManualBookingModal({
 
   const isScheduleStep = step === 3;
   const modalWidth = isScheduleStep ? 'max-w-[460px]' : 'max-w-lg';
+  const headerTitle =
+    (isScheduleStep || step === 2) && selectedService
+      ? selectedService.title
+      : 'New appointment';
+  const headerSubtitle =
+    step === 1
+      ? 'Choose a service · Step 1 of 3'
+      : step === 2
+        ? 'Client details · Step 2 of 3'
+        : 'Pick an open date & time · Step 3 of 3';
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-stone-950/50 p-3 backdrop-blur-sm sm:p-4"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-stone-900/40 p-3 backdrop-blur-sm sm:p-4"
       onClick={completing ? undefined : onClose}
       role="presentation"
     >
       <div
-        className={`flex w-full ${modalWidth} flex-col overflow-hidden rounded-2xl shadow-2xl ${
-          isScheduleStep
-            ? 'border border-stone-200 bg-[#FAF9F6] text-stone-900'
-            : 'border border-stone-200/90 bg-stone-900/95 text-stone-50 shadow-stone-950/40'
-        } ${isScheduleStep ? 'max-h-[min(92vh,680px)]' : 'max-h-[min(88vh,640px)]'}`}
+        className={`flex w-full ${modalWidth} max-h-[min(92vh,680px)] flex-col overflow-hidden rounded-2xl border border-stone-200 bg-[#FAF9F6] text-stone-900 shadow-2xl shadow-stone-900/10`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="manual-booking-title"
       >
-        <header
-          className={`flex shrink-0 items-start justify-between gap-3 border-b ${
-            isScheduleStep
-              ? 'border-stone-200 bg-[#FAF9F6] px-5 py-4'
-              : 'border-stone-700/80 px-6 py-5'
-          }`}
-        >
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-stone-200 bg-[#FAF9F6] px-5 py-4">
           <div className="min-w-0">
-            <p
-              className={`text-[10px] font-medium uppercase tracking-[0.28em] ${
-                isScheduleStep ? 'text-stone-500' : 'text-stone-400'
-              }`}
-            >
+            <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
               Manual booking
             </p>
             <h2
               id="manual-booking-title"
-              className={`font-serif leading-tight ${
-                isScheduleStep
-                  ? 'mt-0.5 truncate text-xl text-stone-900'
-                  : 'mt-1 text-2xl text-stone-50'
-              }`}
+              className="mt-0.5 truncate font-serif text-xl leading-tight text-stone-900"
             >
-              {isScheduleStep && selectedService
-                ? selectedService.title
-                : 'New appointment'}
+              {headerTitle}
             </h2>
-            <p
-              className={`mt-0.5 text-xs ${
-                isScheduleStep ? 'text-stone-500' : 'text-stone-400'
-              }`}
-            >
-              {isScheduleStep
-                ? 'Pick an open date & time · Step 3 of 3'
-                : `Step ${step} of 3`}
-            </p>
+            <p className="mt-0.5 text-xs text-stone-500">{headerSubtitle}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
             disabled={completing}
-            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-50 ${
-              isScheduleStep
-                ? 'text-stone-500 hover:bg-stone-200 hover:text-stone-900'
-                : 'text-stone-400 hover:bg-stone-800 hover:text-stone-100'
-            }`}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 disabled:opacity-50"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
           </button>
         </header>
 
-        <div
-          className={
-            isScheduleStep
-              ? 'min-h-0 flex-1 overflow-y-auto px-4 py-3'
-              : 'flex-1 overflow-y-auto px-6 py-5'
-          }
-        >
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {error && (
             <div
               role="alert"
-              className={`shrink-0 rounded-md border px-3 py-2 text-sm ${
-                isScheduleStep
-                  ? 'mb-3 border-rose-200 bg-rose-50 text-rose-800'
-                  : 'mb-4 border-rose-500/40 bg-rose-950/50 text-rose-200'
-              }`}
+              className="mb-3 shrink-0 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800"
             >
               {error}
             </div>
@@ -309,10 +283,10 @@ export default function ManualBookingModal({
 
           {step === 1 && (
             <div className="space-y-3">
-              <p className="text-sm text-stone-300">Choose a service</p>
+              <p className="text-sm text-stone-600">Choose a service</p>
               <ul className="max-h-64 space-y-2 overflow-y-auto pr-1">
                 {services.length === 0 ? (
-                  <li className="text-sm text-stone-400">
+                  <li className="text-sm text-stone-500">
                     No bookable services found. Add services in the Services
                     tab first.
                   </li>
@@ -329,15 +303,15 @@ export default function ManualBookingModal({
                           }}
                           className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${
                             active
-                              ? 'border-stone-100 bg-stone-800 ring-1 ring-stone-200/80'
-                              : 'border-stone-700 bg-stone-800/40 hover:border-stone-500 hover:bg-stone-800/70'
+                              ? 'border-stone-300 bg-stone-50'
+                              : 'border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50'
                           }`}
                         >
-                          <span className="block font-serif text-base text-stone-50">
+                          <span className="block font-serif text-base text-stone-900">
                             {service.title}
                           </span>
                           {service.durationMins != null && (
-                            <span className="mt-0.5 block text-xs text-stone-400">
+                            <span className="mt-0.5 block text-xs text-stone-500">
                               {service.durationMins} min
                             </span>
                           )}
@@ -352,14 +326,14 @@ export default function ManualBookingModal({
 
           {step === 2 && (
             <div className="space-y-4">
-              <p className="text-sm text-stone-300">Client details</p>
+              <p className="text-sm text-stone-600">Client details</p>
               <p className="text-xs text-stone-500">
                 Phone is required and identifies the client in your CRM. Email
                 is optional — you can add it later from the client profile.
               </p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
-                  <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
+                  <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
                     First name
                   </span>
                   <input
@@ -371,7 +345,7 @@ export default function ManualBookingModal({
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
+                  <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
                     Last name
                   </span>
                   <input
@@ -384,7 +358,7 @@ export default function ManualBookingModal({
                 </label>
               </div>
               <label className="block">
-                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
+                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
                   Phone
                 </span>
                 <input
@@ -399,18 +373,18 @@ export default function ManualBookingModal({
                   autoComplete="tel"
                   placeholder="(801) 555-1234"
                   aria-invalid={phoneInvalid}
-                  className={`${INPUT_CLASS}${phoneInvalid ? ' border-red-500/80 focus:border-red-400 focus:ring-red-400/30' : ''}`}
+                  className={`${INPUT_CLASS}${phoneInvalid ? ' border-rose-200 focus:border-rose-300 focus:ring-rose-100' : ''}`}
                 />
                 <p className="mt-1.5 text-xs text-stone-500">{CLIENT_PHONE_HINT}</p>
                 {phoneInvalid && (
-                  <p className="mt-1 text-xs text-red-400" role="alert">
+                  <p className="mt-1 text-xs text-rose-600" role="alert">
                     {clientPhoneValidationMessage()}
                   </p>
                 )}
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
-                  Email <span className="normal-case tracking-normal text-stone-500">(optional)</span>
+                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+                  Email <span className="normal-case tracking-normal text-stone-400">(optional)</span>
                 </span>
                 <input
                   type="email"
@@ -443,13 +417,7 @@ export default function ManualBookingModal({
           )}
         </div>
 
-        <footer
-          className={`flex shrink-0 items-center justify-between gap-3 border-t ${
-            isScheduleStep
-              ? 'border-stone-200 bg-[#FAF9F6] px-5 py-3'
-              : 'border-stone-700/80 px-6 py-4'
-          }`}
-        >
+        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-stone-200 bg-[#FAF9F6] px-5 py-3">
           <button
             type="button"
             onClick={() => {
@@ -458,11 +426,7 @@ export default function ManualBookingModal({
               else setStep((s) => (s - 1) as WizardStep);
             }}
             disabled={completing}
-            className={`rounded-full border px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] transition-colors disabled:opacity-50 ${
-              isScheduleStep
-                ? 'border-stone-300 text-stone-600 hover:border-stone-900 hover:text-stone-900'
-                : 'border-stone-600 text-stone-300 hover:border-stone-400 hover:text-stone-100'
-            }`}
+            className={BTN_SECONDARY}
           >
             {step === 1 ? 'Cancel' : 'Back'}
           </button>
@@ -484,7 +448,7 @@ export default function ManualBookingModal({
                 (step === 2 && !canAdvanceFromStep2) ||
                 completing
               }
-              className="inline-flex items-center gap-2 rounded-full border border-stone-100 bg-stone-100 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-900 transition-colors hover:bg-white disabled:opacity-50"
+              className={BTN_PRIMARY}
             >
               Continue
             </button>
@@ -493,7 +457,7 @@ export default function ManualBookingModal({
               type="button"
               onClick={() => void handleBook()}
               disabled={!canBook}
-              className="inline-flex items-center gap-2 rounded-full border border-stone-900 bg-stone-900 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-50 transition-colors hover:bg-stone-800 disabled:opacity-50"
+              className={BTN_PRIMARY}
             >
               {completing ? (
                 <>

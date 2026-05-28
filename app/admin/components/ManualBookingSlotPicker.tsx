@@ -228,7 +228,7 @@ export default function ManualBookingSlotPicker({
             type="button"
             onClick={() => shiftMonth(-1)}
             disabled={monthLoading}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 disabled:opacity-40"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-50 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 disabled:opacity-40"
             aria-label="Previous month"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -238,7 +238,7 @@ export default function ManualBookingSlotPicker({
             type="button"
             onClick={() => shiftMonth(1)}
             disabled={monthLoading}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 disabled:opacity-40"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-50 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 disabled:opacity-40"
             aria-label="Next month"
           >
             <ChevronRight className="h-4 w-4" />
@@ -278,12 +278,12 @@ export default function ManualBookingSlotPicker({
                   type="button"
                   disabled={!isSelectable}
                   onClick={() => pickDate(cell.date)}
-                  className={`flex h-9 w-full items-center justify-center rounded-full text-sm transition-colors ${
+                  className={`flex h-9 w-full items-center justify-center rounded-full border text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 ${
                     isSelected
-                      ? 'bg-stone-900 font-semibold text-stone-50'
+                      ? 'border-stone-300 bg-stone-50 font-medium text-stone-900'
                       : isSelectable
-                        ? 'font-semibold text-stone-900 hover:bg-stone-100'
-                        : 'cursor-default text-stone-300'
+                        ? 'border-transparent font-medium text-stone-900 hover:border-stone-200 hover:bg-stone-50'
+                        : 'cursor-default border-transparent text-stone-300'
                   }`}
                   aria-label={
                     isSelectable
@@ -325,10 +325,10 @@ export default function ManualBookingSlotPicker({
                   key={slot}
                   type="button"
                   onClick={() => onSelectSlot(slot)}
-                  className={`flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2.5 text-sm transition-colors ${
+                  className={`flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 ${
                     active
-                      ? 'border-stone-900 bg-stone-900 text-stone-50'
-                      : 'border-stone-200 bg-stone-50 text-stone-800 hover:border-stone-400 hover:bg-white'
+                      ? 'border-stone-300 bg-stone-50 text-stone-900'
+                      : 'border-stone-200 bg-white text-stone-800 hover:border-stone-300 hover:bg-stone-50'
                   }`}
                 >
                   <span
@@ -346,7 +346,7 @@ export default function ManualBookingSlotPicker({
           <p className="py-6 text-center text-sm text-stone-500">
             {availableDates.length === 0
               ? 'No open days this month — try the next month.'
-              : 'Choose a bold date above to see times.'}
+              : 'Choose an open day above to see times.'}
           </p>
         )}
       </div>
