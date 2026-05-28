@@ -1,9 +1,11 @@
 /**
  * GET /api/cron/sync-reviews
  *
- * Upstash QStash (or manual curl) pulls Google Places reviews into
- * `google_reviews`. Each review is keyed by Google's stable `author_url`
- * so edits (new text, new timestamp) update the same row.
+ * Mirrors Google Places reviews into `google_reviews`:
+ * - Upsert each review by stable `author_url` (edits update the same row)
+ * - Delete DB rows that are no longer returned by Google (e.g. user deleted)
+ *
+ * Google only exposes a small set of recent reviews per place (~5).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -34,6 +36,22 @@ interface GooglePlaceDetailsResponse {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Remove rows not present in the current Places API payload. */
+async function deleteReviewsNotInApi(authorUrls: string[]): Promise<number> {
+  if (authorUrls.length === 0) {
+    const { rowCount } = await sql`DELETE FROM google_reviews`;
+    return rowCount ?? 0;
+  }
+
+  const { rowCount } = await sql.query(
+    `DELETE FROM google_reviews
+     WHERE author_url IS NOT NULL
+       AND NOT (author_url = ANY($1::text[]))`,
+    [authorUrls]
+  );
+  return rowCount ?? 0;
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -100,16 +118,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       typeof r.author_url === 'string' &&
       r.author_url.trim().length > 0
   );
-
-  if (reviews.length === 0) {
-    return NextResponse.json({
-      success: true,
-      addedCount: 0,
-      updatedCount: 0,
-      removedCount: 0,
-      fetchedCount: 0,
-    });
-  }
 
   let addedCount = 0;
   let updatedCount = 0;
@@ -200,17 +208,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    // Tagged `sql` templates only accept Primitive values — use sql.query for arrays.
-    const { rowCount: staleRemoved } = await sql.query(
-      `DELETE FROM google_reviews
-       WHERE author_url IS NOT NULL
-         AND NOT (author_url = ANY($1::text[]))`,
-      [authorUrls]
-    );
-    removedCount += staleRemoved ?? 0;
+    removedCount += await deleteReviewsNotInApi(authorUrls);
   } catch (err) {
     const msg = errorMessage(err);
-    console.error('[api/cron/sync-reviews] cleanup failed', msg);
+    console.error('[api/cron/sync-reviews] stale review removal failed', msg);
     return NextResponse.json(
       { error: 'db_cleanup_failed', message: msg },
       { status: 500 }
@@ -223,5 +224,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     updatedCount,
     removedCount,
     fetchedCount: reviews.length,
+    activeOnGoogle: authorUrls.length,
   });
 }
