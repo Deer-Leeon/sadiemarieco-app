@@ -200,11 +200,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const { rowCount: staleRemoved } = await sql`
-      DELETE FROM google_reviews
-      WHERE author_url IS NOT NULL
-        AND author_url <> ALL(${authorUrls}::text[])
-    `;
+    // Tagged `sql` templates only accept Primitive values — use sql.query for arrays.
+    const { rowCount: staleRemoved } = await sql.query(
+      `DELETE FROM google_reviews
+       WHERE author_url IS NOT NULL
+         AND NOT (author_url = ANY($1::text[]))`,
+      [authorUrls]
+    );
     removedCount += staleRemoved ?? 0;
   } catch (err) {
     const msg = errorMessage(err);
