@@ -11,16 +11,12 @@
   // Clone the phrase group until the track is wider than the viewport so
   // wide screens never show empty strip. Animate by exactly one group width
   // (measured in px) so the loop resets without a gap or snap.
-  function initMarquee() {
-    const track = document.querySelector('.marquee-track');
-    if (!track) return;
-
+  function initMarqueeTrack(track) {
     const template = track.querySelector('.marquee-group');
-    if (!template) return;
-
-    let resizeTimer;
+    if (!template) return null;
 
     function rebuild() {
+      track.classList.remove('marquee-ready');
       track.querySelectorAll('.marquee-group').forEach((group, index) => {
         if (index > 0) group.remove();
       });
@@ -40,15 +36,35 @@
       track.classList.add('marquee-ready');
     }
 
-    rebuild();
-    window.addEventListener('resize', () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(rebuild, 150);
-    });
-    window.addEventListener('load', rebuild);
+    return rebuild;
   }
 
-  initMarquee();
+  function initMarquees() {
+    const tracks = document.querySelectorAll('.marquee-track');
+    if (!tracks.length) return;
+
+    const rebuilders = [];
+    tracks.forEach((track) => {
+      const rebuild = initMarqueeTrack(track);
+      if (rebuild) {
+        rebuild();
+        rebuilders.push(rebuild);
+      }
+    });
+
+    if (!rebuilders.length) return;
+
+    let resizeTimer;
+    const rebuildAll = () => rebuilders.forEach((rebuild) => rebuild());
+
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(rebuildAll, 150);
+    });
+    window.addEventListener('load', rebuildAll);
+  }
+
+  initMarquees();
 
   // ── NAVBAR SCROLL ──
   const navbar = document.getElementById('navbar');

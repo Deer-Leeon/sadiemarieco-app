@@ -2,6 +2,8 @@
  * GET /api/reviews
  *
  * Public read of synced Google reviews (4–5 stars), newest first.
+ * Each item includes `review_time` (ISO 8601) from when the review was
+ * posted on Google, stored at sync time in `google_reviews.review_time`.
  */
 
 import { NextResponse } from 'next/server';
