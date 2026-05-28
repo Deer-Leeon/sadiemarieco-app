@@ -2,7 +2,8 @@
  * GET /api/cron/sync-reviews
  *
  * Upstash QStash (or manual curl) pulls Google Places reviews into
- * `google_reviews`. Dedup: UNIQUE (author_name, review_time).
+ * `google_reviews`. Each review is keyed by Google's stable `author_url`
+ * so edits (new text, new timestamp) update the same row.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -16,6 +17,7 @@ export const revalidate = 0;
 
 interface GooglePlaceReview {
   author_name: string;
+  author_url?: string;
   profile_photo_url?: string;
   rating: number;
   text: string;
@@ -92,55 +94,47 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const reviews = (payload.result?.reviews ?? []).filter(
-    (r) => typeof r.text === 'string' && r.text.trim().length > 0
+    (r) =>
+      typeof r.text === 'string' &&
+      r.text.trim().length > 0 &&
+      typeof r.author_url === 'string' &&
+      r.author_url.trim().length > 0
   );
-
-  // Google bumps `time` when a review is edited, so (author_name, review_time)
-  // alone won't match the old row. Drop DB rows for each author that are no
-  // longer in the current Places payload for that author.
-  const timesByAuthor = new Map<string, string[]>();
-  for (const review of reviews) {
-    const reviewTime = new Date(review.time * 1000);
-    if (Number.isNaN(reviewTime.getTime())) continue;
-    const iso = reviewTime.toISOString();
-    const list = timesByAuthor.get(review.author_name) ?? [];
-    list.push(iso);
-    timesByAuthor.set(review.author_name, list);
-  }
-
-  for (const [authorName, keepTimes] of timesByAuthor) {
-    try {
-      await sql`
-        DELETE FROM google_reviews
-        WHERE author_name = ${authorName}
-          AND review_time::timestamptz <> ALL(${keepTimes}::timestamptz[])
-      `;
-    } catch (err) {
-      const msg = errorMessage(err);
-      console.error('[api/cron/sync-reviews] stale review prune failed', {
-        author_name: authorName,
-        error: msg,
-      });
-      return NextResponse.json(
-        { error: 'db_prune_failed', message: msg },
-        { status: 500 }
-      );
-    }
-  }
 
   if (reviews.length === 0) {
     return NextResponse.json({
       success: true,
       addedCount: 0,
       updatedCount: 0,
+      removedCount: 0,
       fetchedCount: 0,
     });
   }
 
   let addedCount = 0;
   let updatedCount = 0;
+  let removedCount = 0;
+  const authorUrls: string[] = [];
+
+  try {
+    const { rowCount: legacyRemoved } = await sql`
+      DELETE FROM google_reviews
+      WHERE author_url IS NULL
+    `;
+    removedCount += legacyRemoved ?? 0;
+  } catch (err) {
+    const msg = errorMessage(err);
+    console.error('[api/cron/sync-reviews] legacy cleanup failed', msg);
+    return NextResponse.json(
+      { error: 'db_cleanup_failed', message: msg },
+      { status: 500 }
+    );
+  }
 
   for (const review of reviews) {
+    const authorUrl = review.author_url!.trim();
+    authorUrls.push(authorUrl);
+
     const reviewTime = new Date(review.time * 1000);
     if (Number.isNaN(reviewTime.getTime())) {
       console.warn('[api/cron/sync-reviews] skipping review with invalid time', {
@@ -154,6 +148,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const { rows } = await sql<{ inserted: boolean }>`
         INSERT INTO google_reviews (
           author_name,
+          author_url,
           profile_photo_url,
           rating,
           review_text,
@@ -161,15 +156,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         )
         VALUES (
           ${review.author_name},
+          ${authorUrl},
           ${review.profile_photo_url ?? null},
           ${review.rating},
           ${review.text.trim()},
           ${reviewTime.toISOString()}::timestamptz
         )
-        ON CONFLICT (author_name, review_time) DO UPDATE SET
+        ON CONFLICT (author_url) DO UPDATE SET
+          author_name = EXCLUDED.author_name,
           profile_photo_url = EXCLUDED.profile_photo_url,
           rating = EXCLUDED.rating,
-          review_text = EXCLUDED.review_text
+          review_text = EXCLUDED.review_text,
+          review_time = EXCLUDED.review_time
         RETURNING (xmax = 0) AS inserted
       `;
       const row = rows[0];
@@ -181,21 +179,47 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     } catch (err) {
       const msg = errorMessage(err);
-      console.error('[api/cron/sync-reviews] insert failed', {
+      if (msg.includes('author_url') && msg.includes('does not exist')) {
+        console.error(
+          '[api/cron/sync-reviews] author_url column missing — run scripts/run-google-reviews-author-url-migration.mjs'
+        );
+        return NextResponse.json(
+          { error: 'db_schema_outdated', message: msg },
+          { status: 500 }
+        );
+      }
+      console.error('[api/cron/sync-reviews] upsert failed', {
         author_name: review.author_name,
         error: msg,
       });
       return NextResponse.json(
-        { error: 'db_insert_failed', message: msg },
+        { error: 'db_upsert_failed', message: msg },
         { status: 500 }
       );
     }
+  }
+
+  try {
+    const { rowCount: staleRemoved } = await sql`
+      DELETE FROM google_reviews
+      WHERE author_url IS NOT NULL
+        AND author_url <> ALL(${authorUrls}::text[])
+    `;
+    removedCount += staleRemoved ?? 0;
+  } catch (err) {
+    const msg = errorMessage(err);
+    console.error('[api/cron/sync-reviews] cleanup failed', msg);
+    return NextResponse.json(
+      { error: 'db_cleanup_failed', message: msg },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({
     success: true,
     addedCount,
     updatedCount,
+    removedCount,
     fetchedCount: reviews.length,
   });
 }
