@@ -3,10 +3,12 @@
 import { useEffect, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 
-import ManualBookingCalSchedule, {
-  ManualBookingCompletingOverlay,
-} from './ManualBookingCalSchedule';
+import ManualBookingSlotPicker from './ManualBookingSlotPicker';
 import type { ManualBookingServiceOption } from './manual-booking-utils';
+import {
+  extractCalBookingFromResponse,
+  slotToStudioLocalStart,
+} from './manual-booking-utils';
 
 type WizardStep = 1 | 2 | 3;
 
@@ -21,6 +23,16 @@ const INPUT_CLASS =
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+function ManualBookingCompletingOverlay() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+      <Loader2 className="h-7 w-7 animate-spin text-stone-400" />
+      <p className="font-serif text-lg text-stone-900">Saving appointment…</p>
+      <p className="text-sm text-stone-500">Updating Cal.com and your calendar</p>
+    </div>
+  );
+}
+
 export default function ManualBookingModal({
   services,
   onClose,
@@ -32,6 +44,7 @@ export default function ManualBookingModal({
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientPhone, setClientPhone] = useState('');
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,42 +64,97 @@ export default function ManualBookingModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, completing]);
 
-  async function handleCalScheduled(data: {
-    calBookingUid: string;
-    startTime: string;
-    endTime: string | null;
-  }) {
-    if (!selectedService) return;
+  useEffect(() => {
+    if (step !== 3) {
+      setSelectedSlot(null);
+    }
+  }, [step]);
+
+  async function handleBook() {
+    if (!selectedService || !selectedSlot) return;
 
     setCompleting(true);
     setError(null);
 
+    let start: string;
     try {
-      const res = await fetch('/api/admin/manual-booking/complete', {
+      start = slotToStudioLocalStart(selectedSlot);
+    } catch {
+      setError('Selected time is invalid. Please pick another slot.');
+      setCompleting(false);
+      return;
+    }
+
+    const trimmedName = clientName.trim();
+    const trimmedEmail = clientEmail.trim();
+    const trimmedPhone = clientPhone.trim();
+
+    try {
+      const createRes = await fetch('/api/admin/manual-booking/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          calBookingUid: data.calBookingUid,
-          clientName: clientName.trim(),
-          clientEmail: clientEmail.trim(),
-          clientPhone: clientPhone.trim(),
-          serviceName: selectedService.title,
-          bookingTime: data.startTime,
-          endTime: data.endTime,
+          eventTypeId: selectedService.eventTypeId,
+          start,
+          clientName: trimmedName,
+          clientEmail: trimmedEmail,
+          clientPhone: trimmedPhone,
         }),
       });
 
-      const payload: unknown = await res.json().catch(() => null);
+      const createPayload: unknown = await createRes.json().catch(() => null);
 
-      if (!res.ok) {
+      if (!createRes.ok) {
         const message =
-          payload &&
-          typeof payload === 'object' &&
-          'message' in payload &&
-          typeof (payload as { message: unknown }).message === 'string'
-            ? (payload as { message: string }).message
-            : `Booking failed (HTTP ${res.status})`;
+          createPayload &&
+          typeof createPayload === 'object' &&
+          'message' in createPayload &&
+          typeof (createPayload as { message: unknown }).message === 'string'
+            ? (createPayload as { message: string }).message
+            : `Booking failed (HTTP ${createRes.status})`;
         setError(`Booking failed: ${message}`);
+        setCompleting(false);
+        return;
+      }
+
+      const { uid, startTime, endTime } =
+        extractCalBookingFromResponse(createPayload);
+
+      if (!uid) {
+        setError(
+          'Cal.com did not return a booking reference. Try another time or reload.'
+        );
+        setCompleting(false);
+        return;
+      }
+
+      const completeRes = await fetch('/api/admin/manual-booking/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          calBookingUid: uid,
+          clientName: trimmedName,
+          clientEmail: trimmedEmail,
+          clientPhone: trimmedPhone,
+          serviceName: selectedService.title,
+          bookingTime: startTime ?? selectedSlot,
+          endTime,
+        }),
+      });
+
+      const completePayload: unknown = await completeRes.json().catch(() => null);
+
+      if (!completeRes.ok) {
+        const message =
+          completePayload &&
+          typeof completePayload === 'object' &&
+          'message' in completePayload &&
+          typeof (completePayload as { message: unknown }).message === 'string'
+            ? (completePayload as { message: string }).message
+            : `Could not save locally (HTTP ${completeRes.status})`;
+        setError(
+          `Booked on Cal.com (${uid}) but dashboard sync failed: ${message}`
+        );
         setCompleting(false);
         return;
       }
@@ -105,6 +173,7 @@ export default function ManualBookingModal({
     clientName.trim().length > 0 &&
     EMAIL_RE.test(clientEmail.trim()) &&
     clientPhone.trim().length > 0;
+  const canBook = selectedSlot !== null && !completing;
 
   const isScheduleStep = step === 3;
   const modalWidth = isScheduleStep ? 'max-w-[460px]' : 'max-w-lg';
@@ -120,7 +189,7 @@ export default function ManualBookingModal({
           isScheduleStep
             ? 'border border-stone-200 bg-[#FAF9F6] text-stone-900'
             : 'border border-stone-200/90 bg-stone-900/95 text-stone-50 shadow-stone-950/40'
-        } ${isScheduleStep ? '' : 'max-h-[min(88vh,640px)]'}`}
+        } ${isScheduleStep ? 'max-h-[min(92vh,680px)]' : 'max-h-[min(88vh,640px)]'}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -181,7 +250,7 @@ export default function ManualBookingModal({
         <div
           className={
             isScheduleStep
-              ? 'shrink-0 px-4 py-3'
+              ? 'min-h-0 flex-1 overflow-y-auto px-4 py-3'
               : 'flex-1 overflow-y-auto px-6 py-5'
           }
         >
@@ -245,8 +314,8 @@ export default function ManualBookingModal({
             <div className="space-y-4">
               <p className="text-sm text-stone-300">Client details</p>
               <p className="text-xs text-stone-500">
-                Next you&apos;ll pick an open slot in Cal.com — these details
-                are sent to Cal when you confirm the time.
+                Enter these once — step 3 is only picking a date and time from
+                Cal.com availability.
               </p>
               <label className="block">
                 <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
@@ -292,13 +361,11 @@ export default function ManualBookingModal({
               {completing ? (
                 <ManualBookingCompletingOverlay />
               ) : (
-                <ManualBookingCalSchedule
-                  serviceSlug={selectedService.slug}
+                <ManualBookingSlotPicker
+                  eventTypeId={selectedService.eventTypeId}
                   clientName={clientName.trim()}
-                  clientEmail={clientEmail.trim()}
-                  clientPhone={clientPhone.trim()}
-                  onScheduled={(data) => void handleCalScheduled(data)}
-                  onError={setError}
+                  selectedSlot={selectedSlot}
+                  onSelectSlot={setSelectedSlot}
                 />
               )}
             </>
@@ -346,13 +413,21 @@ export default function ManualBookingModal({
               Continue
             </button>
           ) : (
-            <p
-              className={`text-xs ${
-                isScheduleStep ? 'text-stone-500' : 'text-stone-400'
-              }`}
+            <button
+              type="button"
+              onClick={() => void handleBook()}
+              disabled={!canBook}
+              className="inline-flex items-center gap-2 rounded-full border border-stone-900 bg-stone-900 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-50 transition-colors hover:bg-stone-800 disabled:opacity-50"
             >
-              Confirm in Cal · no checkout
-            </p>
+              {completing ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Booking…
+                </>
+              ) : (
+                'Book appointment'
+              )}
+            </button>
           )}
         </footer>
       </div>

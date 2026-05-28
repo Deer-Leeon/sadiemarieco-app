@@ -76,3 +76,35 @@ export function todayInStudio(): string {
     timeZone: STUDIO_TIMEZONE,
   }).format(new Date());
 }
+
+/** Parse Cal v2 create-booking JSON for uid and times. */
+export function extractCalBookingFromResponse(payload: unknown): {
+  uid: string | null;
+  startTime: string | null;
+  endTime: string | null;
+} {
+  if (!payload || typeof payload !== 'object') {
+    return { uid: null, startTime: null, endTime: null };
+  }
+
+  const root = payload as Record<string, unknown>;
+  const booking =
+    root.data && typeof root.data === 'object'
+      ? (root.data as Record<string, unknown>)
+      : root.booking && typeof root.booking === 'object'
+        ? (root.booking as Record<string, unknown>)
+        : root;
+
+  const asString = (v: unknown): string | null =>
+    typeof v === 'string' && v.length > 0 ? v : null;
+
+  return {
+    uid: asString(booking.uid),
+    startTime:
+      asString(booking.startTime) ??
+      asString(booking.start) ??
+      null,
+    endTime:
+      asString(booking.endTime) ?? asString(booking.end) ?? null,
+  };
+}
