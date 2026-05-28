@@ -1,0 +1,283 @@
+/**
+ * POST /api/admin/manual-booking/complete
+ *
+ * After the admin picks a slot in the Cal.com embed (step 3), confirm the
+ * booking upstream and upsert the local appointments row — no Stripe checkout.
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { sql } from '@vercel/postgres';
+
+import { getCalComApiKey } from '@/lib/cal-config';
+import {
+  CAL_BOOKINGS_API_VERSION,
+  CAL_V2_BASE,
+  confirmCalV2Booking,
+  errorMessage,
+  gateAdmin,
+} from '@/lib/cal-proxy';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+interface CompleteBody {
+  calBookingUid?: unknown;
+  clientName?: unknown;
+  clientEmail?: unknown;
+  clientPhone?: unknown;
+  serviceName?: unknown;
+  bookingTime?: unknown;
+  endTime?: unknown;
+}
+
+function splitName(fullName: string): { first: string; last: string } {
+  const parts = fullName.trim().split(/\s+/);
+  return { first: parts[0] || '', last: parts.slice(1).join(' ') || '' };
+}
+
+function parseBody(input: unknown):
+  | {
+      calBookingUid: string;
+      clientName: string;
+      clientEmail: string;
+      clientPhone: string;
+      serviceName: string;
+      bookingTime: string | null;
+      endTime: string | null;
+    }
+  | { error: string; message: string } {
+  if (!input || typeof input !== 'object') {
+    return { error: 'invalid_body', message: 'Request body must be a JSON object' };
+  }
+  const body = input as CompleteBody;
+
+  const calBookingUid =
+    typeof body.calBookingUid === 'string' ? body.calBookingUid.trim() : '';
+  const clientName =
+    typeof body.clientName === 'string' ? body.clientName.trim() : '';
+  const clientEmail =
+    typeof body.clientEmail === 'string' ? body.clientEmail.trim() : '';
+  const clientPhone =
+    typeof body.clientPhone === 'string' ? body.clientPhone.trim() : '';
+  const serviceName =
+    typeof body.serviceName === 'string' ? body.serviceName.trim() : '';
+  const bookingTime =
+    typeof body.bookingTime === 'string' ? body.bookingTime.trim() : null;
+  const endTime = typeof body.endTime === 'string' ? body.endTime.trim() : null;
+
+  if (!calBookingUid) {
+    return { error: 'invalid_cal_booking_uid', message: 'calBookingUid is required' };
+  }
+  if (!clientName) {
+    return { error: 'invalid_client_name', message: 'clientName is required' };
+  }
+  if (!clientEmail || !EMAIL_RE.test(clientEmail)) {
+    return {
+      error: 'invalid_client_email',
+      message: 'clientEmail must be a valid email address',
+    };
+  }
+  if (!clientPhone) {
+    return { error: 'invalid_client_phone', message: 'clientPhone is required' };
+  }
+
+  return {
+    calBookingUid,
+    clientName,
+    clientEmail,
+    clientPhone,
+    serviceName: serviceName || 'appointment',
+    bookingTime,
+    endTime,
+  };
+}
+
+async function hydrateTimesFromCal(
+  uid: string,
+  bookingTime: string | null,
+  endTime: string | null,
+  serviceName: string
+): Promise<{ bookingTime: string | null; endTime: string | null; serviceName: string }> {
+  if (bookingTime) {
+    return { bookingTime, endTime, serviceName };
+  }
+
+  const apiKey = getCalComApiKey();
+  if (!apiKey) return { bookingTime, endTime, serviceName };
+
+  try {
+    const res = await fetch(`${CAL_V2_BASE}/bookings/${encodeURIComponent(uid)}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'cal-api-version': CAL_BOOKINGS_API_VERSION,
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+    });
+    if (!res.ok) return { bookingTime, endTime, serviceName };
+
+    const payload: unknown = await res.json().catch(() => null);
+    const booking =
+      payload && typeof payload === 'object' && 'data' in payload
+        ? (payload as { data: Record<string, unknown> }).data
+        : (payload as Record<string, unknown> | null);
+
+    if (!booking || typeof booking !== 'object') {
+      return { bookingTime, endTime, serviceName };
+    }
+
+    const start =
+      typeof booking.start === 'string'
+        ? booking.start
+        : typeof booking.startTime === 'string'
+          ? booking.startTime
+          : null;
+    const end =
+      typeof booking.end === 'string'
+        ? booking.end
+        : typeof booking.endTime === 'string'
+          ? booking.endTime
+          : null;
+    const title =
+      typeof booking.title === 'string' ? booking.title.trim() : serviceName;
+
+    return {
+      bookingTime: start,
+      endTime: end,
+      serviceName: title || serviceName,
+    };
+  } catch (err) {
+    console.warn('[api/admin/manual-booking/complete] Cal hydrate failed', {
+      uid,
+      error: errorMessage(err),
+    });
+    return { bookingTime, endTime, serviceName };
+  }
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const gate = await gateAdmin();
+  if (gate) return gate;
+
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return NextResponse.json(
+      { error: 'invalid_json', message: 'Request body must be valid JSON' },
+      { status: 400 }
+    );
+  }
+
+  const parsed = parseBody(raw);
+  if ('error' in parsed) {
+    return NextResponse.json(
+      { error: parsed.error, message: parsed.message },
+      { status: 400 }
+    );
+  }
+
+  const confirmError = await confirmCalV2Booking(parsed.calBookingUid);
+  if (confirmError) {
+    console.warn('[api/admin/manual-booking/complete] confirm failed', {
+      uid: parsed.calBookingUid,
+      confirmError,
+    });
+  }
+
+  const hydrated = await hydrateTimesFromCal(
+    parsed.calBookingUid,
+    parsed.bookingTime,
+    parsed.endTime,
+    parsed.serviceName
+  );
+
+  if (!hydrated.bookingTime) {
+    return NextResponse.json(
+      {
+        error: 'missing_booking_time',
+        message: 'Could not determine the appointment time from Cal.com.',
+      },
+      { status: 400 }
+    );
+  }
+
+  const { first, last } = splitName(parsed.clientName);
+  const normPhone = parsed.clientPhone.replace(/\D/g, '') || null;
+
+  let clientId: string;
+  try {
+    const { rows } = await sql<{ id: string }>`
+      INSERT INTO clients (first_name, last_name, email, phone)
+      VALUES (
+        ${first},
+        ${last},
+        ${parsed.clientEmail},
+        CASE
+          WHEN ${normPhone}::text IS NULL THEN NULL
+          WHEN EXISTS (SELECT 1 FROM clients WHERE phone = ${normPhone}) THEN NULL
+          ELSE ${normPhone}
+        END
+      )
+      ON CONFLICT (email) DO UPDATE SET
+        first_name = EXCLUDED.first_name,
+        last_name = EXCLUDED.last_name,
+        phone = COALESCE(clients.phone, EXCLUDED.phone)
+      RETURNING id
+    `;
+    const id = rows[0]?.id;
+    if (!id) {
+      return NextResponse.json(
+        { error: 'client_upsert_failed', message: 'Could not save client' },
+        { status: 500 }
+      );
+    }
+    clientId = id;
+  } catch (err) {
+    return NextResponse.json(
+      { error: 'client_upsert_failed', message: errorMessage(err) },
+      { status: 500 }
+    );
+  }
+
+  try {
+    await sql`
+      INSERT INTO appointments (
+        client_id, service_name, booking_time, end_time, cal_event_id,
+        client_first_name, client_last_name, client_email, client_phone,
+        status
+      )
+      VALUES (
+        ${clientId}, ${hydrated.serviceName}, ${hydrated.bookingTime},
+        ${hydrated.endTime}, ${parsed.calBookingUid},
+        ${first}, ${last}, ${parsed.clientEmail}, ${parsed.clientPhone},
+        'confirmed'
+      )
+      ON CONFLICT (cal_event_id) DO UPDATE SET
+        client_id = EXCLUDED.client_id,
+        service_name = EXCLUDED.service_name,
+        booking_time = EXCLUDED.booking_time,
+        end_time = EXCLUDED.end_time,
+        client_first_name = EXCLUDED.client_first_name,
+        client_last_name = EXCLUDED.client_last_name,
+        client_email = EXCLUDED.client_email,
+        client_phone = EXCLUDED.client_phone,
+        status = 'confirmed'
+    `;
+
+    return NextResponse.json({
+      ok: true,
+      calBookingUid: parsed.calBookingUid,
+      status: 'confirmed',
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: 'appointment_upsert_failed', message: errorMessage(err) },
+      { status: 500 }
+    );
+  }
+}

@@ -23,6 +23,11 @@ import {
   isSameAppointmentSlot,
   rescheduleSameSlotNotice,
 } from '@/lib/appointment-slot';
+import {
+  ADMIN_CAL_UI_CONFIG,
+  CAL_USERNAME,
+  extractBookingDataFromEvent,
+} from '@/lib/cal-embed-shared';
 
 import type { Appointment, AppointmentStatus } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
@@ -33,20 +38,6 @@ import ClientProfileModal from './ClientProfileModal';
 // so the event listener attaches to the same iframe instance. Kept as
 // a module-level constant to guarantee both call sites always agree.
 const CAL_RESCHEDULE_NAMESPACE = 'reschedule';
-
-/**
- * Cal.com account handle. MUST stay in sync with the homonymous
- * constant in `app/route.ts` (the public site uses the same value to
- * build `data-cal-link` attributes for the services menu). If the
- * studio migrates Cal accounts again, both files need updating.
- *
- * Why we don't share via import: `app/route.ts` is a Node-runtime
- * route handler and this file is a client component — pulling the
- * constant through a shared module isn't free here (would need a
- * dedicated lib file just for one string), so we accept the small
- * duplication and lean on the cross-reference comment.
- */
-const CAL_USERNAME = 'mckenna-sadiemarie';
 
 interface Props {
   appointment: Appointment;
@@ -740,80 +731,6 @@ type RescheduleEmbedMode = 'reschedule' | 'new_slot';
 type ReschedulePhase = 'embed' | 'error' | 'completing';
 
 /**
- * Cal embed UI theme tuned for the admin's cream/stone palette.
- *
- * Mirrors the structure of `window.calUiConfig` in `public/index.html`
- * (the public site's Cal embed branding) so the reschedule iframe
- * looks like it belongs inside our app instead of dropping a stark
- * dark Cal panel into the middle of the modal.
- *
- * Variable glossary (Cal's docs are sparse — these are what actually
- * paint the booker UI):
- *   • cal-brand*           accent + primary button background
- *   • cal-bg*              page / surface backgrounds
- *   • cal-border*          card outlines and dividers
- *   • cal-text*            type colours
- *
- * `cal-bg` is intentionally transparent so the embed inherits our
- * modal's cream surface; everything else uses subtle alpha-on-stone
- * values so disabled days, hover states, and selection chips read
- * the same density as the rest of the dashboard's neutral palette.
- */
-/*
- * Why `dark` mirrors `light`:
- * Cal's `UiConfig.cssVarsPerTheme` is typed as `Record<Theme, ...>`
- * where `Theme = 'dark' | 'light'`, so both keys are required at
- * build time even though we hard-pin `theme: 'light'` above and the
- * `dark` vars are dead code in practice. We mirror the same stone /
- * cream palette into `dark` so the modal stays on-brand if Cal ever
- * resolves a different theme (e.g. user OS dark-mode bleeding into
- * an `auto` resolution after a future config tweak). Keeping the
- * two blocks identical avoids a second palette to maintain.
- */
-const ADMIN_CAL_LIGHT_VARS = {
-  'cal-brand': '#1c1917', // stone-900
-  'cal-brand-emphasis': '#292524', // stone-800
-  'cal-brand-text': '#FAF9F6', // cream
-  'cal-brand-subtle': 'rgba(28, 25, 23, 0.08)',
-  'cal-brand-accent': '#44403c', // stone-700
-
-  'cal-bg': 'transparent',
-  'cal-bg-emphasis': 'rgba(28, 25, 23, 0.08)',
-  'cal-bg-muted': 'rgba(28, 25, 23, 0.04)',
-  'cal-bg-subtle': 'rgba(28, 25, 23, 0.03)',
-  'cal-bg-inverted': '#1c1917',
-  'cal-bg-info': 'rgba(28, 25, 23, 0.06)',
-  'cal-bg-success': 'rgba(28, 25, 23, 0.06)',
-  'cal-bg-attention': 'rgba(180, 83, 9, 0.08)',
-  'cal-bg-error': 'rgba(159, 18, 57, 0.08)',
-  'cal-bg-dark-error': 'rgba(159, 18, 57, 0.18)',
-
-  'cal-border': 'rgba(28, 25, 23, 0.16)',
-  'cal-border-emphasis': 'rgba(28, 25, 23, 0.42)',
-  'cal-border-subtle': 'rgba(28, 25, 23, 0.08)',
-  'cal-border-booker': 'transparent',
-  'cal-border-error': 'rgba(159, 18, 57, 0.32)',
-
-  'cal-text': '#1c1917', // stone-900
-  'cal-text-emphasis': '#0c0a09', // stone-950
-  'cal-text-subtle': '#57534e', // stone-600
-  'cal-text-muted': '#78716c', // stone-500
-  'cal-text-inverted': '#FAF9F6',
-  'cal-text-error': '#9f1239',
-} as const;
-
-const ADMIN_CAL_UI_CONFIG = {
-  theme: 'light' as const,
-  styles: { branding: { brandColor: '#292524' /* stone-800 */ } },
-  hideEventTypeDetails: false,
-  layout: 'month_view' as const,
-  cssVarsPerTheme: {
-    light: ADMIN_CAL_LIGHT_VARS,
-    dark: ADMIN_CAL_LIGHT_VARS,
-  },
-};
-
-/**
  * Build the calLink string the same way our public manage portal does
  * (`public/js/manage.js`): put `rescheduleUid` in the URL query string,
  * not in the React `config` prop — Cal's embed reliably reads it there.
@@ -1256,67 +1173,3 @@ function formatPrice(price: number): string {
   return price.toFixed(2);
 }
 
-interface ExtractedBookingData {
-  uid: string | null;
-  startTime: string | null;
-  endTime: string | null;
-}
-
-/**
- * Pull `uid`, `startTime`, `endTime` out of a Cal embed event detail
- * regardless of which event version fired.
- *
- * Shape variance we have to handle:
- *   • V2 events (`bookingSuccessfulV2`, `rescheduleBookingSuccessfulV2`)
- *     put the fields flat on `detail.data`.
- *   • V1 events (`bookingSuccessful`, `rescheduleBookingSuccessful`)
- *     nest them inside `detail.data.booking`. The shape of `booking`
- *     varies across Cal builds — uid is usually present at the top
- *     level, start/end may live under `startTime`/`endTime` or
- *     under a `start`/`end` alias.
- *
- * Everything is best-effort: callers must handle the null-fields
- * case (in which we fall back to a plain `router.refresh()` and let
- * the webhook reconcile state).
- */
-function extractBookingDataFromEvent(event: unknown): ExtractedBookingData {
-  const fallback: ExtractedBookingData = {
-    uid: null,
-    startTime: null,
-    endTime: null,
-  };
-  if (!event || typeof event !== 'object') return fallback;
-  const detail = (event as { detail?: unknown }).detail;
-  if (!detail || typeof detail !== 'object') return fallback;
-  const data = (detail as { data?: unknown }).data;
-  if (!data || typeof data !== 'object') return fallback;
-
-  const asString = (v: unknown): string | null =>
-    typeof v === 'string' && v.length > 0 ? v : null;
-
-  const flat = data as Record<string, unknown>;
-  const directUid = asString(flat.uid);
-  const directStart = asString(flat.startTime) ?? asString(flat.start);
-  const directEnd = asString(flat.endTime) ?? asString(flat.end);
-
-  if (directUid || directStart || directEnd) {
-    return {
-      uid: directUid,
-      startTime: directStart,
-      endTime: directEnd,
-    };
-  }
-
-  // V1 nested shape — `data.booking` is the booking object.
-  const booking = flat.booking;
-  if (booking && typeof booking === 'object') {
-    const b = booking as Record<string, unknown>;
-    return {
-      uid: asString(b.uid),
-      startTime: asString(b.startTime) ?? asString(b.start),
-      endTime: asString(b.endTime) ?? asString(b.end),
-    };
-  }
-
-  return fallback;
-}
