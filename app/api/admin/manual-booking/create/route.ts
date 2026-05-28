@@ -13,7 +13,8 @@ import {
 } from '@/lib/cal-timezone';
 import {
   calAttendeeEmailForBooking,
-  normaliseClientPhone,
+  clientPhoneValidationMessage,
+  parseClientPhone,
   parseOptionalClientEmail,
 } from '@/lib/client-identity';
 import {
@@ -51,6 +52,7 @@ function parseCreateBody(input: unknown):
       clientName: string;
       clientEmail: string | null;
       clientPhone: string;
+      clientPhoneE164: string;
     }
   | { error: string; message: string } {
   if (!input || typeof input !== 'object') {
@@ -73,7 +75,7 @@ function parseCreateBody(input: unknown):
   const clientNameFromBody =
     typeof body.clientName === 'string' ? body.clientName.trim() : '';
   const clientEmail = parseOptionalClientEmail(body.clientEmail);
-  const clientPhone = normaliseClientPhone(body.clientPhone);
+  const parsedPhone = parseClientPhone(body.clientPhone);
 
   let clientFirst = clientFirstName;
   let clientLast = clientLastName;
@@ -120,10 +122,10 @@ function parseCreateBody(input: unknown):
       message: 'clientEmail must be a valid email address when provided',
     };
   }
-  if (!clientPhone || clientPhone.length > 40) {
+  if (!parsedPhone) {
     return {
       error: 'invalid_client_phone',
-      message: 'clientPhone is required',
+      message: clientPhoneValidationMessage(),
     };
   }
 
@@ -134,7 +136,8 @@ function parseCreateBody(input: unknown):
     clientLastName: clientLast,
     clientName,
     clientEmail,
-    clientPhone,
+    clientPhone: parsedPhone.digits,
+    clientPhoneE164: parsedPhone.e164,
   };
 }
 
@@ -198,7 +201,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     attendee: {
       name: parsed.clientName,
       email: calAttendeeEmailForBooking(parsed.clientPhone, parsed.clientEmail),
-      phoneNumber: parsed.clientPhone,
+      phoneNumber: parsed.clientPhoneE164,
       timeZone: STUDIO_TIMEZONE,
     },
     bookingFieldsResponses: {
@@ -206,7 +209,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         firstName: parsed.clientFirstName,
         lastName: parsed.clientLastName,
       },
-      attendeePhoneNumber: parsed.clientPhone,
+      attendeePhoneNumber: parsed.clientPhoneE164,
     },
     metadata: {
       manual_admin_booking: 'true',

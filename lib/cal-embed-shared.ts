@@ -2,6 +2,8 @@
  * Shared Cal.com embed constants and event parsing for admin + public flows.
  */
 
+import { parseClientPhone } from '@/lib/client-identity';
+
 /** Must match `app/route.ts` and `AppointmentModal.tsx`. */
 export const CAL_USERNAME = 'mckenna-sadiemarie';
 
@@ -145,9 +147,10 @@ export interface ExtractedBookingData {
 
 /** Prefill phone when the event type uses "Attendee Phone" as a location. */
 export function calEmbedPhoneLocation(phone: string): string {
+  const e164 = parseClientPhone(phone)?.e164 ?? phone;
   return JSON.stringify({
     value: 'phone',
-    optionValue: phone,
+    optionValue: e164,
   });
 }
 

@@ -10,7 +10,8 @@ import { sql } from '@vercel/postgres';
 
 import { getCalComApiKey } from '@/lib/cal-config';
 import {
-  normaliseClientPhone,
+  clientPhoneValidationMessage,
+  parseClientPhone,
   parseOptionalClientEmail,
 } from '@/lib/client-identity';
 import {
@@ -61,7 +62,7 @@ function parseBody(input: unknown):
   const clientName =
     typeof body.clientName === 'string' ? body.clientName.trim() : '';
   const clientEmail = parseOptionalClientEmail(body.clientEmail);
-  const clientPhone = normaliseClientPhone(body.clientPhone);
+  const parsedPhone = parseClientPhone(body.clientPhone);
   const serviceName =
     typeof body.serviceName === 'string' ? body.serviceName.trim() : '';
   const bookingTime =
@@ -86,10 +87,10 @@ function parseBody(input: unknown):
       message: 'clientEmail must be a valid email address when provided',
     };
   }
-  if (!clientPhone) {
+  if (!parsedPhone) {
     return {
       error: 'invalid_client_phone',
-      message: 'clientPhone is required (phone is the client identifier)',
+      message: clientPhoneValidationMessage(),
     };
   }
 
@@ -97,7 +98,7 @@ function parseBody(input: unknown):
     calBookingUid,
     clientName,
     clientEmail,
-    clientPhone,
+    clientPhone: parsedPhone.digits,
     serviceName: serviceName || 'appointment',
     bookingTime,
     endTime,

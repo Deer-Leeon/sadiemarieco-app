@@ -6,6 +6,13 @@ import { Loader2, X } from 'lucide-react';
 import ManualBookingSlotPicker from './ManualBookingSlotPicker';
 import type { ManualBookingServiceOption } from './manual-booking-utils';
 import {
+  CLIENT_PHONE_HINT,
+  clientPhoneValidationMessage,
+  formatPhoneInputDisplay,
+  parseClientPhone,
+} from '@/lib/client-identity';
+
+import {
   extractCalBookingFromResponse,
   joinFullName,
   slotToStudioLocalStart,
@@ -52,6 +59,7 @@ export default function ManualBookingModal({
   const [clientLastName, setClientLastName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientPhone, setClientPhone] = useState('');
+  const [phoneTouched, setPhoneTouched] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,7 +110,13 @@ export default function ManualBookingModal({
       setCompleting(false);
       return;
     }
-    const trimmedPhone = clientPhone.trim();
+    const parsedPhone = parseClientPhone(clientPhone);
+    if (!parsedPhone) {
+      setPhoneTouched(true);
+      setError(clientPhoneValidationMessage());
+      setCompleting(false);
+      return;
+    }
 
     try {
       const createRes = await fetch('/api/admin/manual-booking/create', {
@@ -115,7 +129,7 @@ export default function ManualBookingModal({
           clientLastName: trimmedLast,
           clientName: trimmedName,
           clientEmail: trimmedEmail,
-          clientPhone: trimmedPhone,
+          clientPhone: parsedPhone.digits,
         }),
       });
 
@@ -152,7 +166,7 @@ export default function ManualBookingModal({
           calBookingUid: uid,
           clientName: trimmedName,
           clientEmail: trimmedEmail,
-          clientPhone: trimmedPhone,
+          clientPhone: parsedPhone.digits,
           serviceName: selectedService.title,
           bookingTime: startTime ?? selectedSlot,
           endTime,
@@ -185,12 +199,20 @@ export default function ManualBookingModal({
     }
   }
 
+  const parsedClientPhone = parseClientPhone(clientPhone);
+  const phoneInvalid = phoneTouched && clientPhone.trim().length > 0 && !parsedClientPhone;
+
   const canAdvanceFromStep1 = selectedService !== null;
   const canAdvanceFromStep2 =
     clientFirstName.trim().length > 0 &&
     clientLastName.trim().length > 0 &&
-    clientPhone.replace(/\D/g, '').length > 0 &&
+    parsedClientPhone !== null &&
     (clientEmail.trim().length === 0 || EMAIL_RE.test(clientEmail.trim()));
+
+  function formatPhoneField() {
+    const formatted = formatPhoneInputDisplay(clientPhone);
+    if (formatted !== clientPhone.trim()) setClientPhone(formatted);
+  }
   const canBook = selectedSlot !== null && !completing;
 
   const isScheduleStep = step === 3;
@@ -367,11 +389,24 @@ export default function ManualBookingModal({
                 </span>
                 <input
                   type="tel"
+                  inputMode="tel"
                   value={clientPhone}
                   onChange={(e) => setClientPhone(e.target.value)}
+                  onBlur={() => {
+                    setPhoneTouched(true);
+                    formatPhoneField();
+                  }}
                   autoComplete="tel"
-                  className={INPUT_CLASS}
+                  placeholder="(801) 555-1234"
+                  aria-invalid={phoneInvalid}
+                  className={`${INPUT_CLASS}${phoneInvalid ? ' border-red-500/80 focus:border-red-400 focus:ring-red-400/30' : ''}`}
                 />
+                <p className="mt-1.5 text-xs text-stone-500">{CLIENT_PHONE_HINT}</p>
+                {phoneInvalid && (
+                  <p className="mt-1 text-xs text-red-400" role="alert">
+                    {clientPhoneValidationMessage()}
+                  </p>
+                )}
               </label>
               <label className="block">
                 <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
@@ -437,6 +472,11 @@ export default function ManualBookingModal({
               type="button"
               onClick={() => {
                 setError(null);
+                if (step === 2) {
+                  setPhoneTouched(true);
+                  formatPhoneField();
+                  if (!parseClientPhone(clientPhone)) return;
+                }
                 setStep((s) => (s + 1) as WizardStep);
               }}
               disabled={
