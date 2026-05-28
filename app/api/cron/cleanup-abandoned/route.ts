@@ -10,9 +10,8 @@
  * Cal's dashboard.
  *
  * Pipeline:
- *   1. Bearer-token gate (CRON_SECRET) — Vercel Cron injects
- *      `Authorization: Bearer <env.CRON_SECRET>` automatically. The
- *      check is also useful for manual triggers via `curl`.
+ *   1. CRON_SECRET gate via `lib/cron-auth.ts` (Bearer, X-Cron-Secret,
+ *      or `?cron_secret=` — see that module for curl / redirect notes).
  *   2. SELECT all `appointments` rows with status='pending' older than
  *      the abandonment window (ABANDONMENT_MINUTES). Bound the result
  *      set so a one-off backlog can't blow up our request budget.
@@ -49,6 +48,7 @@ import {
   CAL_ABANDON_CANCEL_REASON,
   CHECKOUT_HOLD_MINUTES,
 } from '@/lib/booking-hold';
+import { rejectUnlessCronAuthorized } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -136,29 +136,11 @@ interface ErrorEntry {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  // ── AUTH GATE ────────────────────────────────────────────────────
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) {
-    console.error(
-      '[api/cron/cleanup-abandoned] CRON_SECRET not set — refusing to run'
-    );
-    return NextResponse.json(
-      { error: 'cron_not_configured' },
-      { status: 503 }
-    );
-  }
-  const header = req.headers.get('authorization') ?? '';
-  const expected = `Bearer ${cronSecret}`;
-  // Constant-time-ish compare. Buffer.byteLength match prevents an
-  // attacker timing the length of the secret; if the lengths differ
-  // we still run the equality check on a same-length string so the
-  // total work is roughly constant.
-  if (
-    header.length !== expected.length ||
-    !timingSafeEqual(header, expected)
-  ) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  const authFailure = rejectUnlessCronAuthorized(
+    req,
+    'api/cron/cleanup-abandoned'
+  );
+  if (authFailure) return authFailure;
 
   const apiKey = process.env.CAL_API_KEY;
   if (!apiKey) {
@@ -315,17 +297,3 @@ async function flipLocalStatus(appointmentId: string): Promise<boolean> {
   }
 }
 
-/**
- * Tiny constant-time string compare. We can't use Node's
- * `crypto.timingSafeEqual` directly because the request-side string
- * length is attacker-controlled — feeding it differs-length buffers
- * throws. So we compare lengths first, then fold byte-by-byte.
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}
