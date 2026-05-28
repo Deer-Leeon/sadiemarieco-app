@@ -11,7 +11,7 @@ export interface ManualBookingServiceOption {
   durationMins: number | null;
 }
 
-/** Parse Cal.com v1 /slots JSON into UTC ISO strings for the selected day. */
+/** Parse Cal.com slots JSON (v1 shape or v2-normalized) into UTC ISO strings for the selected day. */
 export function parseCalSlotTimes(payload: unknown, date: string): string[] {
   if (!payload || typeof payload !== 'object') return [];
 

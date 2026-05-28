@@ -1,14 +1,19 @@
 /**
  * GET /api/admin/manual-booking/slots
  *
- * Admin-only proxy for Cal.com v1 available slots.
+ * Admin-only proxy for Cal.com v2 available slots.
  * Query: eventTypeId (number), date (YYYY-MM-DD).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
 import { STUDIO_TIMEZONE } from '@/lib/cal-config';
-import { gateAdmin, proxyCalV1Get } from '@/lib/cal-v1-proxy';
+import {
+  CAL_SLOTS_API_VERSION,
+  gateAdmin,
+  normalizeCalSlotsForDate,
+  proxyCalV2Get,
+} from '@/lib/cal-proxy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,13 +43,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const result = await proxyCalV1Get('/slots', {
-    eventTypeId: String(eventTypeId),
-    startTime: date,
-    endTime: date,
-    timeZone: STUDIO_TIMEZONE,
-  });
+  const result = await proxyCalV2Get(
+    '/slots',
+    {
+      eventTypeId: String(eventTypeId),
+      start: date,
+      end: date,
+      timeZone: STUDIO_TIMEZONE,
+    },
+    CAL_SLOTS_API_VERSION
+  );
 
   if (!result.ok) return result.response;
-  return NextResponse.json(result.data);
+  return NextResponse.json(normalizeCalSlotsForDate(result.data, date));
 }
