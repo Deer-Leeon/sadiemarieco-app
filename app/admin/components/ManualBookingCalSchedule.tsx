@@ -13,14 +13,13 @@ import {
 
 const CAL_MANUAL_BOOKING_NAMESPACE = 'manual-booking';
 
-/** Intrinsic booker size before scale (month view + time list). */
-const CAL_EMBED_WIDTH_PX = 400;
-const CAL_EMBED_HEIGHT_PX = 580;
-/** Scales the embed down so calendar + slots fit the admin popup. */
-const CAL_EMBED_SCALE = 0.82;
+/** Render size before scale — tuned for month view + time slots. */
+const CAL_RENDER_WIDTH_PX = 440;
+const CAL_RENDER_HEIGHT_PX = 540;
+const CAL_SCALE = 0.9;
 
-const SCALED_WIDTH_PX = Math.round(CAL_EMBED_WIDTH_PX * CAL_EMBED_SCALE);
-const SCALED_HEIGHT_PX = Math.round(CAL_EMBED_HEIGHT_PX * CAL_EMBED_SCALE);
+const VIEWPORT_WIDTH_PX = Math.round(CAL_RENDER_WIDTH_PX * CAL_SCALE);
+const VIEWPORT_HEIGHT_PX = Math.round(CAL_RENDER_HEIGHT_PX * CAL_SCALE);
 
 interface Props {
   serviceSlug: string;
@@ -134,17 +133,21 @@ export default function ManualBookingCalSchedule({
   }, [embedKey, serviceSlug, clientName, clientEmail, clientPhone]);
 
   return (
-    <div className="shrink-0">
+    <div className="space-y-2">
       <div
-        className="mx-auto overflow-hidden rounded-lg border border-stone-600 bg-white"
-        style={{ width: SCALED_WIDTH_PX, height: SCALED_HEIGHT_PX }}
+        className="mx-auto overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm"
+        style={{
+          width: VIEWPORT_WIDTH_PX,
+          height: VIEWPORT_HEIGHT_PX,
+          maxWidth: '100%',
+        }}
       >
         <div
-          className="origin-top"
           style={{
-            width: CAL_EMBED_WIDTH_PX,
-            height: CAL_EMBED_HEIGHT_PX,
-            transform: `scale(${CAL_EMBED_SCALE})`,
+            width: CAL_RENDER_WIDTH_PX,
+            height: CAL_RENDER_HEIGHT_PX,
+            transform: `scale(${CAL_SCALE})`,
+            transformOrigin: 'top left',
           }}
         >
           <Cal
@@ -153,32 +156,33 @@ export default function ManualBookingCalSchedule({
             calLink={calLink}
             config={embedConfig}
             style={{
-              width: CAL_EMBED_WIDTH_PX,
-              height: CAL_EMBED_HEIGHT_PX,
+              width: CAL_RENDER_WIDTH_PX,
+              height: CAL_RENDER_HEIGHT_PX,
               overflow: 'auto',
             }}
           />
         </div>
       </div>
-      <p className="mt-1 text-center text-[10px] leading-snug text-stone-500">
-        Scroll inside the picker if more times are below.
-      </p>
-      <button
-        type="button"
-        onClick={() => setEmbedKey((k) => k + 1)}
-        className="mx-auto mt-0.5 block text-[10px] text-stone-500 underline-offset-2 hover:text-stone-300 hover:underline"
-      >
-        Reload calendar
-      </button>
+      <div className="flex items-center justify-between gap-3 px-0.5 text-xs text-stone-500">
+        <span>Scroll the picker for more times</span>
+        <button
+          type="button"
+          onClick={() => setEmbedKey((k) => k + 1)}
+          className="font-medium text-stone-600 underline-offset-2 hover:text-stone-900 hover:underline"
+        >
+          Reload
+        </button>
+      </div>
     </div>
   );
 }
 
 export function ManualBookingCompletingOverlay() {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
-      <Loader2 className="h-6 w-6 animate-spin text-stone-300" />
-      <p className="font-serif text-base text-stone-100">Saving appointment…</p>
+    <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+      <Loader2 className="h-7 w-7 animate-spin text-stone-400" />
+      <p className="font-serif text-lg text-stone-900">Saving appointment…</p>
+      <p className="text-sm text-stone-500">Updating Cal.com and your calendar</p>
     </div>
   );
 }

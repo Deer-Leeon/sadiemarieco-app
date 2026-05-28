@@ -107,7 +107,7 @@ export default function ManualBookingModal({
     clientPhone.trim().length > 0;
 
   const isScheduleStep = step === 3;
-  const modalWidth = isScheduleStep ? 'max-w-[420px]' : 'max-w-lg';
+  const modalWidth = isScheduleStep ? 'max-w-[460px]' : 'max-w-lg';
 
   return (
     <div
@@ -116,36 +116,48 @@ export default function ManualBookingModal({
       role="presentation"
     >
       <div
-        className={`flex w-full ${modalWidth} flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-stone-900/95 text-stone-50 shadow-2xl shadow-stone-950/40 ${
-          isScheduleStep ? 'max-h-[92vh]' : 'max-h-[min(88vh,640px)]'
-        }`}
+        className={`flex w-full ${modalWidth} flex-col overflow-hidden rounded-2xl shadow-2xl ${
+          isScheduleStep
+            ? 'border border-stone-200 bg-[#FAF9F6] text-stone-900'
+            : 'border border-stone-200/90 bg-stone-900/95 text-stone-50 shadow-stone-950/40'
+        } ${isScheduleStep ? '' : 'max-h-[min(88vh,640px)]'}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="manual-booking-title"
       >
         <header
-          className={`flex shrink-0 items-start justify-between gap-3 border-b border-stone-700/80 ${
-            isScheduleStep ? 'px-4 py-3' : 'px-6 py-5'
+          className={`flex shrink-0 items-start justify-between gap-3 border-b ${
+            isScheduleStep
+              ? 'border-stone-200 bg-[#FAF9F6] px-5 py-4'
+              : 'border-stone-700/80 px-6 py-5'
           }`}
         >
           <div className="min-w-0">
-            <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-400">
+            <p
+              className={`text-[10px] font-medium uppercase tracking-[0.28em] ${
+                isScheduleStep ? 'text-stone-500' : 'text-stone-400'
+              }`}
+            >
               Manual booking
             </p>
             <h2
               id="manual-booking-title"
-              className={`font-serif leading-tight text-stone-50 ${
+              className={`font-serif leading-tight ${
                 isScheduleStep
-                  ? 'mt-0.5 truncate text-xl'
-                  : 'mt-1 text-2xl'
+                  ? 'mt-0.5 truncate text-xl text-stone-900'
+                  : 'mt-1 text-2xl text-stone-50'
               }`}
             >
               {isScheduleStep && selectedService
                 ? selectedService.title
                 : 'New appointment'}
             </h2>
-            <p className="mt-0.5 text-xs text-stone-400">
+            <p
+              className={`mt-0.5 text-xs ${
+                isScheduleStep ? 'text-stone-500' : 'text-stone-400'
+              }`}
+            >
               {isScheduleStep
                 ? 'Pick an open date & time · Step 3 of 3'
                 : `Step ${step} of 3`}
@@ -155,7 +167,11 @@ export default function ManualBookingModal({
             type="button"
             onClick={onClose}
             disabled={completing}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-800 hover:text-stone-100 disabled:opacity-50"
+            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-50 ${
+              isScheduleStep
+                ? 'text-stone-500 hover:bg-stone-200 hover:text-stone-900'
+                : 'text-stone-400 hover:bg-stone-800 hover:text-stone-100'
+            }`}
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -165,15 +181,17 @@ export default function ManualBookingModal({
         <div
           className={
             isScheduleStep
-              ? 'shrink-0 overflow-hidden px-3 pb-2 pt-1'
+              ? 'shrink-0 px-4 py-3'
               : 'flex-1 overflow-y-auto px-6 py-5'
           }
         >
           {error && (
             <div
               role="alert"
-              className={`shrink-0 rounded-md border border-rose-500/40 bg-rose-950/50 px-3 py-2 text-sm text-rose-200 ${
-                isScheduleStep ? 'mb-2' : 'mb-4'
+              className={`shrink-0 rounded-md border px-3 py-2 text-sm ${
+                isScheduleStep
+                  ? 'mb-3 border-rose-200 bg-rose-50 text-rose-800'
+                  : 'mb-4 border-rose-500/40 bg-rose-950/50 text-rose-200'
               }`}
             >
               {error}
@@ -288,8 +306,10 @@ export default function ManualBookingModal({
         </div>
 
         <footer
-          className={`flex shrink-0 items-center justify-between gap-3 border-t border-stone-700/80 ${
-            isScheduleStep ? 'px-4 py-2.5' : 'px-6 py-4'
+          className={`flex shrink-0 items-center justify-between gap-3 border-t ${
+            isScheduleStep
+              ? 'border-stone-200 bg-[#FAF9F6] px-5 py-3'
+              : 'border-stone-700/80 px-6 py-4'
           }`}
         >
           <button
@@ -300,7 +320,11 @@ export default function ManualBookingModal({
               else setStep((s) => (s - 1) as WizardStep);
             }}
             disabled={completing}
-            className="rounded-full border border-stone-600 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-300 transition-colors hover:border-stone-400 hover:text-stone-100 disabled:opacity-50"
+            className={`rounded-full border px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] transition-colors disabled:opacity-50 ${
+              isScheduleStep
+                ? 'border-stone-300 text-stone-600 hover:border-stone-900 hover:text-stone-900'
+                : 'border-stone-600 text-stone-300 hover:border-stone-400 hover:text-stone-100'
+            }`}
           >
             {step === 1 ? 'Cancel' : 'Back'}
           </button>
@@ -322,8 +346,12 @@ export default function ManualBookingModal({
               Continue
             </button>
           ) : (
-            <p className="text-[11px] text-stone-500">
-              Confirm in Cal to book · no checkout
+            <p
+              className={`text-xs ${
+                isScheduleStep ? 'text-stone-500' : 'text-stone-400'
+              }`}
+            >
+              Confirm in Cal · no checkout
             </p>
           )}
         </footer>
