@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
 import {
@@ -64,11 +64,13 @@ export default function ManualBookingSlotPicker({
 
   const [viewYear, setViewYear] = useState(initial.year);
   const [viewMonth, setViewMonth] = useState(initial.month);
-  const [selectedDate, setSelectedDate] = useState(today);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [monthSlots, setMonthSlots] = useState<Record<string, string[]>>({});
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [monthLoading, setMonthLoading] = useState(true);
   const [monthError, setMonthError] = useState<string | null>(null);
+  /** Skip empty current month once on open so admins land on the next bookable month. */
+  const mayAdvanceFromEmptyStart = useRef(true);
 
   const availableSet = useMemo(() => new Set(availableDates), [availableDates]);
 
@@ -83,6 +85,7 @@ export default function ManualBookingSlotPicker({
       setMonthError(null);
       setMonthSlots({});
       setAvailableDates([]);
+      setSelectedDate(null);
       onSelectSlot(null);
 
       const rangeStart = studioDateString(year, month, 1);
@@ -90,6 +93,7 @@ export default function ManualBookingSlotPicker({
       const queryStart = rangeStart < today ? today : rangeStart;
 
       if (queryStart > rangeEnd) {
+        setSelectedDate(null);
         setMonthLoading(false);
         setMonthError('No open days left this month.');
         return;
@@ -112,6 +116,7 @@ export default function ManualBookingSlotPicker({
             typeof (data as { message: unknown }).message === 'string'
               ? (data as { message: string }).message
               : `Could not load availability (HTTP ${res.status})`;
+          setSelectedDate(null);
           setMonthError(message);
           return;
         }
@@ -127,12 +132,32 @@ export default function ManualBookingSlotPicker({
         setAvailableDates(openDates);
 
         if (openDates.length === 0) {
+          setSelectedDate(null);
+          if (
+            mayAdvanceFromEmptyStart.current &&
+            year === initial.year &&
+            month === initial.month
+          ) {
+            mayAdvanceFromEmptyStart.current = false;
+            let nextMonth = month + 1;
+            let nextYear = year;
+            if (nextMonth > 12) {
+              nextMonth = 1;
+              nextYear += 1;
+            }
+            setViewYear(nextYear);
+            setViewMonth(nextMonth);
+            return;
+          }
           setMonthError(`No open days in ${monthLabel(year, month)}. Try another month.`);
           return;
         }
 
-        setSelectedDate(openDates.find((d) => d >= today) ?? openDates[0]);
+        mayAdvanceFromEmptyStart.current = false;
+
+        setSelectedDate(openDates[0]);
       } catch (err) {
+        setSelectedDate(null);
         setMonthError(
           err instanceof Error ? err.message : 'Failed to load availability'
         );
@@ -147,7 +172,10 @@ export default function ManualBookingSlotPicker({
     void loadMonth(viewYear, viewMonth);
   }, [viewYear, viewMonth, loadMonth]);
 
-  const slots = monthSlots[selectedDate] ?? [];
+  const slots =
+    selectedDate && availableSet.has(selectedDate)
+      ? (monthSlots[selectedDate] ?? [])
+      : [];
   const slotsLoading = monthLoading;
 
   function shiftMonth(delta: number) {
@@ -171,6 +199,9 @@ export default function ManualBookingSlotPicker({
   }
 
   const selectedDayLabel = (() => {
+    if (!selectedDate || !availableSet.has(selectedDate)) {
+      return 'Select an open day';
+    }
     try {
       const [y, m, d] = selectedDate.split('-').map(Number);
       return new Intl.DateTimeFormat('en-US', {
@@ -236,7 +267,10 @@ export default function ManualBookingSlotPicker({
               const isPast = cell.date < today;
               const hasSlots = availableSet.has(cell.date);
               const isSelectable = hasSlots && !isPast;
-              const isSelected = cell.date === selectedDate;
+              const isSelected =
+                selectedDate !== null &&
+                cell.date === selectedDate &&
+                isSelectable;
 
               return (
                 <button
@@ -311,8 +345,8 @@ export default function ManualBookingSlotPicker({
         ) : (
           <p className="py-6 text-center text-sm text-stone-500">
             {availableDates.length === 0
-              ? 'Pick a month with open days.'
-              : 'Select an open day above.'}
+              ? 'No open days this month — try the next month.'
+              : 'Choose a bold date above to see times.'}
           </p>
         )}
       </div>
