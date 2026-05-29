@@ -7,15 +7,24 @@
  *
  * When `CAL_ADMIN_OVERRIDE_EVENT_ID` is set, proxies slots for that shadow
  * event type (9 AM–9 PM) while the client still sends the real service id.
+ *
+ * God-mode slot grid: always requests 15-minute steps (`slotInterval=15` +
+ * `duration=15` for the Cal probe), then filters to starts where the full
+ * service duration fits contiguously. Passing only `duration=180` makes Cal
+ * treat 180 as both block length and step (9:00, 12:00, 3:00, …).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
+  ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN,
   loadServiceByCalEventId,
   parseAdminOverrideEventId,
   STUDIO_TIMEZONE,
 } from '@/lib/cal-config';
+import {
+  filterSlotStartsForServiceDuration,
+} from '@/lib/booking-duration';
 import {
   CAL_SLOTS_API_VERSION,
   gateAdmin,
@@ -29,6 +38,19 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function applyGodModeSlotFilter(
+  payload: { slots: Record<string, string[]> },
+  serviceDurationMins: number
+): { slots: Record<string, string[]> } {
+  return {
+    slots: filterSlotStartsForServiceDuration(
+      payload.slots,
+      serviceDurationMins,
+      ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN
+    ),
+  };
+}
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const gate = await gateAdmin();
@@ -69,18 +91,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const overrideEventTypeId = parseAdminOverrideEventId();
   const calEventTypeId = overrideEventTypeId ?? eventTypeId;
+  const service = await loadServiceByCalEventId(eventTypeId);
+  const serviceDurationMins = service?.duration_mins ?? null;
+  const useGodModeGrid = overrideEventTypeId != null;
 
   const slotQuery: Record<string, string> = {
     eventTypeId: String(calEventTypeId),
     start: date,
     end,
     timeZone: STUDIO_TIMEZONE,
+    slotInterval: String(ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN),
   };
 
-  // Real service duration — Cal defaults to the shadow event's 15 min without this.
-  const service = await loadServiceByCalEventId(eventTypeId);
-  if (service?.duration_mins) {
-    slotQuery.duration = String(service.duration_mins);
+  if (useGodModeGrid) {
+    // Probe at quarter-hour granularity; filter below for full service length.
+    slotQuery.duration = String(ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN);
+  } else if (serviceDurationMins) {
+    slotQuery.duration = String(serviceDurationMins);
   }
 
   const result = await proxyCalV2Get(
@@ -92,7 +119,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!result.ok) return result.response;
 
   if (end === date) {
-    return NextResponse.json(normalizeCalSlotsForDate(result.data, date));
+    let normalized = normalizeCalSlotsForDate(result.data, date);
+    if (useGodModeGrid && serviceDurationMins) {
+      normalized = applyGodModeSlotFilter(normalized, serviceDurationMins);
+    }
+    return NextResponse.json(normalized);
   }
-  return NextResponse.json(normalizeCalSlotsPayload(result.data));
+
+  let normalized = normalizeCalSlotsPayload(result.data);
+  if (useGodModeGrid && serviceDurationMins) {
+    normalized = applyGodModeSlotFilter(normalized, serviceDurationMins);
+  }
+  return NextResponse.json(normalized);
 }

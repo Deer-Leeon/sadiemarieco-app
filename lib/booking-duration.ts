@@ -2,6 +2,51 @@
  * Shared appointment duration helpers (manual booking shadow event + webhooks).
  */
 
+import { ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN } from '@/lib/cal-config';
+
+/**
+ * From 15-minute Cal slot starts, keep only times where `serviceDurationMins`
+ * fits (N consecutive interval-sized steps).
+ */
+export function filterSlotStartsForServiceDuration(
+  slots: Record<string, string[]>,
+  serviceDurationMins: number,
+  slotIntervalMins: number = ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN
+): Record<string, string[]> {
+  const required = Math.max(
+    1,
+    Math.ceil(serviceDurationMins / slotIntervalMins)
+  );
+  const stepMs = slotIntervalMins * 60_000;
+  const filtered: Record<string, string[]> = {};
+
+  for (const [date, times] of Object.entries(slots)) {
+    const sorted = [...times].sort(
+      (a, b) => new Date(a).getTime() - new Date(b).getTime()
+    );
+    const valid: string[] = [];
+
+    for (let i = 0; i <= sorted.length - required; i++) {
+      const baseMs = new Date(sorted[i]).getTime();
+      if (Number.isNaN(baseMs)) continue;
+
+      let contiguous = true;
+      for (let j = 1; j < required; j++) {
+        const actualMs = new Date(sorted[i + j]).getTime();
+        if (Number.isNaN(actualMs) || actualMs !== baseMs + j * stepMs) {
+          contiguous = false;
+          break;
+        }
+      }
+      if (contiguous) valid.push(sorted[i]);
+    }
+
+    if (valid.length > 0) filtered[date] = valid;
+  }
+
+  return filtered;
+}
+
 export function bookingEndFromDurationMins(
   startIso: string,
   durationMins: number | null | undefined
