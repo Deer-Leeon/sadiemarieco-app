@@ -16,6 +16,7 @@ import {
   STRIPE_CUSTOMER_ID_RE,
   STRIPE_SETUP_INTENT_ID_RE,
 } from '@/lib/appointment-stripe';
+import { isValidEmail } from '@/lib/client-identity';
 import { stripe } from '@/lib/stripe';
 
 export const runtime = 'nodejs';
@@ -30,10 +31,6 @@ interface CreateSetupIntentBody {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-function isUsableEmail(value: string): boolean {
-  return value.length > 0 && value.includes('@') && value.length <= 254;
 }
 
 function parseBody(input: unknown): {
@@ -56,7 +53,7 @@ function parseBody(input: unknown): {
 
   return {
     calBookingUid,
-    email: isUsableEmail(rawEmail) ? rawEmail : '',
+    email: isValidEmail(rawEmail) ? rawEmail.trim().toLowerCase() : '',
     name: rawName.length > 0 && rawName.length <= 200 ? rawName : '',
   };
 }

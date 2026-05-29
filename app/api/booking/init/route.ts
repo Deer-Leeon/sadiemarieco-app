@@ -12,7 +12,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
-import { normaliseClientPhoneForStorage } from '@/lib/client-identity';
+import {
+  isValidEmail,
+  normaliseClientPhoneForStorage,
+  normalizeClientEmailForStorage,
+} from '@/lib/client-identity';
 import { upsertClientByPhonePrimary } from '@/lib/client-upsert';
 
 export const runtime = 'nodejs';
@@ -46,10 +50,6 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function isUsableEmail(value: string): boolean {
-  return value.length > 0 && value.includes('@') && value.length <= 254;
-}
-
 function splitName(fullName: string): { first: string; last: string } {
   if (!fullName) return { first: '', last: '' };
   const parts = fullName.trim().split(/\s+/);
@@ -76,7 +76,7 @@ function parseInitBody(input: unknown): ParsedInit | { error: string } {
     return { error: 'invalid_cal_booking_uid' };
   }
 
-  const email = isUsableEmail(rawEmail) ? rawEmail : '';
+  const email = normalizeClientEmailForStorage(rawEmail) ?? '';
   const name = rawName.length > 0 && rawName.length <= 200 ? rawName : '';
 
   return {
@@ -150,7 +150,10 @@ async function hydrateFromCal(
 
     return {
       ...partial,
-      email: partial.email || (isUsableEmail(attendeeEmail) ? attendeeEmail : ''),
+      email:
+        partial.email ||
+        normalizeClientEmailForStorage(attendeeEmail) ||
+        '',
       name: partial.name || attendeeName,
       phone: partial.phone || attendeePhone,
       serviceName: partial.serviceName !== 'appointment' ? partial.serviceName : title || partial.serviceName,
@@ -184,7 +187,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     data = await hydrateFromCal(data.calBookingUid, data);
   }
 
-  if (!isUsableEmail(data.email)) {
+  if (!isValidEmail(data.email)) {
     return NextResponse.json(
       { error: 'no_email', message: 'Email is required for checkout and receipts.' },
       { status: 400 }
@@ -246,7 +249,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         end_time = EXCLUDED.end_time,
         client_first_name = EXCLUDED.client_first_name,
         client_last_name = EXCLUDED.client_last_name,
-        client_email = EXCLUDED.client_email,
+        client_email = COALESCE(EXCLUDED.client_email, appointments.client_email),
         client_phone = EXCLUDED.client_phone
     `;
 

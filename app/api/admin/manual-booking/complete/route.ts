@@ -264,7 +264,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           phone = ${normPhone},
           first_name = ${first},
           last_name = ${last},
-          email = ${parsed.clientEmail}
+          email = COALESCE(${parsed.clientEmail}, clients.email)
         WHERE id = ${clientId}
       `;
     } else if (parsed.clientEmail && !(await clientPhoneExistsInDb(normPhone))) {
@@ -335,7 +335,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             phone = ${normPhone},
             first_name = ${first},
             last_name = ${last},
-            email = ${parsed.clientEmail}
+            email = COALESCE(${parsed.clientEmail}, clients.email)
           WHERE id = ${clientId}
         `;
       } else {
@@ -379,7 +379,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         end_time = EXCLUDED.end_time,
         client_first_name = EXCLUDED.client_first_name,
         client_last_name = EXCLUDED.client_last_name,
-        client_email = EXCLUDED.client_email,
+        client_email = COALESCE(EXCLUDED.client_email, appointments.client_email),
         client_phone = EXCLUDED.client_phone,
         status = 'confirmed'
     `;

@@ -26,6 +26,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
+import { parseOptionalClientEmail } from '@/lib/client-identity';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -67,8 +68,9 @@ function sanitiseEmail(raw: unknown): string | null | undefined {
   if (raw === undefined) return undefined;
   if (raw === null) return null;
   if (typeof raw !== 'string') return undefined;
-  const trimmed = raw.trim().toLowerCase();
-  return trimmed.length > 0 ? trimmed : null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  return parseOptionalClientEmail(trimmed);
 }
 
 // Cheap UUID format check so we can short-circuit obviously-malformed
@@ -175,6 +177,17 @@ export async function PATCH(
       { error: 'no_fields', hint: 'pass at least one of first_name, last_name, email' },
       { status: 400 }
     );
+  }
+
+  if (
+    changedEmail &&
+    payload.email !== undefined &&
+    payload.email !== null &&
+    typeof payload.email === 'string' &&
+    payload.email.trim().length > 0 &&
+    nextEmail === null
+  ) {
+    return NextResponse.json({ error: 'invalid_email' }, { status: 400 });
   }
 
   // We resolve the SQL with three independent CASE-style coalesces

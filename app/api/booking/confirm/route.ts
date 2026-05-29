@@ -44,6 +44,7 @@ import {
   STRIPE_CUSTOMER_ID_RE,
 } from '@/lib/appointment-stripe';
 import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
+import { isValidEmail } from '@/lib/client-identity';
 import { stripe } from '@/lib/stripe';
 
 export const runtime = 'nodejs';
@@ -79,10 +80,6 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function isUsableEmail(value: string): boolean {
-  return value.length > 0 && value.includes('@') && value.length <= 254;
-}
-
 function parseBody(input: unknown): ParsedBody | { error: string } {
   if (!input || typeof input !== 'object') {
     return { error: 'invalid_body' };
@@ -106,7 +103,7 @@ function parseBody(input: unknown): ParsedBody | { error: string } {
   // values that pass a loose sanity check — anything obviously broken
   // gets dropped so the PaymentMethod's billing_details (which the
   // visitor just typed into the card form) can take over.
-  const email = isUsableEmail(rawEmail) ? rawEmail : '';
+  const email = isValidEmail(rawEmail) ? rawEmail.trim().toLowerCase() : '';
   const name = rawName.length > 0 && rawName.length <= 200 ? rawName : '';
 
   return { setupIntentId, email, name, calBookingUid };
@@ -330,8 +327,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   //      client_email/client_phone (denormalised by the Cal webhook)
   //      if reconciliation is ever needed.
   const resolvedEmail =
-    email || (pmBilling.email && isUsableEmail(pmBilling.email.trim())
-      ? pmBilling.email.trim()
+    email ||
+    (pmBilling.email && isValidEmail(pmBilling.email.trim())
+      ? pmBilling.email.trim().toLowerCase()
       : '');
   const resolvedName =
     name ||

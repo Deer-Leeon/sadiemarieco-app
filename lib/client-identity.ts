@@ -3,6 +3,11 @@
  */
 
 import {
+  isPlaceholderClientEmail,
+  isValidEmail,
+  normalizeClientEmailForStorage,
+} from './client-email.js';
+import {
   clientPhoneLookupVariants as clientPhoneLookupVariantsImpl,
   normaliseClientPhoneForStorage as normaliseClientPhoneForStorageImpl,
   normaliseClientPhone as normaliseClientPhoneImpl,
@@ -10,7 +15,11 @@ import {
   sqlPhoneVariants as sqlPhoneVariantsImpl,
 } from './client-phone.js';
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export {
+  isPlaceholderClientEmail,
+  isValidEmail,
+  normalizeClientEmailForStorage,
+};
 
 export interface ParsedClientPhone {
   /** Digits only, usually 11 chars for US (+1 + 10-digit number). Used in Postgres. */
@@ -68,14 +77,9 @@ export function formatPhoneInputDisplay(raw: string): string {
   return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`;
 }
 
-/** Trim + lowercase; empty string → null. Invalid format → null. */
+/** Trim + lowercase; empty / invalid / Cal placeholder → null. */
 export function parseOptionalClientEmail(raw: unknown): string | null {
-  if (raw === undefined || raw === null) return null;
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim().toLowerCase();
-  if (!trimmed) return null;
-  if (!EMAIL_RE.test(trimmed) || trimmed.length > 254) return null;
-  return trimmed;
+  return normalizeClientEmailForStorage(raw);
 }
 
 /**
@@ -87,6 +91,6 @@ export function calAttendeeEmailForBooking(
   phoneDigits: string,
   email: string | null
 ): string {
-  if (email) return email;
+  if (email && isValidEmail(email)) return email;
   return `bookings+${phoneDigits}@placeholder.sadiemarie.co`;
 }
