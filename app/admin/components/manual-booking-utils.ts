@@ -7,8 +7,136 @@ export const STUDIO_TIMEZONE = 'America/Denver';
 export interface ManualBookingServiceOption {
   slug: string;
   title: string;
+  category: string;
+  parentId: number | null;
   eventTypeId: number;
   durationMins: number | null;
+}
+
+export interface ManualBookingServiceGroupHeader {
+  id: number;
+  title: string;
+  category: string;
+}
+
+export type ManualBookingCategoryRow =
+  | { kind: 'standalone'; service: ManualBookingServiceOption }
+  | {
+      kind: 'group';
+      groupId: number;
+      groupTitle: string;
+      children: ManualBookingServiceOption[];
+    };
+
+export interface ManualBookingServiceCategoryGroup {
+  category: string;
+  rows: ManualBookingCategoryRow[];
+  /** Empty placeholder category (e.g. Teeth Whitening) — not bookable yet */
+  comingSoon: boolean;
+}
+
+/** Homepage / admin catalogue column order — keep aligned with app/route.ts */
+export const MANUAL_BOOKING_CATEGORY_COLUMN_RANK: Record<string, number> = {
+  'Lash Services': 0,
+  'Brow Services': 1,
+  'Teeth Whitening': 2,
+};
+
+/** Keep in sync with `COMING_SOON_CATEGORIES` in app/route.ts */
+export const MANUAL_BOOKING_COMING_SOON_CATEGORIES = new Set([
+  'Teeth Whitening',
+]);
+
+function buildCategoryRows(
+  bookable: ManualBookingServiceOption[],
+  groupTitleById: Map<number, string>
+): ManualBookingCategoryRow[] {
+  const groupIds = new Set(groupTitleById.keys());
+  const childrenByParent = new Map<number, ManualBookingServiceOption[]>();
+
+  for (const service of bookable) {
+    if (service.parentId !== null && groupIds.has(service.parentId)) {
+      const list = childrenByParent.get(service.parentId);
+      if (list) list.push(service);
+      else childrenByParent.set(service.parentId, [service]);
+    }
+  }
+
+  const rows: ManualBookingCategoryRow[] = [];
+  const emittedGroups = new Set<number>();
+
+  for (const service of bookable) {
+    if (service.parentId !== null && groupIds.has(service.parentId)) {
+      const parentId = service.parentId;
+      if (!emittedGroups.has(parentId)) {
+        emittedGroups.add(parentId);
+        rows.push({
+          kind: 'group',
+          groupId: parentId,
+          groupTitle: groupTitleById.get(parentId) ?? 'Service group',
+          children: childrenByParent.get(parentId) ?? [],
+        });
+      }
+      continue;
+    }
+
+    rows.push({ kind: 'standalone', service });
+  }
+
+  return rows;
+}
+
+/**
+ * Build category sections with nested service groups (mirrors public menu order).
+ * `services` must already be sorted by display_order; `groupHeaders` supply labels.
+ */
+export function buildManualBookingServiceMenu(
+  services: ManualBookingServiceOption[],
+  groupHeaders: ManualBookingServiceGroupHeader[]
+): ManualBookingServiceCategoryGroup[] {
+  const byCategory = new Map<string, ManualBookingServiceOption[]>();
+  for (const service of services) {
+    const list = byCategory.get(service.category);
+    if (list) list.push(service);
+    else byCategory.set(service.category, [service]);
+  }
+
+  const groupsByCategory = new Map<string, Map<number, string>>();
+  for (const group of groupHeaders) {
+    let map = groupsByCategory.get(group.category);
+    if (!map) {
+      map = new Map();
+      groupsByCategory.set(group.category, map);
+    }
+    map.set(group.id, group.title);
+  }
+
+  const categories = new Set([
+    ...byCategory.keys(),
+    ...MANUAL_BOOKING_COMING_SOON_CATEGORIES,
+  ]);
+
+  return Array.from(categories)
+    .sort((a, b) => {
+      const rankA = MANUAL_BOOKING_CATEGORY_COLUMN_RANK[a] ?? 50;
+      const rankB = MANUAL_BOOKING_CATEGORY_COLUMN_RANK[b] ?? 50;
+      if (rankA !== rankB) return rankA - rankB;
+      return a.localeCompare(b);
+    })
+    .map((category) => {
+      const items = byCategory.get(category) ?? [];
+      const rows = buildCategoryRows(
+        items,
+        groupsByCategory.get(category) ?? new Map()
+      );
+      return {
+        category,
+        rows,
+        comingSoon:
+          MANUAL_BOOKING_COMING_SOON_CATEGORIES.has(category) &&
+          rows.length === 0,
+      };
+    });
 }
 
 /** Dates (YYYY-MM-DD) that have at least one open slot in a normalized slots payload. */

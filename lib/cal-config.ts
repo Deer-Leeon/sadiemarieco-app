@@ -36,14 +36,23 @@ export type CalServiceSlug = string;
 export interface CalServiceBookingConfig {
   slug: string;
   title: string;
+  category: string;
+  parentId: number | null;
   eventTypeId: number;
   durationMins: number | null;
+}
+
+export interface CalServiceGroupHeader {
+  id: number;
+  title: string;
+  category: string;
 }
 
 export interface CalEventTypeMaps {
   bySlug: Record<string, number>;
   byTitle: Record<string, number>;
   services: CalServiceBookingConfig[];
+  groupHeaders: CalServiceGroupHeader[];
 }
 
 /**
@@ -100,26 +109,49 @@ export async function loadServiceByCalEventId(
  * Call from Server Components or API routes when the admin UI needs IDs.
  */
 export async function loadCalEventTypeMaps(): Promise<CalEventTypeMaps> {
-  const { rows } = await sql<{
-    slug: string;
-    title: string;
-    cal_event_id: number;
-    duration_mins: number | null;
-  }>`
-    SELECT slug, title, cal_event_id, duration_mins
-    FROM site_services
-    WHERE is_active = TRUE
-      AND is_group = FALSE
-      AND cal_event_id IS NOT NULL
-      AND slug IS NOT NULL
-    ORDER BY display_order ASC, id ASC
-  `;
+  const [{ rows }, { rows: groupRows }] = await Promise.all([
+    sql<{
+      slug: string;
+      title: string;
+      category: string;
+      parent_id: number | null;
+      cal_event_id: number;
+      duration_mins: number | null;
+    }>`
+      SELECT slug, title, category, parent_id, cal_event_id, duration_mins
+      FROM site_services
+      WHERE is_active = TRUE
+        AND is_group = FALSE
+        AND cal_event_id IS NOT NULL
+        AND slug IS NOT NULL
+      ORDER BY display_order ASC, id ASC
+    `,
+    sql<{
+      id: number;
+      title: string;
+      category: string;
+    }>`
+      SELECT id, title, category
+      FROM site_services
+      WHERE is_active = TRUE
+        AND is_group = TRUE
+      ORDER BY display_order ASC, id ASC
+    `,
+  ]);
 
   const services: CalServiceBookingConfig[] = rows.map((row) => ({
     slug: row.slug,
     title: row.title,
+    category: row.category,
+    parentId: row.parent_id,
     eventTypeId: row.cal_event_id,
     durationMins: row.duration_mins,
+  }));
+
+  const groupHeaders: CalServiceGroupHeader[] = groupRows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    category: row.category,
   }));
 
   const bySlug: Record<string, number> = {};
@@ -129,7 +161,7 @@ export async function loadCalEventTypeMaps(): Promise<CalEventTypeMaps> {
     byTitle[s.title] = s.eventTypeId;
   }
 
-  return { bySlug, byTitle, services };
+  return { bySlug, byTitle, services, groupHeaders };
 }
 
 /** Resolve an internal service key (slug or display title) to a Cal event type id. */

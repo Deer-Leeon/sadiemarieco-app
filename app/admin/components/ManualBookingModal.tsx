@@ -3,8 +3,12 @@
 import { useEffect, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 
+import ManualBookingServicePicker from './ManualBookingServicePicker';
 import ManualBookingSlotPicker from './ManualBookingSlotPicker';
-import type { ManualBookingServiceOption } from './manual-booking-utils';
+import type {
+  ManualBookingServiceGroupHeader,
+  ManualBookingServiceOption,
+} from './manual-booking-utils';
 import {
   CLIENT_PHONE_HINT,
   clientPhoneValidationMessage,
@@ -22,6 +26,7 @@ type WizardStep = 1 | 2 | 3;
 
 interface Props {
   services: ManualBookingServiceOption[];
+  groupHeaders: ManualBookingServiceGroupHeader[];
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -55,6 +60,7 @@ function ManualBookingCompletingOverlay() {
 
 export default function ManualBookingModal({
   services,
+  groupHeaders,
   onClose,
   onSuccess,
 }: Props) {
@@ -284,43 +290,15 @@ export default function ManualBookingModal({
           {step === 1 && (
             <div className="space-y-3">
               <p className="text-sm text-stone-600">Choose a service</p>
-              <ul className="max-h-64 space-y-2 overflow-y-auto pr-1">
-                {services.length === 0 ? (
-                  <li className="text-sm text-stone-500">
-                    No bookable services found. Add services in the Services
-                    tab first.
-                  </li>
-                ) : (
-                  services.map((service) => {
-                    const active = selectedService?.slug === service.slug;
-                    return (
-                      <li key={service.slug}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedService(service);
-                            setError(null);
-                          }}
-                          className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${
-                            active
-                              ? 'border-stone-300 bg-stone-50'
-                              : 'border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50'
-                          }`}
-                        >
-                          <span className="block font-serif text-base text-stone-900">
-                            {service.title}
-                          </span>
-                          {service.durationMins != null && (
-                            <span className="mt-0.5 block text-xs text-stone-500">
-                              {service.durationMins} min
-                            </span>
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })
-                )}
-              </ul>
+              <ManualBookingServicePicker
+                services={services}
+                groupHeaders={groupHeaders}
+                selectedService={selectedService}
+                onSelectService={(service) => {
+                  setSelectedService(service);
+                  setError(null);
+                }}
+              />
             </div>
           )}
 

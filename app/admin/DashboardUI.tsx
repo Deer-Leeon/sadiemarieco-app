@@ -21,7 +21,10 @@ import {
 } from 'lucide-react';
 
 import ManualBookingModal from './components/ManualBookingModal';
-import type { ManualBookingServiceOption } from './components/manual-booking-utils';
+import type {
+  ManualBookingServiceGroupHeader,
+  ManualBookingServiceOption,
+} from './components/manual-booking-utils';
 import type { Appointment, ViewMode } from './types';
 import AdminHeader from './AdminHeader';
 import AdminSectionTabs from './AdminSectionTabs';
@@ -36,6 +39,7 @@ interface Props {
   dbError: string | null;
   displayName: string;
   manualBookingServices: ManualBookingServiceOption[];
+  manualBookingGroupHeaders: ManualBookingServiceGroupHeader[];
 }
 
 /**
@@ -65,6 +69,7 @@ export default function DashboardUI({
   dbError,
   displayName,
   manualBookingServices,
+  manualBookingGroupHeaders,
 }: Props) {
   const router = useRouter();
   // Default to the continuous-scroll month calendar. It surfaces both
@@ -234,6 +239,7 @@ export default function DashboardUI({
       {manualBookingOpen && (
         <ManualBookingModal
           services={manualBookingServices}
+          groupHeaders={manualBookingGroupHeaders}
           onClose={() => setManualBookingOpen(false)}
           onSuccess={() => {
             setManualBookingOpen(false);

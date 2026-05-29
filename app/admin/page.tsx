@@ -113,10 +113,14 @@ export default async function AdminPage() {
   let manualBookingServices: Awaited<
     ReturnType<typeof loadCalEventTypeMaps>
   >['services'] = [];
+  let manualBookingGroupHeaders: Awaited<
+    ReturnType<typeof loadCalEventTypeMaps>
+  >['groupHeaders'] = [];
 
   try {
     const calMaps = await loadCalEventTypeMaps();
     manualBookingServices = calMaps.services;
+    manualBookingGroupHeaders = calMaps.groupHeaders;
   } catch (err) {
     console.error('[admin] loadCalEventTypeMaps failed:', err);
   }
@@ -233,6 +237,7 @@ export default async function AdminPage() {
       dbError={dbError}
       displayName={displayName}
       manualBookingServices={manualBookingServices}
+      manualBookingGroupHeaders={manualBookingGroupHeaders}
     />
   );
 }
