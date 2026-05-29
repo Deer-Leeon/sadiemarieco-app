@@ -2,6 +2,8 @@
  * Client-side helpers for the manual booking wizard.
  */
 
+import { bookingEndFromDurationMins } from '@/lib/booking-duration';
+
 export const STUDIO_TIMEZONE = 'America/Denver';
 
 export interface ManualBookingServiceOption {
@@ -245,10 +247,7 @@ export function bookingEndFromDuration(
   startIso: string,
   durationMins: number | null
 ): string | null {
-  if (durationMins == null || durationMins <= 0) return null;
-  const startMs = new Date(startIso).getTime();
-  if (Number.isNaN(startMs)) return null;
-  return new Date(startMs + durationMins * 60_000).toISOString();
+  return bookingEndFromDurationMins(startIso, durationMins);
 }
 
 /** Parse Cal v2 create-booking JSON for uid and times. */

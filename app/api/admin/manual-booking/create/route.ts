@@ -252,11 +252,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     },
   };
 
-  // Cal.com v2 rejects top-level `description` and `end` on create. Only send
-  // `lengthInMinutes` when the target event type has multipleDuration enabled
-  // in Cal — the admin override event is typically single-length, so duration
-  // is taken from the event type default and we persist the real end time via
-  // /complete using the selected service's duration_mins from the DB.
+  // Cal.com v2 rejects top-level `description` and `end` on create. Stretch the
+  // shadow block via lengthInMinutes (requires "Offer multiple durations" on the
+  // override event type with every service length listed in Cal).
+  if (overrideEventTypeId != null && originalServiceDurationMins != null) {
+    calPayload.lengthInMinutes = originalServiceDurationMins;
+  }
 
   const result = await proxyCalV2Post(
     '/bookings',

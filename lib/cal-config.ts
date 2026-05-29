@@ -67,8 +67,8 @@ export function getCalComApiKey(): string | null {
 
 /**
  * Hidden Cal event type with 9 AM–9 PM availability for admin manual booking.
- * Create bookings use this event's default length (do not send lengthInMinutes
- * unless "Offer multiple durations" is enabled in Cal with every service length).
+ * Enable "Offer multiple durations" in Cal and list every service length so
+ * create can send lengthInMinutes; slots use the `duration` query param.
  */
 export const getAdminOverrideEventId = () =>
   process.env.CAL_ADMIN_OVERRIDE_EVENT_ID;

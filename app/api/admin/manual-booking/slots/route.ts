@@ -11,7 +11,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { parseAdminOverrideEventId, STUDIO_TIMEZONE } from '@/lib/cal-config';
+import {
+  loadServiceByCalEventId,
+  parseAdminOverrideEventId,
+  STUDIO_TIMEZONE,
+} from '@/lib/cal-config';
 import {
   CAL_SLOTS_API_VERSION,
   gateAdmin,
@@ -66,14 +70,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const overrideEventTypeId = parseAdminOverrideEventId();
   const calEventTypeId = overrideEventTypeId ?? eventTypeId;
 
+  const slotQuery: Record<string, string> = {
+    eventTypeId: String(calEventTypeId),
+    start: date,
+    end,
+    timeZone: STUDIO_TIMEZONE,
+  };
+
+  // Real service duration — Cal defaults to the shadow event's 15 min without this.
+  const service = await loadServiceByCalEventId(eventTypeId);
+  if (service?.duration_mins) {
+    slotQuery.duration = String(service.duration_mins);
+  }
+
   const result = await proxyCalV2Get(
     '/slots',
-    {
-      eventTypeId: String(calEventTypeId),
-      start: date,
-      end,
-      timeZone: STUDIO_TIMEZONE,
-    },
+    slotQuery,
     CAL_SLOTS_API_VERSION
   );
 

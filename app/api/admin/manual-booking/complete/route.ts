@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
+import { bookingEndFromDurationMins } from '@/lib/booking-duration';
 import { getCalComApiKey } from '@/lib/cal-config';
 import { notifyBookingConfirmed } from '@/lib/booking-notifications';
 import {
@@ -40,6 +41,7 @@ interface CompleteBody {
   serviceName?: unknown;
   bookingTime?: unknown;
   endTime?: unknown;
+  durationMins?: unknown;
 }
 
 function splitName(fullName: string): { first: string; last: string } {
@@ -56,6 +58,7 @@ function parseBody(input: unknown):
       serviceName: string;
       bookingTime: string | null;
       endTime: string | null;
+      durationMins: number | null;
     }
   | { error: string; message: string } {
   if (!input || typeof input !== 'object') {
@@ -74,6 +77,15 @@ function parseBody(input: unknown):
   const bookingTime =
     typeof body.bookingTime === 'string' ? body.bookingTime.trim() : null;
   const endTime = typeof body.endTime === 'string' ? body.endTime.trim() : null;
+  const durationMinsRaw = body.durationMins;
+  const durationMins =
+    typeof durationMinsRaw === 'number' && Number.isFinite(durationMinsRaw)
+      ? durationMinsRaw
+      : typeof durationMinsRaw === 'string'
+        ? Number(durationMinsRaw)
+        : NaN;
+  const parsedDurationMins =
+    Number.isFinite(durationMins) && durationMins > 0 ? durationMins : null;
 
   if (!calBookingUid) {
     return { error: 'invalid_cal_booking_uid', message: 'calBookingUid is required' };
@@ -108,21 +120,16 @@ function parseBody(input: unknown):
     serviceName: serviceName || 'appointment',
     bookingTime,
     endTime,
+    durationMins: parsedDurationMins,
   };
 }
 
-async function hydrateTimesFromCal(
-  uid: string,
-  bookingTime: string | null,
-  endTime: string | null,
-  serviceName: string
-): Promise<{ bookingTime: string | null; endTime: string | null; serviceName: string }> {
-  if (bookingTime) {
-    return { bookingTime, endTime, serviceName };
-  }
-
+/** Fetch start/end from Cal only when the client omitted bookingTime. */
+async function fetchBookingTimesFromCal(
+  uid: string
+): Promise<{ bookingTime: string | null; endTime: string | null }> {
   const apiKey = getCalComApiKey();
-  if (!apiKey) return { bookingTime, endTime, serviceName };
+  if (!apiKey) return { bookingTime: null, endTime: null };
 
   try {
     const res = await fetch(`${CAL_V2_BASE}/bookings/${encodeURIComponent(uid)}`, {
@@ -134,7 +141,7 @@ async function hydrateTimesFromCal(
       },
       cache: 'no-store',
     });
-    if (!res.ok) return { bookingTime, endTime, serviceName };
+    if (!res.ok) return { bookingTime: null, endTime: null };
 
     const payload: unknown = await res.json().catch(() => null);
     const booking =
@@ -143,36 +150,45 @@ async function hydrateTimesFromCal(
         : (payload as Record<string, unknown> | null);
 
     if (!booking || typeof booking !== 'object') {
-      return { bookingTime, endTime, serviceName };
+      return { bookingTime: null, endTime: null };
     }
 
-    const start =
+    const bookingTime =
       typeof booking.start === 'string'
         ? booking.start
         : typeof booking.startTime === 'string'
           ? booking.startTime
           : null;
-    const end =
+    const endTime =
       typeof booking.end === 'string'
         ? booking.end
         : typeof booking.endTime === 'string'
           ? booking.endTime
           : null;
-    const title =
-      typeof booking.title === 'string' ? booking.title.trim() : serviceName;
 
-    return {
-      bookingTime: start,
-      endTime: end,
-      serviceName: title || serviceName,
-    };
+    return { bookingTime, endTime };
   } catch (err) {
     console.warn('[api/admin/manual-booking/complete] Cal hydrate failed', {
       uid,
       error: errorMessage(err),
     });
-    return { bookingTime, endTime, serviceName };
+    return { bookingTime: null, endTime: null };
   }
+}
+
+function resolveAppointmentSchedule(parsed: {
+  bookingTime: string | null;
+  endTime: string | null;
+  durationMins: number | null;
+}): { bookingTime: string | null; endTime: string | null } {
+  let { bookingTime, endTime } = parsed;
+
+  if (!endTime && bookingTime && parsed.durationMins != null) {
+    endTime =
+      bookingEndFromDurationMins(bookingTime, parsed.durationMins) ?? endTime;
+  }
+
+  return { bookingTime, endTime };
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -205,14 +221,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  const hydrated = await hydrateTimesFromCal(
-    parsed.calBookingUid,
-    parsed.bookingTime,
-    parsed.endTime,
-    parsed.serviceName
-  );
+  let bookingTime = parsed.bookingTime;
+  let endTime = parsed.endTime;
 
-  if (!hydrated.bookingTime) {
+  if (!bookingTime) {
+    const fromCal = await fetchBookingTimesFromCal(parsed.calBookingUid);
+    bookingTime = fromCal.bookingTime;
+    if (!endTime) endTime = fromCal.endTime;
+  }
+
+  const schedule = resolveAppointmentSchedule({
+    bookingTime,
+    endTime,
+    durationMins: parsed.durationMins,
+  });
+  bookingTime = schedule.bookingTime;
+  endTime = schedule.endTime;
+
+  const appointmentServiceName = parsed.serviceName;
+
+  if (!bookingTime) {
     return NextResponse.json(
       {
         error: 'missing_booking_time',
@@ -339,8 +367,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         status
       )
       VALUES (
-        ${clientId}, ${hydrated.serviceName}, ${hydrated.bookingTime},
-        ${hydrated.endTime}, ${parsed.calBookingUid},
+        ${clientId}, ${appointmentServiceName}, ${bookingTime},
+        ${endTime}, ${parsed.calBookingUid},
         ${first}, ${last}, ${parsed.clientEmail}, ${parsed.clientPhone},
         'confirmed'
       )
@@ -358,10 +386,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const notifications = await notifyBookingConfirmed({
       bookingUid: parsed.calBookingUid,
-      bookingTime: hydrated.bookingTime,
+      bookingTime,
       clientPhone: parsed.clientPhone,
       clientName: parsed.clientName,
-      serviceName: hydrated.serviceName,
+      serviceName: appointmentServiceName,
       skipIfAlreadySent: true,
     });
 
