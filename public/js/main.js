@@ -156,6 +156,70 @@
   // capping cross-user staleness to a single minute.
   const FRESHNESS_MS = 60 * 1000;
 
+  /** Drawer shell stays fixed; reset any stray scroll offsets on step changes. */
+  const scrollDrawerToTop = () => {
+    if (drawer) drawer.scrollTop = 0;
+    if (drawerContainer) drawerContainer.scrollTop = 0;
+  };
+
+  const teardownDrawerEmbedFrame = (mount) => {
+    if (!mount || typeof mount.__drawerFrameCleanup !== 'function') return;
+    mount.__drawerFrameCleanup();
+    delete mount.__drawerFrameCleanup;
+  };
+
+  /**
+   * Cal inline embeds grow the iframe to content height and ask the parent
+   * to scroll (`__scrollByDistance`). Pin the iframe to the drawer's
+   * remaining viewport so the booker scrolls internally (timeslots column).
+   */
+  const bindDrawerEmbedFrame = (mount) => {
+    if (!mount || !drawerContainer) return;
+    teardownDrawerEmbedFrame(mount);
+
+    const applyFrameBounds = () => {
+      const iframe = mount.querySelector('iframe');
+      if (!iframe) return;
+      const h = drawerContainer.clientHeight;
+      if (h <= 0) return;
+      iframe.style.setProperty('height', `${h}px`, 'important');
+      iframe.style.setProperty('max-height', `${h}px`, 'important');
+    };
+
+    const ro = new ResizeObserver(applyFrameBounds);
+    ro.observe(drawerContainer);
+
+    const mo = new MutationObserver(applyFrameBounds);
+    mo.observe(mount, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style', 'height']
+    });
+
+    mount.__drawerFrameCleanup = () => {
+      ro.disconnect();
+      mo.disconnect();
+    };
+
+    applyFrameBounds();
+    requestAnimationFrame(applyFrameBounds);
+  };
+
+  const registerDrawerEmbedUi = (nsApi) => {
+    const base = window.calUiConfig || {};
+    nsApi('ui', Object.assign({}, base, {
+      layout: 'month_view',
+      disableAutoScroll: true,
+      'ui.autoscroll': 'false'
+    }));
+
+    const onStepChange = () => scrollDrawerToTop();
+    ['routeChanged', 'linkReady'].forEach((action) => {
+      nsApi('on', { action, callback: onStepChange });
+    });
+  };
+
   // Prevent double-redirect when both bookingSuccessfulV2 and the legacy
   // bookingSuccessful event fire for the same booking.
   const checkoutRedirectedUids = new Set();
@@ -294,10 +358,14 @@
         nsApi('inline', {
           elementOrSelector: `#${mount.id}`,
           calLink: link,
-          config: { layout: 'month_view' }
+          config: {
+            layout: 'month_view',
+            'ui.autoscroll': 'false'
+          }
         });
-        nsApi('ui', window.calUiConfig || { layout: 'month_view' });
+        registerDrawerEmbedUi(nsApi);
         registerBookingRedirectHandlers(nsApi, link);
+        bindDrawerEmbedFrame(mount);
       }
     }
     return mount;
@@ -319,6 +387,7 @@
   const rebuildMount = (link) => {
     const oldMount = mountsByLink.get(link);
     if (oldMount) {
+      teardownDrawerEmbedFrame(oldMount);
       oldMount.remove();
       mountsByLink.delete(link);
     }
@@ -376,6 +445,9 @@
     showMount(link);
     drawer.classList.add('drawer-open');
     backdrop.classList.add('drawer-open');
+    scrollDrawerToTop();
+    const activeMount = mountsByLink.get(link);
+    if (activeMount) bindDrawerEmbedFrame(activeMount);
   };
 
   const closeDrawer = () => {

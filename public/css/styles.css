@@ -834,19 +834,28 @@ a.service-item:focus-visible .service-action {
   width: 100%;
   max-width: 460px;
   height: 100vh;
+  height: 100dvh;
   background: var(--off-white);
   transform: translateX(100%);
   transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 1000;
-  overflow-y: auto;
+  /*
+    Flex column + overflow hidden: the drawer shell never scrolls.
+    Cal's embed otherwise calls __scrollByDistance on the parent and
+    drags the whole panel (header + calendar + slots). With a fixed
+    iframe height, scrolling stays inside the booker (timeslots only).
+  */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  overscroll-behavior: contain;
   box-shadow: -10px 0 40px rgba(0, 0, 0, 0.1);
 }
 #booking-drawer.drawer-open {
   transform: translateX(0);
 }
 .drawer-header {
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 10;
   background: var(--off-white);
   border-bottom: 1px solid rgba(13, 27, 42, 0.1);
@@ -918,15 +927,19 @@ a.service-item:focus-visible .service-action {
 
 #drawer-cal-container {
   position: relative;
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  min-height: calc(100vh - 130px);
-  padding: 16px 0 24px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px 0 16px;
 }
 /* Inactive mounts stay rendered (so Cal's iframe is fully populated) but
    are taken out of flow and hidden until their service row is clicked. */
 .drawer-mount {
   position: absolute;
-  top: 16px;
+  top: 8px;
   left: 0;
   right: 0;
   visibility: hidden;
@@ -934,11 +947,20 @@ a.service-item:focus-visible .service-action {
 }
 .drawer-mount.active {
   position: static;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   visibility: visible;
   pointer-events: auto;
 }
 #drawer-cal-container iframe {
   width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  min-height: 0 !important;
+  flex: 1;
   background: transparent !important;
   border: none !important;
 }
