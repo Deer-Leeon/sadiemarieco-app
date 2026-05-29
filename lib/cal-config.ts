@@ -56,6 +56,45 @@ export function getCalComApiKey(): string | null {
   return key && key.length > 0 ? key : null;
 }
 
+/** Hidden Cal event type with 9 AM–9 PM availability for admin manual booking. */
+export const getAdminOverrideEventId = () =>
+  process.env.CAL_ADMIN_OVERRIDE_EVENT_ID;
+
+/** Parsed override id, or null when unset / invalid. */
+export function parseAdminOverrideEventId(): number | null {
+  const raw = getAdminOverrideEventId()?.trim();
+  if (!raw) return null;
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+export interface ServiceByCalEventId {
+  title: string;
+  duration_mins: number;
+}
+
+/** Resolve the bookable service row for a Cal.com event type id (manual booking). */
+export async function loadServiceByCalEventId(
+  calEventId: number
+): Promise<ServiceByCalEventId | null> {
+  const { rows } = await sql<{
+    title: string;
+    duration_mins: number | null;
+  }>`
+    SELECT title, duration_mins
+    FROM site_services
+    WHERE is_active = TRUE
+      AND is_group = FALSE
+      AND cal_event_id = ${calEventId}
+    LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row || row.duration_mins == null || row.duration_mins <= 0) {
+    return null;
+  }
+  return { title: row.title, duration_mins: row.duration_mins };
+}
+
 /**
  * Load active bookable services from Postgres and build lookup maps.
  * Call from Server Components or API routes when the admin UI needs IDs.

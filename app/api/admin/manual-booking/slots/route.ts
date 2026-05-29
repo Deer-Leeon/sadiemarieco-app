@@ -4,11 +4,14 @@
  * Admin-only proxy for Cal.com v2 available slots.
  * Query: eventTypeId (number), date (YYYY-MM-DD), optional end (YYYY-MM-DD).
  * When `end` is provided and differs from `date`, returns all days in the range.
+ *
+ * When `CAL_ADMIN_OVERRIDE_EVENT_ID` is set, proxies slots for that shadow
+ * event type (9 AM–9 PM) while the client still sends the real service id.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { STUDIO_TIMEZONE } from '@/lib/cal-config';
+import { parseAdminOverrideEventId, STUDIO_TIMEZONE } from '@/lib/cal-config';
 import {
   CAL_SLOTS_API_VERSION,
   gateAdmin,
@@ -60,10 +63,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const overrideEventTypeId = parseAdminOverrideEventId();
+  const calEventTypeId = overrideEventTypeId ?? eventTypeId;
+
   const result = await proxyCalV2Get(
     '/slots',
     {
-      eventTypeId: String(eventTypeId),
+      eventTypeId: String(calEventTypeId),
       start: date,
       end,
       timeZone: STUDIO_TIMEZONE,

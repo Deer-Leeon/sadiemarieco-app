@@ -6,7 +6,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { STUDIO_TIMEZONE } from '@/lib/cal-config';
+import {
+  loadServiceByCalEventId,
+  parseAdminOverrideEventId,
+  STUDIO_TIMEZONE,
+} from '@/lib/cal-config';
 import {
   CalStartTimeError,
   parseBookingStartForCal,
@@ -195,8 +199,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const calPayload = {
-    eventTypeId: parsed.eventTypeId,
+  const overrideEventTypeId = parseAdminOverrideEventId();
+  let calEventTypeId = parsed.eventTypeId;
+  let bookingDescription: string | undefined;
+  let bookingEndIso: string | undefined;
+  let lengthInMinutes: number | undefined;
+
+  if (overrideEventTypeId != null) {
+    const service = await loadServiceByCalEventId(parsed.eventTypeId);
+    if (!service) {
+      return NextResponse.json(
+        {
+          error: 'service_not_found',
+          message: `No active bookable service for Cal event type ${parsed.eventTypeId}`,
+        },
+        { status: 404 }
+      );
+    }
+
+    calEventTypeId = overrideEventTypeId;
+    lengthInMinutes = service.duration_mins;
+    bookingEndIso = new Date(
+      startUtc.getTime() + service.duration_mins * 60_000
+    ).toISOString();
+    bookingDescription = service.title;
+  }
+
+  const calPayload: Record<string, unknown> = {
+    eventTypeId: calEventTypeId,
     start: startUtc.toISOString(),
     attendee: {
       name: parsed.clientName,
@@ -213,8 +243,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     },
     metadata: {
       manual_admin_booking: 'true',
+      ...(bookingDescription
+        ? { original_service_name: bookingDescription }
+        : {}),
     },
   };
+
+  if (bookingDescription) {
+    calPayload.description = bookingDescription;
+  }
+  if (bookingEndIso) {
+    calPayload.end = bookingEndIso;
+  }
+  if (lengthInMinutes != null) {
+    calPayload.lengthInMinutes = lengthInMinutes;
+  }
 
   const result = await proxyCalV2Post(
     '/bookings',
