@@ -5,6 +5,10 @@
  * `site_services` query and sort used by `fetchServicesHtml()` in
  * `app/route.ts` — same WHERE/ORDER BY, plus `display_order` for clients
  * that rebuild grouping locally.
+ *
+ * Each bookable row includes `cal_event_id` (Cal.com event type id) for admin
+ * manual booking — pass it as `eventTypeId` to GET /api/admin/manual-booking/slots.
+ * Null on group headers (`is_group: true`).
  */
 
 import { NextResponse } from 'next/server';
@@ -33,6 +37,7 @@ const COMING_SOON_HOST_CATEGORY: Record<string, string> = {
 
 interface PublicServiceRow {
   id: number;
+  cal_event_id: number | null;
   category: string;
   title: string;
   description: string;
@@ -53,6 +58,7 @@ export async function GET(): Promise<NextResponse> {
     const { rows } = await sql<PublicServiceRow>`
       SELECT
         id,
+        cal_event_id,
         category,
         title,
         description,
@@ -69,6 +75,7 @@ export async function GET(): Promise<NextResponse> {
 
     const services = rows.map((row) => ({
       id: row.id,
+      cal_event_id: row.cal_event_id,
       category: row.category,
       title: row.title,
       description: row.description,
