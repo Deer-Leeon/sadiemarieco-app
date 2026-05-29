@@ -285,13 +285,11 @@ async function fetchImageMap(): Promise<Record<string, SiteImage>> {
  * the page still renders (with an empty grid) rather than 500ing the
  * whole homepage on a transient Postgres hiccup.
  *
- * ORDER BY category DESC, id ASC:
- *   • category DESC lexically: "Lash Services" > "Brow Services", so
- *     lashes appear in the left column and brows on the right, which
- *     matches the legacy hardcoded order the studio is used to.
- *   • id ASC within each category preserves insertion order, so the
- *     editor's "I added these in this sequence" mental model is the
- *     order customers see them in too.
+ * ORDER BY display_order ASC, id ASC:
+ *   • Global sequence set in /admin/services ("Save Order").
+ *   • groupByCategory preserves row order within each category bucket.
+ *   • Category columns use PUBLIC_CATEGORY_COLUMN_RANK (Lash left,
+ *     Brow right) — must stay aligned with /admin/services.
  */
 async function fetchServicesHtml(): Promise<string> {
   try {
@@ -308,7 +306,7 @@ async function fetchServicesHtml(): Promise<string> {
         parent_id
       FROM site_services
       WHERE is_active = TRUE
-      ORDER BY category DESC, is_group DESC, id ASC
+      ORDER BY display_order ASC, id ASC
     `;
     return renderServicesHtml(rows);
   } catch (err) {
@@ -405,6 +403,13 @@ function renderComingSoonBlock(category: string): string {
  */
 const COMING_SOON_HOST_CATEGORY: Record<string, string> = {
   'Teeth Whitening': 'Brow Services',
+};
+
+/** Homepage column order — keep in sync with ServiceManager.tsx */
+const PUBLIC_CATEGORY_COLUMN_RANK: Record<string, number> = {
+  'Lash Services': 0,
+  'Brow Services': 1,
+  'Teeth Whitening': 2,
 };
 
 function renderServicesHtml(rows: readonly SiteServiceRow[]): string {
@@ -689,16 +694,18 @@ const ACCORDION_SCRIPT = `
 function groupByCategory(
   rows: readonly SiteServiceRow[]
 ): Array<[string, SiteServiceRow[]]> {
-  // Map preserves insertion order — since rows arrive sorted by
-  // category DESC, the resulting Map keys are already in the order
-  // we want to render columns.
   const map = new Map<string, SiteServiceRow[]>();
   for (const row of rows) {
     const list = map.get(row.category);
     if (list) list.push(row);
     else map.set(row.category, [row]);
   }
-  return Array.from(map.entries());
+  return Array.from(map.entries()).sort(([a], [b]) => {
+    const rankA = PUBLIC_CATEGORY_COLUMN_RANK[a] ?? 50;
+    const rankB = PUBLIC_CATEGORY_COLUMN_RANK[b] ?? 50;
+    if (rankA !== rankB) return rankA - rankB;
+    return a.localeCompare(b);
+  });
 }
 
 /**

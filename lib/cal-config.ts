@@ -73,7 +73,7 @@ export async function loadCalEventTypeMaps(): Promise<CalEventTypeMaps> {
       AND is_group = FALSE
       AND cal_event_id IS NOT NULL
       AND slug IS NOT NULL
-    ORDER BY category ASC, title ASC
+    ORDER BY display_order ASC, id ASC
   `;
 
   const services: CalServiceBookingConfig[] = rows.map((row) => ({

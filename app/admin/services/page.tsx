@@ -28,6 +28,7 @@ interface ServiceRow {
   is_group: boolean;
   parent_id: number | null;
   color: string | null;
+  display_order: number;
 }
 
 export default async function ServicesPage() {
@@ -74,10 +75,11 @@ export default async function ServicesPage() {
         slug,
         is_group,
         parent_id,
-        color
+        color,
+        display_order
       FROM site_services
       WHERE is_active = TRUE
-      ORDER BY category ASC, is_group DESC, title ASC
+      ORDER BY display_order ASC, id ASC
     `;
     services = rows.map((r) => ({
       ...r,

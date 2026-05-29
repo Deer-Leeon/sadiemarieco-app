@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import {
-  Clock,
-  DollarSign,
-  ExternalLink,
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ChevronRight,
   Pencil,
   Plus,
   Trash2,
@@ -86,10 +88,389 @@ export interface Service {
    * `site_services.color`; persisted via /api/admin/services.
    */
   color: string | null;
+  /** Global menu sequence (lower = earlier). Set via Save Order. */
+  display_order: number;
 }
 
 interface Props {
   initialServices: Service[];
+}
+
+function sortServicesByDisplayOrder(list: Service[]): Service[] {
+  return [...list].sort((a, b) =>
+    a.display_order !== b.display_order
+      ? a.display_order - b.display_order
+      : a.id - b.id
+  );
+}
+
+function idsInDisplayOrder(list: Service[]): number[] {
+  return sortServicesByDisplayOrder(list).map((s) => s.id);
+}
+
+/** Mirrors `renderCategoryItems()` in app/route.ts — same top-level sequence. */
+function buildCategoryMenuStructure(
+  items: Service[],
+  sortByMenuOrder: (list: Service[]) => Service[]
+): {
+  topLevel: Service[];
+  childrenByParent: Map<number, Service[]>;
+} {
+  const ordered = sortByMenuOrder(items);
+  const groupIds = new Set(ordered.filter((s) => s.is_group).map((s) => s.id));
+  const childrenByParent = new Map<number, Service[]>();
+
+  for (const s of ordered) {
+    if (s.parent_id !== null && groupIds.has(s.parent_id)) {
+      const list = childrenByParent.get(s.parent_id);
+      if (list) list.push(s);
+      else childrenByParent.set(s.parent_id, [s]);
+    }
+  }
+
+  const topLevel = ordered.filter(
+    (s) =>
+      s.is_group ||
+      s.parent_id === null ||
+      !groupIds.has(s.parent_id)
+  );
+
+  return { topLevel, childrenByParent };
+}
+
+/** Row ids in the order they appear in the admin column (group, then its children). */
+function flattenCategoryVisualIds(
+  topLevel: Service[],
+  childrenByParent: Map<number, Service[]>
+): number[] {
+  const ids: number[] = [];
+  for (const row of topLevel) {
+    ids.push(row.id);
+    if (row.is_group) {
+      for (const child of childrenByParent.get(row.id) ?? []) {
+        ids.push(child.id);
+      }
+    }
+  }
+  return ids;
+}
+
+function buildCategoryVisualOrder(
+  categoryServices: Service[],
+  orderDraft: number[]
+): number[] {
+  const orderIndex = new Map<number, number>();
+  orderDraft.forEach((id, index) => orderIndex.set(id, index));
+  const sortByMenuOrder = (list: Service[]) =>
+    [...list].sort(
+      (a, b) =>
+        (orderIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+        (orderIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER)
+    );
+  const { topLevel, childrenByParent } = buildCategoryMenuStructure(
+    categoryServices,
+    sortByMenuOrder
+  );
+  return flattenCategoryVisualIds(topLevel, childrenByParent);
+}
+
+/**
+ * Reassign global order slots for one category to match the admin column's
+ * visual row order, without moving other categories' rows.
+ */
+function applyCategoryVisualOrderToGlobal(
+  globalOrder: number[],
+  category: string,
+  allServices: Service[],
+  visualIds: number[]
+): number[] {
+  const categoryIdSet = new Set(
+    allServices.filter((s) => s.category === category).map((s) => s.id)
+  );
+  const slotIndices: number[] = [];
+  for (let i = 0; i < globalOrder.length; i++) {
+    if (categoryIdSet.has(globalOrder[i])) slotIndices.push(i);
+  }
+
+  if (slotIndices.length === 0 || categoryIdSet.size === 0) return globalOrder;
+
+  const seen = new Set<number>();
+  const canonicalVisual: number[] = [];
+  for (const id of visualIds) {
+    if (!categoryIdSet.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    canonicalVisual.push(id);
+  }
+  const missing = [...categoryIdSet]
+    .filter((id) => !seen.has(id))
+    .sort(
+      (a, b) =>
+        globalOrder.indexOf(a) - globalOrder.indexOf(b) ||
+        a - b
+    );
+  canonicalVisual.push(...missing);
+
+  if (canonicalVisual.length !== categoryIdSet.size) return globalOrder;
+
+  const next = [...globalOrder];
+  for (let j = 0; j < canonicalVisual.length; j++) {
+    next[slotIndices[j]] = canonicalVisual[j];
+  }
+  return next;
+}
+
+function computeCategoryRenderedOrder(
+  categoryServices: Service[],
+  orderDraft: number[],
+  servicesById: Map<number, Service>,
+  groupIds: Set<number>
+): number[] {
+  const visual = buildCategoryVisualOrder(categoryServices, orderDraft);
+  return buildRenderedRowIds(visual, servicesById, groupIds);
+}
+
+/**
+ * Pure reorder: returns a new global id list, or null when the move is a no-op.
+ */
+function moveItemInGlobalOrder(
+  orderDraft: number[],
+  allServices: Service[],
+  groupIds: Set<number>,
+  category: string,
+  serviceId: number,
+  direction: -1 | 1
+): number[] | null {
+  const servicesById = new Map(allServices.map((s) => [s.id, s]));
+  const categoryServices = allServices.filter((s) => s.category === category);
+  if (categoryServices.length === 0) return null;
+
+  const rendered = computeCategoryRenderedOrder(
+    categoryServices,
+    orderDraft,
+    servicesById,
+    groupIds
+  );
+  const service = servicesById.get(serviceId);
+  if (!service || service.category !== category) return null;
+
+  let newRendered: number[] | null = null;
+
+  if (service.is_group) {
+    const units = buildMoveUnits(rendered, servicesById);
+    const unitIndex = units.findIndex((unit) => unit[0] === serviceId);
+    if (unitIndex < 0) return null;
+    const targetUnit = unitIndex + direction;
+    if (targetUnit < 0 || targetUnit >= units.length) return null;
+
+    const nextUnits = [...units];
+    [nextUnits[unitIndex], nextUnits[targetUnit]] = [
+      nextUnits[targetUnit],
+      nextUnits[unitIndex],
+    ];
+    newRendered = nextUnits.flat();
+  } else {
+    const index = rendered.indexOf(serviceId);
+    if (index < 0) return null;
+    const target = index + direction;
+    if (target < 0 || target >= rendered.length) return null;
+
+    const a = servicesById.get(rendered[index]);
+    const b = servicesById.get(rendered[target]);
+    if (!a || !b) return null;
+    if (a.parent_id === b.id || b.parent_id === a.id) return null;
+
+    newRendered = [...rendered];
+    [newRendered[index], newRendered[target]] = [
+      newRendered[target],
+      newRendered[index],
+    ];
+  }
+
+  const newVisual = renderedRowsToVisualOrder(newRendered, servicesById);
+  const nextGlobal = applyCategoryVisualOrderToGlobal(
+    orderDraft,
+    category,
+    allServices,
+    newVisual
+  );
+
+  if (nextGlobal.join(',') === orderDraft.join(',')) return null;
+  return nextGlobal;
+}
+
+/**
+ * Build the global id list to persist: each category block in homepage
+ * column order (Lash, then Brow, …), with rows inside each column matching
+ * the admin catalogue.
+ */
+function buildGlobalOrderForSave(
+  allServices: Service[],
+  orderDraft: number[],
+  servicesById: Map<number, Service>,
+  groupIds: Set<number>
+): number[] {
+  const byCategory = new Map<string, Service[]>();
+  for (const s of allServices) {
+    const list = byCategory.get(s.category);
+    if (list) list.push(s);
+    else byCategory.set(s.category, [s]);
+  }
+
+  const categories = Array.from(byCategory.keys()).sort((a, b) => {
+    const rankA = CATEGORY_COLUMN_RANK[a] ?? 50;
+    const rankB = CATEGORY_COLUMN_RANK[b] ?? 50;
+    if (rankA !== rankB) return rankA - rankB;
+    return a.localeCompare(b);
+  });
+
+  const result: number[] = [];
+  const used = new Set<number>();
+
+  for (const category of categories) {
+    const items = byCategory.get(category) ?? [];
+    const rendered = computeCategoryRenderedOrder(
+      items,
+      orderDraft,
+      servicesById,
+      groupIds
+    );
+    for (const id of rendered) {
+      if (!used.has(id)) {
+        result.push(id);
+        used.add(id);
+      }
+    }
+  }
+
+  for (const id of orderDraft) {
+    if (!used.has(id)) result.push(id);
+  }
+
+  return result;
+}
+
+/** Flat list of rows exactly as rendered (group header, then its children, etc.). */
+function buildRenderedRowIds(
+  visualOrder: number[],
+  servicesById: Map<number, Service>,
+  groupIds: Set<number>
+): number[] {
+  const out: number[] = [];
+  const seen = new Set<number>();
+
+  for (const id of visualOrder) {
+    if (seen.has(id)) continue;
+    const service = servicesById.get(id);
+    if (!service) continue;
+
+    if (
+      service.parent_id !== null &&
+      groupIds.has(service.parent_id) &&
+      !service.is_group
+    ) {
+      continue;
+    }
+
+    if (service.is_group) {
+      out.push(service.id);
+      seen.add(service.id);
+      for (const child of childrenForGroupInVisualOrder(
+        service.id,
+        visualOrder,
+        servicesById
+      )) {
+        out.push(child.id);
+        seen.add(child.id);
+      }
+      continue;
+    }
+
+    out.push(service.id);
+    seen.add(service.id);
+  }
+
+  return out;
+}
+
+/**
+ * Moveable units for reordering: each group header plus its nested children
+ * moves together; standalones and individual child rows move alone.
+ */
+function buildMoveUnits(
+  rendered: number[],
+  servicesById: Map<number, Service>
+): number[][] {
+  const units: number[][] = [];
+  let i = 0;
+  while (i < rendered.length) {
+    const service = servicesById.get(rendered[i]);
+    if (!service) {
+      i += 1;
+      continue;
+    }
+    if (service.is_group) {
+      const unit = [service.id];
+      i += 1;
+      while (i < rendered.length) {
+        const child = servicesById.get(rendered[i]);
+        if (child?.parent_id === service.id) {
+          unit.push(rendered[i]);
+          i += 1;
+        } else {
+          break;
+        }
+      }
+      units.push(unit);
+      continue;
+    }
+    units.push([rendered[i]]);
+    i += 1;
+  }
+  return units;
+}
+
+function childrenForGroupInVisualOrder(
+  groupId: number,
+  visualOrder: number[],
+  servicesById: Map<number, Service>
+): Service[] {
+  return visualOrder
+    .map((id) => servicesById.get(id))
+    .filter(
+      (s): s is Service => s !== undefined && s.parent_id === groupId
+    )
+    .sort((a, b) => visualOrder.indexOf(a.id) - visualOrder.indexOf(b.id));
+}
+
+function renderedRowsToVisualOrder(
+  rendered: number[],
+  servicesById: Map<number, Service>
+): number[] {
+  const visual: number[] = [];
+  let i = 0;
+  while (i < rendered.length) {
+    const service = servicesById.get(rendered[i]);
+    if (!service) {
+      i += 1;
+      continue;
+    }
+    visual.push(service.id);
+    if (service.is_group) {
+      i += 1;
+      while (i < rendered.length) {
+        const child = servicesById.get(rendered[i]);
+        if (child?.parent_id === service.id) {
+          visual.push(child.id);
+          i += 1;
+        } else {
+          break;
+        }
+      }
+      continue;
+    }
+    i += 1;
+  }
+  return visual;
 }
 
 /**
@@ -119,6 +500,13 @@ const CATEGORIES = [
   'Brow Services',
   'Teeth Whitening',
 ] as const;
+
+/** Public homepage column order: Lash left, Brow right. */
+const CATEGORY_COLUMN_RANK: Record<string, number> = {
+  'Lash Services': 0,
+  'Brow Services': 1,
+  'Teeth Whitening': 2,
+};
 
 interface FormState {
   title: string;
@@ -192,11 +580,57 @@ type FormMode =
   | { kind: 'edit'; service: Service };
 
 export default function ServiceManager({ initialServices }: Props) {
-  const [services, setServices] = useState<Service[]>(initialServices);
+  const router = useRouter();
+  const [services, setServices] = useState<Service[]>(() =>
+    sortServicesByDisplayOrder(initialServices)
+  );
+  const [orderDraft, setOrderDraft] = useState<number[]>(() =>
+    idsInDisplayOrder(initialServices)
+  );
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const [orderToast, setOrderToast] = useState<string | null>(null);
   const [mode, setMode] = useState<FormMode>({ kind: 'closed' });
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const savedOrderKey = useMemo(
+    () => idsInDisplayOrder(services).join(','),
+    [services]
+  );
+
+  const servicesById = useMemo(
+    () => new Map(services.map((s) => [s.id, s])),
+    [services]
+  );
+
+  const groupIds = useMemo(
+    () => new Set(services.filter((s) => s.is_group).map((s) => s.id)),
+    [services]
+  );
+
+  const canonicalOrderKey = useMemo(
+    () =>
+      buildGlobalOrderForSave(
+        services,
+        orderDraft,
+        servicesById,
+        groupIds
+      ).join(','),
+    [services, orderDraft, servicesById, groupIds]
+  );
+
+  const orderDirty = useMemo(
+    () => canonicalOrderKey !== savedOrderKey,
+    [canonicalOrderKey, savedOrderKey]
+  );
+
+  useEffect(() => {
+    const sorted = sortServicesByDisplayOrder(initialServices);
+    const draft = idsInDisplayOrder(sorted);
+    setServices(sorted);
+    setOrderDraft(draft);
+  }, [initialServices]);
 
   // Inline "are you sure" delete state: holds the id of the row in
   // its confirmation window. A timeout auto-reverts after 4s so an
@@ -208,19 +642,18 @@ export default function ServiceManager({ initialServices }: Props) {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Derived: services grouped by category, hierarchical within each ───
-  // Each category renders in this order:
-  //   1. Group headers (is_group=true) with their children nested
-  //      visually beneath. Alphabetical among groups.
-  //   2. Standalone services (is_group=false, parent_id=null).
-  //      Alphabetical among standalones.
-  //
-  // Orphan children — rows whose parent_id points to a row that no
-  // longer exists (raced delete, manual SQL change) — are bubbled up
-  // and rendered as standalones so they never disappear from the
-  // editor. Surfacing them lets the editor reassign or delete them
-  // instead of having to read the database to find out where they
-  // went.
+  const orderIndex = useMemo(() => {
+    const map = new Map<number, number>();
+    orderDraft.forEach((id, index) => map.set(id, index));
+    return map;
+  }, [orderDraft]);
+
+  const servicesRef = useRef(services);
+  servicesRef.current = services;
+  const groupIdsRef = useRef(groupIds);
+  groupIdsRef.current = groupIds;
+
+  // ── Derived: categories in public-site order (display_order) ─────────
   const grouped = useMemo(() => {
     const byCategory = new Map<string, Service[]>();
     for (const s of services) {
@@ -230,43 +663,86 @@ export default function ServiceManager({ initialServices }: Props) {
     }
 
     return Array.from(byCategory.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
       .map(([category, items]) => {
-        const groupSet = new Set(
-          items.filter((s) => s.is_group).map((s) => s.id)
+        const renderedOrder = computeCategoryRenderedOrder(
+          items,
+          orderDraft,
+          servicesById,
+          groupIds
         );
-        const childrenByParent = new Map<number, Service[]>();
-        for (const s of items) {
-          if (s.parent_id !== null && groupSet.has(s.parent_id)) {
-            const list = childrenByParent.get(s.parent_id);
-            if (list) list.push(s);
-            else childrenByParent.set(s.parent_id, [s]);
-          }
-        }
-        // Sort each child list alphabetically so the admin view
-        // matches the public site's rendering order.
-        for (const list of childrenByParent.values()) {
-          list.sort((a, b) => a.title.localeCompare(b.title));
-        }
-
-        const groupRows = items
-          .filter((s) => s.is_group)
-          .sort((a, b) => a.title.localeCompare(b.title));
-
-        // Standalones = non-group rows whose parent_id is null OR
-        // whose parent_id no longer references a live group (the
-        // orphan-bubble-up case described in the block comment).
-        const standalones = items
-          .filter(
-            (s) =>
-              !s.is_group &&
-              (s.parent_id === null || !groupSet.has(s.parent_id))
-          )
-          .sort((a, b) => a.title.localeCompare(b.title));
-
-        return { category, groupRows, childrenByParent, standalones };
+        const minOrder = Math.min(
+          ...items.map((s) => orderIndex.get(s.id) ?? Number.MAX_SAFE_INTEGER)
+        );
+        return { category, renderedOrder, minOrder };
+      })
+      .sort((a, b) => {
+        const rankA = CATEGORY_COLUMN_RANK[a.category] ?? 50;
+        const rankB = CATEGORY_COLUMN_RANK[b.category] ?? 50;
+        if (rankA !== rankB) return rankA - rankB;
+        return a.minOrder - b.minOrder;
       });
-  }, [services]);
+  }, [services, orderIndex, orderDraft, servicesById, groupIds]);
+
+  function moveInCategoryVisual(
+    category: string,
+    serviceId: number,
+    direction: -1 | 1
+  ) {
+    setOrderDraft((prev) => {
+      const next = moveItemInGlobalOrder(
+        prev,
+        servicesRef.current,
+        groupIdsRef.current,
+        category,
+        serviceId,
+        direction
+      );
+      return next ?? prev;
+    });
+  }
+
+  async function saveOrder() {
+    if (!orderDirty || isSavingOrder) return;
+    setIsSavingOrder(true);
+    setSubmitError(null);
+    const orderedIds = buildGlobalOrderForSave(
+      services,
+      orderDraft,
+      servicesById,
+      groupIds
+    );
+    try {
+      const res = await fetch('/api/admin/services/reorder', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderedIds }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.message === 'string'
+            ? data.message
+            : data.error || 'Could not save order'
+        );
+      }
+
+      const byId = new Map(services.map((s) => [s.id, s]));
+      const reordered = orderedIds
+        .map((id, index) => {
+          const row = byId.get(id);
+          return row ? { ...row, display_order: index } : null;
+        })
+        .filter((s): s is Service => s !== null);
+      setOrderDraft(orderedIds);
+      setServices(reordered);
+      setOrderToast('Service order saved.');
+      router.refresh();
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSavingOrder(false);
+    }
+  }
 
   // ── Derived: flat list of groups for the parent-picker dropdown ───────
   // Filtered by the form's current category so the editor can only
@@ -452,7 +928,9 @@ export default function ServiceManager({ initialServices }: Props) {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || data.error || 'Request failed');
-        setServices((prev) => [...prev, data.service as Service]);
+        const created = data.service as Service;
+        setServices((prev) => sortServicesByDisplayOrder([...prev, created]));
+        setOrderDraft((prev) => [...prev, created.id]);
         closeForm();
       } else if (mode.kind === 'edit') {
         const res = await fetch('/api/admin/services', {
@@ -514,11 +992,14 @@ export default function ServiceManager({ initialServices }: Props) {
       // Server cascade-removes children of a deleted group. Mirror
       // the cascade in local state so the list doesn't show stranded
       // child cards under a now-deleted parent until the next refetch.
+      const removedIds = new Set<number>([service.id]);
+      for (const s of services) {
+        if (s.parent_id === service.id) removedIds.add(s.id);
+      }
       setServices((prev) =>
-        prev.filter(
-          (s) => s.id !== service.id && s.parent_id !== service.id
-        )
+        prev.filter((s) => !removedIds.has(s.id))
       );
+      setOrderDraft((prev) => prev.filter((id) => !removedIds.has(id)));
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -532,19 +1013,53 @@ export default function ServiceManager({ initialServices }: Props) {
   return (
     <div className="space-y-8">
       {/* Top toolbar — empty-state hint sits in the body below */}
-      <div className="flex items-center justify-between">
-        <h2 className="font-serif text-xl text-stone-900">
-          Service Catalogue
-        </h2>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="inline-flex items-center gap-2 rounded-full bg-stone-900 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-[#FAF9F6] transition-colors hover:bg-stone-700"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Add service
-        </button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="font-serif text-xl text-stone-900">
+            Service Catalogue
+          </h2>
+          <p className="mt-1 text-xs text-stone-500">
+            Lash column left, Brow right — same as the live site. ↑↓ to reorder,
+            then Save order. Edit opens full details.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void saveOrder()}
+            disabled={!orderDirty || isSavingOrder}
+            className="inline-flex items-center gap-2 rounded-full border border-stone-300 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-800 transition-colors hover:border-stone-400 hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
+          >
+            {isSavingOrder ? 'Saving order…' : 'Save order'}
+          </button>
+          <button
+            type="button"
+            onClick={openCreate}
+            className="inline-flex items-center gap-2 rounded-full bg-stone-900 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-[#FAF9F6] transition-colors hover:bg-stone-700"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add service
+          </button>
+        </div>
       </div>
+
+      {orderToast && (
+        <div
+          role="status"
+          className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-900"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span>{orderToast}</span>
+            <button
+              type="button"
+              onClick={() => setOrderToast(null)}
+              className="text-emerald-800 underline-offset-2 hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Page-level error banner for delete failures (the form has its
           own inline error.) Both reuse `submitError` because only one
@@ -558,21 +1073,33 @@ export default function ServiceManager({ initialServices }: Props) {
       {grouped.length === 0 ? (
         <EmptyState onAdd={openCreate} />
       ) : (
-        grouped.map((section) => (
-          <CategorySection
-            key={section.category}
-            category={section.category}
-            groupRows={section.groupRows}
-            childrenByParent={section.childrenByParent}
-            standalones={section.standalones}
-            confirmingDeleteId={confirmingDeleteId}
-            deletingId={deletingId}
-            onEdit={openEdit}
-            onPrimeDelete={primeDelete}
-            onCancelDelete={cancelDelete}
-            onConfirmDelete={confirmDelete}
-          />
-        ))
+        <div className="rounded-xl border border-stone-200 bg-white px-4 py-6 sm:px-8 sm:py-8">
+          <div className="flex flex-col gap-10 lg:flex-row lg:items-start lg:gap-0">
+            {grouped.map((section, index) => (
+              <div key={section.category} className="flex min-w-0 flex-1 flex-col lg:flex-row">
+                {index > 0 && (
+                  <div
+                    className="my-6 h-px w-full shrink-0 bg-stone-200/90 lg:my-0 lg:mx-8 lg:h-auto lg:w-px lg:self-stretch"
+                    aria-hidden
+                  />
+                )}
+                <CategorySection
+                  category={section.category}
+                  renderedOrder={section.renderedOrder}
+                  servicesById={servicesById}
+                  groupIds={groupIds}
+                  confirmingDeleteId={confirmingDeleteId}
+                  deletingId={deletingId}
+                  onEdit={openEdit}
+                  onPrimeDelete={primeDelete}
+                  onCancelDelete={cancelDelete}
+                  onConfirmDelete={confirmDelete}
+                  onMoveVisual={moveInCategoryVisual}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       <SlideOverForm
@@ -613,254 +1140,289 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 
 interface CategorySectionProps {
   category: string;
-  groupRows: Service[];
-  childrenByParent: Map<number, Service[]>;
-  standalones: Service[];
+  renderedOrder: number[];
+  servicesById: Map<number, Service>;
+  groupIds: Set<number>;
   confirmingDeleteId: number | null;
   deletingId: number | null;
   onEdit: (service: Service) => void;
   onPrimeDelete: (id: number) => void;
   onCancelDelete: () => void;
   onConfirmDelete: (service: Service) => void;
+  onMoveVisual: (
+    category: string,
+    serviceId: number,
+    direction: -1 | 1
+  ) => void;
 }
 
 function CategorySection({
   category,
-  groupRows,
-  childrenByParent,
-  standalones,
+  renderedOrder,
+  servicesById,
+  groupIds,
   confirmingDeleteId,
   deletingId,
   onEdit,
   onPrimeDelete,
   onCancelDelete,
   onConfirmDelete,
+  onMoveVisual,
 }: CategorySectionProps) {
-  // Total count for the section header. We count every visible row
-  // including children — matches the editor's mental model that
-  // "this category contains N services" regardless of nesting.
-  const totalCount =
-    groupRows.length +
-    standalones.length +
-    Array.from(childrenByParent.values()).reduce(
-      (sum, list) => sum + list.length,
-      0
-    );
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<number>>(
+    () => new Set()
+  );
 
-  const cardProps = (service: Service) => ({
-    isConfirmingDelete: confirmingDeleteId === service.id,
-    isDeleting: deletingId === service.id,
-    onEdit: () => onEdit(service),
-    onPrimeDelete: () => onPrimeDelete(service.id),
-    onCancelDelete,
-    onConfirmDelete: () => onConfirmDelete(service),
-  });
+  function toggleGroupCollapse(groupId: number) {
+    setCollapsedGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }
+
+  const moveUnits = useMemo(
+    () => buildMoveUnits(renderedOrder, servicesById),
+    [renderedOrder, servicesById]
+  );
+
+  function rowProps(service: Service) {
+    let canMoveUp = false;
+    let canMoveDown = false;
+
+    if (service.is_group) {
+      const unitIndex = moveUnits.findIndex((unit) => unit[0] === service.id);
+      canMoveUp = unitIndex > 0;
+      canMoveDown = unitIndex >= 0 && unitIndex < moveUnits.length - 1;
+    } else {
+      const rowIndex = renderedOrder.indexOf(service.id);
+      const above =
+        rowIndex > 0 ? servicesById.get(renderedOrder[rowIndex - 1]) : null;
+      const below =
+        rowIndex >= 0 && rowIndex < renderedOrder.length - 1
+          ? servicesById.get(renderedOrder[rowIndex + 1])
+          : null;
+      canMoveUp =
+        rowIndex > 0 &&
+        above !== null &&
+        above !== undefined &&
+        above.id !== service.parent_id;
+      canMoveDown =
+        rowIndex >= 0 &&
+        rowIndex < renderedOrder.length - 1 &&
+        below !== null &&
+        below !== undefined &&
+        below.parent_id !== service.id;
+    }
+
+    return {
+      isConfirmingDelete: confirmingDeleteId === service.id,
+      isDeleting: deletingId === service.id,
+      canMoveUp,
+      canMoveDown,
+      onMoveUp: () => onMoveVisual(category, service.id, -1),
+      onMoveDown: () => onMoveVisual(category, service.id, 1),
+      onEdit: () => onEdit(service),
+      onPrimeDelete: () => onPrimeDelete(service.id),
+      onCancelDelete,
+      onConfirmDelete: () => onConfirmDelete(service),
+    };
+  }
+
+  const rows: ReactNode[] = [];
+
+  for (let i = 0; i < renderedOrder.length; i++) {
+    const service = servicesById.get(renderedOrder[i]);
+    if (!service) continue;
+
+    if (
+      service.parent_id !== null &&
+      groupIds.has(service.parent_id) &&
+      !service.is_group
+    ) {
+      continue;
+    }
+
+    if (service.is_group) {
+      const children: Service[] = [];
+      for (let j = i + 1; j < renderedOrder.length; j++) {
+        const child = servicesById.get(renderedOrder[j]);
+        if (child?.parent_id === service.id) children.push(child);
+        else break;
+      }
+
+      const isExpanded = !collapsedGroupIds.has(service.id);
+
+      rows.push(
+        <div key={service.id} className="py-1">
+          <MenuServiceRow
+            service={service}
+            variant="group"
+            isGroupExpanded={isExpanded}
+            groupChildCount={children.length}
+            onToggleGroupExpand={() => toggleGroupCollapse(service.id)}
+            {...rowProps(service)}
+          />
+          {isExpanded &&
+            (children.length > 0 ? (
+              <div className="ml-2 border-l border-stone-200/80">
+                {children.map((child) => (
+                  <MenuServiceRow
+                    key={child.id}
+                    service={child}
+                    variant="child"
+                    {...rowProps(child)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="py-2 pl-4 text-xs italic text-stone-400">
+                No child services — use Edit on a bookable service to nest under
+                this group.
+              </p>
+            ))}
+        </div>
+      );
+      continue;
+    }
+
+    rows.push(
+      <MenuServiceRow
+        key={service.id}
+        service={service}
+        variant="standalone"
+        {...rowProps(service)}
+      />
+    );
+  }
 
   return (
-    <section>
-      <div className="mb-4 flex items-baseline justify-between border-b border-stone-200 pb-2">
-        <h3 className="font-serif text-lg text-stone-900">{category}</h3>
-        <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
-          {totalCount} {totalCount === 1 ? 'service' : 'services'}
-        </span>
-      </div>
-
-      {/*
-        Hierarchy layout, top to bottom:
-          1. Group rows — each is a full-width header card with its
-             children rendered inside an indented panel beneath it.
-             We don't put the group card in the 2-col grid because
-             the children panel needs to span the full width of the
-             section to feel like a contained "shelf".
-          2. Standalone services — rendered in the same 2-col grid
-             we used pre-feature, so the surface stays familiar when
-             no groups exist in a category.
-        A thin divider sits between groups and standalones to break
-        the two zones apart without screaming for attention.
-      */}
-      <div className="space-y-6">
-        {groupRows.map((group) => {
-          const children = childrenByParent.get(group.id) ?? [];
-          return (
-            <div key={group.id} className="space-y-3">
-              <ServiceCard
-                service={group}
-                variant="group"
-                {...cardProps(group)}
-              />
-
-              {children.length > 0 ? (
-                // Indented child shelf: a soft left border + padding
-                // makes the parent/child relationship readable at a
-                // glance without re-rendering the full card chrome.
-                <div className="ml-3 border-l-2 border-stone-200 pl-5">
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    {children.map((child) => (
-                      <ServiceCard
-                        key={child.id}
-                        service={child}
-                        variant="child"
-                        {...cardProps(child)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="ml-3 border-l-2 border-dashed border-stone-200 pl-5 py-3 text-xs italic text-stone-400">
-                  No child services yet. Add a new service and choose
-                  "{group.title}" as its parent.
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {standalones.length > 0 && (
-          <>
-            {groupRows.length > 0 && (
-              <div className="h-px bg-stone-100" aria-hidden="true" />
-            )}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {standalones.map((service) => (
-                <ServiceCard
-                  key={service.id}
-                  service={service}
-                  variant="standalone"
-                  {...cardProps(service)}
-                />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+    <section aria-label={category}>
+      <h3 className="mb-5 border-b border-stone-200/80 pb-2 text-[10px] font-medium uppercase tracking-[0.36em] text-stone-900">
+        {category}
+      </h3>
+      <div>{rows}</div>
     </section>
   );
 }
 
-type ServiceCardVariant = 'group' | 'child' | 'standalone';
+type MenuRowVariant = 'group' | 'child' | 'standalone';
 
-interface ServiceCardProps {
+interface MenuServiceRowProps {
   service: Service;
-  variant: ServiceCardVariant;
+  variant: MenuRowVariant;
   isConfirmingDelete: boolean;
   isDeleting: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
   onEdit: () => void;
   onPrimeDelete: () => void;
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
+  isGroupExpanded?: boolean;
+  groupChildCount?: number;
+  onToggleGroupExpand?: () => void;
 }
 
-function ServiceCard({
+/** Compact list row — title + price/duration only; full fields live in the edit panel. */
+function MenuServiceRow({
   service,
   variant,
   isConfirmingDelete,
   isDeleting,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
   onEdit,
   onPrimeDelete,
   onCancelDelete,
   onConfirmDelete,
-}: ServiceCardProps) {
+  isGroupExpanded = true,
+  groupChildCount = 0,
+  onToggleGroupExpand,
+}: MenuServiceRowProps) {
   const isGroup = variant === 'group';
+  const isChild = variant === 'child';
 
-  // Visual variant cues:
-  //   • Group rows: warmer stone-50 background + serif italic
-  //     "Group" tag, signalling this isn't a bookable event.
-  //   • Children & standalones: identical white card; the surrounding
-  //     section already provides indentation context for children.
-  const surfaceClass = isGroup
-    ? 'bg-stone-50/80 border-stone-300'
-    : 'bg-white border-stone-200 hover:shadow-md';
+  const priceLabel = isGroup
+    ? `From ${formatPrice(service.price)}`
+    : service.duration_mins !== null
+      ? `${formatPrice(service.price)} · ${service.duration_mins} min`
+      : formatPrice(service.price);
 
   return (
     <article
-      className={`group relative flex flex-col rounded-xl border p-5 shadow-sm transition-shadow ${
-        isConfirmingDelete ? 'border-rose-300' : surfaceClass
+      className={`border-b border-stone-100 last:border-b-0 ${
+        isConfirmingDelete ? 'bg-rose-50/50' : ''
       } ${isDeleting ? 'opacity-50' : ''}`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          {isGroup && (
-            <span className="inline-flex items-center rounded-full bg-stone-900/90 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.22em] text-[#FAF9F6]">
-              Group
-            </span>
+      <div
+        className={`flex items-center gap-2 py-2.5 sm:gap-3 ${
+          isChild ? 'pl-4 sm:pl-5' : ''
+        }`}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+          {isGroup && onToggleGroupExpand && (
+            <button
+              type="button"
+              onClick={onToggleGroupExpand}
+              aria-expanded={isGroupExpanded}
+              aria-label={
+                isGroupExpanded
+                  ? `Collapse ${service.title}`
+                  : `Expand ${service.title}`
+              }
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-stone-500 hover:bg-stone-100 hover:text-stone-800"
+            >
+              {isGroupExpanded ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+            </button>
           )}
-          <h4 className="font-serif text-lg leading-tight text-stone-900">
-            {service.title}
-          </h4>
-        </div>
-        <div className="flex shrink-0 items-center gap-3 text-sm font-medium text-stone-900">
-          <span className="inline-flex items-center gap-1">
-            {/*
-              Group price reads "From $X" because the group itself
-              isn't bookable — the number represents the cheapest
-              child. The "From" prefix mirrors what the public site
-              renders, so the editor previews the customer-facing
-              wording without a context switch.
-            */}
+          <div className="flex min-w-0 flex-1 items-baseline gap-2 sm:gap-4">
             {isGroup && (
-              <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
-                From
+              <span className="shrink-0 text-[9px] font-medium uppercase tracking-[0.2em] text-stone-400">
+                Group
               </span>
             )}
-            <DollarSign className="h-3.5 w-3.5 text-stone-400" />
-            {formatPrice(service.price)}
-          </span>
-          {/*
-            Duration is meaningless for groups — they don't have one
-            of their own. Hiding the field entirely (rather than
-            rendering "— min") keeps the chrome honest.
-          */}
-          {!isGroup && service.duration_mins !== null && (
-            <span className="inline-flex items-center gap-1 text-stone-500">
-              <Clock className="h-3.5 w-3.5 text-stone-400" />
-              {service.duration_mins} min
-            </span>
-          )}
-        </div>
-      </div>
-
-      {service.description && (
-        <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-stone-600">
-          {service.description}
-        </p>
-      )}
-
-      <div className="mt-5 flex flex-col gap-3 border-t border-stone-100 pt-3 max-md:gap-2 md:flex-row md:items-center md:justify-between md:gap-2">
-        {/*
-          Left dock: calendar-colour chip + Cal.com deep-link. Both
-          are "context cues" rather than primary actions, so they
-          stay visually quieter than the Edit / Delete pair on the
-          right. The chip is suppressed for group rows since groups
-          have no appointments to colour-code; the Cal link is
-          suppressed for the same reason (no Cal event behind a group)
-          AND while the destructive confirm is primed (we don't want
-          to compete for attention with a confirm-delete).
-        */}
-        {!isConfirmingDelete && !isGroup && (
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <ServiceColorChip service={service} />
-            {service.cal_event_id !== null && (
-              <a
-                href={`https://app.cal.com/event-types/${service.cal_event_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex max-w-full items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400 transition-colors hover:text-stone-700"
+            {isGroup && onToggleGroupExpand ? (
+              <button
+                type="button"
+                onClick={onToggleGroupExpand}
+                className="min-w-0 truncate text-left font-serif text-base leading-tight text-stone-900 hover:text-stone-700"
               >
-                <ExternalLink className="h-3 w-3 shrink-0" />
-                Open in Cal
-              </a>
+                {service.title}
+              </button>
+            ) : (
+              <h4 className="min-w-0 truncate font-serif text-base leading-tight text-stone-900">
+                {service.title}
+              </h4>
             )}
+            {isGroup && !isGroupExpanded && groupChildCount > 0 && (
+              <span className="shrink-0 text-xs text-stone-400">
+                {groupChildCount} service{groupChildCount === 1 ? '' : 's'}
+              </span>
+            )}
+            <span className="shrink-0 whitespace-nowrap text-sm tabular-nums text-stone-500">
+              {priceLabel}
+            </span>
           </div>
-        )}
+        </div>
 
-        <div className="grid w-full min-w-0 grid-cols-2 gap-2 md:ml-auto md:flex md:w-auto md:flex-nowrap">
+        <div className="flex shrink-0 items-center gap-0.5">
           {isConfirmingDelete ? (
             <>
               <button
                 type="button"
                 onClick={onCancelDelete}
                 disabled={isDeleting}
-                className="inline-flex min-w-0 items-center justify-center rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100 disabled:opacity-50"
+                className="rounded-md px-2 py-1.5 text-xs text-stone-600 hover:bg-stone-100"
               >
                 Cancel
               </button>
@@ -868,35 +1430,52 @@ function ServiceCard({
                 type="button"
                 onClick={onConfirmDelete}
                 disabled={isDeleting}
-                className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-rose-700 disabled:opacity-50"
+                className="rounded-md bg-rose-600 px-2 py-1.5 text-xs font-medium text-white"
               >
-                <Trash2 className="h-3 w-3 shrink-0" />
-                <span className="truncate">
-                  {isDeleting
-                    ? 'Removing…'
-                    : isGroup
-                      ? 'Confirm — removes children'
-                      : 'Confirm delete'}
-                </span>
+                {isDeleting ? '…' : 'Delete'}
               </button>
             </>
           ) : (
             <>
               <button
                 type="button"
-                onClick={onEdit}
-                className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100"
+                onClick={(e) => {
+                  e.preventDefault();
+                  onMoveUp();
+                }}
+                disabled={!canMoveUp || isDeleting}
+                className="inline-flex h-8 w-8 touch-manipulation items-center justify-center text-stone-400 hover:bg-stone-100 hover:text-stone-800 disabled:pointer-events-none disabled:opacity-30"
+                aria-label={`Move ${service.title} up`}
               >
-                <Pencil className="h-3 w-3 shrink-0" />
-                Edit
+                <ArrowUp className="pointer-events-none h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  onMoveDown();
+                }}
+                disabled={!canMoveDown || isDeleting}
+                className="inline-flex h-8 w-8 touch-manipulation items-center justify-center text-stone-400 hover:bg-stone-100 hover:text-stone-800 disabled:pointer-events-none disabled:opacity-30"
+                aria-label={`Move ${service.title} down`}
+              >
+                <ArrowDown className="pointer-events-none h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={onEdit}
+                className="ml-1 inline-flex h-8 items-center gap-1 rounded-md border border-stone-200 bg-white px-2.5 text-xs font-medium text-stone-700 hover:bg-stone-50"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Edit</span>
               </button>
               <button
                 type="button"
                 onClick={onPrimeDelete}
-                className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                className="inline-flex h-8 w-8 items-center justify-center text-stone-400 hover:text-rose-600"
+                aria-label={`Delete ${service.title}`}
               >
-                <Trash2 className="h-3 w-3 shrink-0" />
-                Delete
+                <Trash2 className="h-3.5 w-3.5" />
               </button>
             </>
           )}
@@ -991,6 +1570,21 @@ function SlideOverForm({
           className="flex min-h-0 flex-1 flex-col"
         >
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-6">
+            {isEdit && !form.is_group && mode.service.cal_event_id !== null && (
+              <p className="text-xs text-stone-500">
+                <a
+                  href={`https://app.cal.com/event-types/${mode.service.cal_event_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-stone-700 underline-offset-2 hover:underline"
+                >
+                  Open in Cal.com
+                </a>
+                {' · '}
+                Description, colour, duration, and pricing are edited here.
+              </p>
+            )}
+
             {/*
               Group toggle at the top of the form. Editors who want to
               create an accordion header pick this first; everything
@@ -1311,33 +1905,6 @@ function Field({ label, htmlFor, required, hint, children }: FieldProps) {
       {children}
       {hint && <p className="mt-1.5 text-xs text-stone-400">{hint}</p>}
     </div>
-  );
-}
-
-/**
- * In-catalogue colour chip. Shows the editor-assigned hex for this
- * service so the catalogue is scannable by colour — same hex the
- * calendar will paint. Renders nothing when no colour is set; the
- * editor opens the slide-over and uses the colour field there to
- * assign one.
- */
-function ServiceColorChip({ service }: { service: Service }) {
-  const resolved = getServiceColor({ service_color: service.color });
-  if (!resolved) return null;
-  return (
-    <span
-      className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500"
-      title={`Calendar colour ${resolved.accent}`}
-    >
-      <span
-        aria-hidden="true"
-        className="inline-block h-3 w-3 shrink-0 rounded-full ring-1 ring-stone-300"
-        style={{ backgroundColor: resolved.accent }}
-      />
-      <span className="truncate font-mono normal-case tracking-wider text-stone-700">
-        {resolved.accent}
-      </span>
-    </span>
   );
 }
 

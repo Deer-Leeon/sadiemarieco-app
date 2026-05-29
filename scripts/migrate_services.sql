@@ -76,6 +76,13 @@ ALTER TABLE site_services ADD COLUMN IF NOT EXISTS is_group BOOLEAN NOT NULL DEF
 ALTER TABLE site_services
   ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES site_services(id) ON DELETE CASCADE;
 
+-- Menu sequence for admin + public site (lower = earlier).
+ALTER TABLE site_services
+  ADD COLUMN IF NOT EXISTS display_order INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS site_services_display_order_idx
+  ON site_services (display_order ASC, id ASC);
+
 -- Loosen NOT NULL constraints on the two columns that don't apply to
 -- group headers. Existing rows already have values (they were created
 -- pre-feature), so the drop is purely about allowing future groups

@@ -114,6 +114,7 @@ interface ServiceRow {
   is_group: boolean;
   parent_id: number | null;
   color: string | null;
+  display_order: number;
 }
 
 /**
@@ -199,10 +200,11 @@ export async function GET(): Promise<NextResponse> {
         slug,
         is_group,
         parent_id,
-        color
+        color,
+        display_order
       FROM site_services
       WHERE is_active = TRUE
-      ORDER BY category ASC, is_group DESC, title ASC
+      ORDER BY display_order ASC, id ASC
     `;
 
     // NUMERIC columns come back as strings from node-postgres. Coerce to
@@ -273,7 +275,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const { rows } = await sql<ServiceRow>`
         INSERT INTO site_services (
           cal_event_id, category, title, description, price,
-          duration_mins, slug, is_group, parent_id, color
+          duration_mins, slug, is_group, parent_id, color, display_order
         ) VALUES (
           NULL,
           ${payload.category},
@@ -284,11 +286,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           NULL,
           TRUE,
           NULL,
-          ${payload.color}
+          ${payload.color},
+          (SELECT COALESCE(MAX(display_order), -1) + 1 FROM site_services)
         )
         RETURNING
           id, cal_event_id, category, title, description, price,
-          duration_mins, is_active, slug, is_group, parent_id, color
+          duration_mins, is_active, slug, is_group, parent_id, color,
+          display_order
       `;
       const service = rows[0];
       console.log('[api/admin/services] POST: group created (no Cal sync)', {
@@ -401,7 +405,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const { rows } = await sql<ServiceRow>`
       INSERT INTO site_services (
         cal_event_id, category, title, description, price,
-        duration_mins, slug, is_group, parent_id, color
+        duration_mins, slug, is_group, parent_id, color, display_order
       ) VALUES (
         ${calEventId},
         ${payload.category},
@@ -412,11 +416,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ${slug},
         FALSE,
         ${payload.parent_id},
-        ${payload.color}
+        ${payload.color},
+        (SELECT COALESCE(MAX(display_order), -1) + 1 FROM site_services)
       )
       RETURNING
         id, cal_event_id, category, title, description, price,
-        duration_mins, is_active, slug, is_group, parent_id, color
+        duration_mins, is_active, slug, is_group, parent_id, color,
+        display_order
     `;
     const service = rows[0];
     return NextResponse.json({
@@ -546,7 +552,8 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         WHERE id = ${payload.db_id}
         RETURNING
           id, cal_event_id, category, title, description, price,
-          duration_mins, is_active, slug, is_group, parent_id, color
+          duration_mins, is_active, slug, is_group, parent_id, color,
+          display_order
       `;
       const service = rows[0];
       return NextResponse.json({
@@ -618,7 +625,8 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       WHERE id = ${payload.db_id}
       RETURNING
         id, cal_event_id, category, title, description, price,
-        duration_mins, is_active, slug, is_group, parent_id, color
+        duration_mins, is_active, slug, is_group, parent_id, color,
+        display_order
     `;
     if (rows.length === 0) {
       // Cal.com was already updated but our row vanished — the editor
