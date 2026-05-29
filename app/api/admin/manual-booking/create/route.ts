@@ -201,8 +201,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const overrideEventTypeId = parseAdminOverrideEventId();
   let calEventTypeId = parsed.eventTypeId;
-  let bookingDescription: string | undefined;
-  let bookingEndIso: string | undefined;
+  let originalServiceName: string | undefined;
   let lengthInMinutes: number | undefined;
 
   if (overrideEventTypeId != null) {
@@ -219,10 +218,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     calEventTypeId = overrideEventTypeId;
     lengthInMinutes = service.duration_mins;
-    bookingEndIso = new Date(
-      startUtc.getTime() + service.duration_mins * 60_000
-    ).toISOString();
-    bookingDescription = service.title;
+    originalServiceName = service.title;
   }
 
   const calPayload: Record<string, unknown> = {
@@ -243,18 +239,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     },
     metadata: {
       manual_admin_booking: 'true',
-      ...(bookingDescription
-        ? { original_service_name: bookingDescription }
+      ...(originalServiceName
+        ? { original_service_name: originalServiceName }
         : {}),
     },
   };
 
-  if (bookingDescription) {
-    calPayload.description = bookingDescription;
-  }
-  if (bookingEndIso) {
-    calPayload.end = bookingEndIso;
-  }
+  // Cal.com v2 (2024-08-13) rejects top-level `description` and `end` on create;
+  // duration is expressed via `lengthInMinutes` only.
   if (lengthInMinutes != null) {
     calPayload.lengthInMinutes = lengthInMinutes;
   }
