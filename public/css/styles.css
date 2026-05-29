@@ -35,6 +35,9 @@ html {
     pulling down reveals more image, not off-white).
   */
   background-color: var(--navy);
+  /* Prevent horizontal pan/scroll — 100vw children can expose this navy strip. */
+  overflow-x: hidden;
+  max-width: 100%;
 }
 body {
   background: var(--off-white);
@@ -42,6 +45,7 @@ body {
   font-family: var(--sans);
   font-weight: 300;
   overflow-x: hidden;
+  max-width: 100%;
 }
 
 /* ── NAV ── */
@@ -118,7 +122,9 @@ nav.scrolled { padding: 16px 64px; }
     abruptly stopping at the navbar's lower edge.
   */
   height: 100vh;
-  width: 100vw;
+  /* 100% not 100vw — vw includes scrollbar gutter on mobile and causes sideways scroll. */
+  width: 100%;
+  max-width: 100%;
   position: relative;
   overflow: hidden;
   display: grid;
@@ -249,6 +255,8 @@ nav.scrolled { padding: 16px 64px; }
   color: var(--navy);
   padding: 14px 0;
   overflow: hidden;
+  overflow-x: clip;
+  max-width: 100%;
   margin-top: 0;
 }
 .marquee-track {
@@ -1985,6 +1993,27 @@ footer {
 }
 
 @media (max-width: 860px) {
+  /*
+    Belt-and-braces: clip any wide children (marquee track, portfolio
+    stagger, negative margins) so the page only scrolls vertically.
+  */
+  html, body {
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
+  nav,
+  #hero,
+  #services,
+  #portfolio,
+  #about,
+  #policies,
+  #contact,
+  .faq-section,
+  footer,
+  .reviews-section {
+    max-width: 100%;
+    overflow-x: clip;
+  }
   nav { padding: 18px 24px; }
   nav.scrolled { padding: 12px 24px; }
   .nav-links { display: none; }
