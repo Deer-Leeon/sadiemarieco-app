@@ -17,6 +17,7 @@ import {
 } from '@/lib/client-identity';
 
 import {
+  bookingEndFromDuration,
   extractCalBookingFromResponse,
   joinFullName,
   slotToStudioLocalStart,
@@ -160,7 +161,7 @@ export default function ManualBookingModal({
         return;
       }
 
-      const { uid, startTime, endTime } =
+      const { uid, startTime, endTime: calEndTime } =
         extractCalBookingFromResponse(createPayload);
 
       if (!uid) {
@@ -171,6 +172,11 @@ export default function ManualBookingModal({
         return;
       }
 
+      const bookingTime = startTime ?? selectedSlot;
+      const endTime =
+        bookingEndFromDuration(bookingTime, selectedService.durationMins) ??
+        calEndTime;
+
       const completeRes = await fetch('/api/admin/manual-booking/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -180,7 +186,7 @@ export default function ManualBookingModal({
           clientEmail: trimmedEmail,
           clientPhone: parsedPhone.digits,
           serviceName: selectedService.title,
-          bookingTime: startTime ?? selectedSlot,
+          bookingTime,
           endTime,
         }),
       });

@@ -202,7 +202,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const overrideEventTypeId = parseAdminOverrideEventId();
   let calEventTypeId = parsed.eventTypeId;
   let originalServiceName: string | undefined;
-  let lengthInMinutes: number | undefined;
+  let originalServiceDurationMins: number | undefined;
 
   if (overrideEventTypeId != null) {
     const service = await loadServiceByCalEventId(parsed.eventTypeId);
@@ -217,8 +217,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     calEventTypeId = overrideEventTypeId;
-    lengthInMinutes = service.duration_mins;
     originalServiceName = service.title;
+    originalServiceDurationMins = service.duration_mins;
   }
 
   const calPayload: Record<string, unknown> = {
@@ -242,14 +242,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ...(originalServiceName
         ? { original_service_name: originalServiceName }
         : {}),
+      ...(originalServiceDurationMins != null
+        ? {
+            original_service_duration_mins: String(
+              originalServiceDurationMins
+            ),
+          }
+        : {}),
     },
   };
 
-  // Cal.com v2 (2024-08-13) rejects top-level `description` and `end` on create;
-  // duration is expressed via `lengthInMinutes` only.
-  if (lengthInMinutes != null) {
-    calPayload.lengthInMinutes = lengthInMinutes;
-  }
+  // Cal.com v2 rejects top-level `description` and `end` on create. Only send
+  // `lengthInMinutes` when the target event type has multipleDuration enabled
+  // in Cal — the admin override event is typically single-length, so duration
+  // is taken from the event type default and we persist the real end time via
+  // /complete using the selected service's duration_mins from the DB.
 
   const result = await proxyCalV2Post(
     '/bookings',

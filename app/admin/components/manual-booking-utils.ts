@@ -240,6 +240,17 @@ export function joinFullName(first: string, last: string): string {
   return [first.trim(), last.trim()].filter(Boolean).join(' ');
 }
 
+/** End time from start + service duration (used when Cal override event has fixed length). */
+export function bookingEndFromDuration(
+  startIso: string,
+  durationMins: number | null
+): string | null {
+  if (durationMins == null || durationMins <= 0) return null;
+  const startMs = new Date(startIso).getTime();
+  if (Number.isNaN(startMs)) return null;
+  return new Date(startMs + durationMins * 60_000).toISOString();
+}
+
 /** Parse Cal v2 create-booking JSON for uid and times. */
 export function extractCalBookingFromResponse(payload: unknown): {
   uid: string | null;
