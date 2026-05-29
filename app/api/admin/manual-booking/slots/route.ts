@@ -8,10 +8,9 @@
  * When `CAL_ADMIN_OVERRIDE_EVENT_ID` is set, proxies slots for that shadow
  * event type (9 AM–9 PM) while the client still sends the real service id.
  *
- * God-mode slot grid: always requests 15-minute steps (`slotInterval=15` +
- * `duration=15` for the Cal probe), then filters to starts where the full
- * service duration fits contiguously. Passing only `duration=180` makes Cal
- * treat 180 as both block length and step (9:00, 12:00, 3:00, …).
+ * God-mode slot grid: requests `duration=15` on the shadow event type (Cal uses
+ * the event type's configured interval — do not pass `slotInterval`; v2 rejects
+ * it), then post-filters to starts where the full service duration fits.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -100,11 +99,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     start: date,
     end,
     timeZone: STUDIO_TIMEZONE,
-    slotInterval: String(ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN),
   };
 
   if (useGodModeGrid) {
-    // Probe at quarter-hour granularity; filter below for full service length.
+    // Probe at quarter-hour blocks; filter below for full service length.
     slotQuery.duration = String(ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN);
   } else if (serviceDurationMins) {
     slotQuery.duration = String(serviceDurationMins);

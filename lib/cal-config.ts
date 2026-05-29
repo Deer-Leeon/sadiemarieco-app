@@ -33,7 +33,7 @@ export const CAL_SLOT_INTERVAL_MIN = 30;
 /**
  * Admin manual-booking god-mode: quarter-hour start times when probing Cal slots.
  * Cal uses `duration` for both gap length and step unless the event has
- * `slotInterval` set — we pass this on `/v2/slots` and post-filter when needed.
+ * interval on the shadow Cal event type; we post-filter slot starts when needed.
  */
 export const ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN = 15;
 
