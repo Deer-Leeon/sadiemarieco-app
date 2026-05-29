@@ -8,9 +8,11 @@
  * When `CAL_ADMIN_OVERRIDE_EVENT_ID` is set, proxies slots for that shadow
  * event type (9 AM–9 PM) while the client still sends the real service id.
  *
- * God-mode slot grid: requests `duration=15` on the shadow event type (Cal uses
- * the event type's configured interval — do not pass `slotInterval`; v2 rejects
- * it), then post-filters to starts where the full service duration fits.
+ * God-mode grid:
+ *   1. Fine probe (`duration=15`) — quarter-hour open windows.
+ *   2. Coarse probe (`duration=service`) — Cal-validated full-block starts.
+ *   3. Merge both so long services still show morning starts when buffers
+ *      drop a single 15-min step (e.g. 11:45 before a noon appointment).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -22,7 +24,8 @@ import {
   STUDIO_TIMEZONE,
 } from '@/lib/cal-config';
 import {
-  filterSlotStartsForServiceDuration,
+  mergeSlotDays,
+  slotStartsFromFineGrid,
 } from '@/lib/booking-duration';
 import {
   CAL_SLOTS_API_VERSION,
@@ -38,17 +41,20 @@ export const revalidate = 0;
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function applyGodModeSlotFilter(
-  payload: { slots: Record<string, string[]> },
+function buildGodModeSlots(
+  finePayload: unknown,
+  coarsePayload: unknown,
   serviceDurationMins: number
 ): { slots: Record<string, string[]> } {
-  return {
-    slots: filterSlotStartsForServiceDuration(
-      payload.slots,
-      serviceDurationMins,
-      ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN
-    ),
-  };
+  const fine = normalizeCalSlotsPayload(finePayload);
+  const coarse = normalizeCalSlotsPayload(coarsePayload);
+  const fromFine = slotStartsFromFineGrid(
+    fine.slots,
+    serviceDurationMins,
+    ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN
+  );
+
+  return { slots: mergeSlotDays(fromFine, coarse.slots) };
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -92,9 +98,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const calEventTypeId = overrideEventTypeId ?? eventTypeId;
   const service = await loadServiceByCalEventId(eventTypeId);
   const serviceDurationMins = service?.duration_mins ?? null;
-  const useGodModeGrid = overrideEventTypeId != null;
+  const useGodModeGrid =
+    overrideEventTypeId != null && serviceDurationMins != null;
 
-  const slotQuery: Record<string, string> = {
+  const baseQuery: Record<string, string> = {
     eventTypeId: String(calEventTypeId),
     start: date,
     end,
@@ -102,9 +109,44 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   };
 
   if (useGodModeGrid) {
-    // Probe at quarter-hour blocks; filter below for full service length.
-    slotQuery.duration = String(ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN);
-  } else if (serviceDurationMins) {
+    const [fineResult, coarseResult] = await Promise.all([
+      proxyCalV2Get(
+        '/slots',
+        {
+          ...baseQuery,
+          duration: String(ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN),
+        },
+        CAL_SLOTS_API_VERSION
+      ),
+      proxyCalV2Get(
+        '/slots',
+        {
+          ...baseQuery,
+          duration: String(serviceDurationMins),
+        },
+        CAL_SLOTS_API_VERSION
+      ),
+    ]);
+
+    if (!fineResult.ok) return fineResult.response;
+    if (!coarseResult.ok) return coarseResult.response;
+
+    const merged = buildGodModeSlots(
+      fineResult.data,
+      coarseResult.data,
+      serviceDurationMins
+    );
+
+    if (end === date) {
+      return NextResponse.json({
+        slots: { [date]: merged.slots[date] ?? [] },
+      });
+    }
+    return NextResponse.json(merged);
+  }
+
+  const slotQuery = { ...baseQuery };
+  if (serviceDurationMins) {
     slotQuery.duration = String(serviceDurationMins);
   }
 
@@ -117,16 +159,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!result.ok) return result.response;
 
   if (end === date) {
-    let normalized = normalizeCalSlotsForDate(result.data, date);
-    if (useGodModeGrid && serviceDurationMins) {
-      normalized = applyGodModeSlotFilter(normalized, serviceDurationMins);
-    }
-    return NextResponse.json(normalized);
+    return NextResponse.json(normalizeCalSlotsForDate(result.data, date));
   }
-
-  let normalized = normalizeCalSlotsPayload(result.data);
-  if (useGodModeGrid && serviceDurationMins) {
-    normalized = applyGodModeSlotFilter(normalized, serviceDurationMins);
-  }
-  return NextResponse.json(normalized);
+  return NextResponse.json(normalizeCalSlotsPayload(result.data));
 }

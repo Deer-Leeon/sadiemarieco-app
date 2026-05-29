@@ -4,11 +4,24 @@
 
 import { ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN } from '@/lib/cal-config';
 
+function hasContiguousFineAvailability(
+  fineMs: Set<number>,
+  startMs: number,
+  requiredSteps: number,
+  stepMs: number
+): boolean {
+  for (let j = 0; j < requiredSteps; j++) {
+    if (!fineMs.has(startMs + j * stepMs)) return false;
+  }
+  return true;
+}
+
 /**
- * From 15-minute Cal slot starts, keep only times where `serviceDurationMins`
- * fits (N consecutive interval-sized steps).
+ * From 15-minute Cal probes, keep starts where every quarter-hour step through
+ * `serviceDurationMins` is open. Uses a timestamp set (not array adjacency) so
+ * a missing intermediate slot in Cal's array does not false-negative.
  */
-export function filterSlotStartsForServiceDuration(
+export function slotStartsFromFineGrid(
   slots: Record<string, string[]>,
   serviceDurationMins: number,
   slotIntervalMins: number = ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN
@@ -21,30 +34,68 @@ export function filterSlotStartsForServiceDuration(
   const filtered: Record<string, string[]> = {};
 
   for (const [date, times] of Object.entries(slots)) {
-    const sorted = [...times].sort(
-      (a, b) => new Date(a).getTime() - new Date(b).getTime()
+    const fineMs = new Set(
+      times
+        .map((iso) => new Date(iso).getTime())
+        .filter((ms) => !Number.isNaN(ms))
     );
     const valid: string[] = [];
 
-    for (let i = 0; i <= sorted.length - required; i++) {
-      const baseMs = new Date(sorted[i]).getTime();
-      if (Number.isNaN(baseMs)) continue;
-
-      let contiguous = true;
-      for (let j = 1; j < required; j++) {
-        const actualMs = new Date(sorted[i + j]).getTime();
-        if (Number.isNaN(actualMs) || actualMs !== baseMs + j * stepMs) {
-          contiguous = false;
-          break;
-        }
+    for (const startMs of fineMs) {
+      if (hasContiguousFineAvailability(fineMs, startMs, required, stepMs)) {
+        valid.push(new Date(startMs).toISOString());
       }
-      if (contiguous) valid.push(sorted[i]);
     }
 
-    if (valid.length > 0) filtered[date] = valid;
+    if (valid.length > 0) {
+      valid.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+      filtered[date] = valid;
+    }
   }
 
   return filtered;
+}
+
+/** @deprecated Use slotStartsFromFineGrid — kept as alias for callers. */
+export function filterSlotStartsForServiceDuration(
+  slots: Record<string, string[]>,
+  serviceDurationMins: number,
+  slotIntervalMins?: number
+): Record<string, string[]> {
+  return slotStartsFromFineGrid(slots, serviceDurationMins, slotIntervalMins);
+}
+
+export function mergeSlotIsoLists(a: string[], b: string[]): string[] {
+  const seen = new Set<number>();
+  const merged: string[] = [];
+
+  for (const iso of [...a, ...b]) {
+    const ms = new Date(iso).getTime();
+    if (Number.isNaN(ms) || seen.has(ms)) continue;
+    seen.add(ms);
+    merged.push(new Date(ms).toISOString());
+  }
+
+  merged.sort((x, y) => new Date(x).getTime() - new Date(y).getTime());
+  return merged;
+}
+
+/** Union slot lists per day (deduped by instant). */
+export function mergeSlotDays(
+  ...maps: Record<string, string[]>[]
+): Record<string, string[]> {
+  const dates = new Set(maps.flatMap((m) => Object.keys(m)));
+  const out: Record<string, string[]> = {};
+
+  for (const date of dates) {
+    let merged: string[] = [];
+    for (const m of maps) {
+      merged = mergeSlotIsoLists(merged, m[date] ?? []);
+    }
+    if (merged.length > 0) out[date] = merged;
+  }
+
+  return out;
 }
 
 export function bookingEndFromDurationMins(
