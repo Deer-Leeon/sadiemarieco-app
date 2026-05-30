@@ -2,19 +2,18 @@
  * Stamp client intake answers + signature onto the studio PDF template,
  * upload the flattened PDF to Vercel Blob, and return the public URL.
  *
- * Field names must match the Sejda AcroForm template — see the translation
- * maps below (bridged from `INITIAL_FORM` in consent-form-config.ts).
+ * Maps `INITIAL_FORM` JSON keys to Sejda AcroForm field names (see dictionaries
+ * below). All `setText` / `check` calls are wrapped in try/catch.
  */
 import { put } from '@vercel/blob';
 import { PDFDocument, type PDFForm } from 'pdf-lib';
 import { sql } from '@vercel/postgres';
 
-import { CONSENT_STATEMENTS } from '@/app/consent/[clientId]/consent-form-config';
 import type { ConsentFormData } from '@/lib/consent';
 import { STUDIO_SETTINGS_ROW_ID } from '@/lib/studio-settings';
 
-const SIGNATURE_X = 100;
-const SIGNATURE_Y = 150;
+const SIGNATURE_X = 150;
+const SIGNATURE_Y = 280;
 const SIGNATURE_WIDTH = 200;
 const SIGNATURE_HEIGHT = 50;
 
@@ -34,26 +33,43 @@ const DIRECT_TEXT_FIELD_KEYS = [
 ] as const satisfies readonly (keyof ConsentFormData)[];
 
 /**
- * Yes/No questions stored as `'yes' | 'no' | ''` in form state → PDF uses
- * `{base}_yes` and `{base}_no` checkboxes.
+ * Yes/No answers stored as literal strings `"yes"` / `"no"` in form JSON.
  */
-const YES_NO_FORM_KEY_TO_PDF_BASE: Record<string, string> = {
-  had_lash_lift_tint: 'prev_lash_lift',
-  had_brow_lamination_tint: 'prev_brow_lam',
-  wears_contact_lenses: 'contacts',
-  eye_irritation_itching: 'eye_irritation',
-  recurring_eye_infections: 'eye_infection_history',
-  currently_eye_drops: 'eye_drops',
-  pregnant_or_may_be: 'pregnant',
-  eye_injury_or_condition: 'eye_injury',
-  known_allergies: 'allergies',
-  medications_supplements: 'medications',
-  accutane_last_6_months: 'accutane',
-  uses_retinol_tretinoin: 'retinol',
-  chemotherapy_recent: 'chemo',
+const YES_NO_STRING_TO_PDF_CHECKBOXES: Record<
+  string,
+  { yes: string; no: string }
+> = {
+  had_lash_lift_tint: {
+    yes: 'prev_lash_lift_yes',
+    no: 'prev_lash_lift_no',
+  },
+  had_brow_lamination_tint: {
+    yes: 'prev_brow_lam_yes',
+    no: 'prev_brow_lam_no',
+  },
+  wears_contact_lenses: { yes: 'contacts_yes', no: 'contacts_no' },
+  eye_irritation_itching: {
+    yes: 'eye_irritation_yes',
+    no: 'eye_irritation_no',
+  },
+  recurring_eye_infections: {
+    yes: 'eye_infection_history_yes',
+    no: 'eye_infection_history_no',
+  },
+  currently_eye_drops: { yes: 'eye_drops_yes', no: 'eye_drops_no' },
+  pregnant_or_may_be: { yes: 'pregnant_yes', no: 'pregnant_no' },
+  eye_injury_or_condition: { yes: 'eye_injury_yes', no: 'eye_injury_no' },
+  known_allergies: { yes: 'allergies_yes', no: 'allergies_no' },
+  medications_supplements: {
+    yes: 'medications_yes',
+    no: 'medications_no',
+  },
+  accutane_last_6_months: { yes: 'accutane_yes', no: 'accutane_no' },
+  uses_retinol_tretinoin: { yes: 'retinol_yes', no: 'retinol_no' },
+  chemotherapy_recent: { yes: 'chemo_yes', no: 'chemo_no' },
 };
 
-/** `medical_conditions_checklist` child key → PDF checkbox name. */
+/** `medical_conditions_checklist` key → PDF checkbox. */
 const MEDICAL_CONDITION_TO_PDF: Record<string, string> = {
   alopecia: 'cond_alopecia',
   conjunctivitis: 'cond_conjunctivitis',
@@ -71,7 +87,32 @@ const MEDICAL_CONDITION_TO_PDF: Record<string, string> = {
   other: 'cond_other',
 };
 
-const POLICY_FIELD_COUNT = 12;
+/** `consent_statements` key → PDF policy checkbox. */
+const CONSENT_STATEMENT_TO_POLICY: Record<string, string> = {
+  beauty_service_risks: 'policy_1',
+  eye_contact_protocol: 'policy_2',
+  temporary_redness: 'policy_3',
+  temporary_staining: 'policy_4',
+  color_results_vary: 'policy_5',
+  disclosed_health_history: 'policy_6',
+  unforeseen_conditions: 'policy_7',
+  photo_consent: 'policy_8',
+  contact_adverse_reactions: 'policy_9',
+  aftercare_understanding: 'policy_10',
+  website_policies: 'policy_11',
+};
+
+/** Explanation / notes form keys → PDF text fields. */
+const EXPLANATION_TEXT_TO_PDF: Record<string, string> = {
+  service_adverse_reaction_explain: 'adverse_reaction_explanation',
+  pregnancy_weeks: 'pregnant_weeks',
+  eye_injury_or_condition_explain: 'eye_injury_explanation',
+  known_allergies_explain: 'allergies_explanation',
+  medications_supplements_explain: 'medications_explanation',
+  chemotherapy_recent_explain: 'chemo_explanation',
+  medical_conditions_other_text: 'cond_other_explanation',
+  additional_notes: 'additional_notes',
+};
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -86,9 +127,12 @@ function stringValue(value: unknown): string {
   return '';
 }
 
-function parseYesNo(value: unknown): 'yes' | 'no' | null {
-  if (value === true || value === 'yes') return 'yes';
-  if (value === false || value === 'no') return 'no';
+/** Normalise form yes/no answers (literal `"yes"` / `"no"` strings). */
+function parseYesNoString(value: unknown): 'yes' | 'no' | null {
+  if (typeof value !== 'string') return null;
+  const normalised = value.trim().toLowerCase();
+  if (normalised === 'yes') return 'yes';
+  if (normalised === 'no') return 'no';
   return null;
 }
 
@@ -110,18 +154,21 @@ function tryCheckField(form: PDFForm, fieldName: string): void {
 }
 
 /**
- * PDF uses paired `{base}_yes` / `{base}_no` checkboxes; form uses one value.
+ * Map a JSON yes/no string to the paired PDF checkboxes for one question.
  */
-export function applyYesNoPairToPdf(
+export function applyYesNoStringToPdf(
   form: PDFForm,
-  pdfBaseName: string,
+  formKey: string,
   value: unknown
 ): void {
-  const answer = parseYesNo(value);
+  const targets = YES_NO_STRING_TO_PDF_CHECKBOXES[formKey];
+  if (!targets) return;
+
+  const answer = parseYesNoString(value);
   if (answer === 'yes') {
-    tryCheckField(form, `${pdfBaseName}_yes`);
+    tryCheckField(form, targets.yes);
   } else if (answer === 'no') {
-    tryCheckField(form, `${pdfBaseName}_no`);
+    tryCheckField(form, targets.no);
   }
 }
 
@@ -131,7 +178,7 @@ function applyBooleanCheckbox(form: PDFForm, fieldName: string, value: unknown):
   }
 }
 
-function applyTextFields(form: PDFForm, formData: ConsentFormData): void {
+function applyCoreTextFields(form: PDFForm, formData: ConsentFormData): void {
   const printName =
     stringValue(formData.agreement_print_name) ||
     stringValue(formData.full_name);
@@ -154,8 +201,17 @@ function applyTextFields(form: PDFForm, formData: ConsentFormData): void {
 }
 
 function applyYesNoFields(form: PDFForm, formData: ConsentFormData): void {
-  for (const [formKey, pdfBase] of Object.entries(YES_NO_FORM_KEY_TO_PDF_BASE)) {
-    applyYesNoPairToPdf(form, pdfBase, formData[formKey]);
+  for (const formKey of Object.keys(YES_NO_STRING_TO_PDF_CHECKBOXES)) {
+    applyYesNoStringToPdf(form, formKey, formData[formKey]);
+  }
+}
+
+function applyExplanationFields(form: PDFForm, formData: ConsentFormData): void {
+  for (const [formKey, pdfField] of Object.entries(EXPLANATION_TEXT_TO_PDF)) {
+    const text = stringValue(formData[formKey]);
+    if (text) {
+      trySetTextField(form, pdfField, text);
+    }
   }
 }
 
@@ -165,23 +221,12 @@ function applyMedicalConditions(form: PDFForm, formData: ConsentFormData): void 
     return;
   }
 
+  const map = checklist as Record<string, unknown>;
   for (const [formKey, pdfField] of Object.entries(MEDICAL_CONDITION_TO_PDF)) {
-    applyBooleanCheckbox(
-      form,
-      pdfField,
-      (checklist as Record<string, unknown>)[formKey]
-    );
-  }
-
-  const otherText = stringValue(formData.medical_conditions_other_text);
-  if (otherText) {
-    trySetTextField(form, 'cond_other_text', otherText);
+    applyBooleanCheckbox(form, pdfField, map[formKey]);
   }
 }
 
-/**
- * `consent_statements` booleans → `policy_1` … `policy_12` in catalogue order.
- */
 function applyConsentPolicies(form: PDFForm, formData: ConsentFormData): void {
   const statements = formData.consent_statements;
   if (!statements || typeof statements !== 'object' || Array.isArray(statements)) {
@@ -189,22 +234,20 @@ function applyConsentPolicies(form: PDFForm, formData: ConsentFormData): void {
   }
 
   const map = statements as Record<string, unknown>;
-
-  CONSENT_STATEMENTS.forEach((item, index) => {
-    if (index >= POLICY_FIELD_COUNT) return;
-    const policyField = `policy_${index + 1}`;
-    applyBooleanCheckbox(form, policyField, map[item.key]);
-  });
+  for (const [formKey, pdfField] of Object.entries(CONSENT_STATEMENT_TO_POLICY)) {
+    applyBooleanCheckbox(form, pdfField, map[formKey]);
+  }
 }
 
 /**
- * Map `INITIAL_FORM` / submitted JSON to Sejda AcroForm field names.
+ * Map submitted intake JSON to Sejda AcroForm field names.
  */
 export function applyFormDataToPdf(form: PDFForm, formData: ConsentFormData): void {
-  applyTextFields(form, formData);
+  applyCoreTextFields(form, formData);
   applyYesNoFields(form, formData);
   applyMedicalConditions(form, formData);
   applyConsentPolicies(form, formData);
+  applyExplanationFields(form, formData);
 }
 
 function parseSignaturePngBytes(signatureBase64: string): Uint8Array {
