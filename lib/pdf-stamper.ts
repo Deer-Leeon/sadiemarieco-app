@@ -1,9 +1,6 @@
 /**
  * Stamp client intake answers + signature onto the studio PDF template,
  * upload the flattened PDF to Vercel Blob, and return the public URL.
- *
- * Field mapping is explicit (no generic loops) so checkboxes always use
- * getCheckBox() and text fields always use getTextField().
  */
 import { put } from '@vercel/blob';
 import { PDFDocument, type PDFForm } from 'pdf-lib';
@@ -19,6 +16,16 @@ const SIGNATURE_HEIGHT = 50;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function getBlobToken(): string {
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  if (!token) {
+    throw new Error(
+      'BLOB_READ_WRITE_TOKEN is not set. Add it to .env.local from Vercel → Storage → your Blob store → .env.local, then restart the dev server.'
+    );
+  }
+  return token;
 }
 
 function stringValue(value: unknown): string {
@@ -39,34 +46,64 @@ function yesNoValue(formData: ConsentFormData, key: string): string {
 type MedicalChecklist = Record<string, boolean | undefined>;
 type ConsentPolicies = Record<string, boolean | undefined>;
 
-/**
- * Hardcoded Sejda AcroForm mapping — every field is set explicitly.
- */
-export function applyFormDataToPdf(form: PDFForm, formData: ConsentFormData): void {
+function createFormHelpers(form: PDFForm) {
+  const fieldNames = new Set(form.getFields().map((f) => f.getName()));
+  const skipped: string[] = [];
+
+  const recordSkip = (name: string) => {
+    skipped.push(name);
+  };
+
+  const hasField = (name: string) => fieldNames.has(name);
+
   const safelyCheckBox = (fieldName: string) => {
+    if (!hasField(fieldName)) {
+      recordSkip(fieldName);
+      return;
+    }
     try {
-      const field = form.getCheckBox(fieldName);
-      field.check();
-    } catch (error) {
-      console.error(`❌ Checkbox mapping failed for: ${fieldName}`, error);
+      form.getCheckBox(fieldName).check();
+    } catch {
+      recordSkip(fieldName);
     }
   };
 
   const safelySetText = (fieldName: string, text: string) => {
+    if (!text) return;
+    if (!hasField(fieldName)) {
+      recordSkip(fieldName);
+      return;
+    }
     try {
-      if (!text) return;
-      const field = form.getTextField(fieldName);
-      field.setText(text);
-    } catch (error) {
-      console.error(`❌ Text mapping failed for: ${fieldName}`, error);
+      form.getTextField(fieldName).setText(text);
+    } catch {
+      recordSkip(fieldName);
     }
   };
+
+  const applyYesNo = (value: string, yesField: string, noField: string) => {
+    if (value === 'yes') {
+      safelyCheckBox(yesField);
+    } else if (value === 'no') {
+      safelyCheckBox(noField);
+    }
+  };
+
+  return { safelyCheckBox, safelySetText, applyYesNo, skipped, fieldNames };
+}
+
+/**
+ * Map submitted intake JSON onto whatever AcroForm fields exist in the template.
+ * Missing fields are skipped (logged once per stamp, not per field).
+ */
+export function applyFormDataToPdf(form: PDFForm, formData: ConsentFormData): string[] {
+  const { safelyCheckBox, safelySetText, applyYesNo, skipped } =
+    createFormHelpers(form);
 
   const printName =
     stringValue(formData.agreement_print_name) ||
     stringValue(formData.full_name);
 
-  // --- TEXT FIELDS ---
   safelySetText('client_name', printName);
   safelySetText('signature_print_name', printName);
   safelySetText('signature_date', stringValue(formData.agreement_date));
@@ -88,7 +125,6 @@ export function applyFormDataToPdf(form: PDFForm, formData: ConsentFormData): vo
     stringValue(formData.emergency_contact_phone)
   );
 
-  // --- EXPLANATION TEXT FIELDS ---
   safelySetText(
     'adverse_reaction_explanation',
     stringValue(formData.service_adverse_reaction_explain)
@@ -116,99 +152,72 @@ export function applyFormDataToPdf(form: PDFForm, formData: ConsentFormData): vo
   );
   safelySetText('additional_notes', stringValue(formData.additional_notes));
 
-  // --- YES/NO STRINGS ---
-  if (yesNoValue(formData, 'wears_contact_lenses') === 'yes') {
-    safelyCheckBox('contacts_yes');
-  }
-  if (yesNoValue(formData, 'wears_contact_lenses') === 'no') {
-    safelyCheckBox('contacts_no');
-  }
+  applyYesNo(
+    yesNoValue(formData, 'wears_contact_lenses'),
+    'contacts_yes',
+    'contacts_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'eye_irritation_itching'),
+    'eye_irritation_yes',
+    'eye_irritation_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'recurring_eye_infections'),
+    'eye_infection_history_yes',
+    'eye_infection_history_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'currently_eye_drops'),
+    'eye_drops_yes',
+    'eye_drops_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'pregnant_or_may_be'),
+    'pregnant_yes',
+    'pregnant_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'eye_injury_or_condition'),
+    'eye_injury_yes',
+    'eye_injury_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'known_allergies'),
+    'allergies_yes',
+    'allergies_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'medications_supplements'),
+    'medications_yes',
+    'medications_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'accutane_last_6_months'),
+    'accutane_yes',
+    'accutane_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'uses_retinol_tretinoin'),
+    'retinol_yes',
+    'retinol_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'chemotherapy_recent'),
+    'chemo_yes',
+    'chemo_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'had_lash_lift_tint'),
+    'prev_lash_lift_yes',
+    'prev_lash_lift_no'
+  );
+  applyYesNo(
+    yesNoValue(formData, 'had_brow_lamination_tint'),
+    'prev_brow_lam_yes',
+    'prev_brow_lam_no'
+  );
 
-  if (yesNoValue(formData, 'eye_irritation_itching') === 'yes') {
-    safelyCheckBox('eye_irritation_yes');
-  }
-  if (yesNoValue(formData, 'eye_irritation_itching') === 'no') {
-    safelyCheckBox('eye_irritation_no');
-  }
-
-  if (yesNoValue(formData, 'recurring_eye_infections') === 'yes') {
-    safelyCheckBox('eye_infection_history_yes');
-  }
-  if (yesNoValue(formData, 'recurring_eye_infections') === 'no') {
-    safelyCheckBox('eye_infection_history_no');
-  }
-
-  if (yesNoValue(formData, 'currently_eye_drops') === 'yes') {
-    safelyCheckBox('eye_drops_yes');
-  }
-  if (yesNoValue(formData, 'currently_eye_drops') === 'no') {
-    safelyCheckBox('eye_drops_no');
-  }
-
-  if (yesNoValue(formData, 'pregnant_or_may_be') === 'yes') {
-    safelyCheckBox('pregnant_yes');
-  }
-  if (yesNoValue(formData, 'pregnant_or_may_be') === 'no') {
-    safelyCheckBox('pregnant_no');
-  }
-
-  if (yesNoValue(formData, 'eye_injury_or_condition') === 'yes') {
-    safelyCheckBox('eye_injury_yes');
-  }
-  if (yesNoValue(formData, 'eye_injury_or_condition') === 'no') {
-    safelyCheckBox('eye_injury_no');
-  }
-
-  if (yesNoValue(formData, 'known_allergies') === 'yes') {
-    safelyCheckBox('allergies_yes');
-  }
-  if (yesNoValue(formData, 'known_allergies') === 'no') {
-    safelyCheckBox('allergies_no');
-  }
-
-  if (yesNoValue(formData, 'medications_supplements') === 'yes') {
-    safelyCheckBox('medications_yes');
-  }
-  if (yesNoValue(formData, 'medications_supplements') === 'no') {
-    safelyCheckBox('medications_no');
-  }
-
-  if (yesNoValue(formData, 'accutane_last_6_months') === 'yes') {
-    safelyCheckBox('accutane_yes');
-  }
-  if (yesNoValue(formData, 'accutane_last_6_months') === 'no') {
-    safelyCheckBox('accutane_no');
-  }
-
-  if (yesNoValue(formData, 'uses_retinol_tretinoin') === 'yes') {
-    safelyCheckBox('retinol_yes');
-  }
-  if (yesNoValue(formData, 'uses_retinol_tretinoin') === 'no') {
-    safelyCheckBox('retinol_no');
-  }
-
-  if (yesNoValue(formData, 'chemotherapy_recent') === 'yes') {
-    safelyCheckBox('chemo_yes');
-  }
-  if (yesNoValue(formData, 'chemotherapy_recent') === 'no') {
-    safelyCheckBox('chemo_no');
-  }
-
-  if (yesNoValue(formData, 'had_lash_lift_tint') === 'yes') {
-    safelyCheckBox('prev_lash_lift_yes');
-  }
-  if (yesNoValue(formData, 'had_lash_lift_tint') === 'no') {
-    safelyCheckBox('prev_lash_lift_no');
-  }
-
-  if (yesNoValue(formData, 'had_brow_lamination_tint') === 'yes') {
-    safelyCheckBox('prev_brow_lam_yes');
-  }
-  if (yesNoValue(formData, 'had_brow_lamination_tint') === 'no') {
-    safelyCheckBox('prev_brow_lam_no');
-  }
-
-  // --- MEDICAL CONDITIONS (BOOLEANS) ---
   const rawMeds = formData.medical_conditions_checklist;
   const meds: MedicalChecklist =
     rawMeds && typeof rawMeds === 'object' && !Array.isArray(rawMeds)
@@ -230,7 +239,6 @@ export function applyFormDataToPdf(form: PDFForm, formData: ConsentFormData): vo
   if (meds.recent_eye_infection) safelyCheckBox('cond_recent_infection');
   if (meds.other) safelyCheckBox('cond_other');
 
-  // --- POLICIES (BOOLEANS) ---
   const rawPolicies = formData.consent_statements;
   const policies: ConsentPolicies =
     rawPolicies &&
@@ -250,6 +258,8 @@ export function applyFormDataToPdf(form: PDFForm, formData: ConsentFormData): vo
   if (policies.contact_adverse_reactions) safelyCheckBox('policy_9');
   if (policies.aftercare_understanding) safelyCheckBox('policy_10');
   if (policies.website_policies) safelyCheckBox('policy_11');
+
+  return [...new Set(skipped)];
 }
 
 function parseSignaturePngBytes(signatureBase64: string): Uint8Array {
@@ -300,7 +310,13 @@ export async function stampConsentPDF(
   const pdfDoc = await PDFDocument.load(buffer);
   const form = pdfDoc.getForm();
 
-  applyFormDataToPdf(form, formData);
+  const skippedFields = applyFormDataToPdf(form, formData);
+  if (skippedFields.length > 0) {
+    console.warn(
+      `[pdf-stamper] ${skippedFields.length} AcroForm field(s) missing from template — re-upload a complete Sejda PDF with all field names. Run: npx tsx --env-file=.env.local scripts/list-consent-pdf-fields.ts`,
+      skippedFields.join(', ')
+    );
+  }
 
   const signatureBytes = parseSignaturePngBytes(signatureBase64);
   const signatureImage = await pdfDoc.embedPng(signatureBytes);
@@ -313,24 +329,29 @@ export async function stampConsentPDF(
     height: SIGNATURE_HEIGHT,
   });
 
-  // form.flatten() strips visual checkmarks on some Sejda templates — keep the
-  // interactive appearance layer so yes/no and policy boxes remain visible.
+  // form.flatten() hides checkmarks on this Sejda template — leave interactive.
   // form.flatten();
 
   const pdfBytes = await pdfDoc.save();
+  const token = getBlobToken();
 
   const pathname = `client-consents/${clientId}-signed.pdf`;
-  let blob;
   try {
-    blob = await put(pathname, Buffer.from(pdfBytes), {
+    const blob = await put(pathname, Buffer.from(pdfBytes), {
       access: 'public',
       contentType: 'application/pdf',
       allowOverwrite: true,
+      token,
     });
+    return blob.url;
   } catch (err) {
-    console.error('[pdf-stamper] blob put failed:', errorMessage(err));
-    throw new Error('Failed to upload stamped consent PDF');
+    const message = errorMessage(err);
+    console.error('[pdf-stamper] blob put failed:', message);
+    if (/access denied|unauthorized|invalid token/i.test(message)) {
+      throw new Error(
+        'Vercel Blob rejected the upload (invalid BLOB_READ_WRITE_TOKEN). Regenerate the token in Vercel → Storage → your store → .env.local, then restart npm run dev.'
+      );
+    }
+    throw new Error(`Failed to upload stamped consent PDF: ${message}`);
   }
-
-  return blob.url;
 }

@@ -25,6 +25,7 @@ interface ClientRow {
   phone: string | null;
   email: string | null;
   has_consented: boolean;
+  consent_form_url: string | null;
 }
 
 interface IntakeRow {
@@ -60,7 +61,11 @@ function rowToIntake(row: IntakeRow): ClientIntakeForm {
   };
 }
 
-function buildResponse(client: ClientRow, intake: IntakeRow | undefined): ConsentApiResponse {
+function buildResponse(
+  client: ClientRow,
+  intake: IntakeRow | undefined,
+  stampError?: string | null
+): ConsentApiResponse {
   const intakeForm = intake ? rowToIntake(intake) : null;
   const submitted = Boolean(
     client.has_consented || (intakeForm?.submitted_at && intakeForm.submitted_at.length > 0)
@@ -73,15 +78,71 @@ function buildResponse(client: ClientRow, intake: IntakeRow | undefined): Consen
       phone: client.phone,
       email: client.email,
       has_consented: Boolean(client.has_consented),
+      consent_form_url: client.consent_form_url ?? null,
     },
     intake: intakeForm,
     submitted,
+    stamp_error: stampError ?? null,
   };
+}
+
+/**
+ * Backfill stamped PDFs for submissions saved before stamping succeeded
+ * (or when stamping failed on POST).
+ */
+async function ensureStampedPdf(
+  clientId: string,
+  intake: IntakeRow
+): Promise<{ intake: IntakeRow; stampError: string | null }> {
+  if (intake.stamped_pdf_url?.trim()) {
+    return { intake, stampError: null };
+  }
+  if (!intake.submitted_at || !intake.signature_image?.trim()) {
+    return { intake, stampError: null };
+  }
+
+  const formData =
+    intake.form_data &&
+    typeof intake.form_data === 'object' &&
+    !Array.isArray(intake.form_data)
+      ? intake.form_data
+      : {};
+
+  try {
+    const stampedPdfUrl = await stampConsentPDF(
+      clientId,
+      formData,
+      intake.signature_image
+    );
+
+    await sql`
+      UPDATE client_intake_forms
+      SET stamped_pdf_url = ${stampedPdfUrl}
+      WHERE client_id = ${clientId}::uuid
+    `;
+
+    await sql`
+      UPDATE clients
+      SET
+        has_consented = true,
+        consent_form_url = ${stampedPdfUrl}
+      WHERE id = ${clientId}::uuid
+    `;
+
+    return {
+      intake: { ...intake, stamped_pdf_url: stampedPdfUrl },
+      stampError: null,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[api/consent] ensureStampedPdf failed:', message);
+    return { intake, stampError: message };
+  }
 }
 
 async function loadClient(clientId: string): Promise<ClientRow | null> {
   const { rows } = await sql<ClientRow>`
-    SELECT id, first_name, last_name, phone, email, has_consented
+    SELECT id, first_name, last_name, phone, email, has_consented, consent_form_url
     FROM clients
     WHERE id = ${clientId}::uuid
     LIMIT 1
@@ -153,7 +214,19 @@ export async function GET(
       throw err;
     }
 
-    return NextResponse.json(buildResponse(client, intake));
+    let resolvedIntake = intake;
+    let stampError: string | null = null;
+    if (intake?.submitted_at) {
+      const ensured = await ensureStampedPdf(clientId, intake);
+      resolvedIntake = ensured.intake;
+      stampError = ensured.stampError;
+    }
+
+    const updatedClient = (await loadClient(clientId)) ?? client;
+
+    return NextResponse.json(
+      buildResponse(updatedClient, resolvedIntake, stampError)
+    );
   } catch (err) {
     console.error('[api/consent] GET failed:', err);
     return NextResponse.json({ error: 'server_error' }, { status: 500 });

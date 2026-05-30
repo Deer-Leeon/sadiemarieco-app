@@ -5,7 +5,10 @@ import Link from 'next/link';
 import { Check, FileText, Loader2 } from 'lucide-react';
 
 import type { ConsentApiResponse, ConsentFormData } from '@/lib/consent';
-import { isStampedConsentPdfUrl, isValidClientUuid } from '@/lib/consent';
+import {
+  isValidClientUuid,
+  resolveConsentPdfUrl,
+} from '@/lib/consent';
 
 import {
   allConsentStatementsAccepted,
@@ -37,12 +40,40 @@ import {
 import SignaturePad, { type SignaturePadHandle } from './SignaturePad';
 
 function SubmittedView({ data }: { data: ConsentApiResponse }) {
+  const pdfUrl = resolveConsentPdfUrl(
+    data.intake,
+    data.client.consent_form_url
+  );
+
+  useEffect(() => {
+    if (!pdfUrl) return;
+    window.location.replace(pdfUrl);
+  }, [pdfUrl]);
+
+  if (pdfUrl) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-center">
+        <Loader2 className="h-8 w-8 animate-spin text-stone-500" aria-hidden />
+        <p className="mt-4 font-serif text-xl text-stone-900">Opening your signed PDF…</p>
+        <p className="mt-2 text-sm text-stone-600">
+          Your official consent document with all checkmarks is loading.
+        </p>
+        <a
+          href={pdfUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-6 inline-flex items-center justify-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
+        >
+          <FileText className="h-4 w-4" aria-hidden />
+          Open signed PDF
+        </a>
+      </div>
+    );
+  }
+
   const form = data.intake?.form_data ?? {};
   const submittedAt = data.intake?.submitted_at;
   const signature = data.intake?.signature_image ?? null;
-  const stampedPdfUrl = isStampedConsentPdfUrl(data.intake?.stamped_pdf_url)
-    ? data.intake!.stamped_pdf_url!.trim()
-    : null;
   const checklist = asMedicalChecklist(form.medical_conditions_checklist);
   const flagged = MEDICAL_CONDITION_CHECKLIST.filter((c) => checklist[c.key]);
   const statements = asConsentStatements(form.consent_statements);
@@ -73,17 +104,15 @@ function SubmittedView({ data }: { data: ConsentApiResponse }) {
         <h1 className="mt-3 font-serif text-2xl text-stone-900">
           Form successfully submitted
         </h1>
-        {stampedPdfUrl && (
-          <a
-            href={stampedPdfUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-stone-800"
-          >
-            <FileText className="h-4 w-4" aria-hidden />
-            View Official Signed PDF
-          </a>
-        )}
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Your signed PDF could not be generated yet. The summary below is on
+          file.
+          {data.stamp_error && (
+            <span className="mt-2 block text-left text-xs leading-relaxed text-amber-800">
+              {data.stamp_error}
+            </span>
+          )}
+        </p>
         <p className="mt-2 text-sm text-stone-600">
           Your intake and consent are on file. This form is locked and cannot be
           edited.
@@ -330,6 +359,13 @@ function EditableForm({
       if (!res.ok) {
         throw new Error(payload.message || payload.error || `Submit failed (${res.status})`);
       }
+
+      const pdfUrl = resolveConsentPdfUrl(payload.intake, payload.client.consent_form_url);
+      if (pdfUrl) {
+        window.location.replace(pdfUrl);
+        return;
+      }
+
       onSubmitted({
         client: payload.client,
         intake: payload.intake,
