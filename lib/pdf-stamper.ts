@@ -41,8 +41,11 @@ const EB_GARAMOND_FONT_CANDIDATES = [
   join(process.cwd(), 'assets/fonts/EBGaramond-Regular.ttf'),
 ];
 
-/** Fallback when the template does not specify a field font size. */
-const FALLBACK_STAMP_FONT_SIZE = 11;
+/** Readable size for single-line answers on the Sejda template. */
+const STAMP_FONT_SIZE = 11;
+
+const MIN_STAMP_FONT_SIZE = 10;
+const MAX_STAMP_FONT_SIZE = 14;
 
 const DA_FONT_SIZE_PATTERN = /\/[^\s]+\s+(\d+(?:\.\d+)?)\s+Tf/g;
 
@@ -360,7 +363,8 @@ async function loadEbGaramondFontBytes(): Promise<Uint8Array> {
 async function embedStampFont(pdfDoc: PDFDocument): Promise<PDFFont> {
   pdfDoc.registerFontkit(fontkit);
   const bytes = await loadEbGaramondFontBytes();
-  return pdfDoc.embedFont(bytes, { subset: true });
+  // Full embed avoids subset metric glitches with form-derived coordinates.
+  return pdfDoc.embedFont(bytes, { subset: false });
 }
 
 function parseFontSizeFromDefaultAppearance(
@@ -375,8 +379,21 @@ function parseFontSizeFromDefaultAppearance(
   return size;
 }
 
-/** Prefer the template’s field size; variable fonts break pdf-lib metrics. */
+function clampStampFontSize(size: number): number {
+  return Math.max(MIN_STAMP_FONT_SIZE, Math.min(MAX_STAMP_FONT_SIZE, size));
+}
+
+/** Sejda DA often lists 0–1pt; use a stable readable size instead. */
 function inferStampFontSize(field: PDFTextField): number {
+  if (field.isMultiline()) {
+    const widgets = field.acroField.getWidgets();
+    if (widgets.length > 0) {
+      const { height } = widgets[0].getRectangle();
+      if (height > 24) return clampStampFontSize(Math.round(height / 5));
+    }
+    return 10;
+  }
+
   const widgets = field.acroField.getWidgets();
   const fromWidget =
     widgets.length > 0
@@ -386,16 +403,30 @@ function inferStampFontSize(field: PDFTextField): number {
     field.acroField.getDefaultAppearance()
   );
   const fromTemplate = fromWidget ?? fromField;
-  if (fromTemplate && fromTemplate >= 6 && fromTemplate <= 24) {
-    return fromTemplate;
+  if (fromTemplate && fromTemplate >= MIN_STAMP_FONT_SIZE) {
+    return clampStampFontSize(fromTemplate);
   }
-  if (widgets.length > 0) {
-    const { height } = widgets[0].getRectangle();
-    if (height > 0) {
-      return Math.max(8, Math.min(14, Math.round(height * 0.5)));
+  return STAMP_FONT_SIZE;
+}
+
+/** Prevent flatten from baking broken Sejda text appearances (tiny glyph debris). */
+const emptyTextFieldAppearanceProvider: AppearanceProviderFor<PDFTextField> = () => [];
+
+function clearTextFieldAppearancesForFlatten(
+  form: PDFForm,
+  font: PDFFont
+): void {
+  for (const field of form.getFields()) {
+    if (!(field instanceof PDFTextField)) continue;
+    try {
+      field.updateAppearances(font, emptyTextFieldAppearanceProvider);
+    } catch (err) {
+      console.warn(
+        `[pdf-stamper] clear text appearance failed (${field.getName()}):`,
+        errorMessage(err)
+      );
     }
   }
-  return FALLBACK_STAMP_FONT_SIZE;
 }
 
 type TextFieldPlacement = {
@@ -451,10 +482,10 @@ function collectTextFieldPlacements(
       placements.push({
         page,
         text,
-        x: x + 2,
-        y: y + Math.max(2, (height - fontSize) / 2),
+        x: x + 3,
+        y: y + Math.max(3, (height - fontSize) / 2 + 1),
         fontSize,
-        maxWidth: Math.max(24, width - 4),
+        maxWidth: Math.max(24, width - 6),
       });
     }
   }
@@ -501,6 +532,7 @@ async function finalizeFormAppearance(
 ): Promise<void> {
   const font = await embedStampFont(pdfDoc);
   const textPlacements = collectTextFieldPlacements(pdfDoc, form);
+  clearTextFieldAppearancesForFlatten(form, font);
   refreshCheckboxAppearances(form);
 
   try {
