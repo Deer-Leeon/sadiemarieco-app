@@ -2,17 +2,24 @@
  * Stamp client intake answers + signature onto the studio PDF template,
  * upload the flattened PDF to Vercel Blob, and return the public URL.
  */
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+import fontkit from '@pdf-lib/fontkit';
 import { put } from '@vercel/blob';
 import {
   adjustDimsForRotation,
   drawCheckMark,
   PDFCheckBox,
   PDFDocument,
+  PDFTextField,
   reduceRotation,
   rotateInPlace,
   rgb,
-  StandardFonts,
+  setFillingColor,
+  setFontAndSize,
   type AppearanceProviderFor,
+  type PDFFont,
   type PDFForm,
 } from 'pdf-lib';
 import { sql } from '@vercel/postgres';
@@ -24,6 +31,18 @@ const SIGNATURE_X = 70;
 const SIGNATURE_Y = 310;
 const SIGNATURE_WIDTH = 200;
 const SIGNATURE_HEIGHT = 50;
+
+/** Stamped field text + checkmarks (brand navy). */
+const STAMP_TEXT_COLOR = rgb(13 / 255, 27 / 255, 42 / 255);
+
+const EB_GARAMOND_FONT_PATH = join(
+  process.cwd(),
+  'assets/fonts/EBGaramond-Regular.ttf'
+);
+
+const DEFAULT_STAMP_FONT_SIZE = 10;
+
+let ebGaramondFontBytes: Uint8Array | null = null;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -304,7 +323,7 @@ const checkMarkOnlyAppearanceProvider: AppearanceProviderFor<PDFCheckBox> = (
   const rotation = reduceRotation(ap?.getRotation());
   const { width, height } = adjustDimsForRotation(rectangle, rotation);
   const rotate = rotateInPlace({ ...rectangle, rotation });
-  const markColor = rgb(0, 0, 0);
+  const markColor = STAMP_TEXT_COLOR;
   const checkMarkSize = Math.min(width, height) / 2;
   const checked = [
     ...rotate,
@@ -322,6 +341,49 @@ const checkMarkOnlyAppearanceProvider: AppearanceProviderFor<PDFCheckBox> = (
     down: { on: checked, off: [] },
   };
 };
+
+async function loadEbGaramondFontBytes(): Promise<Uint8Array> {
+  if (!ebGaramondFontBytes) {
+    ebGaramondFontBytes = new Uint8Array(await readFile(EB_GARAMOND_FONT_PATH));
+  }
+  return ebGaramondFontBytes;
+}
+
+async function embedStampFont(pdfDoc: PDFDocument): Promise<PDFFont> {
+  pdfDoc.registerFontkit(fontkit);
+  const bytes = await loadEbGaramondFontBytes();
+  return pdfDoc.embedFont(bytes, { subset: true });
+}
+
+function buildStampDefaultAppearance(font: PDFFont, fontSize: number): string {
+  return [
+    setFillingColor(STAMP_TEXT_COLOR).toString(),
+    setFontAndSize(font.name, fontSize).toString(),
+  ].join('\n');
+}
+
+/** Apply EB Garamond + brand color to filled text fields before flatten. */
+function refreshTextFieldAppearances(form: PDFForm, font: PDFFont): void {
+  const da = buildStampDefaultAppearance(font, DEFAULT_STAMP_FONT_SIZE);
+
+  for (const field of form.getFields()) {
+    if (!(field instanceof PDFTextField)) continue;
+    try {
+      field.acroField.setDefaultAppearance(da);
+      const widgets = field.acroField.getWidgets();
+      for (let i = 0; i < widgets.length; i++) {
+        widgets[i].setDefaultAppearance(da);
+      }
+      form.markFieldAsDirty(field.ref);
+      field.defaultUpdateAppearances(font);
+    } catch (err) {
+      console.warn(
+        `[pdf-stamper] text field appearance failed (${field.getName()}):`,
+        errorMessage(err)
+      );
+    }
+  }
+}
 
 /** Regenerate checkbox appearances before flatten bakes them into the page. */
 function refreshCheckboxAppearances(form: PDFForm): void {
@@ -343,14 +405,9 @@ async function finalizeFormAppearance(
   pdfDoc: PDFDocument,
   form: PDFForm
 ): Promise<void> {
+  const font = await embedStampFont(pdfDoc);
   refreshCheckboxAppearances(form);
-
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  try {
-    form.updateFieldAppearances(font);
-  } catch (err) {
-    console.warn('[pdf-stamper] updateFieldAppearances failed:', errorMessage(err));
-  }
+  refreshTextFieldAppearances(form, font);
 
   try {
     form.flatten({ updateFieldAppearances: false });
