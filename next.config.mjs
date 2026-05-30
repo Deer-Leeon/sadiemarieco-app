@@ -10,6 +10,11 @@ const nextConfig = {
   // auto-detection already handled it.
   serverExternalPackages: ['sharp'],
 
+  // Consent PDF stamping embeds EB Garamond from disk at runtime.
+  outputFileTracingIncludes: {
+    '/api/consent/[clientId]': ['./public/fonts/**/*', './assets/fonts/**/*'],
+  },
+
   // ── Image domain allowlist ─────────────────────────────────────────────
   // Any `<Image>` from next/image whose `src` points to Vercel Blob
   // storage must be on this allowlist or Next.js will reject it at build

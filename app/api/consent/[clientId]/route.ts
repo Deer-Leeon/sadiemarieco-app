@@ -94,9 +94,6 @@ async function ensureStampedPdf(
   clientId: string,
   intake: IntakeRow
 ): Promise<{ intake: IntakeRow; stampError: string | null }> {
-  if (intake.stamped_pdf_url?.trim()) {
-    return { intake, stampError: null };
-  }
   if (!intake.submitted_at || !intake.signature_image?.trim()) {
     return { intake, stampError: null };
   }

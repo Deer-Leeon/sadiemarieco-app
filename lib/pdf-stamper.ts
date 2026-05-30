@@ -16,11 +16,12 @@ import {
   reduceRotation,
   rotateInPlace,
   rgb,
-  setFillingColor,
-  setFontAndSize,
   type AppearanceProviderFor,
   type PDFFont,
   type PDFForm,
+  type PDFDict,
+  type PDFPage,
+  type PDFRef,
 } from 'pdf-lib';
 import { sql } from '@vercel/postgres';
 
@@ -35,15 +36,15 @@ const SIGNATURE_HEIGHT = 50;
 /** Stamped field text + checkmarks (brand navy). */
 const STAMP_TEXT_COLOR = rgb(13 / 255, 27 / 255, 42 / 255);
 
-const EB_GARAMOND_FONT_PATH = join(
-  process.cwd(),
-  'assets/fonts/EBGaramond-Regular.ttf'
-);
+const EB_GARAMOND_FONT_CANDIDATES = [
+  join(process.cwd(), 'public/fonts/EBGaramond-Regular.ttf'),
+  join(process.cwd(), 'assets/fonts/EBGaramond-Regular.ttf'),
+];
 
 /** Fallback when the template does not specify a field font size. */
 const FALLBACK_STAMP_FONT_SIZE = 11;
 
-const DA_FONT_SIZE_PATTERN = /\/[^\s]+\s+(\d+(?:\.\d+)?)\s+Tf/;
+const DA_FONT_SIZE_PATTERN = /\/[^\s]+\s+(\d+(?:\.\d+)?)\s+Tf/g;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -344,8 +345,16 @@ const checkMarkOnlyAppearanceProvider: AppearanceProviderFor<PDFCheckBox> = (
 };
 
 async function loadEbGaramondFontBytes(): Promise<Uint8Array> {
-  // Always read from disk so font file swaps (e.g. variable → static TTF) apply in dev.
-  return new Uint8Array(await readFile(EB_GARAMOND_FONT_PATH));
+  for (const fontPath of EB_GARAMOND_FONT_CANDIDATES) {
+    try {
+      return new Uint8Array(await readFile(fontPath));
+    } catch {
+      // try next path (public/ for Vercel, assets/ for local)
+    }
+  }
+  throw new Error(
+    'EB Garamond font file not found. Expected public/fonts/EBGaramond-Regular.ttf'
+  );
 }
 
 async function embedStampFont(pdfDoc: PDFDocument): Promise<PDFFont> {
@@ -389,33 +398,84 @@ function inferStampFontSize(field: PDFTextField): number {
   return FALLBACK_STAMP_FONT_SIZE;
 }
 
-function buildStampDefaultAppearance(font: PDFFont, fontSize: number): string {
-  return [
-    setFillingColor(STAMP_TEXT_COLOR).toString(),
-    setFontAndSize(font.name, fontSize).toString(),
-  ].join('\n');
+type TextFieldPlacement = {
+  page: PDFPage;
+  text: string;
+  x: number;
+  y: number;
+  fontSize: number;
+  maxWidth: number;
+};
+
+function findPageForWidget(
+  pdfDoc: PDFDocument,
+  widget: {
+    P(): PDFRef | undefined;
+    getRectangle(): { x: number; y: number; width: number; height: number };
+    dict: PDFDict;
+  }
+): PDFPage | undefined {
+  const pageRef = widget.P();
+  if (pageRef) {
+    const page = pdfDoc.getPages().find((p) => p.ref === pageRef);
+    if (page) return page;
+  }
+
+  const widgetRef = pdfDoc.context.getObjectRef(widget.dict);
+  if (widgetRef) {
+    return pdfDoc.findPageForAnnotationRef(widgetRef);
+  }
+
+  return undefined;
 }
 
-/** Apply EB Garamond + brand color to filled text fields before flatten. */
-function refreshTextFieldAppearances(form: PDFForm, font: PDFFont): void {
+/** Snapshot values + positions before flatten removes AcroForm fields. */
+function collectTextFieldPlacements(
+  pdfDoc: PDFDocument,
+  form: PDFForm
+): TextFieldPlacement[] {
+  const placements: TextFieldPlacement[] = [];
+
   for (const field of form.getFields()) {
     if (!(field instanceof PDFTextField)) continue;
-    try {
-      const fontSize = inferStampFontSize(field);
-      const da = buildStampDefaultAppearance(font, fontSize);
-      field.acroField.setDefaultAppearance(da);
-      const widgets = field.acroField.getWidgets();
-      for (let i = 0; i < widgets.length; i++) {
-        widgets[i].setDefaultAppearance(da);
-      }
-      form.markFieldAsDirty(field.ref);
-      field.defaultUpdateAppearances(font);
-    } catch (err) {
-      console.warn(
-        `[pdf-stamper] text field appearance failed (${field.getName()}):`,
-        errorMessage(err)
-      );
+    const text = field.getText()?.trim() ?? '';
+    if (!text) continue;
+
+    const fontSize = inferStampFontSize(field);
+    const widgets = field.acroField.getWidgets();
+    for (const widget of widgets) {
+      const page = findPageForWidget(pdfDoc, widget);
+      if (!page) continue;
+
+      const { x, y, width, height } = widget.getRectangle();
+      placements.push({
+        page,
+        text,
+        x: x + 2,
+        y: y + Math.max(2, (height - fontSize) / 2),
+        fontSize,
+        maxWidth: Math.max(24, width - 4),
+      });
     }
+  }
+
+  return placements;
+}
+
+/** Draw filled answers on the page (reliable vs Sejda AcroForm appearances). */
+function drawTextFieldPlacements(
+  placements: TextFieldPlacement[],
+  font: PDFFont
+): void {
+  for (const { page, text, x, y, fontSize, maxWidth } of placements) {
+    page.drawText(text, {
+      x,
+      y,
+      size: fontSize,
+      font,
+      color: STAMP_TEXT_COLOR,
+      maxWidth,
+    });
   }
 }
 
@@ -440,8 +500,8 @@ async function finalizeFormAppearance(
   form: PDFForm
 ): Promise<void> {
   const font = await embedStampFont(pdfDoc);
+  const textPlacements = collectTextFieldPlacements(pdfDoc, form);
   refreshCheckboxAppearances(form);
-  refreshTextFieldAppearances(form, font);
 
   try {
     form.flatten({ updateFieldAppearances: false });
@@ -450,6 +510,8 @@ async function finalizeFormAppearance(
       `Consent PDF could not be locked (flatten failed): ${errorMessage(err)}`
     );
   }
+
+  drawTextFieldPlacements(textPlacements, font);
 
   const remainingFields = pdfDoc.getForm().getFields();
   if (remainingFields.length > 0) {
