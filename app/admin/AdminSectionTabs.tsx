@@ -36,6 +36,7 @@ const SECTIONS: AdminSection[] = [
   { href: '/admin/clients', label: 'Clients' },
   { href: '/admin/website', label: 'Website' },
   { href: '/admin/services', label: 'Services' },
+  { href: '/admin/settings', label: 'Settings' },
 ];
 
 export default function AdminSectionTabs() {

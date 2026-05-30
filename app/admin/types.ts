@@ -259,6 +259,7 @@ export interface Client extends ClientCrmStats {
 }
 
 export type { ClientIntakeForm } from '@/lib/consent';
+export type { ConsentTemplateWire, StudioSettings } from '@/lib/studio-settings';
 
 /** Default CRM stats when a row has no linked appointments yet. */
 export const EMPTY_CLIENT_CRM_STATS: ClientCrmStats = {
