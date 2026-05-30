@@ -290,7 +290,7 @@ function EditableForm({
     }
     const signatureData = signatureRef.current?.toDataURL();
     if (!signatureData) {
-      setError('Please sign in the signature box before submitting.');
+      setError('Please draw or type your signature before submitting.');
       return;
     }
 
@@ -795,8 +795,8 @@ function EditableForm({
 
       {!canSubmit && !submitting && (
         <p className="text-center text-xs text-stone-500">
-          Complete all required fields, check every consent statement, and sign above to
-          submit.
+          Complete all required fields, check every consent statement, and add your
+          signature above to submit.
           {validationError && !signatureTouched && (
             <span className="mt-1 block text-stone-400">{validationError}</span>
           )}
