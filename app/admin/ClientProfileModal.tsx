@@ -52,11 +52,7 @@ import {
   X,
 } from 'lucide-react';
 
-import {
-  buildTallyConsentFormUrl,
-  getPublicTallyFormId,
-  resolveConsentViewUrl,
-} from '@/lib/tally-consent';
+import { consentFormPath } from '@/lib/consent';
 
 import type {
   Appointment,
@@ -819,33 +815,19 @@ const actionBoxClass = (interactive: boolean) =>
   }`;
 
 function ConsentFormActionBox({ client }: { client: Client }) {
-  const formId = getPublicTallyFormId();
+  const href = consentFormPath(client.id);
 
   if (client.has_consented) {
-    const viewUrl = resolveConsentViewUrl(client.consent_form_url, formId);
-    if (!viewUrl) {
-      return (
-        <ActionBox
-          icon={<ClipboardCheck className="h-3 w-3" />}
-          label="Consent Form"
-          helper="Signed — link unavailable."
-          disabled
-          rightAccessory={
-            <Check className="h-4 w-4 text-emerald-600" aria-hidden />
-          }
-        />
-      );
-    }
     return (
       <ActionBox
-        icon={<ClipboardCheck className="h-3 w-3" />}
+        icon={<ClipboardCheck className="h-3 w-3 shrink-0 text-emerald-700/80" />}
         label="Consent Form"
-        helper="Signed — view only."
-        href={viewUrl}
-        ariaLabel="View signed consent form in new tab"
+        helper="Signed intake on file (read-only)."
+        href={href}
+        ariaLabel="View signed consent form"
         rightAccessory={
           <>
-            <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
+            <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-stone-600">
               View signed form
             </span>
             <Check className="h-4 w-4 text-emerald-600" aria-hidden />
@@ -855,25 +837,18 @@ function ConsentFormActionBox({ client }: { client: Client }) {
     );
   }
 
-  const formUrl = buildTallyConsentFormUrl(client.id, formId);
-  if (!formUrl) {
-    return (
-      <ActionBox
-        icon={<ClipboardCheck className="h-3 w-3" />}
-        label="Consent Form"
-        helper="Tally form ID not configured."
-        disabled
-      />
-    );
-  }
-
   return (
     <ActionBox
-      icon={<ClipboardCheck className="h-3 w-3" />}
+      icon={<ClipboardCheck className="h-3 w-3 shrink-0" />}
       label="Consent Form"
-      helper="Complete intake & consent before the appointment."
-      href={formUrl}
-      ariaLabel="Open consent form in new tab"
+      helper="Send the client this link to complete intake."
+      href={href}
+      ariaLabel="Open consent form to fill out or share"
+      rightAccessory={
+        <span className="max-w-[7.5rem] text-right text-[10px] font-medium uppercase leading-tight tracking-[0.12em] text-stone-500">
+          Fill out / Send form link
+        </span>
+      }
     />
   );
 }

@@ -195,14 +195,13 @@ Optional — only set if you self-host the sign-in pages:
 | `NEXT_PUBLIC_CLERK_SIGN_IN_URL`   | `/sign-in` (if hosted in-app)  |
 | `NEXT_PUBLIC_CLERK_SIGN_UP_URL`   | `/sign-up` (if hosted in-app)  |
 
-### Tally (client consent form)
+### Client consent / intake form
 
-| Name                                   | Value                                                                 |
-| -------------------------------------- | --------------------------------------------------------------------- |
-| `TALLY_CONSENT_FORM_ID`                | Form slug from `https://tally.so/r/<slug>` (server: SMS + webhook)   |
-| `NEXT_PUBLIC_TALLY_CONSENT_FORM_ID`    | Same slug for the admin client profile consent card (client-side)    |
+Internal form at **`/consent/[clientId]`** (public). Answers live in `client_intake_forms` (`scripts/create_client_intake_forms.sql`). API: `GET` / `POST` `/api/consent/[clientId]`.
 
-Wire the Tally form webhook to `POST /api/webhooks/tally` and include a hidden field `client_id` on the form.
+| Name              | Value                                              |
+| ----------------- | -------------------------------------------------- |
+| `PUBLIC_BASE_URL` | Base URL for intake links in SMS (e.g. `https://www.sadiemarie.co`) |
 
 ### Optional
 
