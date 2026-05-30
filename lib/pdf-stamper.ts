@@ -2,8 +2,8 @@
  * Stamp client intake answers + signature onto the studio PDF template,
  * upload the flattened PDF to Vercel Blob, and return the public URL.
  *
- * Maps `INITIAL_FORM` JSON keys to Sejda AcroForm field names (see dictionaries
- * below). All `setText` / `check` calls are wrapped in try/catch.
+ * Field mapping is explicit (no generic loops) so checkboxes always use
+ * getCheckBox() and text fields always use getTextField().
  */
 import { put } from '@vercel/blob';
 import { PDFDocument, type PDFForm } from 'pdf-lib';
@@ -12,107 +12,10 @@ import { sql } from '@vercel/postgres';
 import type { ConsentFormData } from '@/lib/consent';
 import { STUDIO_SETTINGS_ROW_ID } from '@/lib/studio-settings';
 
-const SIGNATURE_X = 150;
-const SIGNATURE_Y = 280;
+const SIGNATURE_X = 70;
+const SIGNATURE_Y = 310;
 const SIGNATURE_WIDTH = 200;
 const SIGNATURE_HEIGHT = 50;
-
-/** Direct 1:1 text fields (form key → same PDF field name). */
-const DIRECT_TEXT_FIELD_KEYS = [
-  'dob',
-  'phone',
-  'address',
-  'city',
-  'state',
-  'zip',
-  'email',
-  'occupation',
-  'referral_source',
-  'emergency_contact_name',
-  'emergency_contact_phone',
-] as const satisfies readonly (keyof ConsentFormData)[];
-
-/**
- * Yes/No answers stored as literal strings `"yes"` / `"no"` in form JSON.
- */
-const YES_NO_STRING_TO_PDF_CHECKBOXES: Record<
-  string,
-  { yes: string; no: string }
-> = {
-  had_lash_lift_tint: {
-    yes: 'prev_lash_lift_yes',
-    no: 'prev_lash_lift_no',
-  },
-  had_brow_lamination_tint: {
-    yes: 'prev_brow_lam_yes',
-    no: 'prev_brow_lam_no',
-  },
-  wears_contact_lenses: { yes: 'contacts_yes', no: 'contacts_no' },
-  eye_irritation_itching: {
-    yes: 'eye_irritation_yes',
-    no: 'eye_irritation_no',
-  },
-  recurring_eye_infections: {
-    yes: 'eye_infection_history_yes',
-    no: 'eye_infection_history_no',
-  },
-  currently_eye_drops: { yes: 'eye_drops_yes', no: 'eye_drops_no' },
-  pregnant_or_may_be: { yes: 'pregnant_yes', no: 'pregnant_no' },
-  eye_injury_or_condition: { yes: 'eye_injury_yes', no: 'eye_injury_no' },
-  known_allergies: { yes: 'allergies_yes', no: 'allergies_no' },
-  medications_supplements: {
-    yes: 'medications_yes',
-    no: 'medications_no',
-  },
-  accutane_last_6_months: { yes: 'accutane_yes', no: 'accutane_no' },
-  uses_retinol_tretinoin: { yes: 'retinol_yes', no: 'retinol_no' },
-  chemotherapy_recent: { yes: 'chemo_yes', no: 'chemo_no' },
-};
-
-/** `medical_conditions_checklist` key → PDF checkbox. */
-const MEDICAL_CONDITION_TO_PDF: Record<string, string> = {
-  alopecia: 'cond_alopecia',
-  conjunctivitis: 'cond_conjunctivitis',
-  eczema: 'cond_eczema',
-  psoriasis_near_eyes: 'cond_psoriasis',
-  sensitive_eyes: 'cond_sensitive_eyes',
-  cancer: 'cond_cancer',
-  diabetes: 'cond_diabetes',
-  glaucoma: 'cond_glaucoma',
-  thyroid_disease: 'cond_thyroid',
-  cataracts: 'cond_cataracts',
-  dry_eyes: 'cond_dry_eyes',
-  lupus: 'cond_lupus',
-  recent_eye_infection: 'cond_recent_infection',
-  other: 'cond_other',
-};
-
-/** `consent_statements` key → PDF policy checkbox. */
-const CONSENT_STATEMENT_TO_POLICY: Record<string, string> = {
-  beauty_service_risks: 'policy_1',
-  eye_contact_protocol: 'policy_2',
-  temporary_redness: 'policy_3',
-  temporary_staining: 'policy_4',
-  color_results_vary: 'policy_5',
-  disclosed_health_history: 'policy_6',
-  unforeseen_conditions: 'policy_7',
-  photo_consent: 'policy_8',
-  contact_adverse_reactions: 'policy_9',
-  aftercare_understanding: 'policy_10',
-  website_policies: 'policy_11',
-};
-
-/** Explanation / notes form keys → PDF text fields. */
-const EXPLANATION_TEXT_TO_PDF: Record<string, string> = {
-  service_adverse_reaction_explain: 'adverse_reaction_explanation',
-  pregnancy_weeks: 'pregnant_weeks',
-  eye_injury_or_condition_explain: 'eye_injury_explanation',
-  known_allergies_explain: 'allergies_explanation',
-  medications_supplements_explain: 'medications_explanation',
-  chemotherapy_recent_explain: 'chemo_explanation',
-  medical_conditions_other_text: 'cond_other_explanation',
-  additional_notes: 'additional_notes',
-};
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -127,127 +30,226 @@ function stringValue(value: unknown): string {
   return '';
 }
 
-/** Normalise form yes/no answers (literal `"yes"` / `"no"` strings). */
-function parseYesNoString(value: unknown): 'yes' | 'no' | null {
-  if (typeof value !== 'string') return null;
-  const normalised = value.trim().toLowerCase();
-  if (normalised === 'yes') return 'yes';
-  if (normalised === 'no') return 'no';
-  return null;
+function yesNoValue(formData: ConsentFormData, key: string): string {
+  const raw = formData[key];
+  if (typeof raw !== 'string') return '';
+  return raw.trim().toLowerCase();
 }
 
-function trySetTextField(form: PDFForm, fieldName: string, text: string): void {
-  if (!text) return;
-  try {
-    form.getTextField(fieldName).setText(text);
-  } catch {
-    /* missing or wrong field type */
-  }
-}
-
-function tryCheckField(form: PDFForm, fieldName: string): void {
-  try {
-    form.getCheckBox(fieldName).check();
-  } catch {
-    /* missing or wrong field type */
-  }
-}
+type MedicalChecklist = Record<string, boolean | undefined>;
+type ConsentPolicies = Record<string, boolean | undefined>;
 
 /**
- * Map a JSON yes/no string to the paired PDF checkboxes for one question.
+ * Hardcoded Sejda AcroForm mapping — every field is set explicitly.
  */
-export function applyYesNoStringToPdf(
-  form: PDFForm,
-  formKey: string,
-  value: unknown
-): void {
-  const targets = YES_NO_STRING_TO_PDF_CHECKBOXES[formKey];
-  if (!targets) return;
+export function applyFormDataToPdf(form: PDFForm, formData: ConsentFormData): void {
+  const safelyCheckBox = (fieldName: string) => {
+    try {
+      const field = form.getCheckBox(fieldName);
+      field.check();
+    } catch (error) {
+      console.error(`❌ Checkbox mapping failed for: ${fieldName}`, error);
+    }
+  };
 
-  const answer = parseYesNoString(value);
-  if (answer === 'yes') {
-    tryCheckField(form, targets.yes);
-  } else if (answer === 'no') {
-    tryCheckField(form, targets.no);
-  }
-}
+  const safelySetText = (fieldName: string, text: string) => {
+    try {
+      if (!text) return;
+      const field = form.getTextField(fieldName);
+      field.setText(text);
+    } catch (error) {
+      console.error(`❌ Text mapping failed for: ${fieldName}`, error);
+    }
+  };
 
-function applyBooleanCheckbox(form: PDFForm, fieldName: string, value: unknown): void {
-  if (value === true) {
-    tryCheckField(form, fieldName);
-  }
-}
-
-function applyCoreTextFields(form: PDFForm, formData: ConsentFormData): void {
   const printName =
     stringValue(formData.agreement_print_name) ||
     stringValue(formData.full_name);
-  if (printName) {
-    trySetTextField(form, 'client_name', printName);
-    trySetTextField(form, 'signature_print_name', printName);
+
+  // --- TEXT FIELDS ---
+  safelySetText('client_name', printName);
+  safelySetText('signature_print_name', printName);
+  safelySetText('signature_date', stringValue(formData.agreement_date));
+  safelySetText('dob', stringValue(formData.dob));
+  safelySetText('phone', stringValue(formData.phone));
+  safelySetText('address', stringValue(formData.address));
+  safelySetText('city', stringValue(formData.city));
+  safelySetText('state', stringValue(formData.state));
+  safelySetText('zip', stringValue(formData.zip));
+  safelySetText('email', stringValue(formData.email));
+  safelySetText('occupation', stringValue(formData.occupation));
+  safelySetText('referral_source', stringValue(formData.referral_source));
+  safelySetText(
+    'emergency_contact_name',
+    stringValue(formData.emergency_contact_name)
+  );
+  safelySetText(
+    'emergency_contact_phone',
+    stringValue(formData.emergency_contact_phone)
+  );
+
+  // --- EXPLANATION TEXT FIELDS ---
+  safelySetText(
+    'adverse_reaction_explanation',
+    stringValue(formData.service_adverse_reaction_explain)
+  );
+  safelySetText('pregnant_weeks', stringValue(formData.pregnancy_weeks));
+  safelySetText(
+    'eye_injury_explanation',
+    stringValue(formData.eye_injury_or_condition_explain)
+  );
+  safelySetText(
+    'allergies_explanation',
+    stringValue(formData.known_allergies_explain)
+  );
+  safelySetText(
+    'medications_explanation',
+    stringValue(formData.medications_supplements_explain)
+  );
+  safelySetText(
+    'chemo_explanation',
+    stringValue(formData.chemotherapy_recent_explain)
+  );
+  safelySetText(
+    'cond_other_explanation',
+    stringValue(formData.medical_conditions_other_text)
+  );
+  safelySetText('additional_notes', stringValue(formData.additional_notes));
+
+  // --- YES/NO STRINGS ---
+  if (yesNoValue(formData, 'wears_contact_lenses') === 'yes') {
+    safelyCheckBox('contacts_yes');
+  }
+  if (yesNoValue(formData, 'wears_contact_lenses') === 'no') {
+    safelyCheckBox('contacts_no');
   }
 
-  const signatureDate = stringValue(formData.agreement_date);
-  if (signatureDate) {
-    trySetTextField(form, 'signature_date', signatureDate);
+  if (yesNoValue(formData, 'eye_irritation_itching') === 'yes') {
+    safelyCheckBox('eye_irritation_yes');
+  }
+  if (yesNoValue(formData, 'eye_irritation_itching') === 'no') {
+    safelyCheckBox('eye_irritation_no');
   }
 
-  for (const key of DIRECT_TEXT_FIELD_KEYS) {
-    const text = stringValue(formData[key]);
-    if (text) {
-      trySetTextField(form, key, text);
-    }
+  if (yesNoValue(formData, 'recurring_eye_infections') === 'yes') {
+    safelyCheckBox('eye_infection_history_yes');
   }
-}
-
-function applyYesNoFields(form: PDFForm, formData: ConsentFormData): void {
-  for (const formKey of Object.keys(YES_NO_STRING_TO_PDF_CHECKBOXES)) {
-    applyYesNoStringToPdf(form, formKey, formData[formKey]);
-  }
-}
-
-function applyExplanationFields(form: PDFForm, formData: ConsentFormData): void {
-  for (const [formKey, pdfField] of Object.entries(EXPLANATION_TEXT_TO_PDF)) {
-    const text = stringValue(formData[formKey]);
-    if (text) {
-      trySetTextField(form, pdfField, text);
-    }
-  }
-}
-
-function applyMedicalConditions(form: PDFForm, formData: ConsentFormData): void {
-  const checklist = formData.medical_conditions_checklist;
-  if (!checklist || typeof checklist !== 'object' || Array.isArray(checklist)) {
-    return;
+  if (yesNoValue(formData, 'recurring_eye_infections') === 'no') {
+    safelyCheckBox('eye_infection_history_no');
   }
 
-  const map = checklist as Record<string, unknown>;
-  for (const [formKey, pdfField] of Object.entries(MEDICAL_CONDITION_TO_PDF)) {
-    applyBooleanCheckbox(form, pdfField, map[formKey]);
+  if (yesNoValue(formData, 'currently_eye_drops') === 'yes') {
+    safelyCheckBox('eye_drops_yes');
   }
-}
-
-function applyConsentPolicies(form: PDFForm, formData: ConsentFormData): void {
-  const statements = formData.consent_statements;
-  if (!statements || typeof statements !== 'object' || Array.isArray(statements)) {
-    return;
+  if (yesNoValue(formData, 'currently_eye_drops') === 'no') {
+    safelyCheckBox('eye_drops_no');
   }
 
-  const map = statements as Record<string, unknown>;
-  for (const [formKey, pdfField] of Object.entries(CONSENT_STATEMENT_TO_POLICY)) {
-    applyBooleanCheckbox(form, pdfField, map[formKey]);
+  if (yesNoValue(formData, 'pregnant_or_may_be') === 'yes') {
+    safelyCheckBox('pregnant_yes');
   }
-}
+  if (yesNoValue(formData, 'pregnant_or_may_be') === 'no') {
+    safelyCheckBox('pregnant_no');
+  }
 
-/**
- * Map submitted intake JSON to Sejda AcroForm field names.
- */
-export function applyFormDataToPdf(form: PDFForm, formData: ConsentFormData): void {
-  applyCoreTextFields(form, formData);
-  applyYesNoFields(form, formData);
-  applyMedicalConditions(form, formData);
-  applyConsentPolicies(form, formData);
-  applyExplanationFields(form, formData);
+  if (yesNoValue(formData, 'eye_injury_or_condition') === 'yes') {
+    safelyCheckBox('eye_injury_yes');
+  }
+  if (yesNoValue(formData, 'eye_injury_or_condition') === 'no') {
+    safelyCheckBox('eye_injury_no');
+  }
+
+  if (yesNoValue(formData, 'known_allergies') === 'yes') {
+    safelyCheckBox('allergies_yes');
+  }
+  if (yesNoValue(formData, 'known_allergies') === 'no') {
+    safelyCheckBox('allergies_no');
+  }
+
+  if (yesNoValue(formData, 'medications_supplements') === 'yes') {
+    safelyCheckBox('medications_yes');
+  }
+  if (yesNoValue(formData, 'medications_supplements') === 'no') {
+    safelyCheckBox('medications_no');
+  }
+
+  if (yesNoValue(formData, 'accutane_last_6_months') === 'yes') {
+    safelyCheckBox('accutane_yes');
+  }
+  if (yesNoValue(formData, 'accutane_last_6_months') === 'no') {
+    safelyCheckBox('accutane_no');
+  }
+
+  if (yesNoValue(formData, 'uses_retinol_tretinoin') === 'yes') {
+    safelyCheckBox('retinol_yes');
+  }
+  if (yesNoValue(formData, 'uses_retinol_tretinoin') === 'no') {
+    safelyCheckBox('retinol_no');
+  }
+
+  if (yesNoValue(formData, 'chemotherapy_recent') === 'yes') {
+    safelyCheckBox('chemo_yes');
+  }
+  if (yesNoValue(formData, 'chemotherapy_recent') === 'no') {
+    safelyCheckBox('chemo_no');
+  }
+
+  if (yesNoValue(formData, 'had_lash_lift_tint') === 'yes') {
+    safelyCheckBox('prev_lash_lift_yes');
+  }
+  if (yesNoValue(formData, 'had_lash_lift_tint') === 'no') {
+    safelyCheckBox('prev_lash_lift_no');
+  }
+
+  if (yesNoValue(formData, 'had_brow_lamination_tint') === 'yes') {
+    safelyCheckBox('prev_brow_lam_yes');
+  }
+  if (yesNoValue(formData, 'had_brow_lamination_tint') === 'no') {
+    safelyCheckBox('prev_brow_lam_no');
+  }
+
+  // --- MEDICAL CONDITIONS (BOOLEANS) ---
+  const rawMeds = formData.medical_conditions_checklist;
+  const meds: MedicalChecklist =
+    rawMeds && typeof rawMeds === 'object' && !Array.isArray(rawMeds)
+      ? (rawMeds as MedicalChecklist)
+      : {};
+
+  if (meds.alopecia) safelyCheckBox('cond_alopecia');
+  if (meds.conjunctivitis) safelyCheckBox('cond_conjunctivitis');
+  if (meds.eczema) safelyCheckBox('cond_eczema');
+  if (meds.psoriasis_near_eyes) safelyCheckBox('cond_psoriasis');
+  if (meds.sensitive_eyes) safelyCheckBox('cond_sensitive_eyes');
+  if (meds.cancer) safelyCheckBox('cond_cancer');
+  if (meds.diabetes) safelyCheckBox('cond_diabetes');
+  if (meds.glaucoma) safelyCheckBox('cond_glaucoma');
+  if (meds.thyroid_disease) safelyCheckBox('cond_thyroid');
+  if (meds.cataracts) safelyCheckBox('cond_cataracts');
+  if (meds.dry_eyes) safelyCheckBox('cond_dry_eyes');
+  if (meds.lupus) safelyCheckBox('cond_lupus');
+  if (meds.recent_eye_infection) safelyCheckBox('cond_recent_infection');
+  if (meds.other) safelyCheckBox('cond_other');
+
+  // --- POLICIES (BOOLEANS) ---
+  const rawPolicies = formData.consent_statements;
+  const policies: ConsentPolicies =
+    rawPolicies &&
+    typeof rawPolicies === 'object' &&
+    !Array.isArray(rawPolicies)
+      ? (rawPolicies as ConsentPolicies)
+      : {};
+
+  if (policies.beauty_service_risks) safelyCheckBox('policy_1');
+  if (policies.eye_contact_protocol) safelyCheckBox('policy_2');
+  if (policies.temporary_redness) safelyCheckBox('policy_3');
+  if (policies.temporary_staining) safelyCheckBox('policy_4');
+  if (policies.color_results_vary) safelyCheckBox('policy_5');
+  if (policies.disclosed_health_history) safelyCheckBox('policy_6');
+  if (policies.unforeseen_conditions) safelyCheckBox('policy_7');
+  if (policies.photo_consent) safelyCheckBox('policy_8');
+  if (policies.contact_adverse_reactions) safelyCheckBox('policy_9');
+  if (policies.aftercare_understanding) safelyCheckBox('policy_10');
+  if (policies.website_policies) safelyCheckBox('policy_11');
 }
 
 function parseSignaturePngBytes(signatureBase64: string): Uint8Array {
