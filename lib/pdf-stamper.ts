@@ -3,7 +3,16 @@
  * upload the flattened PDF to Vercel Blob, and return the public URL.
  */
 import { put } from '@vercel/blob';
-import { PDFDocument, StandardFonts, type PDFForm } from 'pdf-lib';
+import {
+  PDFCheckBox,
+  PDFDocument,
+  StandardFonts,
+  type PDFFont,
+  type PDFForm,
+  type PDFPage,
+  type PDFDict,
+  type PDFRef,
+} from 'pdf-lib';
 import { sql } from '@vercel/postgres';
 
 import type { ConsentFormData } from '@/lib/consent';
@@ -280,6 +289,87 @@ async function fetchTemplatePdfBuffer(templateUrl: string): Promise<ArrayBuffer>
   return res.arrayBuffer();
 }
 
+type CheckboxMarkPlacement = {
+  page: PDFPage;
+  x: number;
+  y: number;
+  size: number;
+};
+
+function findPageForWidget(
+  pdfDoc: PDFDocument,
+  widget: {
+    P(): PDFRef | undefined;
+    getRectangle(): { x: number; y: number; width: number; height: number };
+    dict: PDFDict;
+  }
+): PDFPage | undefined {
+  const pageRef = widget.P();
+  if (pageRef) {
+    const page = pdfDoc.getPages().find((p) => p.ref === pageRef);
+    if (page) return page;
+  }
+
+  const widgetRef = pdfDoc.context.getObjectRef(widget.dict);
+  if (widgetRef) {
+    return pdfDoc.findPageForAnnotationRef(widgetRef);
+  }
+
+  return undefined;
+}
+
+/** Sejda templates often ship empty "on" appearances; record marks before flatten. */
+function collectCheckedCheckboxPlacements(
+  pdfDoc: PDFDocument,
+  form: PDFForm
+): CheckboxMarkPlacement[] {
+  const placements: CheckboxMarkPlacement[] = [];
+
+  for (const field of form.getFields()) {
+    if (!(field instanceof PDFCheckBox) || !field.isChecked()) continue;
+
+    try {
+      field.defaultUpdateAppearances();
+    } catch {
+      // Template may lack appearance dicts; we still draw a mark below.
+    }
+
+    const widgets = field.acroField.getWidgets();
+    for (const widget of widgets) {
+      const page = findPageForWidget(pdfDoc, widget);
+      if (!page) continue;
+
+      const { x, y, width, height } = widget.getRectangle();
+      const box = Math.min(width, height);
+      if (box <= 0) continue;
+
+      const size = Math.max(6, Math.min(11, box * 0.72));
+      placements.push({
+        page,
+        x: x + (width - size * 0.55) / 2,
+        y: y + (height - size) / 2 + size * 0.12,
+        size,
+      });
+    }
+  }
+
+  return placements;
+}
+
+function drawCheckboxMarks(
+  placements: CheckboxMarkPlacement[],
+  font: PDFFont
+): void {
+  for (const { page, x, y, size } of placements) {
+    page.drawText('X', {
+      x,
+      y,
+      size,
+      font,
+    });
+  }
+}
+
 /**
  * Bake form values into the page and remove all AcroForm fields so the signed
  * PDF is not fillable or editable in Preview/Chrome/Acrobat (read-only document).
@@ -289,6 +379,8 @@ async function finalizeFormAppearance(
   form: PDFForm
 ): Promise<void> {
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const checkboxMarks = collectCheckedCheckboxPlacements(pdfDoc, form);
+
   try {
     form.updateFieldAppearances(font);
   } catch (err) {
@@ -296,12 +388,14 @@ async function finalizeFormAppearance(
   }
 
   try {
-    form.flatten();
+    form.flatten({ updateFieldAppearances: false });
   } catch (err) {
     throw new Error(
       `Consent PDF could not be locked (flatten failed): ${errorMessage(err)}`
     );
   }
+
+  drawCheckboxMarks(checkboxMarks, font);
 
   const remainingFields = pdfDoc.getForm().getFields();
   if (remainingFields.length > 0) {
