@@ -34,6 +34,8 @@ interface ClientRow {
   last_name: string | null;
   email: string | null;
   created_at: Date | string | null;
+  has_consented: boolean;
+  consent_form_url: string | null;
   total_bookings: number | string | null;
   lifetime_value: number | string | null;
   has_vaulted_card: boolean | null;
@@ -63,6 +65,8 @@ function rowToClient(row: ClientRow): Client {
     last_name: row.last_name,
     email: row.email,
     created_at: serializeDate(row.created_at),
+    has_consented: Boolean(row.has_consented),
+    consent_form_url: row.consent_form_url,
     total_bookings: toNumber(row.total_bookings),
     lifetime_value: toNumber(row.lifetime_value),
     has_vaulted_card: Boolean(row.has_vaulted_card),
@@ -93,6 +97,8 @@ export async function GET(): Promise<NextResponse> {
         c.last_name,
         c.email,
         c.created_at,
+        c.has_consented,
+        c.consent_form_url,
         COALESCE(stats.total_bookings, 0)::int AS total_bookings,
         COALESCE(stats.lifetime_value, 0)::float AS lifetime_value,
         COALESCE(stats.has_vaulted_card, FALSE) AS has_vaulted_card,

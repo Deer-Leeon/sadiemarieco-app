@@ -36,6 +36,7 @@ import {
   ArrowLeft,
   Calendar,
   Camera,
+  Check,
   ChevronRight,
   ClipboardCheck,
   CreditCard,
@@ -50,6 +51,12 @@ import {
   User,
   X,
 } from 'lucide-react';
+
+import {
+  buildTallyConsentFormUrl,
+  getPublicTallyFormId,
+  resolveConsentViewUrl,
+} from '@/lib/tally-consent';
 
 import type {
   Appointment,
@@ -336,7 +343,13 @@ function ProfileBody({
   onClientPatched: (c: Client) => void;
 }) {
   if (view === 'overview') {
-    return <OverviewView client={client} onChangeView={onChangeView} />;
+    return (
+      <OverviewView
+        client={client}
+        onChangeView={onChangeView}
+        onClientUpdated={onClientPatched}
+      />
+    );
   }
   if (view === 'appointments') {
     return <AppointmentsView client={client} />;
@@ -364,14 +377,20 @@ function ProfileBody({
 function OverviewView({
   client,
   onChangeView,
+  onClientUpdated,
 }: {
   client: Client;
   onChangeView: (v: ProfileView) => void;
+  onClientUpdated: (c: Client) => void;
 }) {
   return (
     <div className="flex flex-col gap-4">
       <IdentityBox client={client} onEdit={() => onChangeView('edit_info')} />
-      <DossierSection client={client} onChangeView={onChangeView} />
+      <DossierSection
+        client={client}
+        onChangeView={onChangeView}
+        onClientUpdated={onClientUpdated}
+      />
     </div>
   );
 }
@@ -380,9 +399,11 @@ function OverviewView({
 function DossierSection({
   client,
   onChangeView,
+  onClientUpdated,
 }: {
   client: Client;
   onChangeView: (v: ProfileView) => void;
+  onClientUpdated: (c: Client) => void;
 }) {
   const [appts, setAppts] = useState<Appointment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -399,6 +420,26 @@ function DossierSection({
     last_booked_at: client.last_booked_at,
   });
   const mutatedRef = useRef(false);
+
+  const refreshClientConsent = useCallback(() => {
+    if (client.has_consented) return;
+    fetch(`/api/admin/clients/${client.id}`)
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = (await res.json()) as { client: Client };
+        if (data.client) onClientUpdated(data.client);
+      })
+      .catch(() => {
+        /* best-effort — admin can close/reopen the profile */
+      });
+  }, [client.id, client.has_consented, onClientUpdated]);
+
+  useEffect(() => {
+    if (client.has_consented) return;
+    const onFocus = () => refreshClientConsent();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [client.has_consented, refreshClientConsent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -453,17 +494,7 @@ function DossierSection({
           helper="Lash, brow, and colour reference shots."
           onClick={() => onChangeView('pictures')}
         />
-        <ActionBox
-          icon={<ClipboardCheck className="h-3 w-3" />}
-          label="Consent Form"
-          helper="Digital intake & consent."
-          disabled
-          rightAccessory={
-            <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-400">
-              Coming soon
-            </span>
-          }
-        />
+        <ConsentFormActionBox client={client} />
       </div>
 
       <PrivateNotesSection clientId={client.id} />
@@ -780,11 +811,80 @@ function IdentityBox({
   );
 }
 
+const actionBoxClass = (interactive: boolean) =>
+  `group flex w-full items-center justify-between gap-3 rounded-lg border border-stone-200 bg-white p-4 text-left transition-colors ${
+    interactive
+      ? 'cursor-pointer hover:border-stone-300 hover:bg-stone-50'
+      : 'cursor-not-allowed opacity-70'
+  }`;
+
+function ConsentFormActionBox({ client }: { client: Client }) {
+  const formId = getPublicTallyFormId();
+
+  if (client.has_consented) {
+    const viewUrl = resolveConsentViewUrl(client.consent_form_url, formId);
+    if (!viewUrl) {
+      return (
+        <ActionBox
+          icon={<ClipboardCheck className="h-3 w-3" />}
+          label="Consent Form"
+          helper="Signed — link unavailable."
+          disabled
+          rightAccessory={
+            <Check className="h-4 w-4 text-emerald-600" aria-hidden />
+          }
+        />
+      );
+    }
+    return (
+      <ActionBox
+        icon={<ClipboardCheck className="h-3 w-3" />}
+        label="Consent Form"
+        helper="Signed — view only."
+        href={viewUrl}
+        ariaLabel="View signed consent form in new tab"
+        rightAccessory={
+          <>
+            <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
+              View signed form
+            </span>
+            <Check className="h-4 w-4 text-emerald-600" aria-hidden />
+          </>
+        }
+      />
+    );
+  }
+
+  const formUrl = buildTallyConsentFormUrl(client.id, formId);
+  if (!formUrl) {
+    return (
+      <ActionBox
+        icon={<ClipboardCheck className="h-3 w-3" />}
+        label="Consent Form"
+        helper="Tally form ID not configured."
+        disabled
+      />
+    );
+  }
+
+  return (
+    <ActionBox
+      icon={<ClipboardCheck className="h-3 w-3" />}
+      label="Consent Form"
+      helper="Complete intake & consent before the appointment."
+      href={formUrl}
+      ariaLabel="Open consent form in new tab"
+    />
+  );
+}
+
 function ActionBox({
   icon,
   label,
   helper,
   onClick,
+  href,
+  ariaLabel,
   disabled,
   rightAccessory,
 }: {
@@ -792,21 +892,15 @@ function ActionBox({
   label: string;
   helper: string;
   onClick?: () => void;
+  href?: string;
+  ariaLabel?: string;
   disabled?: boolean;
   rightAccessory?: React.ReactNode;
 }) {
-  const interactive = !disabled && !!onClick;
-  return (
-    <button
-      type="button"
-      onClick={interactive ? onClick : undefined}
-      disabled={!interactive}
-      className={`group flex w-full items-center justify-between gap-3 rounded-lg border border-stone-200 bg-white p-4 text-left transition-colors ${
-        interactive
-          ? 'cursor-pointer hover:border-stone-300 hover:bg-stone-50'
-          : 'cursor-not-allowed opacity-70'
-      }`}
-    >
+  const interactive = !disabled && (!!onClick || !!href);
+  const className = actionBoxClass(interactive);
+  const inner = (
+    <>
       <span className="min-w-0">
         <span className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
           {icon}
@@ -819,6 +913,32 @@ function ActionBox({
           <ChevronRight className="h-4 w-4 text-stone-400 transition-transform group-hover:translate-x-0.5" />
         )}
       </span>
+    </>
+  );
+
+  if (href && interactive) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={ariaLabel ?? label}
+        className={className}
+      >
+        {inner}
+      </a>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={interactive ? onClick : undefined}
+      disabled={!interactive}
+      aria-label={ariaLabel}
+      className={className}
+    >
+      {inner}
     </button>
   );
 }

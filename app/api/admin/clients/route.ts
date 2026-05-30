@@ -69,6 +69,8 @@ interface ClientRow {
   last_name: string | null;
   email: string | null;
   created_at: string | null;
+  has_consented: boolean;
+  consent_form_url: string | null;
 }
 
 function rowToClient(row: ClientRow): Client {
@@ -80,12 +82,22 @@ function rowToClient(row: ClientRow): Client {
     last_name: row.last_name,
     email: row.email,
     created_at: row.created_at,
+    has_consented: Boolean(row.has_consented),
+    consent_form_url: row.consent_form_url,
   };
 }
 
 async function selectClientByEmail(email: string): Promise<ClientRow | null> {
   const { rows } = await sql<ClientRow>`
-    SELECT id, phone, first_name, last_name, email, created_at
+    SELECT
+      id,
+      phone,
+      first_name,
+      last_name,
+      email,
+      created_at,
+      has_consented,
+      consent_form_url
     FROM clients
     WHERE email IS NOT NULL
       AND LOWER(TRIM(email)) = LOWER(TRIM(${email}))
@@ -109,7 +121,15 @@ async function adoptLegacyEmailRow(
         SELECT 1 FROM clients c2
         WHERE c2.phone = ${pv0} OR c2.phone = ${pv1}
       )
-    RETURNING id, phone, first_name, last_name, email, created_at
+    RETURNING
+      id,
+      phone,
+      first_name,
+      last_name,
+      email,
+      created_at,
+      has_consented,
+      consent_form_url
   `;
   return rows[0] ?? null;
 }
@@ -252,7 +272,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       VALUES (${phone}, ${firstName}, ${lastName}, ${email})
       ON CONFLICT (phone) DO UPDATE
         SET phone = clients.phone
-      RETURNING id, phone, first_name, last_name, email, created_at
+      RETURNING
+        id,
+        phone,
+        first_name,
+        last_name,
+        email,
+        created_at,
+        has_consented,
+        consent_form_url
     `;
     if (rows.length === 0) {
       return NextResponse.json(
@@ -299,7 +327,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             VALUES (${phone}, ${firstName}, ${lastName}, NULL)
             ON CONFLICT (phone) DO UPDATE
               SET phone = clients.phone
-            RETURNING id, phone, first_name, last_name, email, created_at
+            RETURNING
+              id,
+              phone,
+              first_name,
+              last_name,
+              email,
+              created_at,
+              has_consented,
+              consent_form_url
           `;
           if (phoneOnly[0]) {
             return NextResponse.json({

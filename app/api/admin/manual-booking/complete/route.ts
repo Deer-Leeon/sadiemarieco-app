@@ -390,6 +390,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       clientPhone: parsed.clientPhone,
       clientName: parsed.clientName,
       serviceName: appointmentServiceName,
+      clientId,
       skipIfAlreadySent: true,
     });
 

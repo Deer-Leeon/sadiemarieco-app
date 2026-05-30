@@ -38,6 +38,8 @@ interface ClientRow {
   last_name: string | null;
   email: string | null;
   created_at: string | null;
+  has_consented: boolean;
+  consent_form_url: string | null;
 }
 
 function rowToClient(row: ClientRow): Client {
@@ -49,6 +51,8 @@ function rowToClient(row: ClientRow): Client {
     last_name: row.last_name,
     email: row.email,
     created_at: row.created_at,
+    has_consented: Boolean(row.has_consented),
+    consent_form_url: row.consent_form_url,
   };
 }
 
@@ -106,7 +110,15 @@ export async function GET(
 
   try {
     const { rows } = await sql<ClientRow>`
-      SELECT id, phone, first_name, last_name, email, created_at
+      SELECT
+        id,
+        phone,
+        first_name,
+        last_name,
+        email,
+        created_at,
+        has_consented,
+        consent_form_url
       FROM clients
       WHERE id = ${id}::uuid
       LIMIT 1
@@ -214,49 +226,105 @@ export async function PATCH(
             last_name = ${nextLast},
             email = ${nextEmail}
         WHERE id = ${id}::uuid
-        RETURNING id, phone, first_name, last_name, email, created_at
+        RETURNING
+          id,
+          phone,
+          first_name,
+          last_name,
+          email,
+          created_at,
+          has_consented,
+          consent_form_url
       `);
     } else if (changedFirst && changedLast) {
       ({ rows: updated } = await sql<ClientRow>`
         UPDATE clients
         SET first_name = ${nextFirst}, last_name = ${nextLast}
         WHERE id = ${id}::uuid
-        RETURNING id, phone, first_name, last_name, email, created_at
+        RETURNING
+          id,
+          phone,
+          first_name,
+          last_name,
+          email,
+          created_at,
+          has_consented,
+          consent_form_url
       `);
     } else if (changedFirst && changedEmail) {
       ({ rows: updated } = await sql<ClientRow>`
         UPDATE clients
         SET first_name = ${nextFirst}, email = ${nextEmail}
         WHERE id = ${id}::uuid
-        RETURNING id, phone, first_name, last_name, email, created_at
+        RETURNING
+          id,
+          phone,
+          first_name,
+          last_name,
+          email,
+          created_at,
+          has_consented,
+          consent_form_url
       `);
     } else if (changedLast && changedEmail) {
       ({ rows: updated } = await sql<ClientRow>`
         UPDATE clients
         SET last_name = ${nextLast}, email = ${nextEmail}
         WHERE id = ${id}::uuid
-        RETURNING id, phone, first_name, last_name, email, created_at
+        RETURNING
+          id,
+          phone,
+          first_name,
+          last_name,
+          email,
+          created_at,
+          has_consented,
+          consent_form_url
       `);
     } else if (changedFirst) {
       ({ rows: updated } = await sql<ClientRow>`
         UPDATE clients
         SET first_name = ${nextFirst}
         WHERE id = ${id}::uuid
-        RETURNING id, phone, first_name, last_name, email, created_at
+        RETURNING
+          id,
+          phone,
+          first_name,
+          last_name,
+          email,
+          created_at,
+          has_consented,
+          consent_form_url
       `);
     } else if (changedLast) {
       ({ rows: updated } = await sql<ClientRow>`
         UPDATE clients
         SET last_name = ${nextLast}
         WHERE id = ${id}::uuid
-        RETURNING id, phone, first_name, last_name, email, created_at
+        RETURNING
+          id,
+          phone,
+          first_name,
+          last_name,
+          email,
+          created_at,
+          has_consented,
+          consent_form_url
       `);
     } else if (changedEmail) {
       ({ rows: updated } = await sql<ClientRow>`
         UPDATE clients
         SET email = ${nextEmail}
         WHERE id = ${id}::uuid
-        RETURNING id, phone, first_name, last_name, email, created_at
+        RETURNING
+          id,
+          phone,
+          first_name,
+          last_name,
+          email,
+          created_at,
+          has_consented,
+          consent_form_url
       `);
     }
 

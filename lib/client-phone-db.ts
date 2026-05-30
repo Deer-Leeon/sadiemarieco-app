@@ -13,6 +13,8 @@ export interface ClientPhoneRow {
   last_name?: string | null;
   email?: string | null;
   created_at?: string | null;
+  has_consented?: boolean;
+  consent_form_url?: string | null;
 }
 
 /** Canonical 11-digit US when parseable; used for new writes. */
@@ -25,7 +27,15 @@ export async function findClientRowByPhone(
 ): Promise<ClientPhoneRow | null> {
   for (const variant of clientPhoneLookupVariants(canonicalPhone)) {
     const { rows } = await sql<ClientPhoneRow>`
-      SELECT id, phone, first_name, last_name, email, created_at
+      SELECT
+        id,
+        phone,
+        first_name,
+        last_name,
+        email,
+        created_at,
+        has_consented,
+        consent_form_url
       FROM clients
       WHERE phone = ${variant}
       LIMIT 1

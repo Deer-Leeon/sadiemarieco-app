@@ -195,6 +195,15 @@ Optional — only set if you self-host the sign-in pages:
 | `NEXT_PUBLIC_CLERK_SIGN_IN_URL`   | `/sign-in` (if hosted in-app)  |
 | `NEXT_PUBLIC_CLERK_SIGN_UP_URL`   | `/sign-up` (if hosted in-app)  |
 
+### Tally (client consent form)
+
+| Name                                   | Value                                                                 |
+| -------------------------------------- | --------------------------------------------------------------------- |
+| `TALLY_CONSENT_FORM_ID`                | Form slug from `https://tally.so/r/<slug>` (server: SMS + webhook)   |
+| `NEXT_PUBLIC_TALLY_CONSENT_FORM_ID`    | Same slug for the admin client profile consent card (client-side)    |
+
+Wire the Tally form webhook to `POST /api/webhooks/tally` and include a hidden field `client_id` on the form.
+
 ### Optional
 
 | Name              | Value                                              |

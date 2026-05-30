@@ -252,6 +252,10 @@ export interface Client extends ClientCrmStats {
   email: string | null;
   /** ISO 8601 string. */
   created_at: string | null;
+  /** True when the client has completed the Tally consent / intake form. */
+  has_consented: boolean;
+  /** Link to the completed Tally submission or receipt; null until submitted. */
+  consent_form_url: string | null;
 }
 
 /** Default CRM stats when a row has no linked appointments yet. */
