@@ -8,102 +8,58 @@ import type { ConsentApiResponse, ConsentFormData } from '@/lib/consent';
 import { isValidClientUuid } from '@/lib/consent';
 
 import {
-  allAgreementsAccepted,
-  asConsentAgreements,
-  asMedicalConditions,
+  allConsentStatementsAccepted,
+  asConsentStatements,
+  asMedicalChecklist,
+  asYesNo,
   buildInitialForm,
-  CONSENT_POLICY_ITEMS,
-  MEDICAL_CONDITION_FIELDS,
-  type ConsentAgreementKey,
-  type MedicalConditionKey,
+  CLIENT_AGREEMENT_TEXT,
+  CONSENT_STATEMENTS,
+  MEDICAL_CONDITION_CHECKLIST,
+  validateConsentForm,
+  MEDICAL_HISTORY_QUESTIONS,
+  PERSONAL_INFO_QUESTIONS,
+  SERVICE_HISTORY_QUESTIONS,
+  type ConsentStatementKey,
+  type MedicalConditionChecklistKey,
+  type YesNo,
 } from './consent-form-config';
+import {
+  FieldLabel,
+  formatYesNo,
+  inputClass,
+  RequiredMark,
+  SectionBody,
+  SectionHeader,
+  sectionClass,
+  YesNoQuestion,
+} from './ConsentFormFields';
 import SignaturePad, { type SignaturePadHandle } from './SignaturePad';
 
-const inputClass =
-  'mt-1 w-full rounded-md border border-stone-200 bg-[#FAF9F6] px-3 py-2 text-sm text-stone-900 outline-none ring-stone-300 focus:ring-2';
-
-const sectionClass =
-  'rounded-lg border border-stone-200 bg-white p-5 shadow-sm';
-
-const sectionTitleClass =
-  'text-[10px] font-medium uppercase tracking-[0.24em] text-stone-500';
-
-function ConditionToggle({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label
-      className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
-        checked
-          ? 'border-stone-300 bg-stone-100/80'
-          : 'border-stone-100 bg-[#FAF9F6] hover:border-stone-200'
-      }`}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 h-4 w-4 shrink-0 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
-      />
-      <span className="text-sm leading-snug text-stone-800">{label}</span>
-    </label>
-  );
-}
-
-function PolicyAgreement({
-  title,
-  description,
-  checked,
-  onChange,
-}: {
-  title: string;
-  description: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label
-      className={`block cursor-pointer rounded-md border p-4 transition-colors ${
-        checked
-          ? 'border-emerald-200/80 bg-emerald-50/40'
-          : 'border-stone-100 bg-[#FAF9F6] hover:border-stone-200'
-      }`}
-    >
-      <div className="flex items-start gap-3">
-        <input
-          type="checkbox"
-          required
-          checked={checked}
-          onChange={(e) => onChange(e.target.checked)}
-          className="mt-1 h-4 w-4 shrink-0 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
-        />
-        <span className="min-w-0">
-          <span className="block text-sm font-medium text-stone-900">{title}</span>
-          <span className="mt-1.5 block text-xs leading-relaxed text-stone-600">
-            {description}
-          </span>
-        </span>
-      </div>
-    </label>
-  );
-}
-
 function SubmittedView({ data }: { data: ConsentApiResponse }) {
-  const formData = data.intake?.form_data ?? {};
+  const form = data.intake?.form_data ?? {};
   const submittedAt = data.intake?.submitted_at;
-  const signature =
-    data.intake?.signature_image ??
-    (typeof formData.signature_image === 'string' ? formData.signature_image : null);
+  const signature = data.intake?.signature_image ?? null;
+  const checklist = asMedicalChecklist(form.medical_conditions_checklist);
+  const flagged = MEDICAL_CONDITION_CHECKLIST.filter((c) => checklist[c.key]);
+  const statements = asConsentStatements(form.consent_statements);
 
-  const medical = asMedicalConditions(formData.medical_conditions);
-  const agreements = asConsentAgreements(formData.consent_agreements);
-  const flaggedConditions = MEDICAL_CONDITION_FIELDS.filter((f) => medical[f.key]);
+  const textFields: [string, string][] = [
+    ['Full name', String(form.full_name ?? '')],
+    ['Date of birth', String(form.dob ?? '')],
+    ['Phone', String(form.phone ?? '')],
+    ['Address', String(form.address ?? '')],
+    ['City', String(form.city ?? '')],
+    ['State', String(form.state ?? '')],
+    ['Zip', String(form.zip ?? '')],
+    ['Email', String(form.email ?? '')],
+    ['Occupation', String(form.occupation ?? '') || '—'],
+    ['How did you hear about us?', String(form.referral_source ?? '') || '—'],
+    ['Emergency contact', String(form.emergency_contact_name ?? '')],
+    ['Emergency phone', String(form.emergency_contact_phone ?? '')],
+    ['Printed name', String(form.agreement_print_name ?? '')],
+    ['Date signed', String(form.agreement_date ?? '')],
+  ];
 
   return (
     <div className="space-y-6">
@@ -126,99 +82,150 @@ function SubmittedView({ data }: { data: ConsentApiResponse }) {
       </div>
 
       <section className={sectionClass}>
-        <h2 className={sectionTitleClass}>Client information</h2>
-        <dl className="mt-4 space-y-3 text-sm">
-          <div className="flex justify-between gap-4 border-b border-stone-100 pb-2">
-            <dt className="text-stone-500">Full name</dt>
-            <dd className="text-right font-medium text-stone-900">
-              {String(formData.full_name || '—')}
-            </dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b border-stone-100 pb-2">
-            <dt className="text-stone-500">Phone</dt>
-            <dd className="text-right text-stone-900">
-              {String(formData.phone || '—')}
-            </dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-stone-500">Email</dt>
-            <dd className="text-right text-stone-900">
-              {String(formData.email || '—')}
-            </dd>
-          </div>
-        </dl>
+        <SectionHeader title="Client information" />
+        <SectionBody>
+          <dl className="divide-y divide-stone-100">
+            {textFields.map(([label, value]) => (
+              <div key={label} className="flex justify-between gap-4 py-2.5 text-sm">
+                <dt className="text-stone-500">{label}</dt>
+                <dd className="text-right font-medium text-stone-900">{value || '—'}</dd>
+              </div>
+            ))}
+          </dl>
+        </SectionBody>
       </section>
 
       <section className={sectionClass}>
-        <h2 className={sectionTitleClass}>Medical history &amp; eye health</h2>
-        <p className="mt-2 text-xs text-stone-500">
-          Conditions marked at time of submission:
-        </p>
-        {flaggedConditions.length > 0 ? (
-          <ul className="mt-3 space-y-2">
-            {flaggedConditions.map((f) => (
-              <li
-                key={f.key}
-                className="flex items-start gap-2 rounded-md bg-amber-50/60 px-3 py-2 text-sm text-stone-800"
-              >
-                <span className="mt-0.5 text-amber-700" aria-hidden>
-                  •
-                </span>
-                {f.label}
+        <SectionHeader title="Service history" />
+        <SectionBody>
+          <dl className="space-y-2 text-sm">
+            {SERVICE_HISTORY_QUESTIONS.map((q) => (
+              <div key={q.key} className="flex justify-between gap-4">
+                <dt className="text-stone-600">{q.label}</dt>
+                <dd className="font-medium text-stone-900">{formatYesNo(form[q.key])}</dd>
+              </div>
+            ))}
+          </dl>
+          {String(form.service_adverse_reaction_explain ?? '').trim() && (
+            <div className="mt-3 border-t border-stone-100 pt-3">
+              <p className="text-xs font-medium text-stone-500">Adverse reaction details</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-stone-900">
+                {String(form.service_adverse_reaction_explain)}
+              </p>
+            </div>
+          )}
+        </SectionBody>
+      </section>
+
+      <section className={sectionClass}>
+        <SectionHeader title="Personal information" />
+        <SectionBody>
+          <dl className="space-y-2 text-sm">
+            {PERSONAL_INFO_QUESTIONS.map((q) => (
+              <div key={q.key} className="flex justify-between gap-4">
+                <dt className="text-stone-600">{q.label}</dt>
+                <dd className="font-medium text-stone-900">{formatYesNo(form[q.key])}</dd>
+              </div>
+            ))}
+          </dl>
+          {asYesNo(form.pregnant_or_may_be) === 'yes' && (
+            <p className="mt-2 text-sm text-stone-800">
+              <span className="font-medium">Weeks along:</span>{' '}
+              {String(form.pregnancy_weeks || '—')}
+            </p>
+          )}
+        </SectionBody>
+      </section>
+
+      <section className={sectionClass}>
+        <SectionHeader title="Medical history" />
+        <SectionBody>
+          <dl className="space-y-3 text-sm">
+            {MEDICAL_HISTORY_QUESTIONS.map((q) => (
+              <div key={q.key}>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-stone-600">{q.label}</dt>
+                  <dd className="font-medium text-stone-900">{formatYesNo(form[q.key])}</dd>
+                </div>
+                {q.explainKey &&
+                  asYesNo(form[q.key]) === 'yes' &&
+                  String(form[q.explainKey] ?? '').trim() && (
+                    <p className="mt-1 text-xs text-stone-600">
+                      {String(form[q.explainKey])}
+                    </p>
+                  )}
+              </div>
+            ))}
+          </dl>
+          {flagged.length > 0 && (
+            <div className="mt-4 border-t border-stone-100 pt-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
+                Medical conditions checked
+              </p>
+              <ul className="mt-2 list-inside list-disc text-sm text-stone-800">
+                {flagged.map((c) => (
+                  <li key={c.key}>{c.label}</li>
+                ))}
+              </ul>
+              {checklist.other && String(form.medical_conditions_other_text ?? '').trim() && (
+                <p className="mt-2 text-sm text-stone-700">
+                  <span className="font-medium">Other:</span>{' '}
+                  {String(form.medical_conditions_other_text)}
+                </p>
+              )}
+            </div>
+          )}
+          {String(form.additional_notes ?? '').trim() && (
+            <div className="mt-4 border-t border-stone-100 pt-4">
+              <p className="text-xs font-medium text-stone-500">Additional notes</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-stone-900">
+                {String(form.additional_notes)}
+              </p>
+            </div>
+          )}
+        </SectionBody>
+      </section>
+
+      <section className={sectionClass}>
+        <SectionHeader title="Consent acknowledgments" />
+        <SectionBody>
+          <ul className="space-y-3">
+            {CONSENT_STATEMENTS.map((s) => (
+              <li key={s.key} className="flex gap-2 text-sm text-stone-800">
+                <Check
+                  className={`mt-0.5 h-4 w-4 shrink-0 ${
+                    statements[s.key] ? 'text-emerald-600' : 'text-stone-300'
+                  }`}
+                  aria-hidden
+                />
+                <span>{s.text}</span>
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="mt-3 text-sm text-stone-600">None indicated.</p>
-        )}
-        <div className="mt-4 border-t border-stone-100 pt-4">
-          <p className="text-xs font-medium text-stone-500">
-            Medications, vitamins &amp; eye drops
-          </p>
-          <p className="mt-1 whitespace-pre-wrap text-sm text-stone-900">
-            {String(formData.medications || '').trim() || 'None listed.'}
-          </p>
-        </div>
-      </section>
-
-      <section className={sectionClass}>
-        <h2 className={sectionTitleClass}>Studio policies &amp; liability release</h2>
-        <ul className="mt-4 space-y-3">
-          {CONSENT_POLICY_ITEMS.map((item) => (
-            <li
-              key={item.key}
-              className="rounded-md border border-stone-100 bg-[#FAF9F6] px-3 py-3"
-            >
-              <p className="text-sm font-medium text-stone-900">{item.title}</p>
-              <p className="mt-1 text-xs leading-relaxed text-stone-600">
-                {item.description}
-              </p>
-              <p className="mt-2 text-xs font-medium text-emerald-800">
-                {agreements[item.key] ? 'Acknowledged' : '—'}
-              </p>
-            </li>
-          ))}
-        </ul>
+        </SectionBody>
       </section>
 
       {signature && (
         <section className={sectionClass}>
-          <h2 className={sectionTitleClass}>Digital signature</h2>
-          <div className="mt-4 rounded-md border border-stone-200 bg-white p-3">
+          <SectionHeader title="Signature" />
+          <SectionBody>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={signature}
               alt="Client signature"
-              className="mx-auto max-h-32 w-full max-w-md object-contain"
+              className="mx-auto max-h-36 w-full max-w-md object-contain"
             />
-          </div>
+          </SectionBody>
         </section>
       )}
 
+      <p className="text-center text-[10px] uppercase tracking-widest text-stone-400">
+        mckenna@sadiemarie.co · sadiemarie.co
+      </p>
       <p className="text-center">
         <Link
           href="https://www.sadiemarie.co"
-          className="text-sm font-medium text-stone-800 underline underline-offset-2 hover:text-stone-950"
+          className="text-sm font-medium text-stone-800 underline underline-offset-2"
         >
           Back to sadiemarie.co
         </Link>
@@ -236,212 +243,563 @@ function EditableForm({
   initial: ConsentApiResponse;
   onSubmitted: (data: ConsentApiResponse) => void;
 }) {
-  const [form, setForm] = useState<ConsentFormData>(() =>
-    buildInitialForm(initial.client)
-  );
+  const [form, setForm] = useState<ConsentFormData>(() => buildInitialForm(initial.client));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signatureTouched, setSignatureTouched] = useState(false);
   const signatureRef = useRef<SignaturePadHandle>(null);
 
-  const medical = asMedicalConditions(form.medical_conditions);
-  const agreements = asConsentAgreements(form.consent_agreements);
+  const checklist = asMedicalChecklist(form.medical_conditions_checklist);
+  const statements = asConsentStatements(form.consent_statements);
+  const statementsComplete = allConsentStatementsAccepted(statements);
+  const validationError = validateConsentForm(form);
+  const canSubmit = !validationError && signatureTouched && statementsComplete;
 
   const setField = (key: string, value: unknown) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const setMedical = (key: MedicalConditionKey, value: boolean) => {
+  const setYesNo = (key: string, value: YesNo) => setField(key, value);
+
+  const setChecklistItem = (key: MedicalConditionChecklistKey, checked: boolean) => {
     setForm((prev) => ({
       ...prev,
-      medical_conditions: {
-        ...asMedicalConditions(prev.medical_conditions),
-        [key]: value,
+      medical_conditions_checklist: {
+        ...asMedicalChecklist(prev.medical_conditions_checklist),
+        [key]: checked,
       },
     }));
   };
 
-  const setAgreement = (key: ConsentAgreementKey, value: boolean) => {
+  const setStatement = (key: ConsentStatementKey, checked: boolean) => {
     setForm((prev) => ({
       ...prev,
-      consent_agreements: {
-        ...asConsentAgreements(prev.consent_agreements),
-        [key]: value,
+      consent_statements: {
+        ...asConsentStatements(prev.consent_statements),
+        [key]: checked,
       },
     }));
   };
-
-  const canSubmit = allAgreementsAccepted(agreements) && signatureTouched;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-
+    const err = validateConsentForm(form);
+    if (err) {
+      setError(err);
+      return;
+    }
     const signatureData = signatureRef.current?.toDataURL();
     if (!signatureData) {
       setError('Please sign in the signature box before submitting.');
       return;
     }
-    if (!allAgreementsAccepted(agreements)) {
-      setError('Please acknowledge all studio policies.');
-      return;
-    }
 
     setSubmitting(true);
+    setError(null);
     try {
+      const payloadForm = {
+        ...form,
+        agreement_date: String(form.agreement_date || new Date().toISOString().slice(0, 10)),
+      };
       const res = await fetch(`/api/consent/${clientId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          form_data: form,
+          form_data: payloadForm,
           signature_image: signatureData,
         }),
       });
       const payload = (await res.json()) as ConsentApiResponse & {
-        ok?: boolean;
         error?: string;
         message?: string;
       };
       if (!res.ok) {
-        throw new Error(
-          payload.message || payload.error || `Submit failed (${res.status})`
-        );
+        throw new Error(payload.message || payload.error || `Submit failed (${res.status})`);
       }
       onSubmitted({
         client: payload.client,
         intake: payload.intake,
         submitted: payload.submitted ?? true,
       });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Submit failed');
+    } catch (submitErr) {
+      setError(submitErr instanceof Error ? submitErr.message : 'Submit failed');
     } finally {
       setSubmitting(false);
     }
   };
 
+  const showServiceExplain =
+    asYesNo(form.had_lash_lift_tint) === 'yes' ||
+    asYesNo(form.had_brow_lamination_tint) === 'yes';
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-8">
+    <form onSubmit={handleSubmit} className="space-y-6">
       <header className="text-center">
-        <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
-          Sadie Marie
+        <p className="font-serif text-lg text-stone-800">Sadie Marie</p>
+        <p className="mt-1 text-[10px] uppercase tracking-[0.2em] text-stone-500">
+          61 W 3200 N Suite C · Lehi, UT 84043
         </p>
-        <h1 className="mt-2 font-serif text-2xl text-stone-900">
-          Client intake &amp; consent
+        <h1 className="mt-4 font-serif text-2xl uppercase tracking-wide text-stone-900">
+          Lash &amp; Brow Intake &amp; Consent Form
         </h1>
-        <p className="mt-2 text-sm text-stone-600">
-          Please complete all sections before your appointment.
+        <p className="mt-2 text-xs text-stone-500">
+          Fields marked with <span className="text-red-600">*</span> are required.
         </p>
       </header>
 
       <section className={sectionClass}>
-        <h2 className={sectionTitleClass}>Client information</h2>
-        <div className="mt-4 space-y-4">
-          <label className="block">
-            <span className="text-xs font-medium text-stone-700">Full name</span>
-            <input
-              type="text"
-              required
-              value={String(form.full_name ?? '')}
-              onChange={(e) => setField('full_name', e.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium text-stone-700">Phone</span>
-            <input
-              type="tel"
-              required
-              value={String(form.phone ?? '')}
-              onChange={(e) => setField('phone', e.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium text-stone-700">Email</span>
-            <input
-              type="email"
-              value={String(form.email ?? '')}
-              onChange={(e) => setField('email', e.target.value)}
-              className={inputClass}
-            />
-          </label>
-        </div>
+        <SectionHeader title="Client information" />
+        <SectionBody>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block sm:col-span-2">
+              <FieldLabel required>Full name</FieldLabel>
+              <input
+                type="text"
+                required
+                value={String(form.full_name ?? '')}
+                onChange={(e) => setField('full_name', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel required>Date of birth</FieldLabel>
+              <input
+                type="date"
+                required
+                value={String(form.dob ?? '')}
+                onChange={(e) => setField('dob', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel required>Phone number</FieldLabel>
+              <input
+                type="tel"
+                required
+                value={String(form.phone ?? '')}
+                onChange={(e) => setField('phone', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block sm:col-span-2">
+              <FieldLabel required>Address</FieldLabel>
+              <input
+                type="text"
+                required
+                value={String(form.address ?? '')}
+                onChange={(e) => setField('address', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel required>City</FieldLabel>
+              <input
+                type="text"
+                required
+                value={String(form.city ?? '')}
+                onChange={(e) => setField('city', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel required>State</FieldLabel>
+              <input
+                type="text"
+                required
+                maxLength={2}
+                value={String(form.state ?? '')}
+                onChange={(e) => setField('state', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel required>Zip</FieldLabel>
+              <input
+                type="text"
+                required
+                inputMode="numeric"
+                value={String(form.zip ?? '')}
+                onChange={(e) => setField('zip', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block sm:col-span-2">
+              <FieldLabel required>Email address</FieldLabel>
+              <input
+                type="email"
+                required
+                value={String(form.email ?? '')}
+                onChange={(e) => setField('email', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel>Occupation</FieldLabel>
+              <input
+                type="text"
+                value={String(form.occupation ?? '')}
+                onChange={(e) => setField('occupation', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel>How did you hear about us?</FieldLabel>
+              <input
+                type="text"
+                value={String(form.referral_source ?? '')}
+                onChange={(e) => setField('referral_source', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel required>Emergency contact name</FieldLabel>
+              <input
+                type="text"
+                required
+                value={String(form.emergency_contact_name ?? '')}
+                onChange={(e) => setField('emergency_contact_name', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel required>Emergency contact phone</FieldLabel>
+              <input
+                type="tel"
+                required
+                value={String(form.emergency_contact_phone ?? '')}
+                onChange={(e) => setField('emergency_contact_phone', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+          </div>
+        </SectionBody>
       </section>
 
       <section className={sectionClass}>
-        <h2 className={sectionTitleClass}>Medical history &amp; eye health</h2>
-        <p className="mt-2 text-xs leading-relaxed text-stone-500">
-          Check all that apply. This helps us provide safe, appropriate service.
-        </p>
-        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {MEDICAL_CONDITION_FIELDS.map((field) => (
-            <ConditionToggle
-              key={field.key}
-              label={field.label}
-              checked={medical[field.key]}
-              onChange={(v) => setMedical(field.key, v)}
-            />
-          ))}
-        </div>
-        <label className="mt-5 block">
-          <span className="text-xs font-medium text-stone-700">
-            Please list any current medications, vitamins, or eye drops:
-          </span>
-          <textarea
-            rows={4}
-            value={String(form.medications ?? '')}
-            onChange={(e) => setField('medications', e.target.value)}
-            placeholder="List each item, or write “None” if not applicable."
-            className={`${inputClass} resize-y`}
+        <SectionHeader title="Service history" />
+        <SectionBody>
+          <YesNoQuestion
+            name="lash_lift"
+            required
+            label="Have you previously had a lash lift and/or tint?"
+            value={asYesNo(form.had_lash_lift_tint)}
+            onChange={(v) => setYesNo('had_lash_lift_tint', v)}
           />
-        </label>
+          <YesNoQuestion
+            name="brow_lam"
+            required
+            label="Have you previously had a brow lamination and/or tint?"
+            value={asYesNo(form.had_brow_lamination_tint)}
+            onChange={(v) => setYesNo('had_brow_lamination_tint', v)}
+          />
+          {showServiceExplain && (
+            <label className="block">
+              <FieldLabel required>
+                If yes to either service above, have you ever experienced an adverse
+                reaction? Please explain:
+              </FieldLabel>
+              <textarea
+                required
+                rows={3}
+                value={String(form.service_adverse_reaction_explain ?? '')}
+                onChange={(e) => setField('service_adverse_reaction_explain', e.target.value)}
+                className={`${inputClass} resize-y`}
+              />
+            </label>
+          )}
+        </SectionBody>
       </section>
 
       <section className={sectionClass}>
-        <h2 className={sectionTitleClass}>
-          Studio policies &amp; liability release
-        </h2>
-        <p className="mt-2 text-xs text-stone-500">
-          Please read each policy and check the box to acknowledge.
-        </p>
-        <div className="mt-4 space-y-3">
-          {CONSENT_POLICY_ITEMS.map((item) => (
-            <PolicyAgreement
-              key={item.key}
-              title={item.title}
-              description={item.description}
-              checked={agreements[item.key]}
-              onChange={(v) => setAgreement(item.key, v)}
-            />
-          ))}
-        </div>
-      </section>
-
-      <section className={sectionClass}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className={sectionTitleClass}>Digital signature</h2>
-          <button
-            type="button"
-            onClick={() => {
-              signatureRef.current?.clear();
-              setSignatureTouched(false);
-            }}
-            className="text-xs font-medium text-stone-600 underline underline-offset-2 hover:text-stone-900"
+        <SectionHeader title="Personal information" />
+        <SectionBody>
+          <YesNoQuestion
+            name="contacts"
+            required
+            label="Do you wear contact lenses?"
+            value={asYesNo(form.wears_contact_lenses)}
+            onChange={(v) => setYesNo('wears_contact_lenses', v)}
+          />
+          <YesNoQuestion
+            name="irritation"
+            required
+            label="Do you frequently experience eye irritation or itching?"
+            value={asYesNo(form.eye_irritation_itching)}
+            onChange={(v) => setYesNo('eye_irritation_itching', v)}
+          />
+          <YesNoQuestion
+            name="infections"
+            required
+            label="Do you have a history of recurring eye or tear duct infections?"
+            value={asYesNo(form.recurring_eye_infections)}
+            onChange={(v) => setYesNo('recurring_eye_infections', v)}
+          />
+          <YesNoQuestion
+            name="eyedrops"
+            required
+            label="Do you currently use eye drops?"
+            value={asYesNo(form.currently_eye_drops)}
+            onChange={(v) => setYesNo('currently_eye_drops', v)}
+          />
+          <YesNoQuestion
+            name="pregnant"
+            required
+            label="Are you pregnant or believe you may be pregnant?"
+            value={asYesNo(form.pregnant_or_may_be)}
+            onChange={(v) => setYesNo('pregnant_or_may_be', v)}
           >
-            Clear signature
-          </button>
-        </div>
-        <div className="mt-4">
-          <SignaturePad
-            ref={signatureRef}
-            onStroke={() => setSignatureTouched(true)}
+            {asYesNo(form.pregnant_or_may_be) === 'yes' && (
+              <label className="mt-2 block">
+                <FieldLabel required>If yes, how far along are you?</FieldLabel>
+                <input
+                  type="text"
+                  required
+                  value={String(form.pregnancy_weeks ?? '')}
+                  onChange={(e) => setField('pregnancy_weeks', e.target.value)}
+                  className={inputClass}
+                  placeholder="e.g. 12 weeks"
+                />
+              </label>
+            )}
+          </YesNoQuestion>
+        </SectionBody>
+      </section>
+
+      <section className={sectionClass}>
+        <SectionHeader title="Medical history" />
+        <SectionBody>
+          <YesNoQuestion
+            name="eye_injury"
+            required
+            label="Do you currently have, or are you being treated for, any eye injury or condition?"
+            value={asYesNo(form.eye_injury_or_condition)}
+            onChange={(v) => setYesNo('eye_injury_or_condition', v)}
+          >
+            {asYesNo(form.eye_injury_or_condition) === 'yes' && (
+              <label className="block">
+                <FieldLabel required>If yes, please explain:</FieldLabel>
+                <textarea
+                  required
+                  rows={2}
+                  value={String(form.eye_injury_or_condition_explain ?? '')}
+                  onChange={(e) => setField('eye_injury_or_condition_explain', e.target.value)}
+                  className={`${inputClass} resize-y`}
+                />
+              </label>
+            )}
+          </YesNoQuestion>
+          <YesNoQuestion
+            name="allergies"
+            required
+            label="Do you have any known allergies?"
+            value={asYesNo(form.known_allergies)}
+            onChange={(v) => setYesNo('known_allergies', v)}
+          >
+            {asYesNo(form.known_allergies) === 'yes' && (
+              <label className="block">
+                <FieldLabel required>If yes, please explain:</FieldLabel>
+                <textarea
+                  required
+                  rows={2}
+                  value={String(form.known_allergies_explain ?? '')}
+                  onChange={(e) => setField('known_allergies_explain', e.target.value)}
+                  className={`${inputClass} resize-y`}
+                />
+              </label>
+            )}
+          </YesNoQuestion>
+          <YesNoQuestion
+            name="meds"
+            required
+            label="Are you taking any medications or supplements?"
+            value={asYesNo(form.medications_supplements)}
+            onChange={(v) => setYesNo('medications_supplements', v)}
+          >
+            {asYesNo(form.medications_supplements) === 'yes' && (
+              <label className="block">
+                <FieldLabel required>If yes, please explain:</FieldLabel>
+                <textarea
+                  required
+                  rows={2}
+                  value={String(form.medications_supplements_explain ?? '')}
+                  onChange={(e) =>
+                    setField('medications_supplements_explain', e.target.value)
+                  }
+                  className={`${inputClass} resize-y`}
+                />
+              </label>
+            )}
+          </YesNoQuestion>
+          <YesNoQuestion
+            name="accutane"
+            required
+            label="Are you currently using Accutane, or have you used it within the last 6 months?"
+            value={asYesNo(form.accutane_last_6_months)}
+            onChange={(v) => setYesNo('accutane_last_6_months', v)}
           />
-        </div>
+          <YesNoQuestion
+            name="retinol"
+            required
+            label="Do you use retinol or tretinoin products?"
+            value={asYesNo(form.uses_retinol_tretinoin)}
+            onChange={(v) => setYesNo('uses_retinol_tretinoin', v)}
+          />
+          <YesNoQuestion
+            name="chemo"
+            required
+            label="Have you recently undergone chemotherapy treatment?"
+            value={asYesNo(form.chemotherapy_recent)}
+            onChange={(v) => setYesNo('chemotherapy_recent', v)}
+          >
+            {asYesNo(form.chemotherapy_recent) === 'yes' && (
+              <label className="block">
+                <FieldLabel required>If yes, please explain:</FieldLabel>
+                <textarea
+                  required
+                  rows={2}
+                  value={String(form.chemotherapy_recent_explain ?? '')}
+                  onChange={(e) => setField('chemotherapy_recent_explain', e.target.value)}
+                  className={`${inputClass} resize-y`}
+                />
+              </label>
+            )}
+          </YesNoQuestion>
+
+          <div className="rounded-md border border-stone-200 bg-stone-50/50">
+            <div className="border-b border-stone-200 bg-stone-100/90 px-3 py-2 text-center">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                Medical conditions — please check all that apply
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 p-4 sm:grid-cols-2">
+              {MEDICAL_CONDITION_CHECKLIST.map((item) => (
+                <label
+                  key={item.key}
+                  className="flex cursor-pointer items-center gap-2 text-sm text-stone-800"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checklist[item.key]}
+                    onChange={(e) => setChecklistItem(item.key, e.target.checked)}
+                    className="h-4 w-4 rounded border-stone-300"
+                  />
+                  {item.label}
+                </label>
+              ))}
+            </div>
+            {checklist.other && (
+              <div className="border-t border-stone-200 px-4 pb-4">
+                <FieldLabel required>Other (please specify)</FieldLabel>
+                <input
+                  type="text"
+                  required
+                  value={String(form.medical_conditions_other_text ?? '')}
+                  onChange={(e) => setField('medical_conditions_other_text', e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+            )}
+          </div>
+
+          <label className="block">
+            <FieldLabel>Any additional notes</FieldLabel>
+            <textarea
+              rows={3}
+              value={String(form.additional_notes ?? '')}
+              onChange={(e) => setField('additional_notes', e.target.value)}
+              className={`${inputClass} resize-y`}
+            />
+          </label>
+        </SectionBody>
+      </section>
+
+      <section className={sectionClass}>
+        <SectionHeader title="Consent acknowledgments" />
+        <SectionBody>
+          <p className="text-center font-serif text-sm italic text-stone-600">
+            Please read each statement carefully and check the box to show your agreement
+            <RequiredMark />
+          </p>
+          <ul className="divide-y divide-stone-200 rounded-md border border-stone-200">
+            {CONSENT_STATEMENTS.map((item) => (
+              <li key={item.key} className="flex gap-3 bg-[#FAF9F6] p-3 first:rounded-t-md last:rounded-b-md">
+                <input
+                  type="checkbox"
+                  checked={statements[item.key]}
+                  onChange={(e) => setStatement(item.key, e.target.checked)}
+                  className="mt-1 h-4 w-4 shrink-0 rounded border-stone-400 text-stone-900"
+                  aria-required
+                />
+                <span className="text-sm leading-relaxed text-stone-800">{item.text}</span>
+              </li>
+            ))}
+          </ul>
+        </SectionBody>
+      </section>
+
+      <section className={sectionClass}>
+        <SectionHeader title="Client agreement &amp; signature" />
+        <SectionBody>
+          <p className="whitespace-pre-line text-sm leading-relaxed text-stone-700">
+            {CLIENT_AGREEMENT_TEXT}
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block sm:col-span-2">
+              <FieldLabel required>Print name</FieldLabel>
+              <input
+                type="text"
+                required
+                value={String(form.agreement_print_name ?? '')}
+                onChange={(e) => setField('agreement_print_name', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel required>Date</FieldLabel>
+              <input
+                type="date"
+                required
+                value={String(form.agreement_date ?? '')}
+                onChange={(e) => setField('agreement_date', e.target.value)}
+                className={inputClass}
+              />
+            </label>
+          </div>
+          <div>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <FieldLabel required>Signature</FieldLabel>
+              <button
+                type="button"
+                onClick={() => {
+                  signatureRef.current?.clear();
+                  setSignatureTouched(false);
+                }}
+                className="text-xs font-medium text-stone-600 underline underline-offset-2 hover:text-stone-900"
+              >
+                Clear signature
+              </button>
+            </div>
+            <SignaturePad
+              ref={signatureRef}
+              onStroke={() => setSignatureTouched(true)}
+            />
+          </div>
+        </SectionBody>
       </section>
 
       {error && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
           {error}
+        </p>
+      )}
+
+      {!canSubmit && !submitting && (
+        <p className="text-center text-xs text-stone-500">
+          Complete all required fields, check every consent statement, and sign above to
+          submit.
+          {validationError && !signatureTouched && (
+            <span className="mt-1 block text-stone-400">{validationError}</span>
+          )}
         </p>
       )}
 
@@ -459,11 +817,10 @@ function EditableForm({
           'Submit form'
         )}
       </button>
-      {!canSubmit && !submitting && (
-        <p className="text-center text-xs text-stone-500">
-          Acknowledge all policies and sign above to enable submit.
-        </p>
-      )}
+
+      <p className="text-center text-[10px] uppercase tracking-widest text-stone-400">
+        mckenna@sadiemarie.co · sadiemarie.co
+      </p>
     </form>
   );
 }
@@ -488,13 +845,11 @@ export default function ConsentFormClient({ clientId }: { clientId: string }) {
         message?: string;
       };
       if (!res.ok) {
-        throw new Error(
-          payload.message || payload.error || `Failed to load (${res.status})`
-        );
+        throw new Error(payload.message || payload.error || `Failed to load (${res.status})`);
       }
       setData(payload);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load form');
+    } catch (loadErr) {
+      setError(loadErr instanceof Error ? loadErr.message : 'Failed to load form');
     } finally {
       setLoading(false);
     }
