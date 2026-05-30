@@ -3,7 +3,18 @@
  * upload the flattened PDF to Vercel Blob, and return the public URL.
  */
 import { put } from '@vercel/blob';
-import { PDFCheckBox, PDFDocument, StandardFonts, type PDFForm } from 'pdf-lib';
+import {
+  adjustDimsForRotation,
+  drawCheckMark,
+  PDFCheckBox,
+  PDFDocument,
+  reduceRotation,
+  rotateInPlace,
+  rgb,
+  StandardFonts,
+  type AppearanceProviderFor,
+  type PDFForm,
+} from 'pdf-lib';
 import { sql } from '@vercel/postgres';
 
 import type { ConsentFormData } from '@/lib/consent';
@@ -280,12 +291,44 @@ async function fetchTemplatePdfBuffer(templateUrl: string): Promise<ArrayBuffer>
   return res.arrayBuffer();
 }
 
-/** Regenerate appearance streams for checked boxes before flatten bakes them in. */
-function refreshCheckedCheckboxAppearances(form: PDFForm): void {
+/**
+ * Checked boxes: pdf-lib stroke checkmark only (no widget border).
+ * Unchecked: transparent appearance so flatten does not draw an extra box.
+ */
+const checkMarkOnlyAppearanceProvider: AppearanceProviderFor<PDFCheckBox> = (
+  _checkBox,
+  widget
+) => {
+  const rectangle = widget.getRectangle();
+  const ap = widget.getAppearanceCharacteristics();
+  const rotation = reduceRotation(ap?.getRotation());
+  const { width, height } = adjustDimsForRotation(rectangle, rotation);
+  const rotate = rotateInPlace({ ...rectangle, rotation });
+  const markColor = rgb(0, 0, 0);
+  const checkMarkSize = Math.min(width, height) / 2;
+  const checked = [
+    ...rotate,
+    ...drawCheckMark({
+      x: width / 2,
+      y: height / 2,
+      size: checkMarkSize,
+      thickness: 1.5,
+      color: markColor,
+    }),
+  ];
+
+  return {
+    normal: { on: checked, off: [] },
+    down: { on: checked, off: [] },
+  };
+};
+
+/** Regenerate checkbox appearances before flatten bakes them into the page. */
+function refreshCheckboxAppearances(form: PDFForm): void {
   for (const field of form.getFields()) {
-    if (!(field instanceof PDFCheckBox) || !field.isChecked()) continue;
+    if (!(field instanceof PDFCheckBox)) continue;
     try {
-      field.defaultUpdateAppearances();
+      field.updateAppearances(checkMarkOnlyAppearanceProvider);
     } catch {
       // Template may lack appearance dicts; flatten uses whatever exists.
     }
@@ -300,7 +343,7 @@ async function finalizeFormAppearance(
   pdfDoc: PDFDocument,
   form: PDFForm
 ): Promise<void> {
-  refreshCheckedCheckboxAppearances(form);
+  refreshCheckboxAppearances(form);
 
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   try {
