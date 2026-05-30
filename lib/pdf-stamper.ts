@@ -40,9 +40,10 @@ const EB_GARAMOND_FONT_PATH = join(
   'assets/fonts/EBGaramond-Regular.ttf'
 );
 
-const DEFAULT_STAMP_FONT_SIZE = 10;
+/** Fallback when the template does not specify a field font size. */
+const FALLBACK_STAMP_FONT_SIZE = 11;
 
-let ebGaramondFontBytes: Uint8Array | null = null;
+const DA_FONT_SIZE_PATTERN = /\/[^\s]+\s+(\d+(?:\.\d+)?)\s+Tf/;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -343,16 +344,49 @@ const checkMarkOnlyAppearanceProvider: AppearanceProviderFor<PDFCheckBox> = (
 };
 
 async function loadEbGaramondFontBytes(): Promise<Uint8Array> {
-  if (!ebGaramondFontBytes) {
-    ebGaramondFontBytes = new Uint8Array(await readFile(EB_GARAMOND_FONT_PATH));
-  }
-  return ebGaramondFontBytes;
+  // Always read from disk so font file swaps (e.g. variable → static TTF) apply in dev.
+  return new Uint8Array(await readFile(EB_GARAMOND_FONT_PATH));
 }
 
 async function embedStampFont(pdfDoc: PDFDocument): Promise<PDFFont> {
   pdfDoc.registerFontkit(fontkit);
   const bytes = await loadEbGaramondFontBytes();
   return pdfDoc.embedFont(bytes, { subset: true });
+}
+
+function parseFontSizeFromDefaultAppearance(
+  da: string | undefined
+): number | undefined {
+  if (!da) return undefined;
+  const matches = [...da.matchAll(DA_FONT_SIZE_PATTERN)];
+  const last = matches.at(-1);
+  if (!last) return undefined;
+  const size = Number(last[1]);
+  if (!Number.isFinite(size) || size <= 0) return undefined;
+  return size;
+}
+
+/** Prefer the template’s field size; variable fonts break pdf-lib metrics. */
+function inferStampFontSize(field: PDFTextField): number {
+  const widgets = field.acroField.getWidgets();
+  const fromWidget =
+    widgets.length > 0
+      ? parseFontSizeFromDefaultAppearance(widgets[0].getDefaultAppearance())
+      : undefined;
+  const fromField = parseFontSizeFromDefaultAppearance(
+    field.acroField.getDefaultAppearance()
+  );
+  const fromTemplate = fromWidget ?? fromField;
+  if (fromTemplate && fromTemplate >= 6 && fromTemplate <= 24) {
+    return fromTemplate;
+  }
+  if (widgets.length > 0) {
+    const { height } = widgets[0].getRectangle();
+    if (height > 0) {
+      return Math.max(8, Math.min(14, Math.round(height * 0.5)));
+    }
+  }
+  return FALLBACK_STAMP_FONT_SIZE;
 }
 
 function buildStampDefaultAppearance(font: PDFFont, fontSize: number): string {
@@ -364,11 +398,11 @@ function buildStampDefaultAppearance(font: PDFFont, fontSize: number): string {
 
 /** Apply EB Garamond + brand color to filled text fields before flatten. */
 function refreshTextFieldAppearances(form: PDFForm, font: PDFFont): void {
-  const da = buildStampDefaultAppearance(font, DEFAULT_STAMP_FONT_SIZE);
-
   for (const field of form.getFields()) {
     if (!(field instanceof PDFTextField)) continue;
     try {
+      const fontSize = inferStampFontSize(field);
+      const da = buildStampDefaultAppearance(font, fontSize);
       field.acroField.setDefaultAppearance(da);
       const widgets = field.acroField.getWidgets();
       for (let i = 0; i < widgets.length; i++) {
