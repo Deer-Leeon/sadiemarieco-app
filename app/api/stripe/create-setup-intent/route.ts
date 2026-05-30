@@ -4,15 +4,15 @@
  * Card-vault bootstrap for /checkout:
  *   1. Resolve (or create) a Stripe Customer from the Cal booking context.
  *   2. Create a SetupIntent (`usage: 'off_session'`) bound to that customer.
- *   3. Persist `stripe_customer_id` + `stripe_setup_intent_id` on the
- *      pending `appointments` row (when it exists).
+ *   3. Persist `stripe_setup_intent_id` on the pending `appointments` row
+ *      (when it exists). `stripe_customer_id` is written only after confirm.
  *   4. Return `{ clientSecret }` for Stripe Elements + `confirmSetup()`.
  */
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
   getAppointmentStripeByCalUid,
-  saveAppointmentStripeVault,
+  saveAppointmentStripeSetupIntent,
   STRIPE_CUSTOMER_ID_RE,
   STRIPE_SETUP_INTENT_ID_RE,
 } from '@/lib/appointment-stripe';
@@ -139,9 +139,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const dbLinked = await saveAppointmentStripeVault({
+    const dbLinked = await saveAppointmentStripeSetupIntent({
       calBookingUid,
-      stripeCustomerId,
       stripeSetupIntentId: setupIntent.id,
     });
 

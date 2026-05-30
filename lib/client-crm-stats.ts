@@ -48,16 +48,26 @@ export function hasVaultedStripeCustomer(stripeCustomerId: string | null): boole
   );
 }
 
+/**
+ * Card is "on file" only after /checkout succeeded (SetupIntent + confirm).
+ * `stripe_customer_id` is written at confirm; pending rows may still carry a
+ * legacy id from an older create-setup-intent flow — exclude those statuses.
+ */
+export function appointmentHasVaultedCard(
+  status: string | null,
+  stripeCustomerId: string | null
+): boolean {
+  if (!hasVaultedStripeCustomer(stripeCustomerId)) return false;
+  const s = normalizeAppointmentStatus(status);
+  return s !== 'pending' && s !== 'canceled_by_system';
+}
+
 export function countsForRisk(status: string | null): boolean {
   const s = normalizeAppointmentStatus(status);
   return s === 'no-show' || s === 'canceled_by_client_late';
 }
 
-/**
- * Client-side fallback when SQL stats are unavailable. Pass
- * `includePendingAndCanceledForVault: true` only when the input array
- * contains pending/canceled rows (the history API does not).
- */
+/** Client-side fallback when SQL stats are unavailable. */
 export function computeCrmStatsFromAppointments(
   appointments: Array<{
     status: string | null;
@@ -65,8 +75,7 @@ export function computeCrmStatsFromAppointments(
     service_price: number | null;
     stripe_customer_id: string | null;
     created_at?: string | null;
-  }>,
-  options?: { includePendingAndCanceledForVault?: boolean }
+  }>
 ): ClientCrmStats {
   const now = Date.now();
   let total_bookings = 0;
@@ -86,12 +95,7 @@ export function computeCrmStatsFromAppointments(
       risk_flag = true;
     }
 
-    const scanVault =
-      options?.includePendingAndCanceledForVault ||
-      countsAsBooking(a.status) ||
-      status === 'pending';
-
-    if (scanVault && hasVaultedStripeCustomer(a.stripe_customer_id)) {
+    if (appointmentHasVaultedCard(a.status, a.stripe_customer_id)) {
       has_vaulted_card = true;
     }
 
@@ -176,6 +180,10 @@ export async function fetchClientCrmStats(
       BOOL_OR(
         a.stripe_customer_id IS NOT NULL
         AND TRIM(a.stripe_customer_id) <> ''
+        AND COALESCE(LOWER(TRIM(a.status)), '') NOT IN (
+          'pending',
+          'canceled_by_system'
+        )
       ) AS has_vaulted_card,
       BOOL_OR(
         COALESCE(LOWER(TRIM(a.status)), '') IN (

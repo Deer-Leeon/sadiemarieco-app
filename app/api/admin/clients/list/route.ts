@@ -135,6 +135,10 @@ export async function GET(): Promise<NextResponse> {
           BOOL_OR(
             a.stripe_customer_id IS NOT NULL
             AND TRIM(a.stripe_customer_id) <> ''
+            AND COALESCE(LOWER(TRIM(a.status)), '') NOT IN (
+              'pending',
+              'canceled_by_system'
+            )
           ) AS has_vaulted_card,
           BOOL_OR(
             COALESCE(LOWER(TRIM(a.status)), '') IN (

@@ -31,6 +31,7 @@ import {
 
 import type { Appointment, AppointmentStatus } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import { appointmentHasVaultedCard } from '@/lib/client-crm-stats';
 import ClientProfileModal from './ClientProfileModal';
 
 // Cal.com embed namespace. Used both as the React component's
@@ -161,7 +162,10 @@ export default function AppointmentModal({
   const [statusError, setStatusError] = useState<string | null>(null);
 
   const canChargeNoShow =
-    Boolean(appointment.stripe_customer_id) &&
+    appointmentHasVaultedCard(
+      appointment.status,
+      appointment.stripe_customer_id
+    ) &&
     appointment.service_price != null &&
     Number.isFinite(appointment.service_price) &&
     appointment.service_price > 0;

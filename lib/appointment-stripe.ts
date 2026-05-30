@@ -22,21 +22,31 @@ export async function getAppointmentStripeByCalUid(
 }
 
 /**
- * Persist Stripe vault ids on the pending appointment row. Only updates
- * rows still in `pending` (or NULL status) so a late vault attempt cannot
- * clobber a confirmed booking.
+ * Persist in-progress SetupIntent on a pending row only. Do not write
+ * `stripe_customer_id` until /api/booking/confirm succeeds — otherwise CRM
+ * shows "card on file" before checkout completes.
  */
+export async function saveAppointmentStripeSetupIntent(params: {
+  calBookingUid: string;
+  stripeSetupIntentId: string;
+}): Promise<boolean> {
+  const { rowCount } = await sql`
+    UPDATE appointments
+    SET stripe_setup_intent_id = ${params.stripeSetupIntentId}
+    WHERE cal_event_id = ${params.calBookingUid}
+      AND (status IS NULL OR status = 'pending')
+  `;
+  return (rowCount ?? 0) > 0;
+}
+
+/** @deprecated Use saveAppointmentStripeSetupIntent — customer id is set at confirm. */
 export async function saveAppointmentStripeVault(params: {
   calBookingUid: string;
   stripeCustomerId: string;
   stripeSetupIntentId: string;
 }): Promise<boolean> {
-  const { rowCount } = await sql`
-    UPDATE appointments
-    SET stripe_customer_id = ${params.stripeCustomerId},
-        stripe_setup_intent_id = ${params.stripeSetupIntentId}
-    WHERE cal_event_id = ${params.calBookingUid}
-      AND (status IS NULL OR status = 'pending')
-  `;
-  return (rowCount ?? 0) > 0;
+  return saveAppointmentStripeSetupIntent({
+    calBookingUid: params.calBookingUid,
+    stripeSetupIntentId: params.stripeSetupIntentId,
+  });
 }
