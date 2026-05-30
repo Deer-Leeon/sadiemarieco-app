@@ -3,7 +3,7 @@
  * upload the flattened PDF to Vercel Blob, and return the public URL.
  */
 import { put } from '@vercel/blob';
-import { PDFDocument, type PDFForm } from 'pdf-lib';
+import { PDFDocument, StandardFonts, type PDFForm } from 'pdf-lib';
 import { sql } from '@vercel/postgres';
 
 import type { ConsentFormData } from '@/lib/consent';
@@ -280,6 +280,37 @@ async function fetchTemplatePdfBuffer(templateUrl: string): Promise<ArrayBuffer>
   return res.arrayBuffer();
 }
 
+/**
+ * Bake form values into the page and remove all AcroForm fields so the signed
+ * PDF is not fillable or editable in Preview/Chrome/Acrobat (read-only document).
+ */
+async function finalizeFormAppearance(
+  pdfDoc: PDFDocument,
+  form: PDFForm
+): Promise<void> {
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  try {
+    form.updateFieldAppearances(font);
+  } catch (err) {
+    console.warn('[pdf-stamper] updateFieldAppearances failed:', errorMessage(err));
+  }
+
+  try {
+    form.flatten();
+  } catch (err) {
+    throw new Error(
+      `Consent PDF could not be locked (flatten failed): ${errorMessage(err)}`
+    );
+  }
+
+  const remainingFields = pdfDoc.getForm().getFields();
+  if (remainingFields.length > 0) {
+    throw new Error(
+      `Consent PDF still has ${remainingFields.length} editable field(s) after flatten — refusing to save.`
+    );
+  }
+}
+
 async function loadTemplateUrl(): Promise<string> {
   const { rows } = await sql<{ consent_pdf_url: string | null }>`
     SELECT consent_pdf_url
@@ -329,8 +360,7 @@ export async function stampConsentPDF(
     height: SIGNATURE_HEIGHT,
   });
 
-  // form.flatten() hides checkmarks on this Sejda template — leave interactive.
-  // form.flatten();
+  await finalizeFormAppearance(pdfDoc, form);
 
   const pdfBytes = await pdfDoc.save();
   const token = getBlobToken();
