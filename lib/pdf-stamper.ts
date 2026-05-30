@@ -313,7 +313,9 @@ export async function stampConsentPDF(
     height: SIGNATURE_HEIGHT,
   });
 
-  form.flatten();
+  // form.flatten() strips visual checkmarks on some Sejda templates — keep the
+  // interactive appearance layer so yes/no and policy boxes remain visible.
+  // form.flatten();
 
   const pdfBytes = await pdfDoc.save();
 

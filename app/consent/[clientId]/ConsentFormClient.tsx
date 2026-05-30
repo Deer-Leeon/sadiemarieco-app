@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Check, Loader2 } from 'lucide-react';
+import { Check, FileText, Loader2 } from 'lucide-react';
 
 import type { ConsentApiResponse, ConsentFormData } from '@/lib/consent';
-import { isValidClientUuid } from '@/lib/consent';
+import { isStampedConsentPdfUrl, isValidClientUuid } from '@/lib/consent';
 
 import {
   allConsentStatementsAccepted,
@@ -40,6 +40,9 @@ function SubmittedView({ data }: { data: ConsentApiResponse }) {
   const form = data.intake?.form_data ?? {};
   const submittedAt = data.intake?.submitted_at;
   const signature = data.intake?.signature_image ?? null;
+  const stampedPdfUrl = isStampedConsentPdfUrl(data.intake?.stamped_pdf_url)
+    ? data.intake!.stamped_pdf_url!.trim()
+    : null;
   const checklist = asMedicalChecklist(form.medical_conditions_checklist);
   const flagged = MEDICAL_CONDITION_CHECKLIST.filter((c) => checklist[c.key]);
   const statements = asConsentStatements(form.consent_statements);
@@ -70,6 +73,17 @@ function SubmittedView({ data }: { data: ConsentApiResponse }) {
         <h1 className="mt-3 font-serif text-2xl text-stone-900">
           Form successfully submitted
         </h1>
+        {stampedPdfUrl && (
+          <a
+            href={stampedPdfUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-stone-800"
+          >
+            <FileText className="h-4 w-4" aria-hidden />
+            View Official Signed PDF
+          </a>
+        )}
         <p className="mt-2 text-sm text-stone-600">
           Your intake and consent are on file. This form is locked and cannot be
           edited.

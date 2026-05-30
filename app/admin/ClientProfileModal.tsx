@@ -52,7 +52,7 @@ import {
   X,
 } from 'lucide-react';
 
-import { consentFormPath } from '@/lib/consent';
+import { consentFormPath, isStampedConsentPdfUrl } from '@/lib/consent';
 
 import type {
   Appointment,
@@ -815,23 +815,29 @@ const actionBoxClass = (interactive: boolean) =>
   }`;
 
 function ConsentFormActionBox({ client }: { client: Client }) {
-  const href =
-    client.has_consented && client.consent_form_url
-      ? client.consent_form_url
-      : consentFormPath(client.id);
+  const stampedPdfUrl = isStampedConsentPdfUrl(client.consent_form_url)
+    ? client.consent_form_url!.trim()
+    : null;
+  const href = stampedPdfUrl ?? consentFormPath(client.id);
 
   if (client.has_consented) {
     return (
       <ActionBox
         icon={<ClipboardCheck className="h-3 w-3 shrink-0 text-emerald-700/80" />}
         label="Consent Form"
-        helper="Signed intake on file (read-only)."
+        helper={
+          stampedPdfUrl
+            ? 'Open the official stamped PDF.'
+            : 'Signed intake on file (read-only summary).'
+        }
         href={href}
-        ariaLabel="View signed consent form"
+        ariaLabel={
+          stampedPdfUrl ? 'View official signed consent PDF' : 'View signed consent form'
+        }
         rightAccessory={
           <>
             <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-stone-600">
-              View signed form
+              {stampedPdfUrl ? 'View signed PDF' : 'View summary'}
             </span>
             <Check className="h-4 w-4 text-emerald-600" aria-hidden />
           </>

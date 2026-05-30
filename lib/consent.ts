@@ -39,6 +39,13 @@ export function consentFormPath(clientId: string): string {
   return `/consent/${clientId.trim().toLowerCase()}`;
 }
 
+/** True when `consent_form_url` / `stamped_pdf_url` is a Vercel Blob (or other) PDF URL. */
+export function isStampedConsentPdfUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const trimmed = url.trim();
+  return trimmed.startsWith('https://') || trimmed.startsWith('http://');
+}
+
 export function getPublicSiteBaseUrl(): string {
   return (
     process.env.PUBLIC_BASE_URL ||
