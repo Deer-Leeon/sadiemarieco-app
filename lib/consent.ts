@@ -17,6 +17,8 @@ export interface ClientIntakeForm {
   client_id: string;
   form_data: ConsentFormData;
   signature_image: string | null;
+  /** Public Vercel Blob URL for the flattened, stamped PDF. */
+  stamped_pdf_url: string | null;
   submitted_at: string | null;
 }
 

@@ -815,7 +815,10 @@ const actionBoxClass = (interactive: boolean) =>
   }`;
 
 function ConsentFormActionBox({ client }: { client: Client }) {
-  const href = consentFormPath(client.id);
+  const href =
+    client.has_consented && client.consent_form_url
+      ? client.consent_form_url
+      : consentFormPath(client.id);
 
   if (client.has_consented) {
     return (

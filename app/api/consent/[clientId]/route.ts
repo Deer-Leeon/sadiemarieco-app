@@ -7,13 +7,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import {
-  consentFormPath,
   isValidClientUuid,
   type ClientIntakeForm,
   type ConsentApiResponse,
   type ConsentFormData,
 } from '@/lib/consent';
+import { stampConsentPDF } from '@/lib/pdf-stamper';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
@@ -31,6 +32,7 @@ interface IntakeRow {
   client_id: string;
   form_data: ConsentFormData;
   signature_image: string | null;
+  stamped_pdf_url: string | null;
   submitted_at: Date | string | null;
 }
 
@@ -48,6 +50,7 @@ function rowToIntake(row: IntakeRow): ClientIntakeForm {
         ? row.form_data
         : {},
     signature_image: row.signature_image,
+    stamped_pdf_url: row.stamped_pdf_url ?? null,
     submitted_at:
       submittedAt instanceof Date
         ? submittedAt.toISOString()
@@ -88,7 +91,7 @@ async function loadClient(clientId: string): Promise<ClientRow | null> {
 
 async function loadIntake(clientId: string): Promise<IntakeRow | undefined> {
   const { rows } = await sql<IntakeRow>`
-    SELECT id, client_id, form_data, signature_image, submitted_at
+    SELECT id, client_id, form_data, signature_image, stamped_pdf_url, submitted_at
     FROM client_intake_forms
     WHERE client_id = ${clientId}::uuid
     LIMIT 1
@@ -201,7 +204,6 @@ export async function POST(
       );
     }
 
-    const consentPath = consentFormPath(clientId);
     const formDataJson = JSON.stringify(formData);
 
     await sql`
@@ -214,11 +216,42 @@ export async function POST(
       )
     `;
 
+    if (!signature) {
+      return NextResponse.json(
+        { error: 'missing_signature', message: 'A signature is required.' },
+        { status: 400 }
+      );
+    }
+
+    let stampedPdfUrl: string;
+    try {
+      stampedPdfUrl = await stampConsentPDF(clientId, formData, signature);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[api/consent] PDF stamp failed:', message);
+      if (message.includes('No consent PDF template')) {
+        return NextResponse.json(
+          { error: 'template_not_configured', message },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json(
+        { error: 'pdf_stamp_failed', message },
+        { status: 502 }
+      );
+    }
+
+    await sql`
+      UPDATE client_intake_forms
+      SET stamped_pdf_url = ${stampedPdfUrl}
+      WHERE client_id = ${clientId}::uuid
+    `;
+
     await sql`
       UPDATE clients
       SET
         has_consented = true,
-        consent_form_url = ${consentPath}
+        consent_form_url = ${stampedPdfUrl}
       WHERE id = ${clientId}::uuid
     `;
 
