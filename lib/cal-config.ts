@@ -37,6 +37,11 @@ export const CAL_SLOT_INTERVAL_MIN = 30;
  */
 export const ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN = 15;
 
+/** Manual-booking shadow schedule: studio open through 9 PM (America/Denver). */
+export const ADMIN_MANUAL_BOOKING_DAY_START_MIN = 9 * 60;
+
+export const ADMIN_MANUAL_BOOKING_DAY_END_MIN = 21 * 60;
+
 /** Stable slug keys for bookable services (matches `site_services.slug`). */
 export type CalServiceSlug = string;
 

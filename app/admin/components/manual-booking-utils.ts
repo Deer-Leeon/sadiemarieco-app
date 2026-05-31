@@ -6,6 +6,9 @@ import { bookingEndFromDurationMins } from '@/lib/booking-duration';
 
 export const STUDIO_TIMEZONE = 'America/Denver';
 
+/** Keep in sync with `CAL_MIN_BOOKING_NOTICE_MIN` in lib/cal-config.ts */
+export const MANUAL_BOOKING_MIN_NOTICE_MIN = 30;
+
 export interface ManualBookingServiceOption {
   slug: string;
   title: string;
@@ -184,6 +187,23 @@ export function parseCalSlotTimes(payload: unknown, date: string): string[] {
   }
 
   return [];
+}
+
+/** Drop past slots and enforce minimum lead time on the selected studio day. */
+export function filterSlotsForBookingDay(
+  slots: string[],
+  date: string,
+  todayStudio: string
+): string[] {
+  const minMs =
+    date === todayStudio
+      ? Date.now() + MANUAL_BOOKING_MIN_NOTICE_MIN * 60_000
+      : 0;
+
+  return slots.filter((iso) => {
+    const ms = new Date(iso).getTime();
+    return !Number.isNaN(ms) && ms >= minMs;
+  });
 }
 
 export function formatSlotInStudioTime(isoUtc: string): string {

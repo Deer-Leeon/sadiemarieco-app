@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
 import {
   datesWithOpenSlots,
+  filterSlotsForBookingDay,
   formatSlotInStudioTime,
   parseCalSlotTimes,
   STUDIO_TIMEZONE,
@@ -121,12 +122,21 @@ export default function ManualBookingSlotPicker({
           return;
         }
 
-        const openDates = datesWithOpenSlots(data, { notBefore: today });
+        const rawOpenDates = datesWithOpenSlots(data, { notBefore: today });
         const slotsByDay: Record<string, string[]> = {};
 
-        for (const date of openDates) {
-          slotsByDay[date] = parseCalSlotTimes(data, date);
+        for (const date of rawOpenDates) {
+          const filtered = filterSlotsForBookingDay(
+            parseCalSlotTimes(data, date),
+            date,
+            today
+          );
+          if (filtered.length > 0) {
+            slotsByDay[date] = filtered;
+          }
         }
+
+        const openDates = Object.keys(slotsByDay).sort();
 
         setMonthSlots(slotsByDay);
         setAvailableDates(openDates);
@@ -174,7 +184,7 @@ export default function ManualBookingSlotPicker({
 
   const slots =
     selectedDate && availableSet.has(selectedDate)
-      ? (monthSlots[selectedDate] ?? [])
+      ? filterSlotsForBookingDay(monthSlots[selectedDate] ?? [], selectedDate, today)
       : [];
   const slotsLoading = monthLoading;
 
