@@ -44,6 +44,7 @@ import {
   Mail,
   Pencil,
   Phone,
+  Pin,
   Plus,
   Scissors,
   Trash2,
@@ -52,12 +53,15 @@ import {
   X,
 } from 'lucide-react';
 
+import ClientNotesHistoryModal from './components/ClientNotesHistoryModal';
+
 import { consentFormPath, isStampedConsentPdfUrl } from '@/lib/consent';
 
 import type {
   Appointment,
   Client,
   ClientCrmStats,
+  ClientNote,
   ClientPhoto,
 } from './types';
 import AppointmentHistoryList from './AppointmentHistoryList';
@@ -558,48 +562,54 @@ function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
   );
 }
 
+function latestNoteByCreatedAt(notes: ClientNote[]): ClientNote | null {
+  if (notes.length === 0) return null;
+  return [...notes].sort(
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  )[0]!;
+}
+
 function PrivateNotesSection({ clientId }: { clientId: string }) {
   const [notes, setNotes] = useState('');
   const [savedNotes, setSavedNotes] = useState('');
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [latestCreatedAt, setLatestCreatedAt] = useState<string | null>(null);
+  const [pinnedCount, setPinnedCount] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const applyNotesPayload = useCallback((rows: ClientNote[]) => {
+    const latest = latestNoteByCreatedAt(rows);
+    const text = latest?.notes ?? '';
+    setNotes(text);
+    setSavedNotes(text);
+    setLatestCreatedAt(latest?.created_at ?? null);
+    setPinnedCount(rows.filter((n) => n.is_pinned).length);
+  }, []);
+
+  const loadNotes = useCallback(async () => {
     setLoading(true);
     setError(null);
-    fetch(`/api/admin/clients/${clientId}/notes`)
-      .then(async (res) => {
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
-        }
-        return res.json() as Promise<{
-          notes: string;
-          updated_at: string | null;
-        }>;
-      })
-      .then((data) => {
-        if (!cancelled) {
-          setNotes(data.notes ?? '');
-          setSavedNotes(data.notes ?? '');
-          setUpdatedAt(data.updated_at);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [clientId]);
+    try {
+      const res = await fetch(`/api/admin/clients/${clientId}/notes`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      const data = (await res.json()) as { notes: ClientNote[] };
+      applyNotesPayload(data.notes ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [applyNotesPayload, clientId]);
+
+  useEffect(() => {
+    void loadNotes();
+  }, [loadNotes]);
 
   const dirty = notes !== savedNotes;
 
@@ -609,7 +619,7 @@ function PrivateNotesSection({ clientId }: { clientId: string }) {
     setError(null);
     try {
       const res = await fetch(`/api/admin/clients/${clientId}/notes`, {
-        method: 'PATCH',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notes }),
       });
@@ -617,13 +627,11 @@ function PrivateNotesSection({ clientId }: { clientId: string }) {
         const text = await res.text();
         throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
       }
-      const data = (await res.json()) as {
-        notes: string;
-        updated_at: string | null;
-      };
-      setSavedNotes(data.notes);
-      setNotes(data.notes);
-      setUpdatedAt(data.updated_at);
+      const data = (await res.json()) as { note: ClientNote };
+      setSavedNotes(data.note.notes);
+      setNotes(data.note.notes);
+      setLatestCreatedAt(data.note.created_at);
+      await loadNotes();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -631,52 +639,86 @@ function PrivateNotesSection({ clientId }: { clientId: string }) {
     }
   };
 
+  let savedLabel: string | null = null;
+  if (latestCreatedAt && !dirty) {
+    try {
+      savedLabel = format(parseISO(latestCreatedAt), 'MMM d, yyyy · h:mm a');
+    } catch {
+      savedLabel = latestCreatedAt;
+    }
+  }
+
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-          Private notes
-        </p>
-        {updatedAt && !dirty && (
-          <p className="text-[10px] text-stone-400">
-            Saved {format(parseISO(updatedAt), 'MMM d, yyyy · h:mm a')}
+    <>
+      <div className="rounded-lg border border-stone-200 bg-white p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+            Private notes
           </p>
-        )}
-      </div>
-      {loading ? (
-        <CenteredSpinner label="Loading notes…" />
-      ) : (
-        <>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={5}
-            placeholder="Formulas, sensitivities, preferences, patch-test results…"
-            className="w-full resize-y rounded-md border border-stone-200 bg-[#FAF9F6] px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
-          />
-          {error && (
-            <p className="mt-2 text-xs text-rose-700">{error}</p>
-          )}
-          <div className="mt-3 flex justify-end">
+          <div className="flex flex-wrap items-center gap-2">
+            {pinnedCount > 0 && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-amber-200/80 bg-amber-50/60 px-2 py-0.5 text-[10px] font-medium text-amber-900"
+                title={`${pinnedCount} pinned note${pinnedCount === 1 ? '' : 's'}`}
+              >
+                <Pin className="h-3 w-3" fill="currentColor" aria-hidden />
+                {pinnedCount}
+              </span>
+            )}
             <button
               type="button"
-              onClick={onSave}
-              disabled={saving || !dirty}
-              className="inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setHistoryOpen(true)}
+              className="rounded-full border border-stone-200 bg-white px-3 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-700 transition-colors hover:border-stone-300 hover:bg-stone-50"
             >
-              {saving ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Saving…
-                </>
-              ) : (
-                'Save notes'
-              )}
+              All notes
             </button>
+            {savedLabel && (
+              <p className="text-[10px] text-stone-400">Saved {savedLabel}</p>
+            )}
           </div>
-        </>
-      )}
-    </div>
+        </div>
+        {loading ? (
+          <CenteredSpinner label="Loading notes…" />
+        ) : (
+          <>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={5}
+              placeholder="Formulas, sensitivities, preferences, patch-test results…"
+              className="w-full resize-y rounded-md border border-stone-200 bg-[#FAF9F6] px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+            />
+            {error && (
+              <p className="mt-2 text-xs text-rose-700">{error}</p>
+            )}
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={saving || !dirty}
+                className="inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  'Save notes'
+                )}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <ClientNotesHistoryModal
+        clientId={clientId}
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onNotesUpdated={() => void loadNotes()}
+      />
+    </>
   );
 }
 

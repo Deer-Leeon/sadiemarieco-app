@@ -283,3 +283,16 @@ export interface ClientPhoto {
   uploaded_at: string;
 }
 
+/**
+ * Single row from `client_notes` — append-only private admin notes.
+ * Multiple rows per client; pinned notes sort to the top in history.
+ */
+export interface ClientNote {
+  id: number;
+  client_id: string;
+  notes: string;
+  is_pinned: boolean;
+  /** ISO 8601 string. */
+  created_at: string;
+}
+

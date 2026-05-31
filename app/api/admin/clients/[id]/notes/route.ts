@@ -1,13 +1,14 @@
 /**
  * /api/admin/clients/[id]/notes
  *
- * GET   — fetch private admin notes for a client.
- * PATCH — upsert notes text (body: { notes: string }).
+ * GET  — all private notes for a client (pinned first, then newest).
+ * POST — append a new note row (never overwrites history).
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import type { ClientNote } from '@/app/admin/types';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -19,15 +20,32 @@ interface Context {
   params: Promise<{ id: string }>;
 }
 
+interface NoteRow {
+  id: number;
+  client_id: string;
+  notes: string;
+  is_pinned: boolean;
+  created_at: Date | string;
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function serializeDate(value: Date | string | null): string | null {
-  if (!value) return null;
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
+function serializeDate(value: Date | string | null): string {
+  const d = value instanceof Date ? value : new Date(value ?? '');
+  if (Number.isNaN(d.getTime())) return new Date().toISOString();
   return d.toISOString();
+}
+
+function rowToNote(row: NoteRow): ClientNote {
+  return {
+    id: row.id,
+    client_id: row.client_id,
+    notes: row.notes,
+    is_pinned: Boolean(row.is_pinned),
+    created_at: serializeDate(row.created_at),
+  };
 }
 
 async function clientExists(id: string): Promise<boolean> {
@@ -59,21 +77,14 @@ export async function GET(
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
 
-    const { rows } = await sql<{
-      notes: string;
-      updated_at: Date | string | null;
-    }>`
-      SELECT notes, updated_at
+    const { rows } = await sql<NoteRow>`
+      SELECT id, client_id, notes, is_pinned, created_at
       FROM client_notes
       WHERE client_id = ${id}::uuid
-      LIMIT 1
+      ORDER BY is_pinned DESC, created_at DESC
     `;
 
-    const row = rows[0];
-    return NextResponse.json({
-      notes: row?.notes ?? '',
-      updated_at: serializeDate(row?.updated_at ?? null),
-    });
+    return NextResponse.json({ notes: rows.map(rowToNote) });
   } catch (err) {
     console.error('[api/admin/clients/[id]/notes] GET failed:', errorMessage(err));
     return NextResponse.json(
@@ -83,7 +94,7 @@ export async function GET(
   }
 }
 
-export async function PATCH(
+export async function POST(
   req: NextRequest,
   { params }: Context
 ): Promise<NextResponse> {
@@ -121,26 +132,17 @@ export async function PATCH(
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
 
-    const { rows } = await sql<{
-      notes: string;
-      updated_at: Date | string;
-    }>`
-      INSERT INTO client_notes (client_id, notes, updated_at)
-      VALUES (${id}::uuid, ${notes}, NOW())
-      ON CONFLICT (client_id) DO UPDATE SET
-        notes = EXCLUDED.notes,
-        updated_at = NOW()
-      RETURNING notes, updated_at
+    const { rows } = await sql<NoteRow>`
+      INSERT INTO client_notes (client_id, notes, created_at, is_pinned)
+      VALUES (${id}::uuid, ${notes}, NOW(), false)
+      RETURNING id, client_id, notes, is_pinned, created_at
     `;
 
-    return NextResponse.json({
-      notes: rows[0].notes,
-      updated_at: serializeDate(rows[0].updated_at),
-    });
+    return NextResponse.json({ note: rowToNote(rows[0]) }, { status: 201 });
   } catch (err) {
-    console.error('[api/admin/clients/[id]/notes] PATCH failed:', errorMessage(err));
+    console.error('[api/admin/clients/[id]/notes] POST failed:', errorMessage(err));
     return NextResponse.json(
-      { error: 'db_upsert_failed', message: errorMessage(err) },
+      { error: 'db_insert_failed', message: errorMessage(err) },
       { status: 500 }
     );
   }

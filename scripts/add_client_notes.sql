@@ -2,7 +2,7 @@
 -- scripts/add_client_notes.sql
 --
 -- Private admin notes per CRM client (formulas, sensitivities, etc.).
--- One row per client — upserted via PATCH /api/admin/clients/[id]/notes.
+-- Legacy bootstrap (superseded by scripts/update_client_notes.sql for history + pinning).
 -- ──────────────────────────────────────────────────────────────────────────
 
 BEGIN;
