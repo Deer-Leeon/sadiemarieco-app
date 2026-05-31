@@ -27,6 +27,7 @@ import {
   mergeSlotDays,
   slotStartsFromFineGrid,
 } from '@/lib/booking-duration';
+import { addCalendarDays } from '@/lib/cal-slot-dates';
 import {
   CAL_SLOTS_API_VERSION,
   gateAdmin,
@@ -44,10 +45,13 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 function buildGodModeSlots(
   finePayload: unknown,
   coarsePayload: unknown,
-  serviceDurationMins: number
+  serviceDurationMins: number,
+  studioDateStart: string,
+  studioDateEnd: string
 ): { slots: Record<string, string[]> } {
-  const fine = normalizeCalSlotsPayload(finePayload);
-  const coarse = normalizeCalSlotsPayload(coarsePayload);
+  const normOpts = { studioDateStart, studioDateEnd };
+  const fine = normalizeCalSlotsPayload(finePayload, normOpts);
+  const coarse = normalizeCalSlotsPayload(coarsePayload, normOpts);
   const fromFine = slotStartsFromFineGrid(
     fine.slots,
     serviceDurationMins,
@@ -101,12 +105,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const useGodModeGrid =
     overrideEventTypeId != null && serviceDurationMins != null;
 
+  // Cal buckets late Mountain Time under the next UTC date — extend by one day.
+  const calRangeEnd = addCalendarDays(end, 1);
+
   const baseQuery: Record<string, string> = {
     eventTypeId: String(calEventTypeId),
     start: date,
-    end,
+    end: calRangeEnd,
     timeZone: STUDIO_TIMEZONE,
   };
+
+  const normOpts = { studioDateStart: date, studioDateEnd: end };
 
   if (useGodModeGrid) {
     const [fineResult, coarseResult] = await Promise.all([
@@ -134,7 +143,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const merged = buildGodModeSlots(
       fineResult.data,
       coarseResult.data,
-      serviceDurationMins
+      serviceDurationMins,
+      date,
+      end
     );
 
     if (end === date) {
@@ -159,7 +170,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!result.ok) return result.response;
 
   if (end === date) {
-    return NextResponse.json(normalizeCalSlotsForDate(result.data, date));
+    const normalized = normalizeCalSlotsPayload(result.data, normOpts);
+    return NextResponse.json({
+      slots: { [date]: normalized.slots[date] ?? [] },
+    });
   }
-  return NextResponse.json(normalizeCalSlotsPayload(result.data));
+  return NextResponse.json(normalizeCalSlotsPayload(result.data, normOpts));
 }

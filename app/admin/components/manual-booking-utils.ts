@@ -3,6 +3,10 @@
  */
 
 import { bookingEndFromDurationMins } from '@/lib/booking-duration';
+import {
+  filterSlotMapByStudioDateRange,
+  regroupSlotTimesByStudioDate,
+} from '@/lib/cal-slot-dates';
 
 export const STUDIO_TIMEZONE = 'America/Denver';
 
@@ -144,49 +148,75 @@ export function buildManualBookingServiceMenu(
     });
 }
 
-/** Dates (YYYY-MM-DD) that have at least one open slot in a normalized slots payload. */
-export function datesWithOpenSlots(
-  payload: unknown,
-  options?: { notBefore?: string }
-): string[] {
-  if (!payload || typeof payload !== 'object') return [];
+function extractRawSlotMap(payload: unknown): Record<string, string[]> {
+  if (!payload || typeof payload !== 'object') return {};
 
   const root = payload as Record<string, unknown>;
   const slots = root.slots;
-  if (!slots || typeof slots !== 'object') return [];
+  if (!slots || typeof slots !== 'object') return {};
 
+  const out: Record<string, string[]> = {};
+  for (const [date, times] of Object.entries(slots as Record<string, unknown>)) {
+    if (!Array.isArray(times)) continue;
+    const isoList = times.filter((t): t is string => typeof t === 'string');
+    if (isoList.length > 0) out[date] = isoList;
+  }
+  return out;
+}
+
+/** Slots grouped by studio-local date (fixes UTC evening bucket on month boundaries). */
+export function slotsGroupedByStudioDate(
+  payload: unknown,
+  options?: { rangeStart?: string; rangeEnd?: string }
+): Record<string, string[]> {
+  let grouped = regroupSlotTimesByStudioDate(extractRawSlotMap(payload));
+  if (options?.rangeStart && options?.rangeEnd) {
+    grouped = filterSlotMapByStudioDateRange(
+      grouped,
+      options.rangeStart,
+      options.rangeEnd
+    );
+  }
+  return grouped;
+}
+
+/** Dates (YYYY-MM-DD) that have at least one open slot in a normalized slots payload. */
+export function datesWithOpenSlots(
+  payload: unknown,
+  options?: { notBefore?: string; rangeStart?: string; rangeEnd?: string }
+): string[] {
   const minDate = options?.notBefore ?? '';
+  const grouped = slotsGroupedByStudioDate(payload, {
+    rangeStart: options?.rangeStart,
+    rangeEnd: options?.rangeEnd,
+  });
 
-  return Object.entries(slots as Record<string, unknown>)
+  return Object.entries(grouped)
     .filter(([date, times]) => {
       if (minDate && date < minDate) return false;
-      return Array.isArray(times) && times.length > 0;
+      return times.length > 0;
     })
     .map(([date]) => date)
     .sort();
 }
 
-/** Parse Cal.com slots JSON (v1 shape or v2-normalized) into UTC ISO strings for the selected day. */
-export function parseCalSlotTimes(payload: unknown, date: string): string[] {
-  if (!payload || typeof payload !== 'object') return [];
+/** Parse Cal.com slots JSON into UTC ISO strings for the selected studio-local day. */
+export function parseCalSlotTimes(
+  payload: unknown,
+  date: string,
+  options?: { rangeStart?: string; rangeEnd?: string }
+): string[] {
+  const grouped = slotsGroupedByStudioDate(payload, options);
+  return grouped[date] ?? [];
+}
 
-  const root = payload as Record<string, unknown>;
-  const slots = root.slots;
-  if (!slots || typeof slots !== 'object') return [];
-
-  const daySlots = (slots as Record<string, unknown>)[date];
-  if (Array.isArray(daySlots)) {
-    return daySlots.filter((t): t is string => typeof t === 'string');
-  }
-
-  if (daySlots && typeof daySlots === 'object') {
-    const times = (daySlots as { time?: unknown }).time;
-    if (Array.isArray(times)) {
-      return times.filter((t): t is string => typeof t === 'string');
-    }
-  }
-
-  return [];
+export function isStudioDateInMonth(
+  date: string,
+  year: number,
+  month: number
+): boolean {
+  const [y, m] = date.split('-').map(Number);
+  return y === year && m === month;
 }
 
 /** Drop past slots and enforce minimum lead time on the selected studio day. */

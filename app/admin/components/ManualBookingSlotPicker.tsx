@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
 import {
-  datesWithOpenSlots,
   filterSlotsForBookingDay,
   formatSlotInStudioTime,
-  parseCalSlotTimes,
+  isStudioDateInMonth,
+  slotsGroupedByStudioDate,
   STUDIO_TIMEZONE,
   todayInStudio,
 } from './manual-booking-utils';
@@ -122,15 +122,16 @@ export default function ManualBookingSlotPicker({
           return;
         }
 
-        const rawOpenDates = datesWithOpenSlots(data, { notBefore: today });
+        const grouped = slotsGroupedByStudioDate(data, {
+          rangeStart: queryStart,
+          rangeEnd: rangeEnd,
+        });
+
         const slotsByDay: Record<string, string[]> = {};
 
-        for (const date of rawOpenDates) {
-          const filtered = filterSlotsForBookingDay(
-            parseCalSlotTimes(data, date),
-            date,
-            today
-          );
+        for (const [date, times] of Object.entries(grouped)) {
+          if (!isStudioDateInMonth(date, year, month)) continue;
+          const filtered = filterSlotsForBookingDay(times, date, today);
           if (filtered.length > 0) {
             slotsByDay[date] = filtered;
           }
@@ -165,7 +166,11 @@ export default function ManualBookingSlotPicker({
 
         mayAdvanceFromEmptyStart.current = false;
 
-        setSelectedDate(openDates[0]);
+        const defaultDate =
+          openDates.includes(today) && isStudioDateInMonth(today, year, month)
+            ? today
+            : openDates[0];
+        setSelectedDate(defaultDate);
       } catch (err) {
         setSelectedDate(null);
         setMonthError(

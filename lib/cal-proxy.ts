@@ -5,6 +5,11 @@
 import { NextResponse } from 'next/server';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import {
+  filterSlotMapByStudioDateRange,
+  regroupSlotTimesByStudioDate,
+  studioLocalDateKey,
+} from '@/lib/cal-slot-dates';
 import { getCalComApiKey } from '@/lib/cal-config';
 import { parseBookingStartForCal } from '@/lib/cal-timezone';
 
@@ -254,21 +259,34 @@ function normalizeDaySlots(
  * `{ slots: { "YYYY-MM-DD": ["…ISO…", …] } }` with only days that have times.
  */
 export function normalizeCalSlotsPayload(
-  payload: unknown
+  payload: unknown,
+  options?: { studioDateStart?: string; studioDateEnd?: string }
 ): { slots: Record<string, string[]> } {
   const slotsMap = extractSlotsMap(payload);
   if (!slotsMap) return { slots: {} };
 
-  const slots: Record<string, string[]> = {};
+  const byCalKey: Record<string, string[]> = {};
 
   for (const [dateKey, daySlots] of Object.entries(slotsMap)) {
     if (!ISO_DATE_RE.test(dateKey)) continue;
     const times = normalizeDaySlots(daySlots, dateKey);
-    if (times.length > 0) slots[dateKey] = times;
+    if (times.length > 0) byCalKey[dateKey] = times;
+  }
+
+  let slots = regroupSlotTimesByStudioDate(byCalKey);
+
+  if (options?.studioDateStart && options?.studioDateEnd) {
+    slots = filterSlotMapByStudioDateRange(
+      slots,
+      options.studioDateStart,
+      options.studioDateEnd
+    );
   }
 
   return { slots };
 }
+
+export { studioLocalDateKey };
 
 /**
  * Normalize Cal.com v2 slots payloads to the v1-style shape the admin modal expects.
@@ -277,6 +295,9 @@ export function normalizeCalSlotsForDate(
   payload: unknown,
   date: string
 ): { slots: Record<string, string[]> } {
-  const { slots } = normalizeCalSlotsPayload(payload);
+  const { slots } = normalizeCalSlotsPayload(payload, {
+    studioDateStart: date,
+    studioDateEnd: date,
+  });
   return { slots: { [date]: slots[date] ?? [] } };
 }

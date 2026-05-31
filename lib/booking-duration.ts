@@ -89,7 +89,9 @@ export function slotStartsFromFineGrid(
 
     if (sortedMs.length === 0) continue;
 
-    const stepMs = inferFineGridStepMs(sortedMs);
+    const inferredStepMs = inferFineGridStepMs(sortedMs);
+    const configuredStepMs = slotIntervalMins * 60_000;
+    const stepMs = Math.min(inferredStepMs, configuredStepMs);
     const stepMin = stepMs / 60_000;
     const requiredSteps = Math.max(
       1,
