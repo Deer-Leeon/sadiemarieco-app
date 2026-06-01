@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Check, FileText, Loader2 } from 'lucide-react';
 
-import type { ConsentApiResponse, ConsentFormData } from '@/lib/consent';
+import type { ConsentApiResponse } from '@/lib/consent';
 import {
   isValidClientUuid,
   resolveConsentPdfUrl,
@@ -12,6 +12,7 @@ import {
 
 import {
   allConsentStatementsAccepted,
+  asConsentFormData,
   asConsentStatements,
   asMedicalChecklist,
   asYesNo,
@@ -20,9 +21,9 @@ import {
   CONSENT_STATEMENTS,
   MEDICAL_CONDITION_CHECKLIST,
   validateConsentForm,
-  MEDICAL_HISTORY_QUESTIONS,
   PERSONAL_INFO_QUESTIONS,
   SERVICE_HISTORY_QUESTIONS,
+  type ConsentFormData,
   type ConsentStatementKey,
   type MedicalConditionChecklistKey,
   type YesNo,
@@ -71,7 +72,7 @@ function SubmittedView({ data }: { data: ConsentApiResponse }) {
     );
   }
 
-  const form = data.intake?.form_data ?? {};
+  const form = asConsentFormData(data.intake?.form_data ?? {});
   const submittedAt = data.intake?.submitted_at;
   const signature = data.intake?.signature_image ?? null;
   const checklist = asMedicalChecklist(form.medical_conditions_checklist);
@@ -79,20 +80,20 @@ function SubmittedView({ data }: { data: ConsentApiResponse }) {
   const statements = asConsentStatements(form.consent_statements);
 
   const textFields: [string, string][] = [
-    ['Full name', String(form.full_name ?? '')],
-    ['Date of birth', String(form.dob ?? '')],
-    ['Phone', String(form.phone ?? '')],
-    ['Address', String(form.address ?? '')],
-    ['City', String(form.city ?? '')],
-    ['State', String(form.state ?? '')],
-    ['Zip', String(form.zip ?? '')],
-    ['Email', String(form.email ?? '')],
-    ['Occupation', String(form.occupation ?? '') || '—'],
-    ['How did you hear about us?', String(form.referral_source ?? '') || '—'],
-    ['Emergency contact', String(form.emergency_contact_name ?? '')],
-    ['Emergency phone', String(form.emergency_contact_phone ?? '')],
-    ['Printed name', String(form.agreement_print_name ?? '')],
-    ['Date signed', String(form.agreement_date ?? '')],
+    ['Full name', form.full_name],
+    ['Date of birth', form.dob],
+    ['Phone', form.phone],
+    ['Address', form.address],
+    ['City', form.city],
+    ['State', form.state],
+    ['Zip', form.zip],
+    ['Email', form.email],
+    ['Occupation', form.occupation || '—'],
+    ['How did you hear about us?', form.referral_source || '—'],
+    ['Emergency contact', form.emergency_contact_name],
+    ['Emergency phone', form.emergency_contact_phone],
+    ['Printed name', form.agreement_print_name],
+    ['Date signed', form.agreement_date],
   ];
 
   return (
@@ -149,11 +150,11 @@ function SubmittedView({ data }: { data: ConsentApiResponse }) {
               </div>
             ))}
           </dl>
-          {String(form.service_adverse_reaction_explain ?? '').trim() && (
+          {form.service_adverse_reaction_explain.trim() && (
             <div className="mt-3 border-t border-stone-100 pt-3">
               <p className="text-xs font-medium text-stone-500">Adverse reaction details</p>
               <p className="mt-1 whitespace-pre-wrap text-sm text-stone-900">
-                {String(form.service_adverse_reaction_explain)}
+                {form.service_adverse_reaction_explain}
               </p>
             </div>
           )}
@@ -165,26 +166,6 @@ function SubmittedView({ data }: { data: ConsentApiResponse }) {
         <SectionBody>
           <dl className="space-y-2 text-sm">
             {PERSONAL_INFO_QUESTIONS.map((q) => (
-              <div key={q.key} className="flex justify-between gap-4">
-                <dt className="text-stone-600">{q.label}</dt>
-                <dd className="font-medium text-stone-900">{formatYesNo(form[q.key])}</dd>
-              </div>
-            ))}
-          </dl>
-          {asYesNo(form.pregnant_or_may_be) === 'yes' && (
-            <p className="mt-2 text-sm text-stone-800">
-              <span className="font-medium">Weeks along:</span>{' '}
-              {String(form.pregnancy_weeks || '—')}
-            </p>
-          )}
-        </SectionBody>
-      </section>
-
-      <section className={sectionClass}>
-        <SectionHeader title="Medical history" />
-        <SectionBody>
-          <dl className="space-y-3 text-sm">
-            {MEDICAL_HISTORY_QUESTIONS.map((q) => (
               <div key={q.key}>
                 <div className="flex justify-between gap-4">
                   <dt className="text-stone-600">{q.label}</dt>
@@ -200,29 +181,32 @@ function SubmittedView({ data }: { data: ConsentApiResponse }) {
               </div>
             ))}
           </dl>
-          {flagged.length > 0 && (
-            <div className="mt-4 border-t border-stone-100 pt-4">
-              <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
-                Medical conditions checked
-              </p>
-              <ul className="mt-2 list-inside list-disc text-sm text-stone-800">
-                {flagged.map((c) => (
-                  <li key={c.key}>{c.label}</li>
-                ))}
-              </ul>
-              {checklist.other && String(form.medical_conditions_other_text ?? '').trim() && (
-                <p className="mt-2 text-sm text-stone-700">
-                  <span className="font-medium">Other:</span>{' '}
-                  {String(form.medical_conditions_other_text)}
-                </p>
-              )}
-            </div>
+        </SectionBody>
+      </section>
+
+      <section className={sectionClass}>
+        <SectionHeader title="Medical conditions" />
+        <SectionBody>
+          {flagged.length > 0 ? (
+            <ul className="list-inside list-disc text-sm text-stone-800">
+              {flagged.map((c) => (
+                <li key={c.key}>{c.label}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-stone-600">None checked.</p>
           )}
-          {String(form.additional_notes ?? '').trim() && (
+          {checklist.other && form.medical_conditions_other_text.trim() && (
+            <p className="mt-2 text-sm text-stone-700">
+              <span className="font-medium">Other:</span>{' '}
+              {form.medical_conditions_other_text}
+            </p>
+          )}
+          {form.additional_notes.trim() && (
             <div className="mt-4 border-t border-stone-100 pt-4">
               <p className="text-xs font-medium text-stone-500">Additional notes</p>
               <p className="mt-1 whitespace-pre-wrap text-sm text-stone-900">
-                {String(form.additional_notes)}
+                {form.additional_notes}
               </p>
             </div>
           )}
@@ -298,11 +282,13 @@ function EditableForm({
   const validationError = validateConsentForm(form);
   const canSubmit = !validationError && signatureTouched && statementsComplete;
 
-  const setField = (key: string, value: unknown) => {
+  const setField = <K extends keyof ConsentFormData>(key: K, value: ConsentFormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const setYesNo = (key: string, value: YesNo) => setField(key, value);
+  const setYesNo = (key: keyof ConsentFormData, value: YesNo) => {
+    setField(key, value as ConsentFormData[typeof key]);
+  };
 
   const setChecklistItem = (key: MedicalConditionChecklistKey, checked: boolean) => {
     setForm((prev) => ({
@@ -571,27 +557,6 @@ function EditableForm({
             onChange={(v) => setYesNo('wears_contact_lenses', v)}
           />
           <YesNoQuestion
-            name="irritation"
-            required
-            label="Do you frequently experience eye irritation or itching?"
-            value={asYesNo(form.eye_irritation_itching)}
-            onChange={(v) => setYesNo('eye_irritation_itching', v)}
-          />
-          <YesNoQuestion
-            name="infections"
-            required
-            label="Do you have a history of recurring eye or tear duct infections?"
-            value={asYesNo(form.recurring_eye_infections)}
-            onChange={(v) => setYesNo('recurring_eye_infections', v)}
-          />
-          <YesNoQuestion
-            name="eyedrops"
-            required
-            label="Do you currently use eye drops?"
-            value={asYesNo(form.currently_eye_drops)}
-            onChange={(v) => setYesNo('currently_eye_drops', v)}
-          />
-          <YesNoQuestion
             name="pregnant"
             required
             label="Are you pregnant or believe you may be pregnant?"
@@ -604,7 +569,7 @@ function EditableForm({
                 <input
                   type="text"
                   required
-                  value={String(form.pregnancy_weeks ?? '')}
+                  value={form.pregnancy_weeks}
                   onChange={(e) => setField('pregnancy_weeks', e.target.value)}
                   className={inputClass}
                   placeholder="e.g. 12 weeks"
@@ -612,12 +577,6 @@ function EditableForm({
               </label>
             )}
           </YesNoQuestion>
-        </SectionBody>
-      </section>
-
-      <section className={sectionClass}>
-        <SectionHeader title="Medical history" />
-        <SectionBody>
           <YesNoQuestion
             name="eye_injury"
             required
@@ -631,8 +590,10 @@ function EditableForm({
                 <textarea
                   required
                   rows={2}
-                  value={String(form.eye_injury_or_condition_explain ?? '')}
-                  onChange={(e) => setField('eye_injury_or_condition_explain', e.target.value)}
+                  value={form.eye_injury_or_condition_explain}
+                  onChange={(e) =>
+                    setField('eye_injury_or_condition_explain', e.target.value)
+                  }
                   className={`${inputClass} resize-y`}
                 />
               </label>
@@ -651,30 +612,8 @@ function EditableForm({
                 <textarea
                   required
                   rows={2}
-                  value={String(form.known_allergies_explain ?? '')}
+                  value={form.known_allergies_explain}
                   onChange={(e) => setField('known_allergies_explain', e.target.value)}
-                  className={`${inputClass} resize-y`}
-                />
-              </label>
-            )}
-          </YesNoQuestion>
-          <YesNoQuestion
-            name="meds"
-            required
-            label="Are you taking any medications or supplements?"
-            value={asYesNo(form.medications_supplements)}
-            onChange={(v) => setYesNo('medications_supplements', v)}
-          >
-            {asYesNo(form.medications_supplements) === 'yes' && (
-              <label className="block">
-                <FieldLabel required>If yes, please explain:</FieldLabel>
-                <textarea
-                  required
-                  rows={2}
-                  value={String(form.medications_supplements_explain ?? '')}
-                  onChange={(e) =>
-                    setField('medications_supplements_explain', e.target.value)
-                  }
                   className={`${inputClass} resize-y`}
                 />
               </label>
@@ -694,27 +633,12 @@ function EditableForm({
             value={asYesNo(form.uses_retinol_tretinoin)}
             onChange={(v) => setYesNo('uses_retinol_tretinoin', v)}
           />
-          <YesNoQuestion
-            name="chemo"
-            required
-            label="Have you recently undergone chemotherapy treatment?"
-            value={asYesNo(form.chemotherapy_recent)}
-            onChange={(v) => setYesNo('chemotherapy_recent', v)}
-          >
-            {asYesNo(form.chemotherapy_recent) === 'yes' && (
-              <label className="block">
-                <FieldLabel required>If yes, please explain:</FieldLabel>
-                <textarea
-                  required
-                  rows={2}
-                  value={String(form.chemotherapy_recent_explain ?? '')}
-                  onChange={(e) => setField('chemotherapy_recent_explain', e.target.value)}
-                  className={`${inputClass} resize-y`}
-                />
-              </label>
-            )}
-          </YesNoQuestion>
+        </SectionBody>
+      </section>
 
+      <section className={sectionClass}>
+        <SectionHeader title="Medical conditions" />
+        <SectionBody>
           <div className="rounded-md border border-stone-200 bg-stone-50/50">
             <div className="border-b border-stone-200 bg-stone-100/90 px-3 py-2 text-center">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">
@@ -743,7 +667,7 @@ function EditableForm({
                 <input
                   type="text"
                   required
-                  value={String(form.medical_conditions_other_text ?? '')}
+                  value={form.medical_conditions_other_text}
                   onChange={(e) => setField('medical_conditions_other_text', e.target.value)}
                   className={inputClass}
                 />
@@ -755,7 +679,7 @@ function EditableForm({
             <FieldLabel>Any additional notes</FieldLabel>
             <textarea
               rows={3}
-              value={String(form.additional_notes ?? '')}
+              value={form.additional_notes}
               onChange={(e) => setField('additional_notes', e.target.value)}
               className={`${inputClass} resize-y`}
             />

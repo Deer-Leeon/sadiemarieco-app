@@ -9,8 +9,9 @@ export function isValidClientUuid(value: string): boolean {
   return CLIENT_UUID_RE.test(value.trim());
 }
 
-/** Flexible JSON payload for intake answers (expand in the form page). */
-export type ConsentFormData = Record<string, unknown>;
+import type { ConsentFormData } from '@/app/consent/[clientId]/consent-form-config';
+
+export type { ConsentFormData };
 
 export interface ClientIntakeForm {
   id: string;

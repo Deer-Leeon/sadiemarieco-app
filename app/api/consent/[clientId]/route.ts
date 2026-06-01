@@ -12,6 +12,7 @@ import {
   type ConsentApiResponse,
   type ConsentFormData,
 } from '@/lib/consent';
+import { asConsentFormData } from '@/app/consent/[clientId]/consent-form-config';
 import { stampConsentPDF } from '@/lib/pdf-stamper';
 
 export const runtime = 'nodejs';
@@ -46,10 +47,7 @@ function rowToIntake(row: IntakeRow): ClientIntakeForm {
   return {
     id: row.id,
     client_id: row.client_id,
-    form_data:
-      row.form_data && typeof row.form_data === 'object' && !Array.isArray(row.form_data)
-        ? row.form_data
-        : {},
+    form_data: asConsentFormData(row.form_data),
     signature_image: row.signature_image,
     stamped_pdf_url: row.stamped_pdf_url ?? null,
     submitted_at:
@@ -98,12 +96,7 @@ async function ensureStampedPdf(
     return { intake, stampError: null };
   }
 
-  const formData =
-    intake.form_data &&
-    typeof intake.form_data === 'object' &&
-    !Array.isArray(intake.form_data)
-      ? intake.form_data
-      : {};
+  const formData = asConsentFormData(intake.form_data);
 
   try {
     const stampedPdfUrl = await stampConsentPDF(
@@ -166,9 +159,9 @@ function parseFormData(body: unknown): ConsentFormData | null {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
   const record = body as { form_data?: unknown };
   const data = record.form_data;
-  if (data === undefined || data === null) return {};
+  if (data === undefined || data === null) return null;
   if (typeof data !== 'object' || Array.isArray(data)) return null;
-  return data as ConsentFormData;
+  return asConsentFormData(data);
 }
 
 function parseSignature(body: unknown): string | null | undefined {
