@@ -2,16 +2,16 @@
  * Internal consent / intake form — shared types and URL helpers.
  */
 
+import type { ConsentFormData } from '@/app/consent/[clientId]/consent-form-config';
+
+export type { ConsentFormData };
+
 export const CLIENT_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isValidClientUuid(value: string): boolean {
   return CLIENT_UUID_RE.test(value.trim());
 }
-
-import type { ConsentFormData } from '@/app/consent/[clientId]/consent-form-config';
-
-export type { ConsentFormData };
 
 export interface ClientIntakeForm {
   id: string;
@@ -42,6 +42,17 @@ export interface ConsentApiResponse {
 
 export function consentFormPath(clientId: string): string {
   return `/consent/${clientId.trim().toLowerCase()}`;
+}
+
+/** Stable route clients can revisit to open their signed consent PDF. */
+export function consentDocumentPath(clientId: string): string {
+  return `${consentFormPath(clientId)}/document`;
+}
+
+export function consentDocumentAbsoluteUrl(clientId: string): string | null {
+  const id = clientId.trim().toLowerCase();
+  if (!isValidClientUuid(id)) return null;
+  return `${getPublicSiteBaseUrl()}${consentDocumentPath(id)}`;
 }
 
 /** True when `consent_form_url` / `stamped_pdf_url` is a Vercel Blob (or other) PDF URL. */

@@ -55,7 +55,12 @@ import {
 
 import ClientNotesHistoryModal from './components/ClientNotesHistoryModal';
 
-import { consentFormPath, isStampedConsentPdfUrl } from '@/lib/consent';
+import {
+  consentDocumentAbsoluteUrl,
+  consentDocumentPath,
+  consentFormPath,
+  isStampedConsentPdfUrl,
+} from '@/lib/consent';
 
 import type {
   Appointment,
@@ -860,31 +865,60 @@ function ConsentFormActionBox({ client }: { client: Client }) {
   const stampedPdfUrl = isStampedConsentPdfUrl(client.consent_form_url)
     ? client.consent_form_url!.trim()
     : null;
+  const permanentLink =
+    consentDocumentAbsoluteUrl(client.id) ?? consentDocumentPath(client.id);
   const href = stampedPdfUrl ?? consentFormPath(client.id);
 
   if (client.has_consented) {
     return (
-      <ActionBox
-        icon={<ClipboardCheck className="h-3 w-3 shrink-0 text-emerald-700/80" />}
-        label="Consent Form"
-        helper={
-          stampedPdfUrl
-            ? 'Open the official stamped PDF.'
-            : 'Signed intake on file (read-only summary).'
-        }
-        href={href}
-        ariaLabel={
-          stampedPdfUrl ? 'View official signed consent PDF' : 'View signed consent form'
-        }
-        rightAccessory={
-          <>
-            <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-stone-600">
-              {stampedPdfUrl ? 'View signed PDF' : 'View summary'}
-            </span>
-            <Check className="h-4 w-4 text-emerald-600" aria-hidden />
-          </>
-        }
-      />
+      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+        <ActionBox
+          icon={<ClipboardCheck className="h-3 w-3 shrink-0 text-emerald-700/80" />}
+          label="Consent Form"
+          helper={
+            stampedPdfUrl
+              ? 'Open the official stamped PDF.'
+              : 'Signed intake on file (read-only summary).'
+          }
+          href={href}
+          ariaLabel={
+            stampedPdfUrl ? 'View official signed consent PDF' : 'View signed consent form'
+          }
+          rightAccessory={
+            <>
+              <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-stone-600">
+                {stampedPdfUrl ? 'View signed PDF' : 'View summary'}
+              </span>
+              <Check className="h-4 w-4 text-emerald-600" aria-hidden />
+            </>
+          }
+        />
+        <div className="border-t border-stone-100 px-4 py-3">
+          <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
+            Permanent client link
+          </p>
+          <p className="mt-1 text-xs text-stone-600">
+            Clients can reopen their signed form anytime at this URL.
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <a
+              href={consentDocumentPath(client.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="min-w-0 flex-1 truncate font-mono text-[11px] text-stone-800 underline underline-offset-2"
+            >
+              {permanentLink}
+            </a>
+            <button
+              type="button"
+              onClick={() => void navigator.clipboard.writeText(permanentLink)}
+              className="shrink-0 rounded-md border border-stone-200 bg-stone-50 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-stone-700 hover:bg-stone-100"
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 

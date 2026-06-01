@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Check, FileText, Loader2 } from 'lucide-react';
 
 import type { ConsentApiResponse } from '@/lib/consent';
 import {
+  consentDocumentPath,
   isValidClientUuid,
   resolveConsentPdfUrl,
 } from '@/lib/consent';
@@ -38,35 +39,35 @@ import {
   sectionClass,
   YesNoQuestion,
 } from './ConsentFormFields';
-import SignaturePad, { type SignaturePadHandle } from './SignaturePad';
+import ConsentPreviewStep from './ConsentPreviewStep';
 
 function SubmittedView({ data }: { data: ConsentApiResponse }) {
+  const documentPage = consentDocumentPath(data.client.id);
   const pdfUrl = resolveConsentPdfUrl(
     data.intake,
     data.client.consent_form_url
   );
 
   useEffect(() => {
-    if (!pdfUrl) return;
-    window.location.replace(pdfUrl);
-  }, [pdfUrl]);
+    if (pdfUrl) {
+      window.location.replace(documentPage);
+    }
+  }, [pdfUrl, documentPage]);
 
   if (pdfUrl) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
         <Loader2 className="h-8 w-8 animate-spin text-stone-500" aria-hidden />
-        <p className="mt-4 font-serif text-xl text-stone-900">Opening your signed PDF…</p>
+        <p className="mt-4 font-serif text-xl text-stone-900">Opening your signed document…</p>
         <p className="mt-2 text-sm text-stone-600">
-          Your official consent document with all checkmarks is loading.
+          You can view and download your consent anytime from this page.
         </p>
         <a
-          href={pdfUrl}
-          target="_blank"
-          rel="noopener noreferrer"
+          href={documentPage}
           className="mt-6 inline-flex items-center justify-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
         >
           <FileText className="h-4 w-4" aria-hidden />
-          Open signed PDF
+          View signed document
         </a>
       </div>
     );
@@ -271,16 +272,18 @@ function EditableForm({
   onSubmitted: (data: ConsentApiResponse) => void;
 }) {
   const [form, setForm] = useState<ConsentFormData>(() => buildInitialForm(initial.client));
+  const [step, setStep] = useState<'filling' | 'preview'>('filling');
+  const [previewPdf, setPreviewPdf] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [signatureData, setSignatureData] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [signatureTouched, setSignatureTouched] = useState(false);
-  const signatureRef = useRef<SignaturePadHandle>(null);
 
   const checklist = asMedicalChecklist(form.medical_conditions_checklist);
   const statements = asConsentStatements(form.consent_statements);
   const statementsComplete = allConsentStatementsAccepted(statements);
   const validationError = validateConsentForm(form);
-  const canSubmit = !validationError && signatureTouched && statementsComplete;
+  const canReview = !validationError && statementsComplete;
 
   const setField = <K extends keyof ConsentFormData>(key: K, value: ConsentFormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -310,31 +313,67 @@ function EditableForm({
     }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const payloadForm = (): ConsentFormData => ({
+    ...form,
+    agreement_date: form.agreement_date || new Date().toISOString().slice(0, 10),
+  });
+
+  const handleReviewDocument = async (e: React.FormEvent) => {
     e.preventDefault();
     const err = validateConsentForm(form);
     if (err) {
       setError(err);
       return;
     }
-    const signatureData = signatureRef.current?.toDataURL();
+
+    setPreviewLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/consent/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ form_data: payloadForm() }),
+      });
+      const data = (await res.json()) as {
+        pdf_base64?: string;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.message || data.error || `Preview failed (${res.status})`);
+      }
+      if (!data.pdf_base64) {
+        throw new Error('Preview PDF was not returned.');
+      }
+      setPreviewPdf(data.pdf_base64);
+      setStep('preview');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (previewErr) {
+      setError(previewErr instanceof Error ? previewErr.message : 'Preview failed');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleSubmitFinal = async () => {
     if (!signatureData) {
-      setError('Please draw or type your signature before submitting.');
+      setError('Please add your signature before submitting.');
+      return;
+    }
+    const err = validateConsentForm(form);
+    if (err) {
+      setError(err);
       return;
     }
 
     setSubmitting(true);
     setError(null);
     try {
-      const payloadForm = {
-        ...form,
-        agreement_date: String(form.agreement_date || new Date().toISOString().slice(0, 10)),
-      };
       const res = await fetch(`/api/consent/${clientId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          form_data: payloadForm,
+          form_data: payloadForm(),
           signature_image: signatureData,
         }),
       });
@@ -346,17 +385,7 @@ function EditableForm({
         throw new Error(payload.message || payload.error || `Submit failed (${res.status})`);
       }
 
-      const pdfUrl = resolveConsentPdfUrl(payload.intake, payload.client.consent_form_url);
-      if (pdfUrl) {
-        window.location.replace(pdfUrl);
-        return;
-      }
-
-      onSubmitted({
-        client: payload.client,
-        intake: payload.intake,
-        submitted: payload.submitted ?? true,
-      });
+      window.location.replace(consentDocumentPath(clientId));
     } catch (submitErr) {
       setError(submitErr instanceof Error ? submitErr.message : 'Submit failed');
     } finally {
@@ -368,8 +397,26 @@ function EditableForm({
     asYesNo(form.had_lash_lift_tint) === 'yes' ||
     asYesNo(form.had_brow_lamination_tint) === 'yes';
 
+  if (step === 'preview' && previewPdf) {
+    return (
+      <ConsentPreviewStep
+        previewPdf={previewPdf}
+        signatureData={signatureData}
+        submitting={submitting}
+        error={error}
+        onBack={() => {
+          setStep('filling');
+          setError(null);
+        }}
+        onSignatureSaved={setSignatureData}
+        onClearSignature={() => setSignatureData(null)}
+        onSubmitFinal={() => void handleSubmitFinal()}
+      />
+    );
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleReviewDocument} className="space-y-6">
       <header className="text-center">
         <p className="font-serif text-lg text-stone-800">Sadie Marie</p>
         <p className="mt-1 text-[10px] uppercase tracking-[0.2em] text-stone-500">
@@ -739,25 +786,9 @@ function EditableForm({
               />
             </label>
           </div>
-          <div>
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <FieldLabel required>Signature</FieldLabel>
-              <button
-                type="button"
-                onClick={() => {
-                  signatureRef.current?.clear();
-                  setSignatureTouched(false);
-                }}
-                className="text-xs font-medium text-stone-600 underline underline-offset-2 hover:text-stone-900"
-              >
-                Clear signature
-              </button>
-            </div>
-            <SignaturePad
-              ref={signatureRef}
-              onStroke={() => setSignatureTouched(true)}
-            />
-          </div>
+          <p className="text-sm text-stone-600">
+            You will review a PDF of this form and sign on the next step before submitting.
+          </p>
         </SectionBody>
       </section>
 
@@ -767,11 +798,10 @@ function EditableForm({
         </p>
       )}
 
-      {!canSubmit && !submitting && (
+      {!canReview && !previewLoading && (
         <p className="text-center text-xs text-stone-500">
-          Complete all required fields, check every consent statement, and add your
-          signature above to submit.
-          {validationError && !signatureTouched && (
+          Complete all required fields and check every consent statement to continue.
+          {validationError && (
             <span className="mt-1 block text-stone-400">{validationError}</span>
           )}
         </p>
@@ -779,16 +809,16 @@ function EditableForm({
 
       <button
         type="submit"
-        disabled={submitting || !canSubmit}
+        disabled={previewLoading || !canReview}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-stone-900 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {submitting ? (
+        {previewLoading ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            Submitting…
+            Building preview…
           </>
         ) : (
-          'Submit form'
+          'Review document'
         )}
       </button>
 
@@ -835,7 +865,7 @@ export default function ConsentFormClient({ clientId }: { clientId: string }) {
 
   return (
     <main className="min-h-screen bg-[#FAF9F6] px-4 py-10 sm:px-6">
-      <div className="mx-auto max-w-2xl">
+      <div className="mx-auto max-w-4xl">
         {loading && (
           <div className="flex flex-col items-center justify-center py-24 text-stone-500">
             <Loader2 className="h-8 w-8 animate-spin" aria-hidden />

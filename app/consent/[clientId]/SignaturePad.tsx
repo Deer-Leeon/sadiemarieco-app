@@ -10,6 +10,8 @@ import {
   useState,
 } from 'react';
 
+import { trimSignatureCanvasToDataUrl } from '@/lib/signature-trim';
+
 const signatureScript = Great_Vibes({
   weight: '400',
   subsets: ['latin'],
@@ -227,7 +229,7 @@ const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
           if (!hasContentRef.current) return null;
           const canvas = canvasRef.current;
           if (!canvas) return null;
-          return canvas.toDataURL('image/png');
+          return trimSignatureCanvasToDataUrl(canvas);
         },
       }),
       [clear]

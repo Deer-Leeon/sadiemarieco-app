@@ -25,13 +25,14 @@ import {
 } from 'pdf-lib';
 import { sql } from '@vercel/postgres';
 
+import { asConsentFormData } from '@/app/consent/[clientId]/consent-form-config';
 import type { ConsentFormData } from '@/lib/consent';
+import {
+  fitImageDimensions,
+  placeImageInBox,
+  signaturePlacementBox,
+} from '@/lib/signature-fit';
 import { STUDIO_SETTINGS_ROW_ID } from '@/lib/studio-settings';
-
-const SIGNATURE_X = 70;
-const SIGNATURE_Y = 310;
-const SIGNATURE_WIDTH = 200;
-const SIGNATURE_HEIGHT = 50;
 
 /** Stamped field text + checkmarks (brand navy). */
 const STAMP_TEXT_COLOR = rgb(13 / 255, 27 / 255, 42 / 255);
@@ -438,6 +439,31 @@ function findPageForWidget(
   return undefined;
 }
 
+/**
+ * Place the drawn signature on the dotted line. Uses the same box as the
+ * canvas preview (`signaturePlacementBox`) so the stamped PDF matches review.
+ */
+function resolveSignaturePlacement(
+  pdfDoc: PDFDocument,
+  form: PDFForm
+): { page: PDFPage; x: number; y: number; width: number; height: number } {
+  const pages = pdfDoc.getPages();
+  const lastPage = pages[pages.length - 1]!;
+  const box = signaturePlacementBox();
+
+  try {
+    const dateField = form.getTextField('signature_date');
+    for (const widget of dateField.acroField.getWidgets()) {
+      const page = findPageForWidget(pdfDoc, widget) ?? lastPage;
+      return { page, ...box };
+    }
+  } catch {
+    // Field missing on older templates — use measured fallback.
+  }
+
+  return { page: lastPage, ...box };
+}
+
 /** Snapshot values + positions before flatten removes AcroForm fields. */
 function collectTextFieldPlacements(
   pdfDoc: PDFDocument,
@@ -547,6 +573,64 @@ async function loadTemplateUrl(): Promise<string> {
   return url;
 }
 
+function logSkippedFields(skippedFields: string[]): void {
+  if (skippedFields.length === 0) return;
+  console.warn(
+    `[pdf-stamper] ${skippedFields.length} AcroForm field(s) missing from template — re-upload a complete Sejda PDF with all field names. Run: npx tsx --env-file=.env.local scripts/list-consent-pdf-fields.ts`,
+    skippedFields.join(', ')
+  );
+}
+
+/** Load studio template and apply intake field mapping (no signature, no flatten). */
+async function loadFilledConsentPdf(
+  formData: ConsentFormData
+): Promise<PDFDocument> {
+  const templateUrl = await loadTemplateUrl();
+  const buffer = await fetchTemplatePdfBuffer(templateUrl);
+  const pdfDoc = await PDFDocument.load(buffer);
+  const form = pdfDoc.getForm();
+  const skippedFields = applyFormDataToPdf(form, formData);
+  logSkippedFields(skippedFields);
+  return pdfDoc;
+}
+
+/** Interactive AcroForm preview — checkmarks visible, flatten intentionally skipped. */
+async function preparePreviewFormAppearance(
+  pdfDoc: PDFDocument,
+  form: PDFForm
+): Promise<void> {
+  refreshCheckboxAppearances(form);
+  try {
+    const font = await embedStampFont(pdfDoc);
+    for (const field of form.getFields()) {
+      if (field instanceof PDFTextField) {
+        field.updateAppearances(font);
+      }
+    }
+  } catch (err) {
+    console.warn(
+      '[pdf-stamper] preview text appearance update failed:',
+      errorMessage(err)
+    );
+  }
+  // form.flatten() intentionally not called — preview stays an editable AcroForm PDF.
+}
+
+/**
+ * Build a read-only, flattened preview PDF (no signature, no Blob upload).
+ * Flattening removes editable fields so the in-app viewer cannot be filled in.
+ */
+export async function generateUnsignedPreviewPDF(
+  formData: unknown
+): Promise<string> {
+  const normalized = asConsentFormData(formData);
+  const pdfDoc = await loadFilledConsentPdf(normalized);
+  const form = pdfDoc.getForm();
+  await finalizeFormAppearance(pdfDoc, form);
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes).toString('base64');
+}
+
 /**
  * Load the studio template, stamp fields + signature, upload to Blob.
  */
@@ -555,30 +639,20 @@ export async function stampConsentPDF(
   formData: ConsentFormData,
   signatureBase64: string
 ): Promise<string> {
-  const templateUrl = await loadTemplateUrl();
-  const buffer = await fetchTemplatePdfBuffer(templateUrl);
-
-  const pdfDoc = await PDFDocument.load(buffer);
+  const pdfDoc = await loadFilledConsentPdf(formData);
   const form = pdfDoc.getForm();
-
-  const skippedFields = applyFormDataToPdf(form, formData);
-  if (skippedFields.length > 0) {
-    console.warn(
-      `[pdf-stamper] ${skippedFields.length} AcroForm field(s) missing from template — re-upload a complete Sejda PDF with all field names. Run: npx tsx --env-file=.env.local scripts/list-consent-pdf-fields.ts`,
-      skippedFields.join(', ')
-    );
-  }
 
   const signatureBytes = parseSignaturePngBytes(signatureBase64);
   const signatureImage = await pdfDoc.embedPng(signatureBytes);
-  const pages = pdfDoc.getPages();
-  const lastPage = pages[pages.length - 1];
-  lastPage.drawImage(signatureImage, {
-    x: SIGNATURE_X,
-    y: SIGNATURE_Y,
-    width: SIGNATURE_WIDTH,
-    height: SIGNATURE_HEIGHT,
-  });
+  const placement = resolveSignaturePlacement(pdfDoc, form);
+  const fitted = fitImageDimensions(
+    signatureImage.width,
+    signatureImage.height,
+    placement.width,
+    placement.height
+  );
+  const dest = placeImageInBox(placement, fitted, { origin: 'bottom-left' });
+  placement.page.drawImage(signatureImage, dest);
 
   await finalizeFormAppearance(pdfDoc, form);
 
