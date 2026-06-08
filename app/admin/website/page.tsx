@@ -53,41 +53,33 @@ const KNOWN_SLOT_IDS = [
   'portfolio_5',
 ] as const;
 
+/** Matches `public/css/styles.css` `--nav-block` (fixed nav height). */
+const LIVE_NAV_BLOCK_PX = 88;
+
 /**
  * Subtle "hidden by navbar" indicator for the homepage hero preview.
  *
- * The live site's fixed navbar is 95% opaque navy and sits over the
- * top of the 100vh hero image — anything an editor places there is
- * effectively invisible on the live site. Without a hint here, the
- * editor sees the full image in the uploader and can pick a photo
- * whose key subject lands in that masked zone.
+ * Desktop live layout: the hero image column is half the viewport wide
+ * with a 4:5 aspect ratio, so its rendered height is `62.5vw`. The
+ * fixed nav (`--nav-block` = 88px) sits on top of that column from
+ * y=0 — anything in the top `88px / 62.5vw` of the image is covered.
  *
- * Height ratio — 6%:
+ * We express that as a % of this 4:5 preview box (same aspect as the
+ * live slot) so the mask scales with viewport the same way the public
+ * site does. On mobile the image stacks below the text and is not
+ * under the nav, so the mask is desktop-only (`md:`).
  *
- *   The live nav is roughly 60–80px tall (60px scrolled, 80px at
- *   rest) over a 100vh hero. On the typical desktop viewport heights
- *   we design for (≈900–1080px) that lands at 6–8%. We bias to the
- *   lower end here so the mask never claims more vertical territory
- *   than the actual navbar consumes — editors found 8% read as the
- *   admin over-stating the hidden zone vs. the public site.
- *
- * Why this colour (#1E3A8A) and not the brand `--navy` family:
- *
- *   The brand navy `#0D1B2A` and navy-light `#2A4460` are dark AND
- *   low-chroma blues. At <40% alpha, the warm photo tones (skin,
- *   hair, fabric) overwhelm what little chroma they carry and the
- *   band reads as plain grey. #1E3A8A (Tailwind blue-900) is in the
- *   same dark-blue family but carries roughly 2× the chroma. At 30%
- *   alpha it has enough hue dominance to override warm pixels
- *   underneath and read as unambiguously *blue* without darkening
- *   the image meaningfully. This is a deliberate departure from the
- *   brand token because the token's purpose here is editorial
- *   communication ("this is the navbar zone"), and that signal must
- *   survive low alpha.
+ * Colour: #1E3A8A @ 30% — see prior comment in git history for why
+ * we don't use brand `--navy` at low alpha (reads grey on warm photos).
  */
 function HeroNavMask() {
   return (
-    <div className="absolute inset-x-0 top-0 h-[6%] bg-[#1E3A8A]/30" />
+    <div
+      className="absolute inset-x-0 top-0 hidden bg-[#1E3A8A]/30 md:block"
+      style={{
+        height: `calc(${LIVE_NAV_BLOCK_PX}px / (62.5vw) * 100%)`,
+      }}
+    />
   );
 }
 
