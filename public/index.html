@@ -8,10 +8,16 @@
   <title>Sadie Marie — Luxury Beauty Studio</title>
 
   <!-- INJECT_LCP_HINTS -->
-  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    /* Hold the full page until the hero photo is decoded — navy matches the image slot. */
+    html { background-color: #0D1B2A; }
+    html:not(.hero-ready) body { visibility: hidden; }
+  </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@200;300;400&display=swap" rel="stylesheet">
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&amp;family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&amp;family=DM+Sans:wght@200;300;400&amp;display=block">
+  <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@200;300;400&display=block" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 
@@ -43,6 +49,7 @@
     <img data-image-id="home_hero" src="assets/images/hero1.jpeg" alt="Luxury skincare" width="1200" height="1500" sizes="(max-width: 860px) 100vw, 50vw" fetchpriority="high" decoding="async">
   </div>
 </section>
+<script src="js/hero-gate.js"></script>
 
 <div class="marquee-strip" aria-hidden="true">
   <div class="marquee-track">
