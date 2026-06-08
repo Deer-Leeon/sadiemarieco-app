@@ -17,6 +17,9 @@
   --sans: 'DM Sans', sans-serif;
   /* Fixed nav block — used to size sticky about copy on desktop */
   --nav-block: 88px;
+  /* Match admin crop frames (`ImageUploader` aspectClass) */
+  --hero-aspect: 4 / 5;
+  --about-portrait-aspect: 3 / 4;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -107,67 +110,54 @@ nav.scrolled { padding: 16px 64px; }
 /* ── HERO — MAGAZINE COVER ── */
 #hero {
   /*
-    The hero fills the full 100vh with NO top reservation for the
-    fixed navbar. This is intentional: the image column extends from
-    viewport y=0 all the way to y=100vh, and the translucent navbar
-    floats over the top ~88px. The text column avoids overlap by
-    carrying its own `padding-top: 80px` (see `.hero-text-col`).
-
-    Why we accept the small loss in the WYSIWYG editor — and gain a
-    much better feel — is the rubber-band overscroll: when the user
-    pulls the page down past the top edge on macOS, the body bounces
-    down and the hero image bounces with it. Because the image
-    extends to y=0, what slides into view is more image, not an
-    off-white "gap". The picture reads as continuous instead of
-    abruptly stopping at the navbar's lower edge.
+    Portrait hero at the admin crop ratio (4:5) — never cropped again
+    to 100vh. Row height follows the image; shorter viewports scroll.
+    Image column still starts at y=0 under the fixed nav.
   */
-  height: 100vh;
-  /* 100% not 100vw — vw includes scrollbar gutter on mobile and causes sideways scroll. */
   width: 100%;
   max-width: 100%;
   position: relative;
   overflow: hidden;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
   background: var(--off-white);
 }
 .hero-img-col {
   position: relative;
   overflow: hidden;
-  height: 100%;
+  align-self: start;
+  line-height: 0;
+  background: var(--navy);
 }
 .hero-img-col img {
-  width: 100%; height: 100%;
-  object-fit: cover;
-  object-position: center top;
   display: block;
-  filter: saturate(0.88);
+  width: 100%;
+  height: auto;
+  aspect-ratio: var(--hero-aspect);
+  object-fit: cover;
+  object-position: center center;
+  filter: saturate(0.9) contrast(1.02);
 }
 .hero-img-col::after {
   content: '';
   position: absolute;
   bottom: 0; left: 0; right: 0;
-  height: 35%;
-  background: linear-gradient(to top, rgba(13,27,42,0.55) 0%, transparent 100%);
+  height: 28%;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(13,27,42,0.42) 0%, transparent 100%);
 }
 
 .hero-text-col {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  /*
-    The 80px top padding pushes the title clear of the fixed-position
-    navbar. We deliberately do NOT use a hero-level padding-top to
-    achieve this — that would also push the image column down and
-    create an off-white gap above the photo that would slide into
-    view during overscroll. By scoping the offset to the text column
-    only, the image column stays anchored at y=0 and the rubber-band
-    bounce reveals more image rather than off-white.
-  */
-  padding: 80px 60px 40px 70px;
+  padding: calc(var(--nav-block) + 28px) clamp(40px, 5vw, 70px) clamp(48px, 6vh, 64px)
+    clamp(48px, 5vw, 70px);
   position: relative;
   z-index: 2;
-  height: 100%;
+  min-height: 100%;
+  align-self: stretch;
 }
 .hero-title {
   font-family: var(--serif);
@@ -1024,7 +1014,7 @@ a.service-item:focus-visible .service-action {
 .about-split {
   display: grid;
   grid-template-columns: 5fr 7fr;
-  grid-template-rows: auto minmax(680px, auto);
+  grid-template-rows: auto auto;
   column-gap: clamp(3rem, 5vw, 6rem);
   row-gap: 14px;
   align-items: start;
@@ -1042,21 +1032,21 @@ a.service-item:focus-visible .service-action {
   grid-column: 1;
   grid-row: 2;
   width: 100%;
-  min-height: 680px;
   overflow: hidden;
   background: var(--navy);
+  line-height: 0;
   box-shadow:
     0 32px 64px rgba(13, 27, 42, 0.16),
     0 12px 28px rgba(13, 27, 42, 0.1);
 }
 .about-img-panel img {
-  width: 100%;
-  height: 100%;
-  min-height: 680px;
-  object-fit: cover;
-  object-position: center top;
   display: block;
-  filter: saturate(0.85) contrast(1.02);
+  width: 100%;
+  height: auto;
+  aspect-ratio: var(--about-portrait-aspect);
+  object-fit: cover;
+  object-position: center center;
+  filter: saturate(0.88) contrast(1.02);
 }
 .about-copy {
   grid-column: 2;
@@ -1988,8 +1978,10 @@ footer {
 @media (max-width: 1100px) {
   nav { padding: 22px 36px; }
   nav.scrolled { padding: 14px 36px; }
-  #hero { grid-template-columns: 1fr 1fr; }
-  .hero-text-col { padding: 50px 40px 60px 50px; }
+  #hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .hero-text-col {
+    padding: calc(var(--nav-block) + 20px) 40px 52px 50px;
+  }
   .hero-title { margin-right: 0; }
   #services { padding: 90px 36px; }
   .services-cols { grid-template-columns: 1fr 1px 1fr; }
@@ -2045,9 +2037,27 @@ footer {
     clears the (shorter) mobile navbar. Doubling them would shove
     the title way down the viewport.
   */
-  #hero { grid-template-columns: 1fr; height: auto; min-height: 100vh; padding-top: 0; }
-  .hero-img-col { min-height: 55vw; }
-  .hero-text-col { padding: 120px 24px 60px; order: -1; justify-content: flex-end; }
+  #hero {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+    padding-top: 0;
+  }
+  .hero-img-col {
+    min-height: 0;
+    align-self: stretch;
+  }
+  .hero-img-col img {
+    aspect-ratio: var(--hero-aspect);
+    width: 100%;
+    height: auto;
+  }
+  .hero-text-col {
+    padding: calc(var(--nav-block) + 16px) 24px 40px;
+    order: -1;
+    justify-content: flex-end;
+    min-height: 0;
+  }
   .hero-title { margin-right: 0; font-size: clamp(3.5rem,14vw,6rem); }
   .hero-scroll-hint { display: none; }
   #services { padding: 80px 24px; }
@@ -2088,11 +2098,12 @@ footer {
     grid-row: auto;
   }
   .about-img-panel {
-    min-height: 70vw;
     box-shadow: 0 16px 40px rgba(13, 27, 42, 0.12);
   }
   .about-img-panel img {
-    min-height: 70vw;
+    aspect-ratio: var(--about-portrait-aspect);
+    width: 100%;
+    height: auto;
   }
   .about-copy {
     grid-row: auto;
