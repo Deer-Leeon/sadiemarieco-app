@@ -40,9 +40,20 @@
   </div>
 
   <div class="hero-img-col">
-    <img data-image-id="home_hero" src="assets/images/hero1.jpeg" alt="Luxury skincare" fetchpriority="high" decoding="async">
+    <img data-image-id="home_hero" src="assets/images/hero1.jpeg" alt="Luxury skincare" width="1200" height="1500" sizes="(max-width: 860px) 100vw, 50vw" fetchpriority="high" decoding="sync">
   </div>
 </section>
+<script>
+(function () {
+  var img = document.querySelector('.hero-img-col img');
+  if (!img) return;
+  function reveal() {
+    if (img.naturalWidth > 0) img.classList.add('is-ready');
+  }
+  if (img.complete) reveal();
+  else img.addEventListener('load', reveal, { once: true });
+})();
+</script>
 
 <div class="marquee-strip" aria-hidden="true">
   <div class="marquee-track">

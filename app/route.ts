@@ -44,6 +44,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { sql } from '@vercel/postgres';
 
+import { heroDeliveryUrl } from '@/lib/cms-image-url';
+
 import { reconcileWithCal } from './admin/services/sync';
 
 // Node.js runtime required for `node:fs` — the Edge runtime doesn't
@@ -159,9 +161,9 @@ async function loadIndexHtml(): Promise<string> {
  *     Acceptable here; we control the HTML and don't do that.
  */
 /**
- * Preconnect + preload the homepage hero so the browser starts fetching
- * the LCP image as soon as `<head>` is parsed — in parallel with fonts
- * and CSS — instead of waiting for the `<body>` `<img>` tag.
+ * Preload the homepage hero via `/_next/image` at the top of `<head>` so
+ * the browser starts fetching before fonts/CSS and receives a compact
+ * WebP/AVIF (non-progressive) instead of the raw progressive JPEG blob.
  */
 function injectLcpHints(
   html: string,
@@ -170,19 +172,10 @@ function injectLcpHints(
   const heroUrl = imageMap.home_hero?.url;
   if (!heroUrl) return html;
 
-  let origin: string;
-  try {
-    origin = new URL(heroUrl).origin;
-  } catch {
-    return html;
-  }
+  const deliveryUrl = heroDeliveryUrl(heroUrl);
+  const hints = `<link rel="preload" as="image" href="${deliveryUrl}" fetchpriority="high">`;
 
-  const hints = [
-    `<link rel="preconnect" href="${origin}" crossorigin>`,
-    `<link rel="preload" as="image" href="${heroUrl}" fetchpriority="high">`,
-  ].join('\n  ');
-
-  return html.replace('</head>', `  ${hints}\n</head>`);
+  return html.replace('<head>', `<head>\n  ${hints}\n`);
 }
 
 function injectImageUrls(
@@ -193,9 +186,12 @@ function injectImageUrls(
   return html.replace(/<img\s+[^>]*>/g, (tag) => {
     const idMatch = tag.match(/data-image-id="([^"]+)"/);
     if (!idMatch) return tag;
-    const entry = imageMap[idMatch[1]];
+    const slotId = idMatch[1];
+    const entry = imageMap[slotId];
     if (!entry?.url) return tag;
-    return tag.replace(/src="[^"]*"/, `src="${entry.url}"`);
+    const url =
+      slotId === 'home_hero' ? heroDeliveryUrl(entry.url) : entry.url;
+    return tag.replace(/src="[^"]*"/, `src="${url}"`);
   });
 }
 
