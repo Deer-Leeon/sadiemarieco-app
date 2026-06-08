@@ -66,24 +66,6 @@
 
   initMarquees();
 
-  // ── HERO LCP ──
-  // Inline script after #hero reveals first; this is a fallback if the
-  // parser skipped it. Image stays hidden until fully decoded so
-  // progressive JPEG scan passes never flash on screen.
-  (function initHeroImage() {
-    const img = document.querySelector('.hero-img-col img');
-    if (!img) return;
-    const reveal = () => {
-      if (img.naturalWidth > 0) {
-        img.classList.add('is-ready');
-        window.__scheduleDeferredAssets();
-      }
-    };
-    img.addEventListener('load', reveal, { once: true });
-    img.addEventListener('error', reveal, { once: true });
-    if (img.complete) reveal();
-  })();
-
   // ── NAVBAR SCROLL ──
   const navbar = document.getElementById('navbar');
   if (navbar) {

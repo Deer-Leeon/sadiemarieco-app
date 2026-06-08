@@ -141,11 +141,12 @@ nav.scrolled { padding: 16px 64px; }
   object-fit: cover;
   object-position: center center;
   filter: saturate(0.9) contrast(1.02);
-  opacity: 0;
-  transition: opacity 0.2s ease;
 }
-.hero-img-col img.is-ready {
+/* Hero copy + image: no entrance animation — show immediately on load. */
+#hero .fade-in {
+  animation: none;
   opacity: 1;
+  transform: none;
 }
 .hero-img-col::after {
   content: '';
