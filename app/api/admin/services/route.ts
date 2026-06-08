@@ -369,32 +369,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // ── STEP 1b: PATCH our custom bookingFields onto the new event ─────────
-  // splitName + required phone. We deliberately omit email from the
-  // payload — touching email triggers `checkIsEmailUserAccessible`
-  // which always fails on personal accounts (see comment above). By
-  // not sending it, Cal preserves its default required-email field
-  // and the PATCH succeeds.
-  try {
-    await callCal(`/event-types/${calEventId}`, apiKey, {
-      method: 'PATCH',
-      body: JSON.stringify({ bookingFields: STUDIO_BOOKING_FIELDS }),
-    });
-    console.log(
-      '[api/admin/services] POST: Cal event created + booking-fields PATCHed',
-      { calEventId }
-    );
-  } catch (err) {
-    // Non-fatal — the event exists and is bookable with Cal's default
-    // fields. We log so the operator can investigate, but we don't
-    // tear the create down: a half-rolled-back event is worse than a
-    // working event with the wrong name field, since the local DB row
-    // still needs to be written for the editor to see anything at all.
-    console.warn(
-      '[api/admin/services] POST: bookingFields PATCH failed (event still created with Cal defaults):',
-      { calEventId, error: errorMessage(err) }
-    );
-  }
+  await patchStudioBookingFieldsOnCal(calEventId, apiKey, 'POST');
 
   // ── STEP 2: mirror into Postgres ────────────────────────────────────────
   // If this fails the Cal event is a ghost. We attempt a best-effort
@@ -608,6 +583,8 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       { status: 502 }
     );
   }
+
+  await patchStudioBookingFieldsOnCal(payload.cal_event_id, apiKey, 'PATCH');
 
   // ── STEP 2: mirror into Postgres ────────────────────────────────────────
   // Trigger `site_services_touch_updated_at_trg` (defined in the
@@ -986,6 +963,32 @@ interface CalPhoneField {
  * (split into First + Last, both required) and the same phone
  * (required, visible) up front.
  */
+/**
+ * Apply splitName + required phone on Cal. Email is omitted from the payload
+ * (Cal personal accounts reject API email tweaks) — Cal keeps email required
+ * by default when we do not send an email field override.
+ */
+async function patchStudioBookingFieldsOnCal(
+  calEventId: number,
+  apiKey: string,
+  phase: 'POST' | 'PATCH'
+): Promise<void> {
+  try {
+    await callCal(`/event-types/${calEventId}`, apiKey, {
+      method: 'PATCH',
+      body: JSON.stringify({ bookingFields: STUDIO_BOOKING_FIELDS }),
+    });
+    console.log(`[api/admin/services] ${phase}: booking-fields PATCHed`, {
+      calEventId,
+    });
+  } catch (err) {
+    console.warn(
+      `[api/admin/services] ${phase}: bookingFields PATCH failed (event still bookable with Cal defaults):`,
+      { calEventId, error: errorMessage(err) }
+    );
+  }
+}
+
 const STUDIO_BOOKING_FIELDS: CalBookingField[] = [
   {
     type: 'splitName',

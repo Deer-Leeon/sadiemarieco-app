@@ -255,9 +255,12 @@ function moveItemInGlobalOrder(
 
   let newRendered: number[] | null = null;
 
-  if (service.is_group) {
+  if (service.is_group || service.parent_id === null) {
+    // Groups (with nested children) and standalones share one unit list.
     const units = buildMoveUnits(rendered, servicesById);
-    const unitIndex = units.findIndex((unit) => unit[0] === serviceId);
+    const unitIndex = service.is_group
+      ? units.findIndex((unit) => unit[0] === serviceId)
+      : units.findIndex((unit) => unit.length === 1 && unit[0] === serviceId);
     if (unitIndex < 0) return null;
     const targetUnit = unitIndex + direction;
     if (targetUnit < 0 || targetUnit >= units.length) return null;
@@ -269,6 +272,7 @@ function moveItemInGlobalOrder(
     ];
     newRendered = nextUnits.flat();
   } else {
+    // Child rows only swap with siblings inside the same group.
     const index = rendered.indexOf(serviceId);
     if (index < 0) return null;
     const target = index + direction;
@@ -277,7 +281,9 @@ function moveItemInGlobalOrder(
     const a = servicesById.get(rendered[index]);
     const b = servicesById.get(rendered[target]);
     if (!a || !b) return null;
-    if (a.parent_id === b.id || b.parent_id === a.id) return null;
+    if (a.parent_id !== service.parent_id || b.parent_id !== service.parent_id) {
+      return null;
+    }
 
     newRendered = [...rendered];
     [newRendered[index], newRendered[target]] = [
@@ -393,8 +399,9 @@ function buildRenderedRowIds(
 }
 
 /**
- * Moveable units for reordering: each group header plus its nested children
- * moves together; standalones and individual child rows move alone.
+ * Moveable units at the category top level: each group (header + children)
+ * is one unit; each standalone service is its own unit. Child rows reorder
+ * only among siblings inside a group, not via this list.
  */
 function buildMoveUnits(
   rendered: number[],
@@ -1195,6 +1202,12 @@ function CategorySection({
       const unitIndex = moveUnits.findIndex((unit) => unit[0] === service.id);
       canMoveUp = unitIndex > 0;
       canMoveDown = unitIndex >= 0 && unitIndex < moveUnits.length - 1;
+    } else if (service.parent_id === null) {
+      const unitIndex = moveUnits.findIndex(
+        (unit) => unit.length === 1 && unit[0] === service.id
+      );
+      canMoveUp = unitIndex > 0;
+      canMoveDown = unitIndex >= 0 && unitIndex < moveUnits.length - 1;
     } else {
       const rowIndex = renderedOrder.indexOf(service.id);
       const above =
@@ -1207,13 +1220,13 @@ function CategorySection({
         rowIndex > 0 &&
         above !== null &&
         above !== undefined &&
-        above.id !== service.parent_id;
+        above.parent_id === service.parent_id;
       canMoveDown =
         rowIndex >= 0 &&
         rowIndex < renderedOrder.length - 1 &&
         below !== null &&
         below !== undefined &&
-        below.parent_id !== service.id;
+        below.parent_id === service.parent_id;
     }
 
     return {

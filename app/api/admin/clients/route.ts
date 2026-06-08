@@ -11,7 +11,7 @@
  *                          404 when no row matches. No write side-
  *                          effect (use POST for first-touch upsert).
  *
- *   POST { phone, first_name?, last_name?, email? }
+ *   POST { phone, first_name?, last_name?, email }
  *                          First-Touch Lock-in upsert: insert keyed
  *                          by normalised phone; on conflict, return
  *                          the EXISTING row UNTOUCHED. This is what
@@ -39,7 +39,8 @@ import {
 } from '@/lib/client-phone-db';
 import {
   normaliseClientPhone,
-  parseOptionalClientEmail,
+  parseRequiredClientEmail,
+  REQUIRED_CLIENT_EMAIL_MESSAGE,
   sqlPhoneVariants,
 } from '@/lib/client-identity';
 
@@ -222,9 +223,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const firstName = sanitiseName(payload.first_name);
   const lastName = sanitiseName(payload.last_name);
-  const email = parseOptionalClientEmail(payload.email);
+  const email = parseRequiredClientEmail(payload.email);
+  if (!email) {
+    return NextResponse.json(
+      { error: 'missing_email', message: REQUIRED_CLIENT_EMAIL_MESSAGE },
+      { status: 400 }
+    );
+  }
 
-  // Phone is the CRM identifier. Email is optional.
+  // Phone is the CRM identifier; email is required on every client record.
   //
   // Why this branch matters:
   //   Pre-CRM, the webhook created clients keyed by email alone. After

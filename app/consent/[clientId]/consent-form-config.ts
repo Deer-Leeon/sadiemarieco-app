@@ -1,3 +1,5 @@
+import { isValidEmail } from '@/lib/client-identity';
+
 export type YesNo = '' | 'yes' | 'no';
 
 export type MedicalConditionChecklistKey =
@@ -288,6 +290,9 @@ export function validateConsentForm(form: ConsentFormData): string | null {
   ] as const) {
     const err = req(field[0], field[1]);
     if (err) return err;
+  }
+  if (!isValidEmail(form.email)) {
+    return 'Enter a valid email address.';
   }
 
   const lash = asYesNo(form.had_lash_lift_tint);

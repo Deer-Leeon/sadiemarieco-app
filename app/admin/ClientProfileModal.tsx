@@ -1835,8 +1835,19 @@ function EditInfoView({
     if (next.last_name !== prev.last_name) {
       payload.last_name = next.last_name.length ? next.last_name : null;
     }
+    if (!next.email) {
+      setError('Email is required.');
+      setSubmitting(false);
+      return;
+    }
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email);
+    if (!emailOk) {
+      setError('Enter a valid email address.');
+      setSubmitting(false);
+      return;
+    }
     if (next.email !== prev.email) {
-      payload.email = next.email.length ? next.email : null;
+      payload.email = next.email;
     }
     if (Object.keys(payload).length === 0) {
       onCancel();
@@ -1893,7 +1904,7 @@ function EditInfoView({
           </div>
           <LabeledInput
             id="email"
-            label="Email (optional)"
+            label="Email"
             value={email}
             onChange={setEmail}
             type="email"

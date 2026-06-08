@@ -123,13 +123,12 @@ export default async function ServicesPage() {
           <div className="rounded-md border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">
             <p>
               <span className="font-medium text-stone-900">Heads up:</span>{' '}
-              New services collect{' '}
-              <span className="font-medium">First name, Last name, and Phone</span>{' '}
-              up front, with email required by default. To make email optional on
-              any service, click{' '}
-              <span className="font-medium">Open in Cal</span> on its card and
-              toggle the email field in Cal's Booking Questions tab — this isn't
-              available through the API on the current account tier.
+              New and updated services collect{' '}
+              <span className="font-medium">
+                First name, Last name, Phone, and Email
+              </span>{' '}
+              on every booking. Email stays required on the Cal.com booking
+              form (we do not expose a way to make it optional from here).
             </p>
             <p className="mt-2">
               Every new service gets a{' '}

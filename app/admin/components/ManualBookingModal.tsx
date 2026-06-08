@@ -43,7 +43,7 @@ const BTN_PRIMARY =
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function optionalEmailForApi(raw: string): string | null {
+function requiredEmailForApi(raw: string): string | null {
   const trimmed = raw.trim().toLowerCase();
   if (!trimmed) return null;
   return EMAIL_RE.test(trimmed) ? trimmed : null;
@@ -117,9 +117,9 @@ export default function ManualBookingModal({
     const trimmedFirst = clientFirstName.trim();
     const trimmedLast = clientLastName.trim();
     const trimmedName = joinFullName(trimmedFirst, trimmedLast);
-    const trimmedEmail = optionalEmailForApi(clientEmail);
-    if (clientEmail.trim().length > 0 && !trimmedEmail) {
-      setError('Enter a valid email address or leave email blank.');
+    const trimmedEmail = requiredEmailForApi(clientEmail);
+    if (!trimmedEmail) {
+      setError('Enter a valid email address.');
       setCompleting(false);
       return;
     }
@@ -222,11 +222,13 @@ export default function ManualBookingModal({
   const phoneInvalid = phoneTouched && clientPhone.trim().length > 0 && !parsedClientPhone;
 
   const canAdvanceFromStep1 = selectedService !== null;
+  const emailInvalid =
+    clientEmail.trim().length > 0 && !EMAIL_RE.test(clientEmail.trim());
   const canAdvanceFromStep2 =
     clientFirstName.trim().length > 0 &&
     clientLastName.trim().length > 0 &&
     parsedClientPhone !== null &&
-    (clientEmail.trim().length === 0 || EMAIL_RE.test(clientEmail.trim()));
+    EMAIL_RE.test(clientEmail.trim());
 
   function formatPhoneField() {
     const formatted = formatPhoneInputDisplay(clientPhone);
@@ -369,16 +371,23 @@ export default function ManualBookingModal({
               </label>
               <label className="block">
                 <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-                  Email <span className="normal-case tracking-normal text-stone-400">(optional)</span>
+                  Email
                 </span>
                 <input
                   type="email"
+                  required
                   value={clientEmail}
                   onChange={(e) => setClientEmail(e.target.value)}
                   autoComplete="email"
-                  className={INPUT_CLASS}
-                  placeholder="Leave blank if unknown"
+                  aria-invalid={emailInvalid}
+                  className={`${INPUT_CLASS}${emailInvalid ? ' border-rose-200 focus:border-rose-300 focus:ring-rose-100' : ''}`}
+                  placeholder="client@example.com"
                 />
+                {emailInvalid && (
+                  <p className="mt-1 text-xs text-rose-600" role="alert">
+                    Enter a valid email address.
+                  </p>
+                )}
               </label>
             </div>
           )}

@@ -19,7 +19,8 @@ import {
   calAttendeeEmailForBooking,
   clientPhoneValidationMessage,
   parseClientPhone,
-  parseOptionalClientEmail,
+  parseRequiredClientEmail,
+  REQUIRED_CLIENT_EMAIL_MESSAGE,
 } from '@/lib/client-identity';
 import {
   CAL_BOOKINGS_API_VERSION,
@@ -78,7 +79,7 @@ function parseCreateBody(input: unknown):
     typeof body.clientLastName === 'string' ? body.clientLastName.trim() : '';
   const clientNameFromBody =
     typeof body.clientName === 'string' ? body.clientName.trim() : '';
-  const clientEmail = parseOptionalClientEmail(body.clientEmail);
+  const clientEmail = parseRequiredClientEmail(body.clientEmail);
   const parsedPhone = parseClientPhone(body.clientPhone);
 
   let clientFirst = clientFirstName;
@@ -114,16 +115,10 @@ function parseCreateBody(input: unknown):
   if (!clientName || clientName.length > 200) {
     return { error: 'invalid_client_name', message: 'clientName is required' };
   }
-  if (
-    body.clientEmail !== undefined &&
-    body.clientEmail !== null &&
-    typeof body.clientEmail === 'string' &&
-    body.clientEmail.trim().length > 0 &&
-    !clientEmail
-  ) {
+  if (!clientEmail) {
     return {
-      error: 'invalid_client_email',
-      message: 'clientEmail must be a valid email address when provided',
+      error: 'missing_client_email',
+      message: REQUIRED_CLIENT_EMAIL_MESSAGE,
     };
   }
   if (!parsedPhone) {

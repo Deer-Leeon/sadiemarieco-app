@@ -1,5 +1,6 @@
 /**
- * Client CRM identity helpers — phone is the canonical key; email is optional.
+ * Client CRM identity helpers — phone is the canonical CRM key; email is required
+ * for new bookings and client records.
  */
 
 import {
@@ -81,6 +82,14 @@ export function formatPhoneInputDisplay(raw: string): string {
 export function parseOptionalClientEmail(raw: unknown): string | null {
   return normalizeClientEmailForStorage(raw);
 }
+
+/** Same normalisation as optional parse; use when email must be present. */
+export function parseRequiredClientEmail(raw: unknown): string | null {
+  return normalizeClientEmailForStorage(raw);
+}
+
+export const REQUIRED_CLIENT_EMAIL_MESSAGE =
+  'A valid email address is required.';
 
 /**
  * Cal.com v2 requires `attendee.email`. When the admin omits email we send a
