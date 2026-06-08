@@ -232,9 +232,11 @@ nav.scrolled { padding: 16px 64px; }
 .btn-outline-navy:hover { background: var(--navy); color: var(--off-white); transform: translateY(-2px); }
 
 .hero-scroll-hint {
-  position: absolute;
-  bottom: 32px; left: 70px;
-  display: flex; align-items: center; gap: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  align-self: flex-start;
+  margin-top: 28px;
   font-family: var(--sans);
   font-size: 0.56rem;
   letter-spacing: 0.28em;
@@ -2081,7 +2083,7 @@ footer {
     min-height: 0;
   }
   .hero-title { margin-right: 0; font-size: clamp(3.5rem,14vw,6rem); }
-  .hero-scroll-hint { display: none; }
+  .hero-scroll-hint { margin-top: 24px; }
   #services { padding: 80px 24px; }
   .services-masthead { flex-direction: column; align-items: flex-start; gap: 14px; }
   .services-referral {
