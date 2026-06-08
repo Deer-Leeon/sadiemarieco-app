@@ -1844,6 +1844,10 @@ a.service-item:focus-visible .service-action {
   color: var(--off-white);
   letter-spacing: -0.02em;
   -webkit-text-stroke: 1px var(--off-white);
+  hyphens: none;
+}
+.faq-big-title-line1 {
+  white-space: nowrap;
 }
 .faq-big-title em {
   font-style: italic;

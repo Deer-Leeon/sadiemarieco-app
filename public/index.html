@@ -40,7 +40,7 @@
   </div>
 
   <div class="hero-img-col">
-    <img data-image-id="home_hero" src="assets/images/hero1.jpeg" alt="Luxury skincare" width="1200" height="1500" sizes="(max-width: 860px) 100vw, 50vw" fetchpriority="high" decoding="sync">
+    <img data-image-id="home_hero" src="assets/images/hero1.jpeg" alt="Luxury skincare" width="1200" height="1500" sizes="(max-width: 860px) 100vw, 50vw" fetchpriority="high" decoding="async">
   </div>
 </section>
 <script>
@@ -50,8 +50,9 @@
   function reveal() {
     if (img.naturalWidth > 0) img.classList.add('is-ready');
   }
+  img.addEventListener('load', reveal, { once: true });
+  img.addEventListener('error', reveal, { once: true });
   if (img.complete) reveal();
-  else img.addEventListener('load', reveal, { once: true });
 })();
 </script>
 
@@ -303,7 +304,7 @@
   <div class="faq-inner">
     <div class="faq-aside reveal">
       <span class="section-label" style="color:rgba(221,224,230,0.4)">FAQ</span>
-      <h3 class="faq-big-title">Fre&shy;quently<br><em>Asked</em></h3>
+      <h3 class="faq-big-title"><span class="faq-big-title-line1">Frequently</span><br><em>Asked</em></h3>
       <p class="faq-aside-note">Everything you need to know before your first visit — and beyond.</p>
     </div>
     <div class="faq-list reveal reveal-delay-1">

@@ -76,8 +76,9 @@
     const reveal = () => {
       if (img.naturalWidth > 0) img.classList.add('is-ready');
     };
+    img.addEventListener('load', reveal, { once: true });
+    img.addEventListener('error', reveal, { once: true });
     if (img.complete) reveal();
-    else img.addEventListener('load', reveal, { once: true });
   })();
 
   // ── NAVBAR SCROLL ──

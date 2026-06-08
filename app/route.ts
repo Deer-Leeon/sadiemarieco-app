@@ -44,8 +44,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { sql } from '@vercel/postgres';
 
-import { heroDeliveryUrl } from '@/lib/cms-image-url';
-
 import { reconcileWithCal } from './admin/services/sync';
 
 // Node.js runtime required for `node:fs` — the Edge runtime doesn't
@@ -161,9 +159,9 @@ async function loadIndexHtml(): Promise<string> {
  *     Acceptable here; we control the HTML and don't do that.
  */
 /**
- * Preload the homepage hero via `/_next/image` at the top of `<head>` so
- * the browser starts fetching before fonts/CSS and receives a compact
- * WebP/AVIF (non-progressive) instead of the raw progressive JPEG blob.
+ * Preconnect + preload the CMS hero blob at the top of `<head>` so the
+ * browser starts fetching before fonts/CSS. Uses the blob URL directly —
+ * `/_next/image` rejects our Vercel Blob host in production.
  */
 function injectLcpHints(
   html: string,
@@ -172,8 +170,17 @@ function injectLcpHints(
   const heroUrl = imageMap.home_hero?.url;
   if (!heroUrl) return html;
 
-  const deliveryUrl = heroDeliveryUrl(heroUrl);
-  const hints = `<link rel="preload" as="image" href="${deliveryUrl}" fetchpriority="high">`;
+  let origin: string;
+  try {
+    origin = new URL(heroUrl).origin;
+  } catch {
+    return html;
+  }
+
+  const hints = [
+    `<link rel="preconnect" href="${origin}" crossorigin>`,
+    `<link rel="preload" as="image" href="${heroUrl}" fetchpriority="high">`,
+  ].join('\n  ');
 
   return html.replace('<head>', `<head>\n  ${hints}\n`);
 }
@@ -186,12 +193,9 @@ function injectImageUrls(
   return html.replace(/<img\s+[^>]*>/g, (tag) => {
     const idMatch = tag.match(/data-image-id="([^"]+)"/);
     if (!idMatch) return tag;
-    const slotId = idMatch[1];
-    const entry = imageMap[slotId];
+    const entry = imageMap[idMatch[1]];
     if (!entry?.url) return tag;
-    const url =
-      slotId === 'home_hero' ? heroDeliveryUrl(entry.url) : entry.url;
-    return tag.replace(/src="[^"]*"/, `src="${url}"`);
+    return tag.replace(/src="[^"]*"/, `src="${entry.url}"`);
   });
 }
 
