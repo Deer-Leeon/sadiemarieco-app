@@ -74,7 +74,10 @@
     const img = document.querySelector('.hero-img-col img');
     if (!img) return;
     const reveal = () => {
-      if (img.naturalWidth > 0) img.classList.add('is-ready');
+      if (img.naturalWidth > 0) {
+        img.classList.add('is-ready');
+        window.__scheduleDeferredAssets();
+      }
     };
     img.addEventListener('load', reveal, { once: true });
     img.addEventListener('error', reveal, { once: true });

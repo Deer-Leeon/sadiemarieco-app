@@ -7,11 +7,45 @@
   <meta name="theme-color" content="#0D1B2A">
   <title>Sadie Marie — Luxury Beauty Studio</title>
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@200;300;400&display=swap" rel="stylesheet">
-
-  <link rel="stylesheet" href="css/styles.css">
+  <!-- INJECT_LCP_HINTS -->
+  <style id="critical-css">
+    :root{--off-white:#F5F3F0;--navy:#0D1B2A;--hero-aspect:4/5;--ink:#1a1a24;--sans:'DM Sans',sans-serif;--serif:'Bodoni Moda',Georgia,serif}
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{background-color:var(--navy);overflow-x:hidden;max-width:100%}
+    body{background:var(--off-white);color:var(--ink);font-family:var(--sans);font-weight:300;overflow-x:hidden;max-width:100%}
+    nav{position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:center;justify-content:space-between;padding:26px 64px;background:var(--navy);border-bottom:1px solid rgba(245,243,240,0.1)}
+    .nav-logo{font-family:var(--serif);font-size:1.15rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--off-white);text-decoration:none}
+    .nav-links{display:flex;gap:44px;list-style:none}
+    .nav-links a{font-family:var(--sans);font-size:.64rem;font-weight:300;letter-spacing:.22em;text-transform:uppercase;color:var(--off-white);text-decoration:none}
+    .nav-book{font-family:var(--sans);font-size:.62rem;font-weight:400;letter-spacing:.22em;text-transform:uppercase;color:var(--navy);background:var(--off-white);border:1px solid var(--off-white);padding:11px 28px;text-decoration:none}
+    #hero{width:100%;max-width:100%;position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:stretch;background:var(--off-white)}
+    .hero-img-col{position:relative;overflow:hidden;align-self:start;width:100%;aspect-ratio:var(--hero-aspect);line-height:0;background:var(--navy)}
+    .hero-img-col img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover;object-position:center center;opacity:0;transition:opacity .2s ease}
+    .hero-img-col img.is-ready{opacity:1}
+  </style>
+  <link rel="preload" href="css/styles.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="css/styles.css"></noscript>
+  <script>
+  (function () {
+    var scheduled = false;
+    window.__scheduleDeferredAssets = function () {
+      if (scheduled) return;
+      scheduled = true;
+      var run = function () {
+        if (!document.getElementById('deferred-fonts')) {
+          var fonts = document.createElement('link');
+          fonts.id = 'deferred-fonts';
+          fonts.rel = 'stylesheet';
+          fonts.href = 'https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@200;300;400&display=swap';
+          document.head.appendChild(fonts);
+        }
+      };
+      if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 2500 });
+      else setTimeout(run, 1);
+    };
+    window.addEventListener('load', window.__scheduleDeferredAssets);
+  })();
+  </script>
 </head>
 <body>
 
@@ -48,7 +82,10 @@
   var img = document.querySelector('.hero-img-col img');
   if (!img) return;
   function reveal() {
-    if (img.naturalWidth > 0) img.classList.add('is-ready');
+    if (img.naturalWidth > 0) {
+      img.classList.add('is-ready');
+      if (window.__scheduleDeferredAssets) window.__scheduleDeferredAssets();
+    }
   }
   img.addEventListener('load', reveal, { once: true });
   img.addEventListener('error', reveal, { once: true });

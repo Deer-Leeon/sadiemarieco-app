@@ -75,6 +75,7 @@ const CAL_USERNAME = 'mckenna-sadiemarie';
  * injection (the regex match would fail) rather than corrupt the page.
  */
 const SERVICES_TOKEN = '<!-- INJECT_SERVICES_HTML -->';
+const LCP_HINTS_TOKEN = '<!-- INJECT_LCP_HINTS -->';
 
 interface SiteImageRow {
   id: string;
@@ -159,22 +160,28 @@ async function loadIndexHtml(): Promise<string> {
  *     Acceptable here; we control the HTML and don't do that.
  */
 /**
- * Preconnect + preload the CMS hero blob at the top of `<head>` so the
- * browser starts fetching before fonts/CSS. Uses the blob URL directly —
- * `/_next/image` rejects our Vercel Blob host in production.
+ * Inject `<link rel="preload">` for the CMS hero at `LCP_HINTS_TOKEN`
+ * (first resource hints in `<head>`, before deferred CSS). Pair with the
+ * HTTP `Link` response header so the browser can start the fetch on
+ * response headers — before the HTML body is parsed.
  */
 function injectLcpHints(
   html: string,
   imageMap: Record<string, SiteImage>
 ): string {
   const heroUrl = imageMap.home_hero?.url;
-  if (!heroUrl) return html;
+  if (!heroUrl) {
+    return html.replace(LCP_HINTS_TOKEN, '');
+  }
 
   let origin: string;
   try {
     origin = new URL(heroUrl).origin;
   } catch {
-    return html;
+    return html.replace(
+      LCP_HINTS_TOKEN,
+      `<link rel="preload" as="image" href="${heroUrl}" fetchpriority="high">`
+    );
   }
 
   const hints = [
@@ -182,7 +189,20 @@ function injectLcpHints(
     `<link rel="preload" as="image" href="${heroUrl}" fetchpriority="high">`,
   ].join('\n  ');
 
-  return html.replace('<head>', `<head>\n  ${hints}\n`);
+  return html.replace(LCP_HINTS_TOKEN, hints);
+}
+
+/** RFC 8288 `Link` header — earliest possible hero fetch (with Early Hints). */
+function buildHeroLinkHeader(heroUrl: string): string | undefined {
+  try {
+    const origin = new URL(heroUrl).origin;
+    return [
+      `<${heroUrl}>; rel=preload; as=image; fetchpriority=high`,
+      `<${origin}>; rel=preconnect; crossorigin`,
+    ].join(', ');
+  } catch {
+    return `<${heroUrl}>; rel=preload; as=image; fetchpriority=high`;
+  }
 }
 
 function injectImageUrls(
@@ -233,60 +253,53 @@ function injectCaptions(
 }
 
 export async function GET(): Promise<Response> {
+  // ── RECONCILE WITH CAL (non-blocking) ─────────────────────────────────
+  // Fire-and-forget on the public homepage — services HTML may lag the
+  // admin view by up to one TTL window, but TTFB no longer waits on a
+  // Cal.com round-trip before the hero preload can start.
+  void reconcileWithCal();
+
+  // ── DATA FETCH ────────────────────────────────────────────────────────
   let html: string;
+  let imageMap: Record<string, SiteImage>;
+  let servicesHtml: string;
   try {
-    html = await loadIndexHtml();
+    [html, imageMap, servicesHtml] = await Promise.all([
+      loadIndexHtml(),
+      fetchImageMap(),
+      fetchServicesHtml(),
+    ]);
   } catch (err) {
     // If the HTML file is genuinely missing in production something is
     // catastrophically wrong with the deploy — surface a 500 so the
     // alert hits us instead of serving a confusing blank page.
-    console.error('[/] failed to read public/index.html:', err);
+    console.error('[/] homepage render failed:', err);
     return new Response('Marketing page unavailable.', {
       status: 500,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     });
   }
 
-  // ── RECONCILE WITH CAL (TTL-throttled) ────────────────────────────────
-  // Sync orphans before reading site_services so a service deleted
-  // directly from the Cal.com dashboard disappears from the public
-  // menu within the cache window. We DON'T pass `force: true` here —
-  // this is a high-traffic path and a per-visitor Cal round-trip is
-  // wasteful. The default 60-second TTL in sync.ts means we hit Cal
-  // at most once a minute regardless of visitor volume.
-  //
-  // The admin path (`/admin/services` Server Component) force-runs
-  // the reconciler on every load, so editors see orphans disappear
-  // immediately. The public site converges on the same DB state
-  // within the next TTL window — by the time a customer browses, the
-  // editor has usually already triggered the reconcile.
-  //
-  // The reconciler swallows its own errors, so a Cal outage can't
-  // break the homepage render.
-  // ── DATA FETCH ────────────────────────────────────────────────────────
-  // Cal reconcile + both DB queries run in parallel. Reconcile used to
-  // block the whole response serially (~200–500ms TTFB); images and
-  // services don't depend on it finishing first.
-  const [, imageMap, servicesHtml] = await Promise.all([
-    reconcileWithCal(),
-    fetchImageMap(),
-    fetchServicesHtml(),
-  ]);
-
   let rendered = injectLcpHints(html, imageMap);
   rendered = injectImageUrls(rendered, imageMap);
   rendered = injectCaptions(rendered, imageMap);
   rendered = rendered.replace(SERVICES_TOKEN, servicesHtml);
 
-  return new Response(rendered, {
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      // Three-layer opt-out (browser, intermediate proxies, Vercel CDN)
-      // so an upload or a service edit appears on the next page load
-      // without waiting on a stale cache.
-      'Cache-Control': 'no-store, no-cache, must-revalidate',
-    },
-  });
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/html; charset=utf-8',
+    // Three-layer opt-out (browser, intermediate proxies, Vercel CDN)
+    // so an upload or a service edit appears on the next page load
+    // without waiting on a stale cache.
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+  };
+
+  const heroUrl = imageMap.home_hero?.url;
+  if (heroUrl) {
+    const link = buildHeroLinkHeader(heroUrl);
+    if (link) headers['Link'] = link;
+  }
+
+  return new Response(rendered, { headers });
 }
 
 async function fetchImageMap(): Promise<Record<string, SiteImage>> {
