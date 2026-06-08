@@ -69,10 +69,23 @@
   // ── NAVBAR SCROLL ──
   const navbar = document.getElementById('navbar');
   if (navbar) {
-    const handleScroll = () => {
-      navbar.classList.toggle('scrolled', window.scrollY > 60);
+    let navScrolled = window.scrollY > 60;
+    let navTicking = false;
+    const applyNavScroll = () => {
+      navTicking = false;
+      const next = window.scrollY > 60;
+      if (next === navScrolled) return;
+      navScrolled = next;
+      navbar.classList.toggle('scrolled', navScrolled);
     };
-    window.addEventListener('scroll', handleScroll, { passive: true });
+    const onNavScroll = () => {
+      if (!navTicking) {
+        navTicking = true;
+        requestAnimationFrame(applyNavScroll);
+      }
+    };
+    applyNavScroll();
+    window.addEventListener('scroll', onNavScroll, { passive: true });
   }
 
   // ── SCROLL REVEAL ──
@@ -90,13 +103,15 @@
       showAllReveals();
     } else if ('IntersectionObserver' in window) {
       const revealObs = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('visible');
-            revealObs.unobserve(entry.target);
-          }
+        requestAnimationFrame(() => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              entry.target.classList.add('visible');
+              revealObs.unobserve(entry.target);
+            }
+          });
         });
-      }, { threshold: 0.05, rootMargin: '0px 0px 10% 0px' });
+      }, { threshold: 0.08, rootMargin: '0px 0px 8% 0px' });
       reveals.forEach((el) => revealObs.observe(el));
     } else {
       showAllReveals();

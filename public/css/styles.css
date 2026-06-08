@@ -24,7 +24,9 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html {
-  scroll-behavior: smooth;
+  /* `smooth` only affects anchor jumps and can feel sluggish; wheel
+     scrolling stays native — faster and more consistent across browsers. */
+  scroll-behavior: auto;
   font-size: 16px;
   /*
     Paint the html element with the navy nav color so when the user
@@ -65,9 +67,7 @@ nav {
     "haze line" between browser and page.
   */
   background: var(--navy);
-  backdrop-filter: blur(14px);
   border-bottom: 1px solid rgba(245,243,240,0.1);
-  transition: padding 0.4s ease;
 }
 nav.scrolled { padding: 16px 64px; }
 .nav-logo {
@@ -257,11 +257,13 @@ nav.scrolled { padding: 16px 64px; }
   overflow-x: clip;
   max-width: 100%;
   margin-top: 0;
+  contain: layout style paint;
 }
 .marquee-track {
   display: flex;
   width: max-content;
   will-change: transform;
+  backface-visibility: hidden;
 }
 .marquee-track.marquee-ready {
   animation: marquee var(--marquee-duration, 28s) linear infinite;
@@ -283,8 +285,8 @@ nav.scrolled { padding: 16px 64px; }
 }
 .marquee-group span.sep { padding: 0; opacity: 0.5; font-size: 0.45rem; }
 @keyframes marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(calc(-1 * var(--marquee-shift, 0px))); }
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(calc(-1 * var(--marquee-shift, 0px)), 0, 0); }
 }
 @media (prefers-reduced-motion: reduce) {
   .marquee-track { animation: none; }
@@ -1947,10 +1949,21 @@ footer {
 /* ── SCROLL REVEAL ── */
 .reveal {
   opacity: 0;
-  transform: translateY(22px);
-  transition: opacity 0.45s ease, transform 0.45s ease;
+  transform: translate3d(0, 18px, 0);
+  transition:
+    opacity 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  backface-visibility: hidden;
+  contain: layout style;
 }
-.reveal.visible { opacity: 1; transform: translateY(0); }
+.reveal:not(.visible) {
+  will-change: transform, opacity;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  will-change: auto;
+}
 .reveal-delay-1 { transition-delay: 0.05s; }
 .reveal-delay-2 { transition-delay: 0.1s; }
 .reveal-delay-3 { transition-delay: 0.15s; }
