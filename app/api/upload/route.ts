@@ -304,8 +304,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
  *   - .rotate() with no args reads EXIF Orientation and bakes the
  *     rotation into pixels. Some browsers (or downstream tools) ignore
  *     the Orientation tag, so baking it in once removes a class of bugs.
- *   - High-quality JPEG settings (q=90, 4:4:4 chroma, progressive,
- *     mozjpeg encoder) that match scripts/convert_to_srgb.py exactly.
+   *   - High-quality JPEG settings (q=90, 4:4:4 chroma, mozjpeg
+   *     encoder). Non-progressive so the hero LCP image appears sharp
+   *     once loaded instead of ramping up through a blurry pass.
  *   - .keepExif() preserves the rest of the EXIF block (camera info,
  *     timestamps). The Python script does the same. NOTE: this also
  *     preserves GPS coordinates if present — phones strip these by
@@ -357,7 +358,7 @@ async function normaliseToSrgb(file: File): Promise<ProcessedImage> {
       .jpeg({
         quality: 90,
         chromaSubsampling: '4:4:4',
-        progressive: true,
+        progressive: false,
         mozjpeg: true,
       })
       .keepExif()

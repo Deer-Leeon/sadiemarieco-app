@@ -158,6 +158,33 @@ async function loadIndexHtml(): Promise<string> {
  *     attribute value itself contains a literal `>` (e.g. `alt="x > y"`).
  *     Acceptable here; we control the HTML and don't do that.
  */
+/**
+ * Preconnect + preload the homepage hero so the browser starts fetching
+ * the LCP image as soon as `<head>` is parsed — in parallel with fonts
+ * and CSS — instead of waiting for the `<body>` `<img>` tag.
+ */
+function injectLcpHints(
+  html: string,
+  imageMap: Record<string, SiteImage>
+): string {
+  const heroUrl = imageMap.home_hero?.url;
+  if (!heroUrl) return html;
+
+  let origin: string;
+  try {
+    origin = new URL(heroUrl).origin;
+  } catch {
+    return html;
+  }
+
+  const hints = [
+    `<link rel="preconnect" href="${origin}" crossorigin>`,
+    `<link rel="preload" as="image" href="${heroUrl}" fetchpriority="high">`,
+  ].join('\n  ');
+
+  return html.replace('</head>', `  ${hints}\n</head>`);
+}
+
 function injectImageUrls(
   html: string,
   imageMap: Record<string, SiteImage>
@@ -236,21 +263,18 @@ export async function GET(): Promise<Response> {
   //
   // The reconciler swallows its own errors, so a Cal outage can't
   // break the homepage render.
-  await reconcileWithCal();
-
   // ── DATA FETCH ────────────────────────────────────────────────────────
-  // Both queries run in parallel — they target different tables and
-  // share no dependencies, so there's no reason to serialise them.
-  // Either failing is non-fatal: missing images fall back to the
-  // hardcoded URLs in index.html, and missing services leave the
-  // injection token unreplaced (which produces an empty grid that
-  // still validates as HTML).
-  const [imageMap, servicesHtml] = await Promise.all([
+  // Cal reconcile + both DB queries run in parallel. Reconcile used to
+  // block the whole response serially (~200–500ms TTFB); images and
+  // services don't depend on it finishing first.
+  const [, imageMap, servicesHtml] = await Promise.all([
+    reconcileWithCal(),
     fetchImageMap(),
     fetchServicesHtml(),
   ]);
 
-  let rendered = injectImageUrls(html, imageMap);
+  let rendered = injectLcpHints(html, imageMap);
+  rendered = injectImageUrls(rendered, imageMap);
   rendered = injectCaptions(rendered, imageMap);
   rendered = rendered.replace(SERVICES_TOKEN, servicesHtml);
 
