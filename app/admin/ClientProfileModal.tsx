@@ -33,6 +33,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import imageCompression from 'browser-image-compression';
 import {
+  AlertCircle,
   ArrowLeft,
   Calendar,
   Camera,
@@ -422,6 +423,7 @@ function DossierSection({
     lifetime_value: client.lifetime_value,
     has_vaulted_card: client.has_vaulted_card,
     risk_flag: client.risk_flag,
+    strike_count: client.strike_count,
     last_booked_at: client.last_booked_at,
   });
   const mutatedRef = useRef(false);
@@ -530,9 +532,10 @@ function DossierSection({
 }
 
 function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
+  const strikes = stats.strike_count ?? 0;
   return (
-    <div className="grid grid-cols-3 gap-2 rounded-lg border border-stone-200 bg-white p-3">
-      <div className="text-center">
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-stone-200 bg-stone-200 sm:grid-cols-4">
+      <div className="bg-white p-3 text-center">
         <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
           Lifetime spend
         </p>
@@ -540,7 +543,7 @@ function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
           {formatLifetimeSpend(stats.lifetime_value)}
         </p>
       </div>
-      <div className="border-x border-stone-100 text-center">
+      <div className="bg-white p-3 text-center">
         <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
           Bookings
         </p>
@@ -548,7 +551,23 @@ function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
           {stats.total_bookings}
         </p>
       </div>
-      <div className="text-center">
+      <div className="bg-white p-3 text-center">
+        <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
+          Strikes
+        </p>
+        <p
+          className={`mt-1 flex items-center justify-center gap-1 font-serif text-lg tabular-nums ${
+            strikes > 0 ? 'text-amber-800' : 'text-stone-900'
+          }`}
+          title="No-shows marked without charging the fee"
+        >
+          {strikes > 0 && (
+            <AlertCircle className="h-4 w-4 text-amber-600" aria-hidden />
+          )}
+          <span>{strikes}</span>
+        </p>
+      </div>
+      <div className="bg-white p-3 text-center">
         <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
           Card vault
         </p>

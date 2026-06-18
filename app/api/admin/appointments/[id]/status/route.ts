@@ -179,25 +179,43 @@ async function cancelOnCal(uid: string): Promise<string | null> {
  */
 async function updateAppointmentStatus(
   idParam: string,
-  status: AppointmentStatus
+  status: AppointmentStatus,
+  options?: { noShowStrike?: boolean }
 ): Promise<AppointmentRow | null> {
+  const noShowStrike = options?.noShowStrike;
   if (UUID_RE.test(idParam)) {
-    const { rows } = await sql<AppointmentRow>`
-      UPDATE appointments
-      SET status = ${status}
-      WHERE id = ${idParam}::uuid
-      RETURNING id, cal_event_id, status
-    `;
+    const { rows } =
+      noShowStrike === undefined
+        ? await sql<AppointmentRow>`
+            UPDATE appointments
+            SET status = ${status}
+            WHERE id = ${idParam}::uuid
+            RETURNING id, cal_event_id, status
+          `
+        : await sql<AppointmentRow>`
+            UPDATE appointments
+            SET status = ${status}, no_show_strike = ${noShowStrike}
+            WHERE id = ${idParam}::uuid
+            RETURNING id, cal_event_id, status
+          `;
     return rows[0] ?? null;
   }
   const intId = parseIntegerId(idParam);
   if (intId !== null) {
-    const { rows } = await sql<AppointmentRow>`
-      UPDATE appointments
-      SET status = ${status}
-      WHERE id = ${intId}
-      RETURNING id, cal_event_id, status
-    `;
+    const { rows } =
+      noShowStrike === undefined
+        ? await sql<AppointmentRow>`
+            UPDATE appointments
+            SET status = ${status}
+            WHERE id = ${intId}
+            RETURNING id, cal_event_id, status
+          `
+        : await sql<AppointmentRow>`
+            UPDATE appointments
+            SET status = ${status}, no_show_strike = ${noShowStrike}
+            WHERE id = ${intId}
+            RETURNING id, cal_event_id, status
+          `;
     return rows[0] ?? null;
   }
   return null;
@@ -459,7 +477,13 @@ export async function PATCH(
     }
 
     // ── Local status write ────────────────────────────────────────
-    const updated = await updateAppointmentStatus(idParam, targetStatus);
+    const updated = await updateAppointmentStatus(
+      idParam,
+      targetStatus,
+      targetStatus === 'no-show'
+        ? { noShowStrike: !chargeNoShow }
+        : undefined
+    );
     if (updated === null) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }

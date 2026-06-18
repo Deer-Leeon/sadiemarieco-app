@@ -240,6 +240,8 @@ export interface ClientCrmStats {
   lifetime_value: number;
   has_vaulted_card: boolean;
   risk_flag: boolean;
+  /** No-shows marked without charging the vaulted card. */
+  strike_count: number;
   /** ISO 8601 — most recent appointment row created for this client. */
   last_booked_at: string | null;
 }
@@ -267,6 +269,7 @@ export const EMPTY_CLIENT_CRM_STATS: ClientCrmStats = {
   lifetime_value: 0,
   has_vaulted_card: false,
   risk_flag: false,
+  strike_count: 0,
   last_booked_at: null,
 };
 

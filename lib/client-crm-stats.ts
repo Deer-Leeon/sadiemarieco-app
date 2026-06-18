@@ -75,6 +75,7 @@ export function computeCrmStatsFromAppointments(
     service_price: number | null;
     stripe_customer_id: string | null;
     created_at?: string | null;
+    no_show_strike?: boolean | null;
   }>
 ): ClientCrmStats {
   const now = Date.now();
@@ -82,6 +83,7 @@ export function computeCrmStatsFromAppointments(
   let lifetime_value = 0;
   let has_vaulted_card = false;
   let risk_flag = false;
+  let strike_count = 0;
   let lastBookedMs = Number.NEGATIVE_INFINITY;
 
   for (const a of appointments) {
@@ -89,7 +91,10 @@ export function computeCrmStatsFromAppointments(
       const ms = Date.parse(a.created_at);
       if (Number.isFinite(ms) && ms > lastBookedMs) lastBookedMs = ms;
     }
-    const status = normalizeAppointmentStatus(a.status);
+
+    if (a.no_show_strike) {
+      strike_count += 1;
+    }
 
     if (countsForRisk(a.status)) {
       risk_flag = true;
@@ -119,6 +124,7 @@ export function computeCrmStatsFromAppointments(
     lifetime_value,
     has_vaulted_card,
     risk_flag,
+    strike_count,
     last_booked_at:
       Number.isFinite(lastBookedMs) && lastBookedMs > Number.NEGATIVE_INFINITY
         ? new Date(lastBookedMs).toISOString()
@@ -131,6 +137,7 @@ interface CrmStatsRow {
   lifetime_value: number | string | null;
   has_vaulted_card: boolean | null;
   risk_flag: boolean | null;
+  strike_count: number | string | null;
   last_booked_at: Date | string | null;
 }
 
@@ -190,7 +197,8 @@ export async function fetchClientCrmStats(
           'no-show',
           'canceled_by_client_late'
         )
-      ) AS risk_flag
+      ) AS risk_flag,
+      COUNT(*) FILTER (WHERE COALESCE(a.no_show_strike, FALSE))::int AS strike_count
     FROM appointments a
     LEFT JOIN LATERAL (
       SELECT s.price
@@ -249,6 +257,7 @@ export async function fetchClientCrmStats(
     lifetime_value: toNumber(row.lifetime_value),
     has_vaulted_card: Boolean(row.has_vaulted_card),
     risk_flag: Boolean(row.risk_flag),
+    strike_count: toNumber(row.strike_count),
     last_booked_at,
   };
 }
