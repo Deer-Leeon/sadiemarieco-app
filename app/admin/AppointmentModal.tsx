@@ -76,6 +76,12 @@ interface Props {
    * whether the parent uses this callback.
    */
   onMutated?: () => void;
+  /**
+   * When false, the client name in the appointment modal is display-only.
+   * Use when the modal is opened from ClientProfileModal — the admin is
+   * already on that client's profile.
+   */
+  allowClientProfileLink?: boolean;
 }
 
 /**
@@ -143,6 +149,7 @@ export default function AppointmentModal({
   onClose,
   stacked = false,
   onMutated,
+  allowClientProfileLink = true,
 }: Props) {
   const router = useRouter();
 
@@ -360,7 +367,14 @@ export default function AppointmentModal({
               onClose();
             }}
           />
-        ) : view === 'appointment' ? (
+        ) : view === 'client' && allowClientProfileLink ? (
+          <ClientProfileModal
+            appointment={appointment}
+            backLabel="Appointment"
+            onBack={() => setView('appointment')}
+            onClose={onClose}
+          />
+        ) : (
           <>
             <ModalHeader appointment={appointment} onClose={onClose} />
 
@@ -368,7 +382,11 @@ export default function AppointmentModal({
               <div className="flex flex-col gap-4">
                 <ClientBox
                   appointment={appointment}
-                  onOpenProfile={() => setView('client')}
+                  onOpenProfile={
+                    allowClientProfileLink
+                      ? () => setView('client')
+                      : undefined
+                  }
                 />
                 <DateTimeBox appointment={appointment} />
                 <ServiceBox appointment={appointment} />
@@ -408,13 +426,6 @@ export default function AppointmentModal({
               />
             )}
           </>
-        ) : (
-          <ClientProfileModal
-            appointment={appointment}
-            backLabel="Appointment"
-            onBack={() => setView('appointment')}
-            onClose={onClose}
-          />
         )}
       </div>
     </div>
@@ -490,7 +501,7 @@ function ClientBox({
   onOpenProfile,
 }: {
   appointment: Appointment;
-  onOpenProfile: () => void;
+  onOpenProfile?: () => void;
 }) {
   const name = clientDisplayName(
     appointment.client_first_name,
@@ -502,8 +513,10 @@ function ClientBox({
   // we render the name as plain text — the CRM is phone-keyed and
   // wouldn't know which row to load (an appointment without a phone
   // is a legacy / web-form booking we never associated with a real
-  // CRM record).
-  const canOpenProfile = Boolean(appointment.client_phone);
+  // CRM record). When onOpenProfile is omitted (opened from an
+  // existing client profile), the name stays plain text too.
+  const canOpenProfile =
+    Boolean(appointment.client_phone) && onOpenProfile !== undefined;
 
   return (
     <DetailBox label="Client" icon={<Scissors className="h-3 w-3" />}>

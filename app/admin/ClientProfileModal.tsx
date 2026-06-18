@@ -525,6 +525,7 @@ function DossierSection({
             mutatedRef.current = true;
           }}
           stacked
+          allowClientProfileLink={false}
         />
       )}
     </>
@@ -1173,6 +1174,7 @@ function AppointmentsView({ client }: { client: Client }) {
             mutatedRef.current = true;
           }}
           stacked
+          allowClientProfileLink={false}
         />
       )}
     </div>
