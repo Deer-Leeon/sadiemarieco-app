@@ -74,6 +74,27 @@ export function clientDisplayName(
   return name || 'Unknown client';
 }
 
+/** Cancelled lifecycle statuses (any party). */
+export function isAppointmentCanceled(status: string | null): boolean {
+  const s = (status || '').toLowerCase().trim();
+  return (
+    s === 'cancelled' ||
+    s === 'canceled_by_admin' ||
+    s === 'canceled_by_client' ||
+    s === 'canceled_by_client_late' ||
+    s === 'canceled_by_system'
+  );
+}
+
+/**
+ * Closed bookings that should not be rescheduled or status-patched again.
+ * Matches struck-through rows in client appointment history.
+ */
+export function isAppointmentReadOnly(status: string | null): boolean {
+  const s = (status || '').toLowerCase().trim();
+  return s === 'no-show' || isAppointmentCanceled(status);
+}
+
 /**
  * Format a digits-only phone number into a friendlier US-style
  * presentation:

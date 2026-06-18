@@ -3,7 +3,7 @@
 import { format, parseISO } from 'date-fns';
 
 import type { Appointment } from './types';
-import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import { appointmentServiceLabel, clientDisplayName, isAppointmentCanceled } from './helpers';
 import { getServiceColor } from './serviceColors';
 
 const TIME_FORMAT = 'h:mm a';
@@ -67,14 +67,7 @@ export function AppointmentStatusPill({ status }: { status: string | null }) {
 }
 
 function isCanceledStatus(status: string | null): boolean {
-  const s = (status || '').toLowerCase();
-  return (
-    s === 'cancelled' ||
-    s === 'canceled_by_admin' ||
-    s === 'canceled_by_client' ||
-    s === 'canceled_by_client_late' ||
-    s === 'canceled_by_system'
-  );
+  return isAppointmentCanceled(status);
 }
 
 /**
@@ -100,6 +93,7 @@ export function AppointmentListRow({
   const isNoShow = statusLower === 'no-show';
   const isPending = statusLower === 'pending';
   const isCanceled = isCanceledStatus(appointment.status);
+  const readOnly = isNoShow || isCanceled;
   const strike = isNoShow || (variant === 'client' && isCanceled);
 
   const color =
@@ -176,7 +170,11 @@ export function AppointmentListRow({
         <button
           type="button"
           onClick={onSelect}
-          aria-label={`Open appointment · ${appointmentServiceLabel(appointment)}`}
+          aria-label={
+            readOnly
+              ? `View appointment (read-only) · ${appointmentServiceLabel(appointment)}`
+              : `Open appointment · ${appointmentServiceLabel(appointment)}`
+          }
           className={rowClass}
           style={colorStyle}
         >

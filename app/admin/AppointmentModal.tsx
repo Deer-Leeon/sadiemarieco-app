@@ -30,7 +30,7 @@ import {
 } from '@/lib/cal-embed-shared';
 
 import type { Appointment, AppointmentStatus } from './types';
-import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import { appointmentServiceLabel, clientDisplayName, isAppointmentReadOnly } from './helpers';
 import {
   NO_SHOW_PENALTY_FRACTION,
   penaltyAmountCents,
@@ -185,6 +185,8 @@ export default function AppointmentModal({
       ? penaltyAmountCents(appointment.service_price)
       : 0;
 
+  const readOnly = isAppointmentReadOnly(appointment.status);
+
   const submitStatusChange = async (
     next: AppointmentStatus,
     options?: { chargeNoShow?: boolean }
@@ -268,7 +270,7 @@ export default function AppointmentModal({
   };
 
   const openStatusConfirm = (kind: StatusConfirmKind) => {
-    if (statusAction !== null) return;
+    if (statusAction !== null || readOnly) return;
     setStatusError(null);
     setStatusConfirm(kind);
   };
@@ -340,7 +342,9 @@ export default function AppointmentModal({
             ? 'Reschedule appointment'
             : view === 'client'
               ? 'Client profile'
-              : 'Appointment details'
+              : readOnly
+                ? 'Appointment details (view only)'
+                : 'Appointment details'
         }
       >
         {isRescheduling ? (
@@ -371,16 +375,20 @@ export default function AppointmentModal({
               </div>
             </div>
 
-            <ActionFooter
-              canReschedule={Boolean(appointment.service_slug)}
-              onReschedule={() => setIsRescheduling(true)}
-              onNoShow={() => openStatusConfirm('no-show')}
-              onCancel={() => openStatusConfirm('cancel')}
-              statusAction={statusAction}
-              statusError={statusError}
-            />
+            {readOnly ? (
+              <ReadOnlyFooter status={appointment.status} />
+            ) : (
+              <ActionFooter
+                canReschedule={Boolean(appointment.service_slug)}
+                onReschedule={() => setIsRescheduling(true)}
+                onNoShow={() => openStatusConfirm('no-show')}
+                onCancel={() => openStatusConfirm('cancel')}
+                statusAction={statusAction}
+                statusError={statusError}
+              />
+            )}
 
-            {statusConfirm && (
+            {!readOnly && statusConfirm && (
               <StatusActionConfirmDialog
                 kind={statusConfirm}
                 clientName={clientDisplayName(
@@ -755,10 +763,27 @@ function describeHeaderStatus(status: string): {
       };
     case 'no-show':
       return { label: 'No-show', tone: 'text-stone-500' };
+    case 'canceled_by_system':
+      return { label: 'Cancelled by system', tone: 'text-stone-500' };
     case 'confirmed':
     default:
       return { label: 'Booking', tone: 'text-stone-500' };
   }
+}
+
+function ReadOnlyFooter({ status }: { status: string | null }) {
+  const { label } = describeHeaderStatus((status || '').toLowerCase());
+  return (
+    <div className="border-t border-stone-200 bg-stone-50 px-6 py-4 text-center">
+      <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+        View only
+      </p>
+      <p className="mt-1 text-sm text-stone-600">
+        This booking is closed ({label.toLowerCase()}) and can&apos;t be
+        changed here.
+      </p>
+    </div>
+  );
 }
 
 /** Cal embed mode: true reschedule vs fresh slot on the same service. */
