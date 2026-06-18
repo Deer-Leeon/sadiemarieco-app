@@ -44,7 +44,9 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { sql } from '@vercel/postgres';
 
+import { fetchDefaultSchedule } from './admin/availability/calSchedules';
 import { reconcileWithCal } from './admin/services/sync';
+import { renderWeeklyHoursHtml } from '@/lib/format-weekly-hours';
 
 // Node.js runtime required for `node:fs` — the Edge runtime doesn't
 // expose the filesystem. Default runtime for route handlers is already
@@ -75,7 +77,12 @@ const CAL_USERNAME = 'mckenna-sadiemarie';
  * injection (the regex match would fail) rather than corrupt the page.
  */
 const SERVICES_TOKEN = '<!-- INJECT_SERVICES_HTML -->';
+const HOURS_TOKEN = '<!-- INJECT_HOURS_HTML -->';
 const LCP_HINTS_TOKEN = '<!-- INJECT_LCP_HINTS -->';
+
+/** Shown when Cal is unreachable or no weekly hours are configured. */
+const HOURS_FALLBACK_HTML =
+  'Wednesday: 9 am &ndash; 12:45 pm<br>Saturday: 9 am &ndash; 9 pm';
 
 interface SiteImageRow {
   id: string;
@@ -263,11 +270,13 @@ export async function GET(): Promise<Response> {
   let html: string;
   let imageMap: Record<string, SiteImage>;
   let servicesHtml: string;
+  let hoursHtml: string;
   try {
-    [html, imageMap, servicesHtml] = await Promise.all([
+    [html, imageMap, servicesHtml, hoursHtml] = await Promise.all([
       loadIndexHtml(),
       fetchImageMap(),
       fetchServicesHtml(),
+      fetchWeeklyHoursHtml(),
     ]);
   } catch (err) {
     // If the HTML file is genuinely missing in production something is
@@ -284,6 +293,7 @@ export async function GET(): Promise<Response> {
   rendered = injectImageUrls(rendered, imageMap);
   rendered = injectCaptions(rendered, imageMap);
   rendered = rendered.replace(SERVICES_TOKEN, servicesHtml);
+  rendered = rendered.replace(HOURS_TOKEN, hoursHtml);
 
   const headers: Record<string, string> = {
     'Content-Type': 'text/html; charset=utf-8',
@@ -313,6 +323,27 @@ async function fetchImageMap(): Promise<Record<string, SiteImage>> {
   } catch (err) {
     console.error('[/] site_images query failed:', err);
     return {};
+  }
+}
+
+/**
+ * Pull recurring weekly hours from Cal.com's default schedule (same
+ * source as /admin/availability). Date overrides are ignored.
+ */
+async function fetchWeeklyHoursHtml(): Promise<string> {
+  const apiKey =
+    process.env.CALCOM_API_KEY?.trim() || process.env.CAL_API_KEY?.trim();
+  if (!apiKey) {
+    console.error('[/] weekly hours: CAL_API_KEY is not set');
+    return HOURS_FALLBACK_HTML;
+  }
+
+  try {
+    const schedule = await fetchDefaultSchedule(apiKey);
+    return renderWeeklyHoursHtml(schedule.availability);
+  } catch (err) {
+    console.error('[/] weekly hours Cal fetch failed:', err);
+    return HOURS_FALLBACK_HTML;
   }
 }
 
