@@ -34,7 +34,7 @@ import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import {
   NO_SHOW_PENALTY_FRACTION,
   penaltyAmountCents,
-} from '@/lib/no-show-charge';
+} from '@/lib/no-show-penalty';
 import { appointmentHasVaultedCard } from '@/lib/client-crm-stats';
 import ClientProfileModal from './ClientProfileModal';
 

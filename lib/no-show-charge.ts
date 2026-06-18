@@ -1,9 +1,13 @@
 import Stripe from 'stripe';
 
 import { STRIPE_CUSTOMER_ID_RE } from '@/lib/appointment-stripe';
+import {
+  NO_SHOW_PENALTY_FRACTION,
+  penaltyAmountCents,
+} from '@/lib/no-show-penalty';
 import { stripe } from '@/lib/stripe';
 
-export const NO_SHOW_PENALTY_FRACTION = 0.5;
+export { NO_SHOW_PENALTY_FRACTION, penaltyAmountCents };
 
 export interface NoShowChargeSuccess {
   paymentIntentId: string;
@@ -15,13 +19,6 @@ export interface NoShowChargeFailure {
   error: string;
   message: string;
   status: number;
-}
-
-export function penaltyAmountCents(servicePriceDollars: number): number {
-  if (!Number.isFinite(servicePriceDollars) || servicePriceDollars <= 0) {
-    return 0;
-  }
-  return Math.round(servicePriceDollars * NO_SHOW_PENALTY_FRACTION * 100);
 }
 
 /**
