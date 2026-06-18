@@ -31,6 +31,10 @@ import {
 
 import type { Appointment, AppointmentStatus } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import {
+  NO_SHOW_PENALTY_FRACTION,
+  penaltyAmountCents,
+} from '@/lib/no-show-charge';
 import { appointmentHasVaultedCard } from '@/lib/client-crm-stats';
 import ClientProfileModal from './ClientProfileModal';
 
@@ -99,6 +103,9 @@ const escStack: Array<() => void> = [];
  */
 type ModalView = 'appointment' | 'client';
 
+/** In-modal confirmation before cancel / no-show status PATCH. */
+type StatusConfirmKind = 'no-show' | 'cancel';
+
 /**
  * AppointmentModal
  *
@@ -160,6 +167,9 @@ export default function AppointmentModal({
     null | 'no-show' | 'canceled_by_admin'
   >(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [statusConfirm, setStatusConfirm] = useState<StatusConfirmKind | null>(
+    null
+  );
 
   const canChargeNoShow =
     appointmentHasVaultedCard(
@@ -170,29 +180,20 @@ export default function AppointmentModal({
     Number.isFinite(appointment.service_price) &&
     appointment.service_price > 0;
 
-  const handleStatusChange = async (next: AppointmentStatus) => {
+  const noShowFeeCents =
+    canChargeNoShow && appointment.service_price != null
+      ? penaltyAmountCents(appointment.service_price)
+      : 0;
+
+  const submitStatusChange = async (
+    next: AppointmentStatus,
+    options?: { chargeNoShow?: boolean }
+  ) => {
     if (statusAction !== null) return;
-    if (next === 'no-show') {
-      if (!canChargeNoShow) {
-        setStatusError(
-          'No vaulted card or service price on file — a 50% no-show fee cannot be charged.'
-        );
-        return;
-      }
-      const confirmed = window.confirm(
-        "Are you sure you want to mark this as a No-Show? This will automatically charge the client's vaulted card for 50% of the service price."
-      );
-      if (!confirmed) return;
-    }
-    if (next === 'canceled_by_admin') {
-      const confirmed = window.confirm(
-        'Are you sure you want to cancel this appointment? The client will be notified.'
-      );
-      if (!confirmed) return;
-    }
 
     setStatusAction(next === 'no-show' ? 'no-show' : 'canceled_by_admin');
     setStatusError(null);
+    setStatusConfirm(null);
 
     try {
       const res = await fetch(
@@ -200,7 +201,12 @@ export default function AppointmentModal({
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: next }),
+          body: JSON.stringify({
+            status: next,
+            ...(next === 'no-show'
+              ? { charge_no_show: options?.chargeNoShow === true }
+              : {}),
+          }),
         }
       );
       const data = (await res.json().catch(() => null)) as {
@@ -219,15 +225,16 @@ export default function AppointmentModal({
           (data && typeof data === 'object' && data.error) ||
           `HTTP ${res.status}`;
         const code = data && typeof data === 'object' ? data.error : undefined;
-        if (
+        setStatusError(
           code === 'card_declined' ||
-          code === 'authentication_required' ||
-          code === 'no_payment_method' ||
-          code === 'no_vaulted_card'
-        ) {
-          alert(`Card charge failed:\n${msg}`);
-        }
-        throw new Error(msg);
+            code === 'authentication_required' ||
+            code === 'no_payment_method' ||
+            code === 'no_vaulted_card'
+            ? `Card charge failed: ${msg}`
+            : msg
+        );
+        setStatusAction(null);
+        return;
       }
       // Non-fatal Cal cancel error: the local DB row was updated but
       // Cal didn't accept the cancellation. We surface this as a
@@ -260,6 +267,12 @@ export default function AppointmentModal({
     }
   };
 
+  const openStatusConfirm = (kind: StatusConfirmKind) => {
+    if (statusAction !== null) return;
+    setStatusError(null);
+    setStatusConfirm(kind);
+  };
+
   // ESC to close. Bound at window so the modal closes regardless of
   // which child element has focus when the user hits the key. While
   // the reschedule embed is open we let the user bail with ESC too —
@@ -275,6 +288,10 @@ export default function AppointmentModal({
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return;
       if (escStack[escStack.length - 1] !== onClose) return;
+      if (statusConfirm !== null) {
+        setStatusConfirm(null);
+        return;
+      }
       onClose();
     }
     window.addEventListener('keydown', onKey);
@@ -283,7 +300,7 @@ export default function AppointmentModal({
       if (i >= 0) escStack.splice(i, 1);
       window.removeEventListener('keydown', onKey);
     };
-  }, [onClose]);
+  }, [onClose, statusConfirm]);
 
   // Body scroll lock + restore. Snapshotting `previous` rather than
   // hard-coding '' on cleanup means we cooperate with any parent
@@ -307,11 +324,14 @@ export default function AppointmentModal({
       className={`fixed inset-0 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm ${
         stacked ? 'z-70' : 'z-60'
       }`}
-      onClick={onClose}
+      onClick={() => {
+        if (statusConfirm) setStatusConfirm(null);
+        else onClose();
+      }}
       role="presentation"
     >
       <div
-        className={`flex max-h-[90vh] w-full ${cardWidthClass} flex-col overflow-hidden rounded-2xl bg-[#FAF9F6] shadow-2xl transition-[max-width] duration-200`}
+        className={`relative flex max-h-[90vh] w-full ${cardWidthClass} flex-col overflow-hidden rounded-2xl bg-[#FAF9F6] shadow-2xl transition-[max-width] duration-200`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -353,13 +373,32 @@ export default function AppointmentModal({
 
             <ActionFooter
               canReschedule={Boolean(appointment.service_slug)}
-              canChargeNoShow={canChargeNoShow}
               onReschedule={() => setIsRescheduling(true)}
-              onNoShow={() => handleStatusChange('no-show')}
-              onCancel={() => handleStatusChange('canceled_by_admin')}
+              onNoShow={() => openStatusConfirm('no-show')}
+              onCancel={() => openStatusConfirm('cancel')}
               statusAction={statusAction}
               statusError={statusError}
             />
+
+            {statusConfirm && (
+              <StatusActionConfirmDialog
+                kind={statusConfirm}
+                clientName={clientDisplayName(
+                  appointment.client_first_name,
+                  appointment.client_last_name
+                )}
+                canChargeNoShow={canChargeNoShow}
+                noShowFeeCents={noShowFeeCents}
+                busy={statusAction !== null}
+                onDismiss={() => setStatusConfirm(null)}
+                onConfirmNoShow={(charge) =>
+                  submitStatusChange('no-show', { chargeNoShow: charge })
+                }
+                onConfirmCancel={() =>
+                  submitStatusChange('canceled_by_admin')
+                }
+              />
+            )}
           </>
         ) : (
           <ClientProfileModal
@@ -605,7 +644,6 @@ function ServiceBox({ appointment }: { appointment: Appointment }) {
 
 function ActionFooter({
   canReschedule,
-  canChargeNoShow,
   onReschedule,
   onNoShow,
   onCancel,
@@ -619,8 +657,6 @@ function ActionFooter({
    * than opening an empty embed.
    */
   canReschedule: boolean;
-  /** False when there is no vaulted card or resolvable service price. */
-  canChargeNoShow: boolean;
   onReschedule: () => void;
   onNoShow: () => void;
   onCancel: () => void;
@@ -662,18 +698,14 @@ function ActionFooter({
         <button
           type="button"
           onClick={onNoShow}
-          disabled={busy || !canChargeNoShow}
-          title={
-            canChargeNoShow
-              ? 'Charge 50% of the service price to the card on file and mark as no-show'
-              : 'Requires a vaulted card and a service price from checkout'
-          }
+          disabled={busy}
+          title="Mark this appointment as a no-show"
           className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white"
         >
           {statusAction === 'no-show' ? (
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
-              Charging
+              Updating
             </>
           ) : (
             'No-show'
@@ -1164,6 +1196,174 @@ function RescheduleView({
   );
 }
 
+function StatusActionConfirmDialog({
+  kind,
+  clientName,
+  canChargeNoShow,
+  noShowFeeCents,
+  busy,
+  onDismiss,
+  onConfirmNoShow,
+  onConfirmCancel,
+}: {
+  kind: StatusConfirmKind;
+  clientName: string;
+  canChargeNoShow: boolean;
+  noShowFeeCents: number;
+  busy: boolean;
+  onDismiss: () => void;
+  onConfirmNoShow: (charge: boolean) => void;
+  onConfirmCancel: () => void;
+}) {
+  const feeLabel = formatCentsUsd(noShowFeeCents);
+  const isNoShow = kind === 'no-show';
+
+  return (
+    <div
+      className="absolute inset-0 z-10 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-[2px]"
+      onClick={onDismiss}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="status-confirm-title"
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-stone-200/80 bg-[#FAF9F6] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3 px-6 pt-6">
+          <span
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+              isNoShow
+                ? 'bg-amber-100 text-amber-700'
+                : 'bg-rose-100 text-rose-600'
+            }`}
+          >
+            {isNoShow ? (
+              <AlertCircle className="h-5 w-5" strokeWidth={1.6} />
+            ) : (
+              <X className="h-5 w-5" strokeWidth={1.6} />
+            )}
+          </span>
+          <div className="flex-1">
+            <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
+              {isNoShow ? 'No-show' : 'Cancel booking'}
+            </p>
+            <h3
+              id="status-confirm-title"
+              className="font-serif text-xl leading-tight text-stone-900"
+            >
+              {isNoShow
+                ? 'Mark as no-show?'
+                : 'Cancel this appointment?'}
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed text-stone-600">
+              {isNoShow ? (
+                <>
+                  <span className="font-medium text-stone-800">
+                    {clientName}
+                  </span>{' '}
+                  did not arrive for this booking. Choose whether to charge
+                  the no-show fee to the card on file.
+                </>
+              ) : (
+                <>
+                  This will cancel the booking for{' '}
+                  <span className="font-medium text-stone-800">
+                    {clientName}
+                  </span>
+                  . Cal.com will send them a cancellation notification.
+                </>
+              )}
+            </p>
+            {isNoShow && !canChargeNoShow && (
+              <p className="mt-3 rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs leading-relaxed text-stone-500">
+                No vaulted card or service price on file — you can mark this
+                as a no-show, but a fee cannot be charged automatically.
+              </p>
+            )}
+            {isNoShow && canChargeNoShow && (
+              <p className="mt-3 rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2 text-xs leading-relaxed text-amber-900">
+                No-show fee:{' '}
+                <strong>
+                  {Math.round(NO_SHOW_PENALTY_FRACTION * 100)}% ({feeLabel})
+                </strong>{' '}
+                of the service price, charged to the card saved at checkout.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-col gap-2 border-t border-stone-200/70 bg-white/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
+          <button
+            type="button"
+            onClick={onDismiss}
+            disabled={busy}
+            className="order-last rounded-full border border-stone-200 bg-white px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50 sm:order-first"
+          >
+            Go back
+          </button>
+
+          {isNoShow ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onConfirmNoShow(false)}
+                disabled={busy}
+                className="rounded-full border border-stone-300 bg-white px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-stone-700 transition-colors hover:border-stone-400 hover:bg-stone-50 disabled:opacity-50"
+              >
+                {busy ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Saving
+                  </span>
+                ) : (
+                  'No charge'
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => onConfirmNoShow(true)}
+                disabled={busy || !canChargeNoShow}
+                title={
+                  canChargeNoShow
+                    ? undefined
+                    : 'Requires a vaulted card and service price'
+                }
+                className="rounded-full border border-amber-700 bg-amber-700 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {busy ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Charging
+                  </span>
+                ) : (
+                  `Charge ${feeLabel}`
+                )}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={onConfirmCancel}
+              disabled={busy}
+              className="rounded-full border border-rose-600 bg-rose-600 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-white transition-colors hover:bg-rose-700 disabled:opacity-50"
+            >
+              {busy ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Canceling
+                </span>
+              ) : (
+                'Confirm cancel'
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── HELPERS ───────────────────────────────────────────────────────────────
 
 /**
@@ -1175,5 +1375,13 @@ function RescheduleView({
 function formatPrice(price: number): string {
   if (Number.isInteger(price)) return String(price);
   return price.toFixed(2);
+}
+
+function formatCentsUsd(cents: number): string {
+  if (!Number.isFinite(cents) || cents <= 0) return '$0';
+  const dollars = cents / 100;
+  return dollars % 1 === 0
+    ? `$${dollars.toFixed(0)}`
+    : `$${dollars.toFixed(2)}`;
 }
 

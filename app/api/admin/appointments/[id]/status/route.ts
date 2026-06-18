@@ -6,9 +6,10 @@
  *
  * Behaviours per target status:
  *   • 'no-show'
- *       → charge 50% of the matched service price off-session against
- *         the vaulted card (`stripe_customer_id`), then flip local
- *         status. If Stripe declines, the row stays unchanged.
+ *       → optionally charge 50% of the matched service price off-session
+ *         when `charge_no_show: true`, then flip local status. If Stripe
+ *         declines, the row stays unchanged. When `charge_no_show` is false
+ *         or omitted, only the status is updated.
  *
  *   • 'confirmed' / 'canceled_by_client'
  *       → local DB update only. (canceled_by_client is unusual from
@@ -76,6 +77,8 @@ interface Context {
 
 interface PatchBody {
   status?: unknown;
+  /** When status is `no-show`, charge 50% off-session only if true. */
+  charge_no_show?: unknown;
 }
 
 interface AppointmentRow {
@@ -355,6 +358,10 @@ export async function PATCH(
     );
   }
   const targetStatus: AppointmentStatus = body.status;
+  const chargeNoShow =
+    body.charge_no_show === true ||
+    body.charge_no_show === 'true' ||
+    body.charge_no_show === 1;
 
   try {
     let calCancelError: string | null = null;
@@ -382,17 +389,6 @@ export async function PATCH(
         );
       }
 
-      if (!existing.stripe_customer_id) {
-        return NextResponse.json(
-          {
-            error: 'no_vaulted_card',
-            message:
-              'No card on file for this client. They must complete checkout before a no-show fee can be charged.',
-          },
-          { status: 400 }
-        );
-      }
-
       const priceRaw =
         existing.service_price === null
           ? NaN
@@ -401,29 +397,42 @@ export async function PATCH(
         (existing.service_name || 'appointment').split(' between ')[0]?.trim() ||
         'appointment';
 
-      const chargeResult = await chargeNoShowPenalty({
-        stripeCustomerId: existing.stripe_customer_id,
-        servicePriceDollars: priceRaw,
-        appointmentId: String(existing.id),
-        calBookingUid: existing.cal_event_id,
-        serviceLabel,
-      });
+      if (chargeNoShow) {
+        if (!existing.stripe_customer_id) {
+          return NextResponse.json(
+            {
+              error: 'no_vaulted_card',
+              message:
+                'No card on file for this client. They must complete checkout before a no-show fee can be charged.',
+            },
+            { status: 400 }
+          );
+        }
 
-      if (!('paymentIntentId' in chargeResult)) {
-        return NextResponse.json(
-          {
-            error: chargeResult.error,
-            message: chargeResult.message,
-          },
-          { status: chargeResult.status }
-        );
+        const chargeResult = await chargeNoShowPenalty({
+          stripeCustomerId: existing.stripe_customer_id,
+          servicePriceDollars: priceRaw,
+          appointmentId: String(existing.id),
+          calBookingUid: existing.cal_event_id,
+          serviceLabel,
+        });
+
+        if (!('paymentIntentId' in chargeResult)) {
+          return NextResponse.json(
+            {
+              error: chargeResult.error,
+              message: chargeResult.message,
+            },
+            { status: chargeResult.status }
+          );
+        }
+
+        noShowCharge = {
+          payment_intent_id: chargeResult.paymentIntentId,
+          amount_cents: chargeResult.amountCents,
+          currency: chargeResult.currency,
+        };
       }
-
-      noShowCharge = {
-        payment_intent_id: chargeResult.paymentIntentId,
-        amount_cents: chargeResult.amountCents,
-        currency: chargeResult.currency,
-      };
     }
 
     // ── Admin-cancel branch: hit Cal first ────────────────────────
