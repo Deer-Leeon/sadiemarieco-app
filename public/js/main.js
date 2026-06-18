@@ -66,27 +66,59 @@
 
   initMarquees();
 
-  // ── NAVBAR SCROLL ──
-  const navbar = document.getElementById('navbar');
-  if (navbar) {
-    let navScrolled = window.scrollY > 60;
-    let navTicking = false;
-    const applyNavScroll = () => {
-      navTicking = false;
-      const next = window.scrollY > 60;
-      if (next === navScrolled) return;
-      navScrolled = next;
-      navbar.classList.toggle('scrolled', navScrolled);
-    };
-    const onNavScroll = () => {
-      if (!navTicking) {
-        navTicking = true;
-        requestAnimationFrame(applyNavScroll);
+  // ── SMOOTH IN-PAGE ANCHOR SCROLL ──
+  // Nav and other #section links animate scroll; wheel/touch stay instant (html scroll-behavior: auto).
+  function initSmoothAnchorScroll() {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const DURATION_MS = 560;
+
+    function easeInOutCubic(t) {
+      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    let scrollAnim = null;
+
+    function smoothScrollTo(targetY) {
+      if (reduceMotion) {
+        window.scrollTo(0, targetY);
+        return;
       }
-    };
-    applyNavScroll();
-    window.addEventListener('scroll', onNavScroll, { passive: true });
+      if (scrollAnim) cancelAnimationFrame(scrollAnim);
+      const startY = window.scrollY;
+      const delta = targetY - startY;
+      if (Math.abs(delta) < 2) return;
+      const start = performance.now();
+      const step = (now) => {
+        const t = Math.min((now - start) / DURATION_MS, 1);
+        window.scrollTo(0, startY + delta * easeInOutCubic(t));
+        if (t < 1) scrollAnim = requestAnimationFrame(step);
+        else scrollAnim = null;
+      };
+      scrollAnim = requestAnimationFrame(step);
+    }
+
+    document.addEventListener('click', (e) => {
+      const link = e.target.closest('a[href^="#"]');
+      if (!link) return;
+      const raw = link.getAttribute('href');
+      if (!raw || raw === '#') return;
+      let id;
+      try {
+        id = decodeURIComponent(raw.slice(1));
+      } catch {
+        return;
+      }
+      const target = document.getElementById(id);
+      if (!target) return;
+      e.preventDefault();
+      // Match native anchor jumps: section top aligns with viewport top (same as before smooth scroll).
+      const top = target.getBoundingClientRect().top + window.scrollY;
+      smoothScrollTo(Math.max(0, top));
+      if (history.pushState) history.pushState(null, '', raw);
+    });
   }
+
+  initSmoothAnchorScroll();
 
   // ── SCROLL REVEAL ──
   // Matches the site's 860px mobile breakpoint in styles.css.
