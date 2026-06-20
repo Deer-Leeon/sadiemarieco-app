@@ -64,6 +64,84 @@ export function calUpstreamErrorMessage(payload: unknown, status: number): strin
   return `Cal.com returned HTTP ${status}`;
 }
 
+const CAL_ALREADY_CONFIRMED_PATTERNS = [
+  /already\s+confirmed/i,
+  /already\s+accepted/i,
+  /booking\s+is\s+accepted/i,
+  /does\s+not\s+require\s+confirmation/i,
+  /not\s+(in\s+)?pending/i,
+  /no\s+longer\s+pending/i,
+];
+
+/** Extract booking status from a Cal v2 GET/confirm response body. */
+export function extractCalBookingStatus(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const root = payload as Record<string, unknown>;
+  const booking =
+    root.data && typeof root.data === 'object'
+      ? (root.data as Record<string, unknown>)
+      : root;
+  const status = booking.status;
+  return typeof status === 'string' ? status.trim().toLowerCase() : null;
+}
+
+/** True when Cal rejected confirm because the booking is already accepted. */
+export function isCalBookingAlreadyConfirmed(
+  payload: unknown,
+  message: string
+): boolean {
+  if (CAL_ALREADY_CONFIRMED_PATTERNS.some((re) => re.test(message))) {
+    return true;
+  }
+  return extractCalBookingStatus(payload) === 'accepted';
+}
+
+/** GET booking from Cal v2 and check whether it is already accepted. */
+export async function fetchCalBookingIsAccepted(
+  bookingUid: string,
+  apiKey: string,
+  apiVersion: string = CAL_BOOKINGS_API_VERSION
+): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${CAL_V2_BASE}/bookings/${encodeURIComponent(bookingUid)}`,
+      {
+        method: 'GET',
+        headers: calV2Headers(apiKey, apiVersion),
+        cache: 'no-store',
+      }
+    );
+    if (!res.ok) return false;
+    const payload: unknown = await res.json().catch(() => null);
+    return extractCalBookingStatus(payload) === 'accepted';
+  } catch {
+    return false;
+  }
+}
+
+async function treatAlreadyConfirmedAsSuccess(
+  bookingUid: string,
+  apiKey: string,
+  payload: unknown,
+  message: string,
+  logPrefix: string
+): Promise<boolean> {
+  if (isCalBookingAlreadyConfirmed(payload, message)) {
+    console.log(`${logPrefix} booking already confirmed on Cal — treating as success`, {
+      bookingUid,
+      message,
+    });
+    return true;
+  }
+  if (await fetchCalBookingIsAccepted(bookingUid, apiKey)) {
+    console.log(`${logPrefix} booking status is accepted on Cal — treating confirm as success`, {
+      bookingUid,
+    });
+    return true;
+  }
+  return false;
+}
+
 function calV2Headers(apiKey: string, apiVersion: string): HeadersInit {
   return {
     Accept: 'application/json',
@@ -191,7 +269,19 @@ export async function confirmCalV2Booking(
     );
     if (res.ok) return null;
     const payload: unknown = await res.json().catch(() => null);
-    return calUpstreamErrorMessage(payload, res.status);
+    const message = calUpstreamErrorMessage(payload, res.status);
+    if (
+      await treatAlreadyConfirmedAsSuccess(
+        bookingUid,
+        apiKey,
+        payload,
+        message,
+        '[cal-proxy]'
+      )
+    ) {
+      return null;
+    }
+    return message;
   } catch (err) {
     return errorMessage(err);
   }

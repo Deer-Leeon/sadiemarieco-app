@@ -1,5 +1,5 @@
 const PUBLIC_BASE_URL = 'https://www.sadiemarie.co';
-const PAGE_BG = '#f5f3f0';
+const PAGE_BG = '#ebe8e4';
 const NAVY = '#0d1b2a';
 const SERIF = "'Times New Roman', Times, Georgia, serif";
 const SCRIPT = "'Pinyon Script', 'Brush Script MT', 'Segoe Script', cursive";
@@ -68,8 +68,8 @@ export function generateConfirmationHtml({
 
           <!-- Header bar — anchored above the banner -->
           <tr>
-            <td class="email-pad" style="padding:0;background-color:#ebe8e4;border-bottom:1px solid #d5d0ca;">
-              <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color:#ebe8e4;">
+            <td class="email-pad" style="padding:0;background-color:${PAGE_BG};border-bottom:1px solid #d5d0ca;">
+              <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color:${PAGE_BG};">
                 <tr>
                   <td style="padding:14px 36px 13px;">
                     <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
@@ -112,12 +112,12 @@ export function generateConfirmationHtml({
             </td>
           </tr>
 
-          <!-- Body -->
+          <!-- Body + CTA -->
           <tr>
-            <td class="email-pad" style="padding:28px 40px 8px;background-color:${PAGE_BG};">
+            <td class="email-pad" bgcolor="${PAGE_BG}" style="padding:32px 40px 40px;background-color:${PAGE_BG};">
               <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td style="padding-bottom:20px;">
+                  <td style="padding-bottom:22px;">
                     <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
                       <tr>
                         <td height="1" style="height:1px;line-height:1px;font-size:0;background-color:#8a93a0;border-radius:999px;">&nbsp;</td>
@@ -131,23 +131,21 @@ export function generateConfirmationHtml({
                   </td>
                 </tr>
                 <tr>
-                  <td align="center" class="body-copy" style="font-family:${SERIF};font-size:17px;color:${NAVY};line-height:1.55;text-align:center;">
+                  <td align="center" class="body-copy" style="padding-bottom:32px;font-family:${SERIF};font-size:17px;color:${NAVY};line-height:1.55;text-align:center;">
                     If there is any conflict, please cancel or reschedule with at least 24 hours' notice. You'll receive reminder messages with pre-arrival instructions before your appointment. I can't wait to see you!
                   </td>
                 </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- CTA -->
-          <tr>
-            <td align="center" class="email-pad" style="padding:28px 40px 40px;background-color:${PAGE_BG};">
-              <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin:0 auto;">
                 <tr>
-                  <td align="center" bgcolor="#2a4460" style="background-color:#2a4460;border-radius:26px;">
-                    <a href="${cancelUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:20px 36px;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:-0.02em;line-height:1;">
-                      Cancel/Reschedule
-                    </a>
+                  <td align="center">
+                    <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+                      <tr>
+                        <td align="center" bgcolor="#2a4460" style="background-color:#2a4460;border-radius:26px;">
+                          <a href="${cancelUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:20px 36px;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:-0.02em;line-height:1;">
+                            Cancel/Reschedule
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
                   </td>
                 </tr>
               </table>

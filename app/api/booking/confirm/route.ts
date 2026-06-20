@@ -44,6 +44,12 @@ import {
   STRIPE_CUSTOMER_ID_RE,
 } from '@/lib/appointment-stripe';
 import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
+import {
+  CAL_BOOKINGS_API_VERSION,
+  calUpstreamErrorMessage,
+  fetchCalBookingIsAccepted,
+  isCalBookingAlreadyConfirmed,
+} from '@/lib/cal-proxy';
 import { isValidEmail } from '@/lib/client-identity';
 import { stripe } from '@/lib/stripe';
 
@@ -53,7 +59,6 @@ export const revalidate = 0;
 
 const CAL_V1_BASE = 'https://api.cal.com/v1';
 const CAL_V2_BASE = 'https://api.cal.com/v2';
-const CAL_API_VERSION = '2024-08-13';
 interface ConfirmBody {
   setupIntentId?: unknown;
   email?: unknown;
@@ -110,17 +115,40 @@ function parseBody(input: unknown): ParsedBody | { error: string } {
 }
 
 function calErrorMessage(payload: unknown, status: number): string {
-  return (
-    (payload && typeof payload === 'object'
-      ? ((payload as { message?: string; error?: string }).message ??
-        (payload as { message?: string; error?: string }).error)
-      : null) ?? `HTTP ${status}`
-  );
+  return calUpstreamErrorMessage(payload, status);
+}
+
+async function treatConfirmFailureAsSuccessIfAccepted(
+  calEventId: string,
+  apiKey: string,
+  payload: unknown,
+  message: string
+): Promise<boolean> {
+  if (isCalBookingAlreadyConfirmed(payload, message)) {
+    console.log(
+      '[api/booking/confirm] booking already confirmed on Cal — treating as success',
+      { calEventId, message }
+    );
+    return true;
+  }
+  if (await fetchCalBookingIsAccepted(calEventId, apiKey, CAL_BOOKINGS_API_VERSION)) {
+    console.log(
+      '[api/booking/confirm] booking status is accepted on Cal — treating confirm as success',
+      { calEventId }
+    );
+    return true;
+  }
+  return false;
 }
 
 /**
  * Accept a pending booking on Cal.com so it leaves "Unconfirmed".
  * Returns null on success, or a human-readable error for the UI.
+ *
+ * When confirmation is disabled on the event type, Cal creates the
+ * booking as already accepted — confirm/accept calls then fail with
+ * a 400. We treat that as success (card vault + local DB are what
+ * matter for checkout).
  *
  * Tries v1 PATCH first (matches cleanup cron), then v2 confirm
  * (matches cancel-booking.js) because some accounts only honour
@@ -159,6 +187,9 @@ async function acceptOnCal(calEventId: string): Promise<string | null> {
 
     const v1Payload = await v1.json().catch(() => null);
     const v1Message = calErrorMessage(v1Payload, v1.status);
+    if (await treatConfirmFailureAsSuccessIfAccepted(calEventId, apiKey, v1Payload, v1Message)) {
+      return null;
+    }
     console.warn('[api/booking/confirm] Cal v1 PATCH failed — trying v2', {
       calEventId,
       status: v1.status,
@@ -179,7 +210,7 @@ async function acceptOnCal(calEventId: string): Promise<string | null> {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
-          'cal-api-version': CAL_API_VERSION,
+          'cal-api-version': CAL_BOOKINGS_API_VERSION,
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
@@ -195,6 +226,9 @@ async function acceptOnCal(calEventId: string): Promise<string | null> {
 
     const v2Payload = await v2.json().catch(() => null);
     const v2Message = calErrorMessage(v2Payload, v2.status);
+    if (await treatConfirmFailureAsSuccessIfAccepted(calEventId, apiKey, v2Payload, v2Message)) {
+      return null;
+    }
     console.error('[api/booking/confirm] Cal v2 confirm failed', {
       calEventId,
       status: v2.status,

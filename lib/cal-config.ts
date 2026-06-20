@@ -30,6 +30,37 @@ export const CAL_MIN_BOOKING_NOTICE_MIN = 30;
  */
 export const CAL_SLOT_INTERVAL_MIN = 30;
 
+/** Studio address shown on Cal.com in-person event types. */
+export const STUDIO_IN_PERSON_ADDRESS =
+  '61 W 3200 N, Suite #10, Lehi, UT 84043';
+
+/** Cal v2 location object — In Person (Organizer Address). */
+export const CAL_STUDIO_IN_PERSON_LOCATION = {
+  type: 'address' as const,
+  address: STUDIO_IN_PERSON_ADDRESS,
+  public: true,
+};
+
+/** Auto-confirm bookings (no Cal.com "requires confirmation" / pending checkout gate). */
+export const CAL_CONFIRMATION_POLICY_DISABLED = {
+  disabled: true as const,
+};
+
+/**
+ * Cal event-type metadata — suppress hello@cal.com attendee emails.
+ * Sadie Marie sends confirmations via Resend on BOOKING_CREATED.
+ *
+ * Cal stores email toggles under `metadata.disableStandardEmails` (not a
+ * top-level PATCH field on personal event types). We set both `confirmation`
+ * and `all` so auto-confirmed and legacy paths respect the flag.
+ */
+export const CAL_EVENT_METADATA_DISABLE_ATTENDEE_EMAILS = {
+  disableStandardEmails: {
+    confirmation: { attendee: true },
+    all: { attendee: true },
+  },
+} as const;
+
 /**
  * Admin manual-booking god-mode: quarter-hour start times when probing Cal slots.
  * Cal uses `duration` for both gap length and step unless the event has

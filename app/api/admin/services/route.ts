@@ -54,6 +54,12 @@
  *     the canonical booking surface, and a second public menu on
  *     cal.com would drift the moment we add a service here that the
  *     homepage hasn't been re-deployed to render yet.
+ *   • `confirmationPolicy: { disabled: true }` — bookings confirm
+ *     immediately (no Cal-side pending state).
+ *   • `locations` — in-person at {@link STUDIO_IN_PERSON_ADDRESS}.
+ *   • `bookingFields` — split name + required phone (via PATCH).
+ *   • `metadata.disableStandardEmails` — no Cal.com attendee emails;
+ *     Resend handles confirmations.
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
@@ -61,8 +67,11 @@ import { sql } from '@vercel/postgres';
 import { requireAdminUser } from '@/app/admin/auth';
 import {
   CAL_AFTER_EVENT_BUFFER_MIN,
+  CAL_CONFIRMATION_POLICY_DISABLED,
+  CAL_EVENT_METADATA_DISABLE_ATTENDEE_EMAILS,
   CAL_MIN_BOOKING_NOTICE_MIN,
   CAL_SLOT_INTERVAL_MIN,
+  CAL_STUDIO_IN_PERSON_LOCATION,
 } from '@/lib/cal-config';
 import {
   CalApiError,
@@ -369,7 +378,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  await patchStudioBookingFieldsOnCal(calEventId, apiKey, 'POST');
+  await patchStudioCalEventDefaultsOnCal(calEventId, apiKey, 'POST');
 
   // ── STEP 2: mirror into Postgres ────────────────────────────────────────
   // If this fails the Cal event is a ghost. We attempt a best-effort
@@ -584,7 +593,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  await patchStudioBookingFieldsOnCal(payload.cal_event_id, apiKey, 'PATCH');
+  await patchStudioCalEventDefaultsOnCal(payload.cal_event_id, apiKey, 'PATCH');
 
   // ── STEP 2: mirror into Postgres ────────────────────────────────────────
   // Trigger `site_services_touch_updated_at_trg` (defined in the
@@ -964,11 +973,11 @@ interface CalPhoneField {
  * (required, visible) up front.
  */
 /**
- * Apply splitName + required phone on Cal. Email is omitted from the payload
- * (Cal personal accounts reject API email tweaks) — Cal keeps email required
- * by default when we do not send an email field override.
+ * Apply studio defaults on Cal: booking fields, auto-confirm, in-person location,
+ * and disabled Cal.com attendee emails (Resend is the confirmation channel).
+ * Email is omitted from bookingFields (Cal personal accounts reject API email tweaks).
  */
-async function patchStudioBookingFieldsOnCal(
+async function patchStudioCalEventDefaultsOnCal(
   calEventId: number,
   apiKey: string,
   phase: 'POST' | 'PATCH'
@@ -976,14 +985,19 @@ async function patchStudioBookingFieldsOnCal(
   try {
     await callCal(`/event-types/${calEventId}`, apiKey, {
       method: 'PATCH',
-      body: JSON.stringify({ bookingFields: STUDIO_BOOKING_FIELDS }),
+      body: JSON.stringify({
+        bookingFields: STUDIO_BOOKING_FIELDS,
+        confirmationPolicy: CAL_CONFIRMATION_POLICY_DISABLED,
+        locations: [CAL_STUDIO_IN_PERSON_LOCATION],
+        metadata: CAL_EVENT_METADATA_DISABLE_ATTENDEE_EMAILS,
+      }),
     });
-    console.log(`[api/admin/services] ${phase}: booking-fields PATCHed`, {
+    console.log(`[api/admin/services] ${phase}: Cal studio defaults PATCHed`, {
       calEventId,
     });
   } catch (err) {
     console.warn(
-      `[api/admin/services] ${phase}: bookingFields PATCH failed (event still bookable with Cal defaults):`,
+      `[api/admin/services] ${phase}: Cal studio defaults PATCH failed (event still bookable with Cal defaults):`,
       { calEventId, error: errorMessage(err) }
     );
   }
