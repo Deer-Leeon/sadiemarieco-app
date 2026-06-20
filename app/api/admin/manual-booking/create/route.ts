@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   loadServiceByCalEventId,
   parseAdminOverrideEventId,
+  STUDIO_IN_PERSON_ADDRESS,
   STUDIO_TIMEZONE,
 } from '@/lib/cal-config';
 import {
@@ -23,9 +24,11 @@ import {
   REQUIRED_CLIENT_EMAIL_MESSAGE,
 } from '@/lib/client-identity';
 import {
+  CAL_BOOKINGS_ADMIN_CREATE_API_VERSION,
   CAL_BOOKINGS_API_VERSION,
   confirmCalV2Booking,
   gateAdmin,
+  patchCalV2BookingLocation,
   proxyCalV2Post,
 } from '@/lib/cal-proxy';
 
@@ -160,6 +163,49 @@ function extractBooking(
   return { uid, status };
 }
 
+/** In-person studio — avoids defaulting to Cal Video on API-created bookings. */
+function studioBookingLocation(serviceName: string | undefined): Record<string, unknown> {
+  if (serviceName) {
+    return {
+      type: 'attendeeDefined',
+      location: `${serviceName} · ${STUDIO_IN_PERSON_ADDRESS}`,
+    };
+  }
+  return {
+    type: 'address',
+    address: STUDIO_IN_PERSON_ADDRESS,
+  };
+}
+
+function isScheduleOrBoundsError(status: number, message: string): boolean {
+  if (status === 409) return true;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('not available') ||
+    lower.includes('no available') ||
+    lower.includes('out of bounds') ||
+    lower.includes('outside') ||
+    lower.includes('schedule') ||
+    lower.includes('working hours')
+  );
+}
+
+async function ensureStudioBookingLocation(
+  bookingUid: string,
+  serviceName: string | undefined
+): Promise<void> {
+  const patchError = await patchCalV2BookingLocation(
+    bookingUid,
+    studioBookingLocation(serviceName)
+  );
+  if (patchError) {
+    console.warn('[api/admin/manual-booking/create] location PATCH failed', {
+      bookingUid,
+      patchError,
+    });
+  }
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const gate = await gateAdmin();
   if (gate) return gate;
@@ -195,12 +241,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const overrideEventTypeId = parseAdminOverrideEventId();
-  let calEventTypeId = parsed.eventTypeId;
+  const serviceEventTypeId = parsed.eventTypeId;
   let originalServiceName: string | undefined;
   let originalServiceDurationMins: number | undefined;
 
+  const service = await loadServiceByCalEventId(parsed.eventTypeId);
   if (overrideEventTypeId != null) {
-    const service = await loadServiceByCalEventId(parsed.eventTypeId);
     if (!service) {
       return NextResponse.json(
         {
@@ -211,13 +257,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    calEventTypeId = overrideEventTypeId;
+    originalServiceName = service.title;
+    originalServiceDurationMins = service.duration_mins;
+  } else if (service) {
     originalServiceName = service.title;
     originalServiceDurationMins = service.duration_mins;
   }
 
   const calPayload: Record<string, unknown> = {
-    eventTypeId: calEventTypeId,
+    eventTypeId: serviceEventTypeId,
     start: startUtc.toISOString(),
     attendee: {
       name: parsed.clientName,
@@ -232,6 +280,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
       attendeePhoneNumber: parsed.clientPhoneE164,
     },
+    location: studioBookingLocation(originalServiceName),
     metadata: {
       manual_admin_booking: 'true',
       ...(originalServiceName
@@ -247,21 +296,76 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     },
   };
 
-  // Cal.com v2 rejects top-level `description` and `end` on create. Stretch the
-  // shadow block via lengthInMinutes (requires "Offer multiple durations" on the
-  // override event type with every service length listed in Cal).
-  if (overrideEventTypeId != null && originalServiceDurationMins != null) {
+  if (originalServiceDurationMins != null) {
     calPayload.lengthInMinutes = originalServiceDurationMins;
   }
 
-  const result = await proxyCalV2Post(
+  // Shadow override is for slot discovery only. Create on the real service event
+  // so Cal.com emails show the service title and location, not "Admin Manual Booking".
+  if (overrideEventTypeId != null) {
+    calPayload.allowConflicts = true;
+    calPayload.allowBookingOutOfBounds = true;
+  }
+
+  let createApiVersion = CAL_BOOKINGS_API_VERSION;
+  if (overrideEventTypeId != null) {
+    createApiVersion = CAL_BOOKINGS_ADMIN_CREATE_API_VERSION;
+  }
+
+  let result = await proxyCalV2Post(
     '/bookings',
     calPayload,
-    CAL_BOOKINGS_API_VERSION
+    createApiVersion
   );
+
+  // Fallback: host-bypass create can still fail on some Cal plans — use shadow event.
+  if (
+    !result.ok &&
+    overrideEventTypeId != null &&
+    result.response.status < 500
+  ) {
+    const fallbackBody = await result.response.clone().json().catch(() => null);
+    const fallbackMessage =
+      fallbackBody &&
+      typeof fallbackBody === 'object' &&
+      'message' in fallbackBody &&
+      typeof (fallbackBody as { message: unknown }).message === 'string'
+        ? (fallbackBody as { message: string }).message
+        : '';
+
+    if (isScheduleOrBoundsError(result.response.status, fallbackMessage)) {
+      console.warn(
+        '[api/admin/manual-booking/create] service event create failed — retrying shadow event',
+        {
+          serviceEventTypeId,
+          overrideEventTypeId,
+          status: result.response.status,
+          message: fallbackMessage,
+        }
+      );
+
+      const shadowPayload: Record<string, unknown> = {
+        ...calPayload,
+        eventTypeId: overrideEventTypeId,
+      };
+      delete shadowPayload.allowConflicts;
+      delete shadowPayload.allowBookingOutOfBounds;
+
+      result = await proxyCalV2Post(
+        '/bookings',
+        shadowPayload,
+        CAL_BOOKINGS_API_VERSION
+      );
+    }
+  }
+
   if (!result.ok) return result.response;
 
   const { uid, status } = extractBooking(result.data);
+
+  if (uid) {
+    await ensureStudioBookingLocation(uid, originalServiceName);
+  }
 
   if (uid && status && status.toUpperCase() !== 'ACCEPTED') {
     const confirmError = await confirmCalV2Booking(uid);

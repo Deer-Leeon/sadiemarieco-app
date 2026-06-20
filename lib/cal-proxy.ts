@@ -21,6 +21,9 @@ export const CAL_SLOTS_API_VERSION = '2024-09-04';
 /** Bookings create / confirm (matches /api/booking/confirm). */
 export const CAL_BOOKINGS_API_VERSION = '2024-08-13';
 
+/** Admin manual booking create — enables allowBookingOutOfBounds for host. */
+export const CAL_BOOKINGS_ADMIN_CREATE_API_VERSION = '2026-02-25';
+
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -197,6 +200,37 @@ export async function proxyCalV2Get(
         { status: 502 }
       ),
     };
+  }
+}
+
+/** Set in-person studio location on an existing booking (Cal.com v2). */
+export async function patchCalV2BookingLocation(
+  bookingUid: string,
+  location: Record<string, unknown>
+): Promise<string | null> {
+  const apiKey = requireCalApiKey();
+  if (apiKey instanceof NextResponse) {
+    return 'Cal.com API key is not configured';
+  }
+
+  try {
+    const res = await fetch(
+      `${CAL_V2_BASE}/bookings/${encodeURIComponent(bookingUid)}/location`,
+      {
+        method: 'PATCH',
+        headers: {
+          ...calV2Headers(apiKey, CAL_BOOKINGS_API_VERSION),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ location }),
+        cache: 'no-store',
+      }
+    );
+    if (res.ok) return null;
+    const payload: unknown = await res.json().catch(() => null);
+    return calUpstreamErrorMessage(payload, res.status);
+  } catch (err) {
+    return errorMessage(err);
   }
 }
 

@@ -94,9 +94,11 @@ export function getCalComApiKey(): string | null {
 }
 
 /**
- * Hidden Cal event type with 9 AM–9 PM availability for admin manual booking.
- * Enable "Offer multiple durations" in Cal and list every service length so
- * create can send lengthInMinutes; slots use the `duration` query param.
+ * Hidden Cal event type with 9 AM–9 PM availability for admin slot picking only.
+ * Bookings are created on each service's real Cal event (correct title/location
+ * in Cal emails); this shadow type is a fallback when host-bypass create fails.
+ * Enable "Offer multiple durations" and list every service length on the shadow
+ * event for fallback lengthInMinutes.
  */
 export const getAdminOverrideEventId = () =>
   process.env.CAL_ADMIN_OVERRIDE_EVENT_ID;
