@@ -386,6 +386,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       clientName: parsed.clientName,
       serviceName: appointmentServiceName,
       clientId,
+      clientEmail: parsed.clientEmail,
       skipIfAlreadySent: true,
     });
 

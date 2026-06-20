@@ -12,6 +12,7 @@ const impl = require('./booking-notifications.js') as {
     serviceName: string;
     /** Postgres clients.id — used to append internal intake link when not yet consented. */
     clientId?: string | null;
+    clientEmail?: string | null;
     skipIfAlreadySent?: boolean;
   }) => Promise<Record<string, unknown>>;
 };

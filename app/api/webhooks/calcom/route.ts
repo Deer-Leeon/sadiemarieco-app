@@ -10,25 +10,20 @@
  *   - RESEND_API_KEY
  *
  * Optional:
- *   - RESEND_FROM_EMAIL (defaults to bookings@sadiemarie.co)
+ *   - RESEND_FROM_EMAIL (defaults to Sadie Marie <bookings@sadiemarie.co>)
  *   - PUBLIC_BASE_URL (fallback cancel/manage link base)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { Resend } from 'resend';
 
-import { STUDIO_TIMEZONE } from '@/lib/cal-config';
-import { generateConfirmationHtml } from '@/lib/email-templates';
+import { sendBookingConfirmationEmail } from '@/lib/send-booking-confirmation-email';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'bookings@sadiemarie.co';
 const PUBLIC_BASE_URL =
   process.env.PUBLIC_BASE_URL || 'https://www.sadiemarie.co';
-
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 function unwrap(val: unknown): string {
   if (val == null) return '';
@@ -50,34 +45,8 @@ function resolveServiceName(payload: Record<string, unknown>): string {
   return unwrap(payload.type) || unwrap(payload.title) || 'appointment';
 }
 
-/** e.g. "Saturday, June 20 at 10:00am" */
-function formatBookingStartTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-
-  const datePart = new Intl.DateTimeFormat('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    timeZone: STUDIO_TIMEZONE,
-  }).format(date);
-
-  const timePart = new Intl.DateTimeFormat('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-    timeZone: STUDIO_TIMEZONE,
-  })
-    .format(date)
-    .replace(/\s?AM$/i, 'am')
-    .replace(/\s?PM$/i, 'pm');
-
-  return `${datePart} at ${timePart}`;
-}
-
 function resolveCancelUrl(payload: Record<string, unknown>): string {
-  const direct =
-    unwrap(payload.cancel_url) || unwrap(payload.cancelUrl);
+  const direct = unwrap(payload.cancel_url) || unwrap(payload.cancelUrl);
   if (direct) return direct;
 
   const uid = unwrap(payload.uid);
@@ -93,6 +62,8 @@ export async function POST(req: NextRequest) {
     };
 
     const triggerEvent = body.triggerEvent || '';
+    console.log('[api/webhooks/calcom] received', { triggerEvent });
+
     if (triggerEvent && triggerEvent !== 'BOOKING_CREATED') {
       return NextResponse.json({ ok: true, skipped: 'ignored_event' });
     }
@@ -107,40 +78,36 @@ export async function POST(req: NextRequest) {
     const clientName = unwrap(attendee.name) || 'there';
     const clientEmail = unwrap(attendee.email);
     const serviceName = resolveServiceName(payload);
-    const startTimeRaw =
-      unwrap(payload.startTime) || unwrap(payload.start);
+    const startTimeRaw = unwrap(payload.startTime) || unwrap(payload.start);
+    const bookingUid = unwrap(payload.uid);
 
     if (!clientEmail || !startTimeRaw) {
-      console.warn('[api/webhooks/calcom] missing attendee email or startTime');
+      console.warn('[api/webhooks/calcom] missing attendee email or startTime', {
+        bookingUid,
+        hasEmail: Boolean(clientEmail),
+        hasStartTime: Boolean(startTimeRaw),
+      });
       return NextResponse.json({ ok: true, skipped: 'missing_fields' });
     }
 
-    if (!process.env.RESEND_API_KEY) {
-      console.error('[api/webhooks/calcom] RESEND_API_KEY is not configured');
-      return NextResponse.json({ ok: true, skipped: 'email_not_configured' });
-    }
-
-    const startTime = formatBookingStartTime(startTimeRaw);
     const cancelUrl = resolveCancelUrl(payload);
-    const html = generateConfirmationHtml(
+    const emailResult = await sendBookingConfirmationEmail({
       clientName,
+      clientEmail,
       serviceName,
-      startTime,
+      startTime: startTimeRaw,
       cancelUrl,
-    );
-
-    const { error } = await resend.emails.send({
-      from: FROM_EMAIL,
-      to: clientEmail,
-      subject: `Confirmation: Your Session with Sadie Marie, ${clientName}!`,
-      html,
+      bookingUid,
     });
 
-    if (error) {
-      console.error('[api/webhooks/calcom] Resend send failed', error);
+    if (!emailResult.ok) {
+      console.error('[api/webhooks/calcom] email not sent', {
+        bookingUid,
+        ...emailResult,
+      });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, email: emailResult });
   } catch (err) {
     console.error('[api/webhooks/calcom] handler error', err);
     return NextResponse.json({ ok: true });
