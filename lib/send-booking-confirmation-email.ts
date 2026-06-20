@@ -1,3 +1,4 @@
+import { sql } from '@vercel/postgres';
 import { Resend } from 'resend';
 
 import { STUDIO_TIMEZONE } from '@/lib/cal-config';
@@ -12,10 +13,15 @@ function maskEmail(email: string): string {
   return `${local.slice(0, 1)}***@${domain}`;
 }
 
-/** e.g. "Saturday, June 20 at 10:00am" */
-export function formatBookingStartTime(iso: string): string {
+export function formatBookingStartParts(iso: string): {
+  date: string;
+  time: string;
+  combined: string;
+} {
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
+  if (Number.isNaN(date.getTime())) {
+    return { date: iso, time: '', combined: iso };
+  }
 
   const datePart = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
@@ -34,7 +40,34 @@ export function formatBookingStartTime(iso: string): string {
     .replace(/\s?AM$/i, 'am')
     .replace(/\s?PM$/i, 'pm');
 
-  return `${datePart} at ${timePart}`;
+  return {
+    date: datePart,
+    time: timePart,
+    combined: `${datePart} at ${timePart}`,
+  };
+}
+
+/** Idempotent per booking — prevents duplicate sends from parallel webhooks. */
+async function claimConfirmationEmailSend(
+  bookingUid: string | undefined,
+): Promise<boolean> {
+  if (!bookingUid) return true;
+  const key = `${bookingUid}:email`;
+  try {
+    const { rows } = await sql`
+      INSERT INTO webhook_events (booking_uid)
+      VALUES (${key})
+      ON CONFLICT (booking_uid) DO NOTHING
+      RETURNING booking_uid
+    `;
+    return rows.length > 0;
+  } catch (err) {
+    console.error('[booking-confirmation-email] idempotency claim failed', {
+      bookingUid,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return true;
+  }
 }
 
 export async function sendBookingConfirmationEmail(args: {
@@ -56,13 +89,22 @@ export async function sendBookingConfirmationEmail(args: {
     return { ok: false, skipped: 'no_email' };
   }
 
-  const formattedStart = formatBookingStartTime(args.startTime);
-  const html = generateConfirmationHtml(
-    args.clientName,
-    args.serviceName,
-    formattedStart,
-    args.cancelUrl,
-  );
+  const claimed = await claimConfirmationEmailSend(args.bookingUid);
+  if (!claimed) {
+    console.log('[booking-confirmation-email] duplicate skipped', {
+      bookingUid: args.bookingUid,
+    });
+    return { ok: true, skipped: 'already_sent' };
+  }
+
+  const { date, time } = formatBookingStartParts(args.startTime);
+  const html = generateConfirmationHtml({
+    clientName: args.clientName,
+    serviceName: args.serviceName,
+    appointmentDate: date,
+    appointmentTime: time,
+    cancelUrl: args.cancelUrl,
+  });
 
   const resend = new Resend(apiKey);
   const { data, error } = await resend.emails.send({

@@ -1,21 +1,16 @@
 /**
  * POST /api/webhooks/calcom
  *
- * Receives Cal.com webhook events and sends a branded HTML confirmation
- * email to the booking attendee via Resend. Intended as a dedicated
- * subscriber URL in Cal.com (separate from /api/webhook, which handles
- * Postgres upserts, SMS, and QStash).
+ * Optional Cal.com subscriber for confirmation email only. Email also sends
+ * from /api/webhook on BOOKING_CREATED — disable this webhook in Cal.com if
+ * you only need one path (recommended).
  *
- * Required environment variables:
- *   - RESEND_API_KEY
- *
- * Optional:
- *   - RESEND_FROM_EMAIL (defaults to Sadie Marie <bookings@sadiemarie.co>)
- *   - PUBLIC_BASE_URL (fallback cancel/manage link base)
+ * Duplicate sends are deduped via webhook_events (`{uid}:email`).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { resolveBookingServiceName } from '@/lib/resolve-booking-service-name';
 import { sendBookingConfirmationEmail } from '@/lib/send-booking-confirmation-email';
 
 export const runtime = 'nodejs';
@@ -35,16 +30,6 @@ function unwrap(val: unknown): string {
   return String(val);
 }
 
-function resolveServiceName(payload: Record<string, unknown>): string {
-  const metadata =
-    payload.metadata && typeof payload.metadata === 'object'
-      ? (payload.metadata as Record<string, unknown>)
-      : {};
-  const shadowName = unwrap(metadata.original_service_name);
-  if (shadowName) return shadowName;
-  return unwrap(payload.type) || unwrap(payload.title) || 'appointment';
-}
-
 function resolveCancelUrl(payload: Record<string, unknown>): string {
   const direct = unwrap(payload.cancel_url) || unwrap(payload.cancelUrl);
   if (direct) return direct;
@@ -62,8 +47,6 @@ export async function POST(req: NextRequest) {
     };
 
     const triggerEvent = body.triggerEvent || '';
-    console.log('[api/webhooks/calcom] received', { triggerEvent });
-
     if (triggerEvent && triggerEvent !== 'BOOKING_CREATED') {
       return NextResponse.json({ ok: true, skipped: 'ignored_event' });
     }
@@ -77,35 +60,22 @@ export async function POST(req: NextRequest) {
 
     const clientName = unwrap(attendee.name) || 'there';
     const clientEmail = unwrap(attendee.email);
-    const serviceName = resolveServiceName(payload);
+    const serviceName = resolveBookingServiceName(payload);
     const startTimeRaw = unwrap(payload.startTime) || unwrap(payload.start);
     const bookingUid = unwrap(payload.uid);
 
     if (!clientEmail || !startTimeRaw) {
-      console.warn('[api/webhooks/calcom] missing attendee email or startTime', {
-        bookingUid,
-        hasEmail: Boolean(clientEmail),
-        hasStartTime: Boolean(startTimeRaw),
-      });
       return NextResponse.json({ ok: true, skipped: 'missing_fields' });
     }
 
-    const cancelUrl = resolveCancelUrl(payload);
     const emailResult = await sendBookingConfirmationEmail({
       clientName,
       clientEmail,
       serviceName,
       startTime: startTimeRaw,
-      cancelUrl,
+      cancelUrl: resolveCancelUrl(payload),
       bookingUid,
     });
-
-    if (!emailResult.ok) {
-      console.error('[api/webhooks/calcom] email not sent', {
-        bookingUid,
-        ...emailResult,
-      });
-    }
 
     return NextResponse.json({ ok: true, email: emailResult });
   } catch (err) {
