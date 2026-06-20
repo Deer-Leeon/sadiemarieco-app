@@ -66,16 +66,22 @@ export function generateConfirmationHtml({
         <!-- Card -->
         <table role="presentation" class="email-card" width="${CARD_WIDTH}" border="0" cellpadding="0" cellspacing="0" bgcolor="${PAGE_BG}" style="width:100%;max-width:${CARD_WIDTH}px;background-color:${PAGE_BG};border-collapse:separate;border-radius:4px;overflow:hidden;box-shadow:0 12px 48px rgba(13,27,42,0.10);">
 
-          <!-- Header -->
+          <!-- Header bar — anchored above the banner -->
           <tr>
-            <td class="email-pad" style="padding:22px 36px 18px;background-color:${PAGE_BG};">
-              <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+            <td class="email-pad" style="padding:0;background-color:#ebe8e4;border-bottom:1px solid #d5d0ca;">
+              <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color:#ebe8e4;">
                 <tr>
-                  <td align="left" style="font-family:${SERIF};font-size:20px;letter-spacing:-0.04em;color:${NAVY};line-height:1.2;">
-                    Sadie Marie
-                  </td>
-                  <td align="right" style="font-family:${SERIF};font-size:13px;color:${NAVY};line-height:1.2;">
-                    <a href="${PUBLIC_BASE_URL}" target="_blank" rel="noopener noreferrer" style="color:${NAVY};text-decoration:none;">sadiemarie.co</a>
+                  <td style="padding:14px 36px 13px;">
+                    <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td align="left" valign="middle" style="font-family:${SERIF};font-size:20px;letter-spacing:-0.04em;color:${NAVY};line-height:1.2;">
+                          <span style="white-space:nowrap;">Sadie&nbsp;Marie</span>
+                        </td>
+                        <td align="right" valign="middle" style="font-family:${SERIF};font-size:13px;color:${NAVY};line-height:1.2;">
+                          <a href="${PUBLIC_BASE_URL}" target="_blank" rel="noopener noreferrer" style="color:${NAVY};text-decoration:none;white-space:nowrap;">sadiemarie.co</a>
+                        </td>
+                      </tr>
+                    </table>
                   </td>
                 </tr>
               </table>
@@ -97,7 +103,7 @@ export function generateConfirmationHtml({
                       Confirmed!
                     </p>
                     <p class="banner-sub" style="margin:22px 0 0;font-family:${SERIF};font-size:16px;font-weight:400;color:#e8eaed;line-height:1.65;text-align:center;max-width:520px;">
-                      You've booked <strong style="color:#ffffff;font-weight:700;">${serviceName}</strong> on <strong style="color:#ffffff;font-weight:700;">${appointmentWhen}</strong> with Sadie Marie.
+                      You've booked <strong style="color:#ffffff;font-weight:700;">${serviceName}</strong> on <strong style="color:#ffffff;font-weight:700;">${appointmentWhen}</strong> with <span style="white-space:nowrap;">Sadie&nbsp;Marie.</span>
                     </p>
                   </td>
                 </tr>
@@ -165,7 +171,7 @@ export function generateConfirmationHtml({
                   <td align="center" style="font-family:${SERIF};font-size:12px;color:#f5f3f0;line-height:1.6;text-align:center;padding-bottom:8px;">
                     61 W 3200 N, Suite #10, Lehi, UT 84043<br />
                     (<a href="tel:3852003904" target="_blank" rel="noopener noreferrer" style="color:#f5f3f0;text-decoration:none;">385) 200-3904</a>)<br />
-                    © Sadie Marie Co.
+                    © <span style="white-space:nowrap;">Sadie&nbsp;Marie</span> Co.
                   </td>
                 </tr>
               </table>
