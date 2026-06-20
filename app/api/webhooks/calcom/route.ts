@@ -52,6 +52,17 @@ export async function POST(req: NextRequest) {
     }
 
     const payload = body.payload ?? {};
+    const metadata =
+      payload.metadata && typeof payload.metadata === 'object'
+        ? (payload.metadata as Record<string, unknown>)
+        : {};
+    if (unwrap(metadata.manual_admin_booking) === 'true') {
+      return NextResponse.json({
+        ok: true,
+        skipped: 'manual_admin_notifications_deferred',
+      });
+    }
+
     const attendees = payload.attendees;
     const attendee =
       Array.isArray(attendees) && attendees[0] && typeof attendees[0] === 'object'

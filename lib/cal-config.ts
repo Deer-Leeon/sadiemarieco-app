@@ -47,22 +47,6 @@ export const CAL_CONFIRMATION_POLICY_DISABLED = {
 };
 
 /**
- * Cal event-type metadata — suppress hello@cal.com attendee emails.
- * Sadie Marie sends confirmations via Resend on BOOKING_CREATED.
- *
- * Cal stores email toggles under `metadata.disableStandardEmails` (not a
- * top-level PATCH field on personal event types). We set both `confirmation`
- * and `all` so auto-confirmed and legacy paths respect the flag.
- */
-export const CAL_EVENT_METADATA_DISABLE_ATTENDEE_EMAILS = {
-  disableStandardEmails: {
-    confirmation: { attendee: true },
-    scheduled: { attendee: true },
-    all: { attendee: true },
-  },
-} as const;
-
-/**
  * Admin manual-booking god-mode: quarter-hour start times when probing Cal slots.
  * Cal uses `duration` for both gap length and step unless the event has
  * interval on the shadow Cal event type; we post-filter slot starts when needed.

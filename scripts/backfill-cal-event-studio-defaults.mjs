@@ -4,8 +4,7 @@
  * Usage:
  *   node --env-file=.env.local scripts/backfill-cal-event-studio-defaults.mjs
  *
- * Sets auto-confirm, in-person address, booking fields, and metadata that
- * disables Cal.com attendee emails (Resend + SMS handle comms).
+ * Sets auto-confirm, in-person address, and booking fields.
  */
 import { sql } from '@vercel/postgres';
 
@@ -34,27 +33,6 @@ const STUDIO_BOOKING_FIELDS = [
   },
 ];
 
-function isRecord(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function buildMetadata(existing) {
-  const base = isRecord(existing) ? { ...existing } : {};
-  const prev = isRecord(base.disableStandardEmails) ? base.disableStandardEmails : {};
-  const prevConfirmation = isRecord(prev.confirmation) ? prev.confirmation : {};
-  const prevScheduled = isRecord(prev.scheduled) ? prev.scheduled : {};
-  const prevAll = isRecord(prev.all) ? prev.all : {};
-
-  base.disableStandardEmails = {
-    ...prev,
-    confirmation: { ...prevConfirmation, attendee: true },
-    scheduled: { ...prevScheduled, attendee: true },
-    all: { ...prevAll, attendee: true },
-  };
-
-  return base;
-}
-
 function calHeaders(apiKey) {
   return {
     Authorization: `Bearer ${apiKey}`,
@@ -80,9 +58,13 @@ async function calJson(path, apiKey, init) {
   }
   if (!res.ok) {
     const message =
-      (isRecord(payload) &&
+      (payload &&
+        typeof payload === 'object' &&
         (payload.message ||
-          (isRecord(payload.error) ? payload.error.message : payload.error))) ||
+          (payload.error &&
+            typeof payload.error === 'object' &&
+            payload.error.message) ||
+          payload.error)) ||
       `HTTP ${res.status}`;
     throw new Error(String(message));
   }
@@ -90,18 +72,6 @@ async function calJson(path, apiKey, init) {
 }
 
 async function patchStudioDefaults(calEventId, apiKey) {
-  let existingMetadata;
-  try {
-    const current = await calJson(
-      `/event-types/${calEventId}`,
-      apiKey,
-      { method: 'GET' }
-    );
-    existingMetadata = isRecord(current?.data) ? current.data.metadata : undefined;
-  } catch (err) {
-    console.warn(`  GET failed for ${calEventId} — patching with fresh metadata`, err.message);
-  }
-
   await calJson(`/event-types/${calEventId}`, apiKey, {
     method: 'PATCH',
     body: JSON.stringify({
@@ -114,7 +84,6 @@ async function patchStudioDefaults(calEventId, apiKey) {
           public: true,
         },
       ],
-      metadata: buildMetadata(existingMetadata),
     }),
   });
 }

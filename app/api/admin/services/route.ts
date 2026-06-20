@@ -58,8 +58,6 @@
  *     immediately (no Cal-side pending state).
  *   • `locations` — in-person at {@link STUDIO_IN_PERSON_ADDRESS}.
  *   • `bookingFields` — split name + required phone (via PATCH).
- *   • `metadata.disableStandardEmails` — no Cal.com attendee emails;
- *     Resend handles confirmations.
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
@@ -971,8 +969,7 @@ interface CalPhoneField {
  * (required, visible) up front.
  */
 /**
- * Apply studio defaults on Cal: booking fields, auto-confirm, in-person location,
- * and disabled Cal.com attendee emails (Resend is the confirmation channel).
+ * Apply studio defaults on Cal: booking fields, auto-confirm, in-person location.
  * Email is omitted from bookingFields (Cal personal accounts reject API email tweaks).
  */
 async function patchStudioCalEventDefaultsOnCal(
@@ -981,28 +978,10 @@ async function patchStudioCalEventDefaultsOnCal(
   phase: 'POST' | 'PATCH'
 ): Promise<void> {
   try {
-    let existingMetadata: unknown;
-    try {
-      const current = await callCal<{ data?: { metadata?: unknown } }>(
-        `/event-types/${calEventId}`,
-        apiKey,
-        { method: 'GET' }
-      );
-      existingMetadata = current?.data?.metadata;
-    } catch (err) {
-      console.warn(
-        `[api/admin/services] ${phase}: Cal GET before studio defaults PATCH failed — merging into empty metadata`,
-        { calEventId, error: errorMessage(err) }
-      );
-    }
-
     await callCal(`/event-types/${calEventId}`, apiKey, {
       method: 'PATCH',
       body: JSON.stringify(
-        buildStudioCalEventPatchBody({
-          bookingFields: STUDIO_BOOKING_FIELDS,
-          existingMetadata,
-        })
+        buildStudioCalEventPatchBody(STUDIO_BOOKING_FIELDS)
       ),
     });
     console.log(`[api/admin/services] ${phase}: Cal studio defaults PATCHed`, {
