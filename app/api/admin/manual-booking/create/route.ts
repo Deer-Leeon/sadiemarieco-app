@@ -296,12 +296,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     },
   };
 
-  if (originalServiceDurationMins != null) {
-    calPayload.lengthInMinutes = originalServiceDurationMins;
-  }
-
   // Shadow override is for slot discovery only. Create on the real service event
   // so Cal.com emails show the service title and location, not "Admin Manual Booking".
+  // Real service events have a fixed duration in Cal — do not send lengthInMinutes.
   if (overrideEventTypeId != null) {
     calPayload.allowConflicts = true;
     calPayload.allowBookingOutOfBounds = true;
@@ -350,6 +347,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       };
       delete shadowPayload.allowConflicts;
       delete shadowPayload.allowBookingOutOfBounds;
+      if (originalServiceDurationMins != null) {
+        shadowPayload.lengthInMinutes = originalServiceDurationMins;
+      }
 
       result = await proxyCalV2Post(
         '/bookings',
