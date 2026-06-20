@@ -57,6 +57,7 @@ export const CAL_CONFIRMATION_POLICY_DISABLED = {
 export const CAL_EVENT_METADATA_DISABLE_ATTENDEE_EMAILS = {
   disableStandardEmails: {
     confirmation: { attendee: true },
+    scheduled: { attendee: true },
     all: { attendee: true },
   },
 } as const;

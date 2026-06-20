@@ -67,12 +67,10 @@ import { sql } from '@vercel/postgres';
 import { requireAdminUser } from '@/app/admin/auth';
 import {
   CAL_AFTER_EVENT_BUFFER_MIN,
-  CAL_CONFIRMATION_POLICY_DISABLED,
-  CAL_EVENT_METADATA_DISABLE_ATTENDEE_EMAILS,
   CAL_MIN_BOOKING_NOTICE_MIN,
   CAL_SLOT_INTERVAL_MIN,
-  CAL_STUDIO_IN_PERSON_LOCATION,
 } from '@/lib/cal-config';
+import { buildStudioCalEventPatchBody } from '@/lib/cal-event-studio-defaults';
 import {
   CalApiError,
   callCal,
@@ -983,14 +981,29 @@ async function patchStudioCalEventDefaultsOnCal(
   phase: 'POST' | 'PATCH'
 ): Promise<void> {
   try {
+    let existingMetadata: unknown;
+    try {
+      const current = await callCal<{ data?: { metadata?: unknown } }>(
+        `/event-types/${calEventId}`,
+        apiKey,
+        { method: 'GET' }
+      );
+      existingMetadata = current?.data?.metadata;
+    } catch (err) {
+      console.warn(
+        `[api/admin/services] ${phase}: Cal GET before studio defaults PATCH failed — merging into empty metadata`,
+        { calEventId, error: errorMessage(err) }
+      );
+    }
+
     await callCal(`/event-types/${calEventId}`, apiKey, {
       method: 'PATCH',
-      body: JSON.stringify({
-        bookingFields: STUDIO_BOOKING_FIELDS,
-        confirmationPolicy: CAL_CONFIRMATION_POLICY_DISABLED,
-        locations: [CAL_STUDIO_IN_PERSON_LOCATION],
-        metadata: CAL_EVENT_METADATA_DISABLE_ATTENDEE_EMAILS,
-      }),
+      body: JSON.stringify(
+        buildStudioCalEventPatchBody({
+          bookingFields: STUDIO_BOOKING_FIELDS,
+          existingMetadata,
+        })
+      ),
     });
     console.log(`[api/admin/services] ${phase}: Cal studio defaults PATCHed`, {
       calEventId,
