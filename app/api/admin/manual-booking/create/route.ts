@@ -7,9 +7,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
+  CAL_STUDIO_IN_PERSON_LOCATION,
   loadServiceByCalEventId,
   parseAdminOverrideEventId,
-  STUDIO_IN_PERSON_ADDRESS,
   STUDIO_TIMEZONE,
 } from '@/lib/cal-config';
 import {
@@ -163,17 +163,11 @@ function extractBooking(
   return { uid, status };
 }
 
-/** In-person studio — avoids defaulting to Cal Video on API-created bookings. */
-function studioBookingLocation(serviceName: string | undefined): Record<string, unknown> {
-  if (serviceName) {
-    return {
-      type: 'attendeeDefined',
-      location: `${serviceName} · ${STUDIO_IN_PERSON_ADDRESS}`,
-    };
-  }
+/** In-person studio — must match event type location (`address` only). */
+function studioBookingLocation(): Record<string, unknown> {
   return {
-    type: 'address',
-    address: STUDIO_IN_PERSON_ADDRESS,
+    type: CAL_STUDIO_IN_PERSON_LOCATION.type,
+    address: CAL_STUDIO_IN_PERSON_LOCATION.address,
   };
 }
 
@@ -190,13 +184,10 @@ function isScheduleOrBoundsError(status: number, message: string): boolean {
   );
 }
 
-async function ensureStudioBookingLocation(
-  bookingUid: string,
-  serviceName: string | undefined
-): Promise<void> {
+async function ensureStudioBookingLocation(bookingUid: string): Promise<void> {
   const patchError = await patchCalV2BookingLocation(
     bookingUid,
-    studioBookingLocation(serviceName)
+    studioBookingLocation()
   );
   if (patchError) {
     console.warn('[api/admin/manual-booking/create] location PATCH failed', {
@@ -280,7 +271,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
       attendeePhoneNumber: parsed.clientPhoneE164,
     },
-    location: studioBookingLocation(originalServiceName),
+    location: studioBookingLocation(),
     metadata: {
       manual_admin_booking: 'true',
       ...(originalServiceName
@@ -364,7 +355,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { uid, status } = extractBooking(result.data);
 
   if (uid) {
-    await ensureStudioBookingLocation(uid, originalServiceName);
+    await ensureStudioBookingLocation(uid);
   }
 
   if (uid && status && status.toUpperCase() !== 'ACCEPTED') {
