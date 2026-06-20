@@ -1,5 +1,9 @@
 const PUBLIC_BASE_URL = 'https://www.sadiemarie.co';
 const PAGE_BG = '#f5f3f0';
+const NAVY = '#0d1b2a';
+const SERIF = "'Times New Roman', Times, Georgia, serif";
+const SCRIPT = "'Pinyon Script', 'Brush Script MT', 'Segoe Script', cursive";
+const CARD_WIDTH = 680;
 
 export interface ConfirmationEmailContent {
   clientName: string;
@@ -10,36 +14,170 @@ export interface ConfirmationEmailContent {
 }
 
 /**
- * Builds the HTML confirmation email sent after a Cal.com booking.
- * Banner copy is HTML (not a static image) so service/date/time stay dynamic.
+ * Sadie Marie booking confirmation email — matches the Canva design language.
  */
 export function generateConfirmationHtml({
-  clientName,
   serviceName,
   appointmentDate,
   appointmentTime,
   cancelUrl,
 }: ConfirmationEmailContent): string {
-  const combinedStart = `${appointmentDate} at ${appointmentTime}`;
+  const appointmentWhen = `${appointmentDate} at ${appointmentTime}`;
 
-  return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><meta name="format-detection" content="telephone=no, date=no, address=no, email=no"><meta name="x-apple-disable-message-reformatting"><style>body{margin:0;padding:0}table{mso-table-lspace:0;mso-table-rspace:0}p,span,h1,h2,h3,h4,h5,h6{margin:0;padding:0}p{line-height:inherit}a[x-apple-data-detectors]{color:inherit!important;text-decoration:inherit!important}#MessageViewBody a{color:inherit;text-decoration:none}img+div{display:none}.ecw{width:100%!important;min-width:0!important}</style><!--[if mso]><div>
-                <noscript>
-                  <xml>
-                    <w:WordDocument xmlns:w="urn:schemas-microsoft-com:office:word">
-                      <w:DontUseAdvancedTypographyReadingMail/>
-                    </w:WordDocument>
-                    <o:OfficeDocumentSettings>
-                      <o:AllowPNG/>
-                      <o:PixelsPerInch>96</o:PixelsPerInch>
-                    </o:OfficeDocumentSettings>
-                  </xml>
-                </noscript></div><![endif]--><style>@media(max-width:550px){.ers-fs-173{font-size:16.7px!important}.ers-fs-200{font-size:18px!important}.ers-fs-333{font-size:24.7px!important}.banner-title{font-size:34px!important}.banner-sub{font-size:14px!important}}</style></head><body style="width:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%;background-color:${PAGE_BG};margin:0;padding:0"><table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="${PAGE_BG}" style="background-color:${PAGE_BG}"><tbody><tr><td align="center" style="background-color:${PAGE_BG};padding:0"><!--[if mso]><center>
-                    <table align="center" border="0" cellpadding="0" cellspacing="0" width="600">
-                      <tbody>
-                        <tr>
-                          <td><![endif]--><table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" class="ecw" style="max-width:600px;margin:0 auto;background-color:${PAGE_BG};width:100%"><tbody><tr><td style="vertical-align:top"><table border="0" cellpadding="0" cellspacing="0" class="layout-0" align="center" style="display:table;border-spacing:0px;border-collapse:separate;width:100%;max-width:100%;table-layout:fixed;margin:0 auto;background-color:${PAGE_BG}"><tbody><tr><td style="text-align:center;padding:19.741537978222123px 24px"><table border="0" cellpadding="0" cellspacing="0" style="border-spacing:0px;border-collapse:separate;width:100%;max-width:552px;table-layout:fixed;margin:0 auto"><tbody><tr><td width="48.55%" style="width:48.55%;box-sizing:border-box;vertical-align:top"><table border="0" cellpadding="0" cellspacing="0" style="border-spacing:0px;border-collapse:separate;width:100%;table-layout:fixed"><tbody><tr><td><table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="color:#000;font-style:normal;font-weight:normal;font-size:16px;line-height:1.4;letter-spacing:0;text-align:left;direction:ltr;border-collapse:collapse;font-family:Arial, Helvetica, sans-serif;white-space:normal;word-wrap:break-word;word-break:break-word"><tbody><tr><td dir="ltr" class="ers-fs-200" style="color:#0d1b2a;font-size:20px;letter-spacing:-0.05em;font-family:&quot;Times New Roman&quot;, Times, serif;white-space:pre-wrap;text-align:left;line-height:1;mso-line-height-alt:20px">Sadie Marie<br></td></tr></tbody></table></td></tr></tbody></table></td><td width="16" style="width:16px;box-sizing:border-box;font-size:0">&nbsp;</td><td width="48.55%" style="width:48.55%;box-sizing:border-box;vertical-align:middle"><table border="0" cellpadding="0" cellspacing="0" style="border-spacing:0px;border-collapse:separate;width:100%;table-layout:fixed"><tbody><tr><td><table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="color:#000;font-style:normal;font-weight:normal;font-size:16px;line-height:1.4;letter-spacing:0;text-align:left;direction:ltr;border-collapse:collapse;font-family:Arial, Helvetica, sans-serif;white-space:normal;word-wrap:break-word;word-break:break-word"><tbody><tr><td dir="ltr" style="color:#0d1b2a;font-size:13.3px;font-family:&quot;Times New Roman&quot;, Times, serif;white-space:pre-wrap;text-align:right;line-height:16px;mso-line-height-alt:16px"><a href="${PUBLIC_BASE_URL}" target="_blank" rel="noopener noreferrer" style="color:#0d1b2a;text-decoration:none">sadiemarie.co</a><br></td></tr></tbody></table></td></tr></tbody></table></td></tr></tbody></table></td></tr></tbody></table></td></tr><tr><td style="vertical-align:top;padding:0"><table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background-color:${PAGE_BG}"><tbody><tr><td style="padding:24px 0 24px 0;vertical-align:top"><table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="color:#000;font-style:normal;font-weight:normal;font-size:16px;line-height:1.4;letter-spacing:0;text-align:left;direction:ltr;border-collapse:collapse;font-family:Arial, Helvetica, sans-serif;white-space:normal;word-wrap:break-word;word-break:break-word"><tbody><tr><td style="padding:0px 24px 16px"><table cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;background-color:#1c2e42;background-image:linear-gradient(135deg,#243b55 0%,#0d1b2a 100%);border-radius:12px"><tbody><tr><td align="center" style="padding:36px 28px"><p class="banner-title" style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:42px;font-style:italic;font-weight:400;color:#f5f3f0;line-height:1.15">Confirmed!</p><p class="banner-sub" style="margin:18px 0 0;font-family:Georgia,'Times New Roman',serif;font-size:15px;color:#dde0e6;line-height:1.55;text-align:center">You've booked <strong style="color:#f5f3f0;font-weight:700">${serviceName}</strong> on <strong style="color:#f5f3f0;font-weight:700">${appointmentDate}</strong> at <strong style="color:#f5f3f0;font-weight:700">${appointmentTime}</strong> with Sadie Marie.</p></td></tr></tbody></table></td></tr><tr><td style="padding:0px 24px 16px"><table cellpadding="0" cellspacing="0" border="0" style="width:100%"><tbody><tr><td align="center"><table cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:552px"><tbody><tr><td height="1" style="height:1px;border-radius:999px;line-height:1px;mso-line-height-rule:exactly;font-size:0;background-color:#8a93a0">&nbsp;</td></tr></tbody></table></td></tr></tbody></table></td></tr><tr><td dir="ltr" class="ers-fs-333" style="color:#0d1b2a;font-size:33.3px;font-weight:700;letter-spacing:-0.02em;font-family:&quot;Times New Roman&quot;, Times, serif;white-space:pre-wrap;text-align:center;padding:0px 24px 16px;line-height:1.5;mso-line-height-alt:49.9px">${serviceName}<br></td></tr><tr><td dir="ltr" style="color:#0d1b2a;font-size:16px;font-family:&quot;Times New Roman&quot;, Times, serif;text-align:center;padding:0px 24px 16px;line-height:1.38;mso-line-height-alt:22.1px"><span class="ers-fs-173" style="font-size:17.3px;white-space:pre-wrap">Hi ${clientName},<br><br>Your appointment is scheduled for <strong>${combinedStart}</strong>.<br><br>If there is any conflict, please cancel or reschedule with at least 24 hours' notice. You'll receive reminder messages with pre-arrival instructions before your appointment. I can't wait to see you!</span><br><br></td></tr><tr><td style="padding:0px 24px 24px"><table cellpadding="0" cellspacing="0" border="0" style="width:100%"><tbody><tr><td align="center"><!--[if mso]><table cellpadding="0" cellspacing="0" border="0" width="245" style="width:245px"><tbody><tr><td><![endif]--><table cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:245px"><tbody><tr><td style="width:100%"><a href="${cancelUrl}" target="_blank" rel="noopener" ses:no-track="" style="color:#ffffff;text-decoration:none"><!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${cancelUrl}" style="height:66px;width:245px;v-text-anchor:middle;" arcsize="39%" fillcolor="#2a4460"><v:stroke dashstyle="Solid" weight="0px" color="#2a4460"/><w:anchorlock/><v:textbox inset="0px,0px,0px,0px"><center dir="false" style="color:#ffffff;font-family:sans-serif;font-size:17.9px"><![endif]--><span style="background-color:#2a4460;border-bottom:0px solid transparent;border-left:0px solid transparent;border-radius:26px;border-right:0px solid transparent;border-top:0px solid transparent;color:#ffffff;display:table;font-family:Arial, Helvetica, sans-serif;font-size:17.9px;font-weight:700;height:66px;mso-border-alt:none;text-align:center;width:100%;max-width:100%;box-sizing:border-box;border-spacing:0;border-collapse:separate;letter-spacing:-0.02em;line-height:25.1px"><span style="word-break:break-word;padding-left:8px;padding-right:8px;display:table-cell;height:100%;vertical-align:middle"><span style="word-break:break-word;line-height:25.1px;mso-style-textfill-type:solid;mso-style-textfill-fill-color:#ffffff">Cancel/Reschedule</span></span></span><!--[if mso]></center></v:textbox></v:roundrect><![endif]--></a></td></tr></tbody></table><!--[if mso]></td></tr></tbody></table><![endif]--></td></tr></tbody></table></td></tr></tbody></table></td></tr></tbody></table></td></tr><tr><td style="vertical-align:top"><table border="0" cellpadding="0" cellspacing="0" class="layout-1" align="center" style="display:table;border-spacing:0px;border-collapse:separate;width:100%;max-width:100%;table-layout:fixed;margin:0 auto;background-color:#0d1b2a"><tbody><tr><td style="text-align:center;padding:0px 24px"><table border="0" cellpadding="0" cellspacing="0" style="border-spacing:0px;border-collapse:separate;width:100%;max-width:552px;table-layout:fixed;margin:0 auto"><tbody><tr><td width="100.00%" style="width:100.00%;box-sizing:border-box;vertical-align:top"><table border="0" cellpadding="0" cellspacing="0" style="border-spacing:0px;border-collapse:separate;width:100%;table-layout:fixed"><tbody><tr><td style="padding:13px"><table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="color:#000;font-style:normal;font-weight:normal;font-size:16px;line-height:1.4;letter-spacing:0;text-align:left;direction:ltr;border-collapse:collapse;font-family:Arial, Helvetica, sans-serif;white-space:normal;word-wrap:break-word;word-break:break-word"><tbody><tr><td style="padding:0px 0px 16px"><table cellpadding="0" cellspacing="0" border="0" style="width:100%"><tbody><tr><td align="center"><table cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:526px"><tbody><tr><td height="1" style="height:1px;border-radius:999px;line-height:1px;mso-line-height-rule:exactly;font-size:0;background-color:#8a93a0">&nbsp;</td></tr></tbody></table></td></tr></tbody></table></td></tr><tr><td dir="ltr" style="color:#f5f3f0;font-size:12px;font-family:&quot;Times New Roman&quot;, Times, serif;white-space:pre-wrap;text-align:center;padding:0px 0px 16px;line-height:19.2px;mso-line-height-alt:19.2px">61 W 3200 N, Suite #10, Lehi, UT 84043<br>(<a href="tel:3852003904" target="_blank" rel="noopener noreferrer" style="color:#f5f3f0;text-decoration:none">385) 200-3904</a>)<br>© Sadie Marie Co.<br></td></tr></tbody></table></td></tr></tbody></table></td></tr></tbody></table></td></tr></tbody></table></td></tr></tbody></table><!--[if mso]></td>
+  return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
+  <link href="https://fonts.googleapis.com/css2?family=Pinyon+Script&amp;display=swap" rel="stylesheet" />
+  <title>${serviceName} — Sadie Marie</title>
+  <style>
+    body, table, td { margin: 0; padding: 0; }
+    img { border: 0; outline: none; text-decoration: none; display: block; }
+    a { color: inherit; }
+    @media (max-width: 720px) {
+      .email-card { width: 100% !important; max-width: 100% !important; }
+      .email-pad { padding-left: 20px !important; padding-right: 20px !important; }
+      .banner-title { font-size: 52px !important; line-height: 1 !important; }
+      .banner-sub { font-size: 15px !important; }
+      .service-title { font-size: 26px !important; }
+      .body-copy { font-size: 16px !important; }
+    }
+  </style>
+  <!--[if mso]>
+  <style>
+    .banner-title { font-family: ${SERIF} !important; font-style: italic !important; }
+  </style>
+  <![endif]-->
+</head>
+<body style="margin:0;padding:0;width:100%;background-color:${PAGE_BG};-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+    Your ${serviceName} appointment is confirmed for ${appointmentWhen}.
+  </div>
+
+  <!-- Full-viewport wash so wide screens feel intentional, not empty -->
+  <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="${PAGE_BG}" style="width:100%;min-width:100%;background-color:${PAGE_BG};">
+    <tr>
+      <td align="center" bgcolor="${PAGE_BG}" style="background-color:${PAGE_BG};padding:48px 16px;">
+
+        <!-- Card -->
+        <table role="presentation" class="email-card" width="${CARD_WIDTH}" border="0" cellpadding="0" cellspacing="0" bgcolor="${PAGE_BG}" style="width:100%;max-width:${CARD_WIDTH}px;background-color:${PAGE_BG};border-collapse:separate;border-radius:4px;overflow:hidden;box-shadow:0 12px 48px rgba(13,27,42,0.10);">
+
+          <!-- Header -->
+          <tr>
+            <td class="email-pad" style="padding:22px 36px 18px;background-color:${PAGE_BG};">
+              <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="left" style="font-family:${SERIF};font-size:20px;letter-spacing:-0.04em;color:${NAVY};line-height:1.2;">
+                    Sadie Marie
+                  </td>
+                  <td align="right" style="font-family:${SERIF};font-size:13px;color:${NAVY};line-height:1.2;">
+                    <a href="${PUBLIC_BASE_URL}" target="_blank" rel="noopener noreferrer" style="color:${NAVY};text-decoration:none;">sadiemarie.co</a>
+                  </td>
                 </tr>
-              </tbody>
-            </table>
-          </center><![endif]--></td></tr></tbody></table></body></html>`;
+              </table>
+            </td>
+          </tr>
+
+          <!-- Hero banner — edge-to-edge within card -->
+          <tr>
+            <td align="center" style="padding:0;background-color:${NAVY};">
+              <!--[if gte mso 9]>
+              <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:${CARD_WIDTH}px;height:220px;">
+                <v:fill type="gradient" color="#1c2e42" color2="#0d1b2a" angle="90" />
+                <v:textbox inset="0,0,0,0" style="mso-fit-shape-to-text:true">
+              <![endif]-->
+              <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;background-color:${NAVY};background-image:radial-gradient(ellipse 120% 90% at 50% 42%, #2a4460 0%, #152536 38%, ${NAVY} 72%, #1a2f45 100%);">
+                <tr>
+                  <td align="center" style="padding:52px 40px 48px;">
+                    <p class="banner-title" style="margin:0;font-family:${SCRIPT};font-size:64px;font-weight:400;color:#f5f3f0;line-height:1.05;letter-spacing:0.01em;">
+                      Confirmed!
+                    </p>
+                    <p class="banner-sub" style="margin:22px 0 0;font-family:${SERIF};font-size:16px;font-weight:400;color:#e8eaed;line-height:1.65;text-align:center;max-width:520px;">
+                      You've booked <strong style="color:#ffffff;font-weight:700;">${serviceName}</strong> on <strong style="color:#ffffff;font-weight:700;">${appointmentWhen}</strong> with Sadie Marie.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+              <!--[if gte mso 9]></v:textbox></v:rect><![endif]-->
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td class="email-pad" style="padding:28px 40px 8px;background-color:${PAGE_BG};">
+              <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="padding-bottom:20px;">
+                    <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td height="1" style="height:1px;line-height:1px;font-size:0;background-color:#8a93a0;border-radius:999px;">&nbsp;</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" class="service-title" style="padding-bottom:18px;font-family:${SERIF};font-size:33px;font-weight:700;letter-spacing:-0.02em;color:${NAVY};line-height:1.35;text-align:center;">
+                    ${serviceName}
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" class="body-copy" style="font-family:${SERIF};font-size:17px;color:${NAVY};line-height:1.55;text-align:center;">
+                    If there is any conflict, please cancel or reschedule with at least 24 hours' notice. You'll receive reminder messages with pre-arrival instructions before your appointment. I can't wait to see you!
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td align="center" class="email-pad" style="padding:28px 40px 40px;background-color:${PAGE_BG};">
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+                <tr>
+                  <td align="center" bgcolor="#2a4460" style="background-color:#2a4460;border-radius:26px;">
+                    <a href="${cancelUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:20px 36px;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:-0.02em;line-height:1;">
+                      Cancel/Reschedule
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td bgcolor="${NAVY}" style="background-color:${NAVY};padding:0 36px 20px;">
+              <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="padding:18px 0 16px;">
+                    <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td height="1" style="height:1px;line-height:1px;font-size:0;background-color:#8a93a0;">&nbsp;</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="font-family:${SERIF};font-size:12px;color:#f5f3f0;line-height:1.6;text-align:center;padding-bottom:8px;">
+                    61 W 3200 N, Suite #10, Lehi, UT 84043<br />
+                    (<a href="tel:3852003904" target="_blank" rel="noopener noreferrer" style="color:#f5f3f0;text-decoration:none;">385) 200-3904</a>)<br />
+                    © Sadie Marie Co.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+        <!-- /Card -->
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
