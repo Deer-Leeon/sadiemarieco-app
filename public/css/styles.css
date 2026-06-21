@@ -12,6 +12,12 @@
   --navy-light: #2A4460;
   --ink: #1a1a24;
   --mist: #8A93A0;
+  /* WCAG AA 4.5:1+ body text on --off-white (5.37:1). Use for small/muted copy on cream. */
+  --mist-readable: #586574;
+  /* WCAG AA 4.5:1+ on --ink footer (6.78:1). Use instead of --mist + opacity on dark surfaces. */
+  --mist-on-dark: #9ca3ad;
+  /* Large decorative watermark on --off-white (3.07:1 — passes WCAG AA for 18pt+). */
+  --watermark-readable: #928a80;
   --serif: 'Bodoni Moda', Georgia, serif;
   --serif-alt: 'EB Garamond', Georgia, serif;
   --sans: 'DM Sans', sans-serif;
@@ -260,13 +266,12 @@ nav {
   font-size: 0.56rem;
   letter-spacing: 0.28em;
   text-transform: uppercase;
-  color: var(--mist);
-  opacity: 0.6;
+  color: var(--mist-readable);
 }
 .hero-scroll-hint::before {
   content: '';
   width: 38px; height: 1px;
-  background: var(--mist);
+  background: var(--mist-readable);
 }
 
 /* ── MARQUEE ── */
@@ -515,7 +520,7 @@ nav {
   font-style: italic;
   font-size: 0.92rem;
   letter-spacing: 0.01em;
-  color: var(--mist);
+  color: var(--mist-readable);
   margin: 0;
   padding: 8px 0 4px;
 }
@@ -997,7 +1002,7 @@ a.service-item:focus-visible .service-action {
   font-family: var(--serif-alt);
   font-style: italic;
   font-size: 0.78rem;
-  color: var(--mist);
+  color: var(--mist-readable);
   display: block;
   margin-top: 4px;
 }
@@ -1015,7 +1020,7 @@ a.service-item:focus-visible .service-action {
   font-family: var(--sans);
   font-size: 0.58rem;
   letter-spacing: 0.12em;
-  color: var(--mist);
+  color: var(--mist-readable);
   display: block;
   margin-top: 3px;
 }
@@ -1432,7 +1437,7 @@ a.service-item:focus-visible .service-action {
   font-size: 28vw;
   font-weight: 400;
   line-height: 1;
-  color: rgba(13,27,42,0.03);
+  color: var(--watermark-readable);
   pointer-events: none;
   letter-spacing: -0.06em;
   z-index: 0;
@@ -1950,8 +1955,7 @@ footer {
   font-size: 0.58rem;
   font-weight: 300;
   letter-spacing: 0.16em;
-  color: var(--mist);
-  opacity: 0.6;
+  color: var(--mist-on-dark);
 }
 .footer-links { display: flex; gap: 28px; list-style: none; }
 .footer-links a {
@@ -1960,12 +1964,11 @@ footer {
   font-weight: 300;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--mist);
+  color: var(--mist-on-dark);
   text-decoration: none;
-  opacity: 0.55;
-  transition: opacity 0.3s;
+  transition: color 0.3s;
 }
-.footer-links a:hover { opacity: 1; }
+.footer-links a:hover { color: var(--off-white); }
 
 /* ── SCROLL REVEAL ── */
 .reveal {
