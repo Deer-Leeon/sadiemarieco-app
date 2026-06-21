@@ -801,11 +801,11 @@ async function checkWebhooks(): Promise<HealthCheckResult[]> {
     }),
     result({
       id: 'webhook-calcom-optional',
-      name: 'Optional Cal email webhook',
+      name: 'Legacy Cal email webhook',
       category: 'Webhooks',
-      status: 'degraded',
-      message: 'POST /api/webhooks/calcom — duplicate email path (disable if using primary only)',
-      detail: `${publicBase}/api/webhooks/calcom`,
+      status: 'skipped',
+      message: 'POST /api/webhooks/calcom — not required; primary webhook sends confirmation email',
+      detail: `Do not configure in Cal.com. Primary: ${publicBase}/api/webhook`,
     }),
     result({
       id: 'webhook-idempotency',
