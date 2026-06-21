@@ -842,13 +842,13 @@ a.service-item:focus-visible .service-action {
 #booking-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(13, 27, 42, 0.4);
+  background: rgba(13, 27, 42, 0.12);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.4s ease;
   z-index: 999;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
 }
 #booking-backdrop.drawer-open {
   opacity: 1;

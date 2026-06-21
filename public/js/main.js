@@ -503,6 +503,23 @@
     backdrop.classList.remove('drawer-open');
   };
 
+  // If the drawer was open and the visitor uses in-page nav (Portfolio,
+  // About, …) the backdrop stayed up while the page scrolled underneath —
+  // looks like a random dark overlay until refresh.
+  document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
+    if (anchor.classList.contains('service-item')) return;
+    anchor.addEventListener('click', () => {
+      if (drawer && drawer.classList.contains('drawer-open')) closeDrawer();
+    });
+  });
+
+  // Browser back/forward can restore the page with drawer-open still set.
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) closeDrawer();
+  });
+
+  closeDrawer();
+
   const readText = (root, selector) => {
     const el = root.querySelector(selector);
     return el ? el.textContent.trim() : '';
