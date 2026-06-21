@@ -183,7 +183,6 @@ async function checkEnvironment(): Promise<HealthCheckResult[]> {
 
   const optional = [
     ['RESEND_FROM_EMAIL', 'Resend from address'],
-    ['QSTASH_NEXT_SIGNING_KEY', 'QStash next signing key (rotation)'],
     ['GOOGLE_PLACES_API_KEY', 'Google Places API key'],
     ['NEXT_PUBLIC_GOOGLE_PLACE_ID', 'Google Place ID'],
     ['CAL_USERNAME', 'Cal.com username slug'],
@@ -763,7 +762,9 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
       category: 'Scheduled jobs (QStash)',
       status: currentKey ? 'healthy' : 'unhealthy',
       message: currentKey
-        ? `Signing key set${nextKey ? ' (rotation key also set)' : ''}`
+        ? nextKey
+          ? 'Signing key set (rotation key also configured)'
+          : 'Signing key set'
         : 'QSTASH_CURRENT_SIGNING_KEY missing — /api/remind and /api/feedback will reject callbacks',
     })
   );
