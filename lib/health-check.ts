@@ -800,14 +800,6 @@ async function checkWebhooks(): Promise<HealthCheckResult[]> {
       detail: `Configure in Cal.com: ${publicBase}/api/webhook`,
     }),
     result({
-      id: 'webhook-calcom-optional',
-      name: 'Legacy Cal email webhook',
-      category: 'Webhooks',
-      status: 'skipped',
-      message: 'POST /api/webhooks/calcom — not required; primary webhook sends confirmation email',
-      detail: `Do not configure in Cal.com. Primary: ${publicBase}/api/webhook`,
-    }),
-    result({
       id: 'webhook-idempotency',
       name: 'Webhook deduplication table',
       category: 'Webhooks',
