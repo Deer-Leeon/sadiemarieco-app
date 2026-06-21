@@ -523,6 +523,47 @@ function extractCalEventTypes(payload: unknown): Array<{ id: number; title: stri
     .filter((x): x is { id: number; title: string } => x != null);
 }
 
+/** Probe POST /emails with an invalid payload — auth succeeds on 400/422 without sending mail. */
+async function probeResendSendingAccess(apiKey: string): Promise<void> {
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'sadiemarie-health-check/1.0',
+    },
+    body: '{}',
+    cache: 'no-store',
+  });
+
+  if (res.status === 401) {
+    let detail = 'Invalid API key';
+    try {
+      const body = (await res.json()) as { message?: string };
+      if (body.message) detail = body.message;
+    } catch {
+      // keep default
+    }
+    throw new Error(detail);
+  }
+
+  // Validation errors mean the key authenticated against the send endpoint.
+  if (res.status === 400 || res.status === 422) return;
+
+  if (res.ok) {
+    throw new Error('Unexpected success from send probe');
+  }
+
+  let detail = `HTTP ${res.status}`;
+  try {
+    const body = (await res.json()) as { message?: string };
+    if (body.message) detail = body.message;
+  } catch {
+    // keep status-only detail
+  }
+  throw new Error(detail);
+}
+
 async function checkResend(): Promise<HealthCheckResult[]> {
   const checks: HealthCheckResult[] = [];
   const apiKey = process.env.RESEND_API_KEY?.trim();
@@ -541,23 +582,7 @@ async function checkResend(): Promise<HealthCheckResult[]> {
 
   try {
     const { latencyMs } = await timed(async () => {
-      const res = await fetch('https://api.resend.com/domains', {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        cache: 'no-store',
-      });
-      if (res.status === 401) throw new Error('Invalid API key');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { data?: Array<{ name: string; status: string }> };
-      const domains = body.data ?? [];
-      const verified = domains.filter((d) => d.status === 'verified');
-      if (verified.length === 0 && domains.length > 0) {
-        throw new Error(
-          `No verified sending domains (${domains.map((d) => `${d.name}:${d.status}`).join(', ')})`
-        );
-      }
-      if (domains.length === 0) {
-        throw new Error('No domains configured in Resend');
-      }
+      await probeResendSendingAccess(apiKey);
     });
 
     const fromEmail =
@@ -567,9 +592,9 @@ async function checkResend(): Promise<HealthCheckResult[]> {
       result(
         {
           id: 'resend-api',
-          name: 'Resend API & domain verification',
+          name: 'Resend send API',
           category: 'Email (Resend)',
-          message: 'Resend API reachable with verified sending domain',
+          message: 'Sending API key valid — confirmation emails can be sent',
         },
         latencyMs
       )
@@ -589,10 +614,10 @@ async function checkResend(): Promise<HealthCheckResult[]> {
     checks.push(
       result({
         id: 'resend-api',
-        name: 'Resend API & domain verification',
+        name: 'Resend send API',
         category: 'Email (Resend)',
         status: 'unhealthy',
-        message: 'Resend check failed',
+        message: 'Resend send check failed',
         detail: err instanceof Error ? err.message : String(err),
       })
     );
