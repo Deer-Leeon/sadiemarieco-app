@@ -16,8 +16,8 @@
   --mist-readable: #586574;
   /* WCAG AA 4.5:1+ on --ink footer (6.78:1). Use instead of --mist + opacity on dark surfaces. */
   --mist-on-dark: #9ca3ad;
-  /* Large decorative watermark on --off-white (3.07:1 — passes WCAG AA for 18pt+). */
-  --watermark-readable: #928a80;
+  /* Decorative section watermarks — faint navy on cream (not for readable text). */
+  --watermark-faint: rgba(13, 27, 42, 0.07);
   --serif: 'Bodoni Moda', Georgia, serif;
   --serif-alt: 'EB Garamond', Georgia, serif;
   --sans: 'DM Sans', sans-serif;
@@ -1045,7 +1045,7 @@ a.service-item:focus-visible .service-action {
   font-size: clamp(5rem, 10vw, 10.5rem);
   font-weight: 700;
   line-height: 1;
-  color: rgba(13, 27, 42, 0.07);
+  color: var(--watermark-faint);
   pointer-events: none;
   white-space: nowrap;
   letter-spacing: -0.04em;
@@ -1440,7 +1440,7 @@ a.service-item:focus-visible .service-action {
   font-size: 28vw;
   font-weight: 400;
   line-height: 1;
-  color: var(--watermark-readable);
+  color: rgba(13, 27, 42, 0.04);
   pointer-events: none;
   letter-spacing: -0.06em;
   z-index: 0;
