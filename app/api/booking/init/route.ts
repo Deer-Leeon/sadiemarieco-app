@@ -17,6 +17,7 @@ import {
   normaliseClientPhoneForStorage,
   normalizeClientEmailForStorage,
 } from '@/lib/client-identity';
+import { extractCalBookingNotes } from '@/lib/cal-booking-notes';
 import { upsertClientByPhonePrimary } from '@/lib/client-upsert';
 
 export const runtime = 'nodejs';
@@ -44,6 +45,7 @@ interface ParsedInit {
   bookingTime: string | null;
   endTime: string | null;
   phone: string;
+  bookingNotes: string | null;
 }
 
 function errorMessage(err: unknown): string {
@@ -87,6 +89,7 @@ function parseInitBody(input: unknown): ParsedInit | { error: string } {
     bookingTime: bookingTime || null,
     endTime: endTime || null,
     phone,
+    bookingNotes: null,
   };
 }
 
@@ -148,6 +151,9 @@ async function hydrateFromCal(
           ? booking.endTime
           : null;
 
+    const bookingNotes =
+      partial.bookingNotes || extractCalBookingNotes(booking as Record<string, unknown>);
+
     return {
       ...partial,
       email:
@@ -159,6 +165,7 @@ async function hydrateFromCal(
       serviceName: partial.serviceName !== 'appointment' ? partial.serviceName : title || partial.serviceName,
       bookingTime: partial.bookingTime || start,
       endTime: partial.endTime || end,
+      bookingNotes,
     };
   } catch (err) {
     console.warn('[api/booking/init] Cal hydrate failed (non-fatal)', {
@@ -183,7 +190,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   let data = parsed;
-  if (!data.email || !data.bookingTime) {
+  if (!data.email || !data.bookingTime || !data.bookingNotes) {
     data = await hydrateFromCal(data.calBookingUid, data);
   }
 
@@ -234,13 +241,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       INSERT INTO appointments (
         client_id, service_name, booking_time, end_time, cal_event_id,
         client_first_name, client_last_name, client_email, client_phone,
-        status
+        booking_notes, status
       )
       VALUES (
         ${clientId}, ${data.serviceName}, ${data.bookingTime}, ${data.endTime},
         ${data.calBookingUid},
         ${firstName}, ${lastName}, ${data.email}, ${appointmentPhone},
-        'pending'
+        ${data.bookingNotes}, 'pending'
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,
@@ -250,7 +257,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         client_first_name = EXCLUDED.client_first_name,
         client_last_name = EXCLUDED.client_last_name,
         client_email = COALESCE(EXCLUDED.client_email, appointments.client_email),
-        client_phone = EXCLUDED.client_phone
+        client_phone = EXCLUDED.client_phone,
+        booking_notes = COALESCE(EXCLUDED.booking_notes, appointments.booking_notes)
     `;
 
     return NextResponse.json({

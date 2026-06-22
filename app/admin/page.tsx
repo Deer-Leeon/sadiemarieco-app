@@ -47,6 +47,7 @@ interface DbRow {
   status: string | null;
   client_phone: string | null;
   client_email: string | null;
+  booking_notes: string | null;
   // NUMERIC arrives from Postgres as a string. We coerce in the row
   // mapping below so the client sees a clean `number | null`.
   service_price: string | null;
@@ -163,6 +164,7 @@ export default async function AdminPage() {
         a.client_phone,
         a.client_email,
         a.stripe_customer_id,
+        a.booking_notes,
         s.price       AS service_price,
         s.description AS service_description,
         s.slug        AS service_slug,
@@ -207,6 +209,7 @@ export default async function AdminPage() {
       status: r.status,
       client_phone: r.client_phone,
       client_email: r.client_email,
+      booking_notes: r.booking_notes,
       // NUMERIC arrives stringified — coerce here so the client side
       // never has to think about parsing. Use Number() rather than
       // parseFloat so a non-numeric string surfaces as NaN, which we

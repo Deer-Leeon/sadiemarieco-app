@@ -77,6 +77,7 @@ interface AppointmentRow {
   // Stripe Customer id (`cus_…`) for the vaulted card-on-file. Written
   // by /api/booking/confirm after a successful SetupIntent on /checkout.
   stripe_customer_id: string | null;
+  booking_notes: string | null;
 }
 
 function serializeDate(value: Date | string | null): string | null {
@@ -98,6 +99,7 @@ function rowToAppointment(row: AppointmentRow): Appointment {
     status: row.status,
     client_phone: row.client_phone,
     client_email: row.client_email,
+    booking_notes: row.booking_notes,
     service_price:
       row.service_price === null
         ? null
@@ -189,6 +191,7 @@ export async function GET(
         a.client_phone,
         a.client_email,
         a.stripe_customer_id,
+        a.booking_notes,
         s.price       AS service_price,
         s.description AS service_description,
         s.slug        AS service_slug,

@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Loader2,
   Mail,
+  MessageSquare,
   Phone,
   Scissors,
   X,
@@ -388,6 +389,9 @@ export default function AppointmentModal({
                       : undefined
                   }
                 />
+                {appointment.booking_notes?.trim() ? (
+                  <BookingNotesBox notes={appointment.booking_notes.trim()} />
+                ) : null}
                 <DateTimeBox appointment={appointment} />
                 <ServiceBox appointment={appointment} />
               </div>
@@ -578,6 +582,16 @@ function ClientBox({
           </p>
         )}
       </div>
+    </DetailBox>
+  );
+}
+
+function BookingNotesBox({ notes }: { notes: string }) {
+  return (
+    <DetailBox label="Booking notes" icon={<MessageSquare className="h-3 w-3" />}>
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-stone-700">
+        {notes}
+      </p>
     </DetailBox>
   );
 }

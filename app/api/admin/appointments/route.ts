@@ -44,6 +44,7 @@ interface AppointmentRow {
   status: string | null;
   client_phone: string | null;
   client_email: string | null;
+  booking_notes: string | null;
   service_price: string | null;
   service_description: string | null;
   service_color: string | null;
@@ -70,6 +71,7 @@ function rowToAppointment(row: AppointmentRow): Appointment {
     status: row.status,
     client_phone: row.client_phone,
     client_email: row.client_email,
+    booking_notes: row.booking_notes,
     service_price:
       row.service_price === null
         ? null
@@ -111,6 +113,7 @@ export async function GET(): Promise<NextResponse> {
         a.client_phone,
         a.client_email,
         a.stripe_customer_id,
+        a.booking_notes,
         s.price       AS service_price,
         s.description AS service_description,
         s.slug        AS service_slug,

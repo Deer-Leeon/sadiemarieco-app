@@ -155,6 +155,11 @@ export interface Appointment {
    */
   client_email: string | null;
   /**
+   * Optional comment the client left on the Cal.com booking form
+   * ("Additional notes"). Null when they left it blank.
+   */
+  booking_notes: string | null;
+  /**
    * Price for this appointment's service, joined in from
    * `site_services.price` on title match. Null when no matching CMS
    * row exists (legacy bookings, manually renamed services, etc.).
