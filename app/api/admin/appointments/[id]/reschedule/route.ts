@@ -28,6 +28,7 @@ import {
   isSameAppointmentSlot,
   RESCHEDULE_SAME_SLOT_MESSAGE,
 } from '@/lib/appointment-slot';
+import { rescheduleAppointmentReminderEmails } from '@/lib/booking-notifications';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -244,6 +245,10 @@ export async function POST(
     }
 
     const row = rows[0];
+    const reminderEmails = await rescheduleAppointmentReminderEmails(
+      row.cal_event_id || newCalUid,
+    );
+
     return NextResponse.json({
       appointment: {
         id: row.id,
@@ -252,6 +257,7 @@ export async function POST(
         end_time: serialiseDate(row.end_time),
         status: row.status,
       },
+      reminderEmails,
     });
   } catch (err) {
     const msg = errorMessage(err);

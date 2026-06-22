@@ -382,6 +382,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const notifications = await notifyBookingConfirmed({
       bookingUid: parsed.calBookingUid,
       bookingTime,
+      endTime,
       clientPhone: parsed.clientPhone,
       clientName: parsed.clientName,
       serviceName: appointmentServiceName,
