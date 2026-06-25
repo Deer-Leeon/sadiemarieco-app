@@ -41,6 +41,16 @@ export const CAL_STUDIO_IN_PERSON_LOCATION = {
   public: true,
 };
 
+/**
+ * The hidden admin override event type is configured for Cal Video only
+ * (`integration`, not `address`). Time blocks and shadow-event fallbacks
+ * must use this location shape or Cal rejects the create.
+ */
+export const CAL_ADMIN_OVERRIDE_BOOKING_LOCATION = {
+  type: 'integration' as const,
+  integration: 'cal-video' as const,
+};
+
 /** Auto-confirm bookings (no Cal.com "requires confirmation" / pending checkout gate). */
 export const CAL_CONFIRMATION_POLICY_DISABLED = {
   disabled: true as const,
@@ -110,6 +120,15 @@ export function parseAdminOverrideEventId(): number | null {
   const id = Number(raw);
   return Number.isInteger(id) && id > 0 ? id : null;
 }
+
+/**
+ * Allowed `lengthInMinutes` values on the admin override Cal event type
+ * (multi-duration / "Offer multiple durations"). Long blocks are split into
+ * consecutive bookings using these lengths — keep in sync with Cal.com.
+ */
+export const CAL_ADMIN_OVERRIDE_BLOCK_DURATIONS_MIN = [
+  30, 45, 60, 80, 90, 120, 150, 180,
+] as const;
 
 export interface ServiceByCalEventId {
   title: string;

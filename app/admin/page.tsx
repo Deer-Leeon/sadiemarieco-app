@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { loadCalEventTypeMaps } from '@/lib/cal-config';
 
 import DashboardUI from './DashboardUI';
-import type { Appointment } from './types';
+import type { Appointment, TimeBlock } from './types';
 
 // Reads cookies (Clerk) and queries Postgres on every render. Force dynamic
 // so Next doesn't try to statically optimise — without this `next build`
@@ -110,6 +110,7 @@ export default async function AdminPage() {
   // Wrapped so a DB outage shows a graceful banner in the UI instead of
   // surfacing the Next.js error boundary.
   let appointments: Appointment[] = [];
+  let timeBlocks: TimeBlock[] = [];
   let dbError: string | null = null;
   let manualBookingServices: Awaited<
     ReturnType<typeof loadCalEventTypeMaps>
@@ -231,12 +232,52 @@ export default async function AdminPage() {
     dbError = err instanceof Error ? err.message : 'Unknown DB error';
   }
 
+  try {
+    const { rows: blockRows } = await sql<{
+      id: string;
+      start_time: Date | string;
+      end_time: Date | string;
+      note: string | null;
+      cal_booking_uid: string | null;
+      cal_booking_uids: unknown;
+    }>`
+      SELECT id, start_time, end_time, note, cal_booking_uid, cal_booking_uids
+      FROM studio_time_blocks
+      WHERE end_time >= NOW() - INTERVAL '30 days'
+      ORDER BY start_time ASC
+      LIMIT 500
+    `;
+    timeBlocks = blockRows.map((r) => {
+      const uids = Array.isArray(r.cal_booking_uids)
+        ? r.cal_booking_uids.filter(
+            (uid): uid is string => typeof uid === 'string' && uid.length > 0
+          )
+        : [];
+      return {
+        id: r.id,
+        start_time: serializeDate(r.start_time) ?? '',
+        end_time: serializeDate(r.end_time) ?? '',
+        note: r.note,
+        cal_booking_uid: r.cal_booking_uid,
+        cal_booking_uids:
+          uids.length > 0 ? uids : r.cal_booking_uid ? [r.cal_booking_uid] : [],
+      };
+    });
+  } catch (err) {
+    console.error('[admin] studio_time_blocks query failed:', err);
+    if (!dbError) {
+      dbError =
+        err instanceof Error ? err.message : 'Could not load time blocks';
+    }
+  }
+
   const displayName =
     user?.firstName || userEmails[0] || 'Admin';
 
   return (
     <DashboardUI
       appointments={appointments}
+      timeBlocks={timeBlocks}
       dbError={dbError}
       displayName={displayName}
       manualBookingServices={manualBookingServices}

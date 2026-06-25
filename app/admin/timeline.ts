@@ -9,6 +9,10 @@ import { isSameDay, parseISO, startOfDay } from 'date-fns';
 
 import type { Appointment } from './types';
 
+// Re-export for convenience in timeline consumers.
+export type { TimeBlock } from './types';
+import type { TimeBlock } from './types';
+
 // ──────────────────────────────────────────────────────────────────────────
 // Geometry constants
 // ──────────────────────────────────────────────────────────────────────────
@@ -36,6 +40,11 @@ export const HOURS = END_HOUR - START_HOUR; // 12
  */
 export const MIN_PILL_HEIGHT_PX = 22;
 
+/** Minimum height per hour row in the single-day modal (readable pills). */
+export const MODAL_HOUR_ROW_MIN_PX = 56;
+
+export const MODAL_HOUR_GRID_ROWS = `repeat(${HOURS}, minmax(${MODAL_HOUR_ROW_MIN_PX}px, 1fr))`;
+
 // ──────────────────────────────────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────────────────────────────────
@@ -51,6 +60,12 @@ export interface PositionedAppointment {
   col: number;
   /** Total number of lanes the day needs — uniform across the day. */
   totalCols: number;
+}
+
+export interface PositionedTimeBlock {
+  block: TimeBlock;
+  topPct: number;
+  heightPct: number;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -97,6 +112,18 @@ export function positionFor(
   const end =
     safeParseISO(apt.end_time) ?? new Date(start.getTime() + 60 * 60 * 1000);
 
+  return positionInterval(start, end);
+}
+
+/**
+ * Same visible-window math as `positionFor`, but for arbitrary intervals
+ * (admin time blocks). Returns null when the interval falls entirely
+ * outside START_HOUR..END_HOUR.
+ */
+export function positionInterval(
+  start: Date,
+  end: Date
+): { topPct: number; heightPct: number } | null {
   const dayStart = startOfDay(start);
   const visibleStartMs = dayStart.getTime() + START_HOUR * 60 * 60 * 1000;
   const visibleEndMs = dayStart.getTime() + END_HOUR * 60 * 60 * 1000;
@@ -182,4 +209,21 @@ export function layoutForDay(
     positioned.push({ apt, topPct: pos.topPct, heightPct: pos.heightPct });
   }
   return packLanes(positioned);
+}
+
+/** Filter time blocks to a single local day with timeline positioning. */
+export function layoutBlocksForDay(
+  date: Date,
+  blocks: TimeBlock[]
+): PositionedTimeBlock[] {
+  const positioned: PositionedTimeBlock[] = [];
+  for (const block of blocks) {
+    const start = safeParseISO(block.start_time);
+    const end = safeParseISO(block.end_time);
+    if (!start || !end || !isSameDay(start, date)) continue;
+    const pos = positionInterval(start, end);
+    if (!pos) continue;
+    positioned.push({ block, topPct: pos.topPct, heightPct: pos.heightPct });
+  }
+  return positioned.sort((a, b) => a.topPct - b.topPct);
 }

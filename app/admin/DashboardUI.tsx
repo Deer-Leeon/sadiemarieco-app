@@ -25,7 +25,7 @@ import type {
   ManualBookingServiceGroupHeader,
   ManualBookingServiceOption,
 } from './components/manual-booking-utils';
-import type { Appointment, ViewMode } from './types';
+import type { Appointment, TimeBlock, ViewMode } from './types';
 import AdminHeader from './AdminHeader';
 import AdminSectionTabs from './AdminSectionTabs';
 import ListView from './ListView';
@@ -33,9 +33,18 @@ import CalendarView from './CalendarView';
 import TimeGrid from './TimeGrid';
 import SingleDayModal from './SingleDayModal';
 import AppointmentModal from './AppointmentModal';
+import RemoveBlockDialog from './components/RemoveBlockDialog';
+import {
+  deleteTimeBlock,
+  isIngestedTimeBlockAppointment,
+  mergeGhostTimeBlocks,
+  timeBlockCalUidSet,
+} from './time-block-helpers';
+import { allCalBookingUids } from '@/lib/cal-time-block-segments';
 
 interface Props {
   appointments: Appointment[];
+  timeBlocks: TimeBlock[];
   dbError: string | null;
   displayName: string;
   manualBookingServices: ManualBookingServiceOption[];
@@ -66,6 +75,7 @@ interface Props {
  */
 export default function DashboardUI({
   appointments,
+  timeBlocks,
   dbError,
   displayName,
   manualBookingServices,
@@ -93,6 +103,87 @@ export default function DashboardUI({
     useState<Appointment | null>(null);
   const [manualBookingOpen, setManualBookingOpen] = useState(false);
   const [bookingToast, setBookingToast] = useState<string | null>(null);
+  const [blockPendingRemove, setBlockPendingRemove] = useState<TimeBlock | null>(
+    null
+  );
+  const [removingBlockId, setRemovingBlockId] = useState<string | null>(null);
+  const [removedBlockIds, setRemovedBlockIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [removedBlockCalUids, setRemovedBlockCalUids] = useState<Set<string>>(
+    () => new Set()
+  );
+
+  const timeBlockCalUids = useMemo(
+    () => timeBlockCalUidSet(timeBlocks),
+    [timeBlocks]
+  );
+
+  const displayTimeBlocks = useMemo(
+    () =>
+      mergeGhostTimeBlocks(timeBlocks, appointments).filter((b) => {
+        if (removedBlockIds.has(b.id)) return false;
+        if (allCalBookingUids(b).some((uid) => removedBlockCalUids.has(uid))) {
+          return false;
+        }
+        return true;
+      }),
+    [timeBlocks, appointments, removedBlockIds, removedBlockCalUids]
+  );
+
+  const appointmentsWithoutTimeBlockGhosts = useMemo(
+    () =>
+      appointments.filter(
+        (a) => !isIngestedTimeBlockAppointment(a, timeBlockCalUids)
+      ),
+    [appointments, timeBlockCalUids]
+  );
+
+  async function handleConfirmRemoveBlock() {
+    if (!blockPendingRemove || removingBlockId) return;
+
+    const blockId = blockPendingRemove.id;
+    const calUids = allCalBookingUids(blockPendingRemove);
+
+    setRemovingBlockId(blockId);
+    setRemovedBlockIds((prev) => new Set(prev).add(blockId));
+    if (calUids.length > 0) {
+      setRemovedBlockCalUids((prev) => {
+        const next = new Set(prev);
+        for (const uid of calUids) next.add(uid);
+        return next;
+      });
+    }
+    setBlockPendingRemove(null);
+
+    const result = await deleteTimeBlock(blockId);
+    setRemovingBlockId(null);
+
+    if (!result.ok) {
+      setRemovedBlockIds((prev) => {
+        const next = new Set(prev);
+        next.delete(blockId);
+        return next;
+      });
+      if (calUids.length > 0) {
+        setRemovedBlockCalUids((prev) => {
+          const next = new Set(prev);
+          for (const uid of calUids) next.delete(uid);
+          return next;
+        });
+      }
+      setBookingToast(result.message);
+      return;
+    }
+
+    if (result.warning) {
+      setBookingToast(
+        `Block removed. Cal.com may still show the hold — check your calendar if the slot stays blocked.`
+      );
+    }
+
+    router.refresh();
+  }
 
   const showDateNav = view === '3day' || view === 'week';
 
@@ -109,7 +200,7 @@ export default function DashboardUI({
   // without pretending the slot is still bookable.
   const visibleAppointments = useMemo(
     () =>
-      appointments.filter((a) => {
+      appointmentsWithoutTimeBlockGhosts.filter((a) => {
         const s = (a.status || '').toLowerCase();
         return (
           s !== 'canceled_by_admin' &&
@@ -123,7 +214,7 @@ export default function DashboardUI({
           s !== 'canceled_by_system'
         );
       }),
-    [appointments]
+    [appointmentsWithoutTimeBlockGhosts]
   );
 
   // The Month/Week/3-Day time-grid views show only bookings that are
@@ -194,18 +285,24 @@ export default function DashboardUI({
         ) : view === '3day' ? (
           <TimeGrid
             appointments={calendarAppointments}
+            timeBlocks={displayTimeBlocks}
+            removingBlockId={removingBlockId}
             currentDate={currentDate}
             daysToShow={3}
             onDayClick={setModalDate}
             onAppointmentClick={setSelectedAppointment}
+            onBlockClick={setBlockPendingRemove}
           />
         ) : (
           <TimeGrid
             appointments={calendarAppointments}
+            timeBlocks={displayTimeBlocks}
+            removingBlockId={removingBlockId}
             currentDate={currentDate}
             daysToShow={7}
             onDayClick={setModalDate}
             onAppointmentClick={setSelectedAppointment}
+            onBlockClick={setBlockPendingRemove}
           />
         )}
       </main>
@@ -224,9 +321,27 @@ export default function DashboardUI({
       {modalDate !== null && (
         <SingleDayModal
           appointments={visibleAppointments}
+          timeBlocks={displayTimeBlocks}
           initialDate={modalDate}
+          removingBlockId={removingBlockId}
           onClose={() => setModalDate(null)}
           onAppointmentClick={setSelectedAppointment}
+          onBlockClick={setBlockPendingRemove}
+          onBlocksChanged={(infoMessage) => {
+            if (infoMessage) setBookingToast(infoMessage);
+            router.refresh();
+          }}
+        />
+      )}
+      {blockPendingRemove !== null && (
+        <RemoveBlockDialog
+          block={blockPendingRemove}
+          busy={removingBlockId === blockPendingRemove.id}
+          onCancel={() => {
+            if (removingBlockId) return;
+            setBlockPendingRemove(null);
+          }}
+          onConfirm={handleConfirmRemoveBlock}
         />
       )}
       {selectedAppointment !== null && (

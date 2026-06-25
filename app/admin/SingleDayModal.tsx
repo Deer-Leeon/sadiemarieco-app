@@ -4,85 +4,74 @@ import { useEffect, useMemo, useState } from 'react';
 import { addDays, format, subDays } from 'date-fns';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 
-import type { Appointment } from './types';
+import BlockTimeDialog from './BlockTimeDialog';
+import TimeBlockPill from './components/TimeBlockPill';
+import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import { getServiceColor } from './serviceColors';
 import {
   HOURS,
   MIN_PILL_HEIGHT_PX,
+  MODAL_HOUR_GRID_ROWS,
   START_HOUR,
+  layoutBlocksForDay,
   layoutForDay,
   safeParseISO,
   type PositionedAppointment,
+  type PositionedTimeBlock,
 } from './timeline';
 
 interface Props {
   appointments: Appointment[];
+  timeBlocks: TimeBlock[];
   initialDate: Date;
+  removingBlockId?: string | null;
   onClose: () => void;
-  /**
-   * Fired when the user clicks an appointment pill inside the day
-   * timeline. The parent renders AppointmentModal on top of this
-   * modal (z-[60] above the day modal's z-50) rather than dismissing
-   * the day view — so the editor keeps the day's context in place
-   * while drilling into a single booking.
-   */
   onAppointmentClick?: (appointment: Appointment) => void;
+  onBlockClick?: (block: TimeBlock) => void;
+  onBlocksChanged?: (infoMessage?: string) => void;
 }
 
-/**
- * Centered single-day timeline modal.
- *
- * Behaviour contract:
- *   - Press ESC anywhere → close.
- *   - Click the dimmed backdrop → close.
- *   - Click inside the card → do nothing (event.stopPropagation).
- *   - Prev/Next arrows shift `activeDate` by ±1 day; the modal stays
- *     open. The parent does NOT re-render this component on date
- *     changes — activeDate is owned here so users can scrub through
- *     multiple days without the parent caring.
- *   - Backdrop is `fixed inset-0 z-50` so it overlays the dashboard
- *     header & content regardless of where the component is mounted.
- */
 export default function SingleDayModal({
   appointments,
+  timeBlocks,
   initialDate,
+  removingBlockId = null,
   onClose,
   onAppointmentClick,
+  onBlockClick,
+  onBlocksChanged,
 }: Props) {
   const [activeDate, setActiveDate] = useState<Date>(initialDate);
+  const [blockDialogHour, setBlockDialogHour] = useState<number | null>(null);
 
-  // Re-anchor activeDate if the parent picks a different initialDate
-  // while the modal is mounted (e.g. user clicks a different day in
-  // TimeGrid while the modal is technically still in the DOM). Without
-  // this, the modal could "stick" to a stale date.
   useEffect(() => {
     setActiveDate(initialDate);
   }, [initialDate]);
 
-  // ── Keyboard: ESC closes, ← / → navigate days ────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        if (blockDialogHour !== null) {
+          setBlockDialogHour(null);
+          return;
+        }
         onClose();
         return;
       }
+      if (blockDialogHour !== null) return;
       if (e.key === 'ArrowLeft') {
         setActiveDate((d) => subDays(d, 1));
         return;
       }
       if (e.key === 'ArrowRight') {
         setActiveDate((d) => addDays(d, 1));
-        return;
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, blockDialogHour]);
 
-  // ── Body scroll lock while the modal is open ─────────────────────
-  // Prevents the page underneath from scrolling when the modal's body
-  // hits the end of its own scroll region.
   useEffect(() => {
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -96,37 +85,58 @@ export default function SingleDayModal({
     [activeDate, appointments]
   );
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-[#FAF9F6] shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Bookings on ${format(activeDate, 'EEEE, MMMM d')}`}
-      >
-        <ModalHeader
-          activeDate={activeDate}
-          onPrev={() => setActiveDate((d) => subDays(d, 1))}
-          onNext={() => setActiveDate((d) => addDays(d, 1))}
-          onClose={onClose}
-        />
+  const positionedBlocks = useMemo(
+    () => layoutBlocksForDay(activeDate, timeBlocks),
+    [activeDate, timeBlocks]
+  );
 
-        {/* Timeline body fills the remaining space inside the modal card.
-            `min-h-0` lets it shrink properly inside the flex column so the
-            whole 9 AM → 9 PM range always fits without internal scroll. */}
-        <div className="flex min-h-0 flex-1">
-          <DayTimeline
-            positioned={positioned}
-            onAppointmentClick={onAppointmentClick}
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4 sm:p-6 backdrop-blur-sm"
+        onClick={onClose}
+        role="presentation"
+      >
+        <div
+          className="flex h-[min(92vh,880px)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-[#FAF9F6] shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Schedule on ${format(activeDate, 'EEEE, MMMM d')}`}
+        >
+          <ModalHeader
+            activeDate={activeDate}
+            onPrev={() => setActiveDate((d) => subDays(d, 1))}
+            onNext={() => setActiveDate((d) => addDays(d, 1))}
+            onClose={onClose}
           />
+
+          <p className="shrink-0 border-b border-stone-200 px-4 py-2.5 text-center text-[11px] uppercase tracking-[0.22em] text-stone-500">
+            Click an hour to block time
+          </p>
+
+          <div className="min-h-0 flex-1 overflow-hidden px-1 pb-1 pt-1">
+            <DayTimeline
+              positioned={positioned}
+              positionedBlocks={positionedBlocks}
+              removingBlockId={removingBlockId}
+              onHourClick={(hour) => setBlockDialogHour(hour)}
+              onAppointmentClick={onAppointmentClick}
+              onBlockClick={onBlockClick}
+            />
+          </div>
         </div>
       </div>
-    </div>
+
+      {blockDialogHour !== null && (
+        <BlockTimeDialog
+          activeDate={activeDate}
+          initialHour={blockDialogHour}
+          onClose={() => setBlockDialogHour(null)}
+          onCreated={(infoMessage) => onBlocksChanged?.(infoMessage)}
+        />
+      )}
+    </>
   );
 }
 
@@ -143,7 +153,6 @@ function ModalHeader({
 }) {
   return (
     <div className="relative flex items-center justify-center border-b border-stone-200 bg-[#FAF9F6] px-4 py-4">
-      {/* Left arrow — absolute so the centered title stays optically centered. */}
       <button
         type="button"
         onClick={onPrev}
@@ -186,30 +195,35 @@ function ModalHeader({
 
 function DayTimeline({
   positioned,
+  positionedBlocks,
+  removingBlockId,
+  onHourClick,
   onAppointmentClick,
+  onBlockClick,
 }: {
   positioned: PositionedAppointment[];
+  positionedBlocks: PositionedTimeBlock[];
+  removingBlockId: string | null;
+  onHourClick: (hour: number) => void;
   onAppointmentClick?: (appointment: Appointment) => void;
+  onBlockClick?: (block: TimeBlock) => void;
 }) {
-  // Same column structure as TimeGrid: a left time-labels column and a
-  // single relative column for the day's content. The grid fills its
-  // parent's height (the modal body), and hour rows distribute evenly
-  // via the children's own grid-template-rows.
   return (
     <div
-      className="grid w-full"
+      className="grid h-full min-h-0 w-full"
       style={{
-        gridTemplateColumns: '60px minmax(0, 1fr)',
-        // Single implicit row → force it to fill the flex parent's
-        // height so the inner `repeat(HOURS, 1fr)` rows have something
-        // real to scale into. See TimeGrid for the same reasoning.
+        gridTemplateColumns: '72px minmax(0, 1fr)',
         gridTemplateRows: 'minmax(0, 1fr)',
       }}
     >
       <TimeLabelColumn />
       <DayBody
         positioned={positioned}
+        positionedBlocks={positionedBlocks}
+        removingBlockId={removingBlockId}
+        onHourClick={onHourClick}
         onAppointmentClick={onAppointmentClick}
+        onBlockClick={onBlockClick}
       />
     </div>
   );
@@ -218,8 +232,8 @@ function DayTimeline({
 function TimeLabelColumn() {
   return (
     <div
-      className="grid border-r border-stone-200"
-      style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+      className="grid h-full min-h-0 border-r border-stone-200"
+      style={{ gridTemplateRows: MODAL_HOUR_GRID_ROWS }}
     >
       {Array.from({ length: HOURS }, (_, i) => {
         const hour = START_HOUR + i;
@@ -228,7 +242,7 @@ function TimeLabelColumn() {
         return (
           <div
             key={hour}
-            className="border-t border-stone-200 pr-2 pt-1 text-right text-[10px] uppercase tracking-widest text-stone-400"
+            className="flex items-start justify-end border-t border-stone-200 pr-3 pt-2 text-[11px] font-medium uppercase tracking-widest text-stone-400"
           >
             {format(labelDate, 'h a')}
           </div>
@@ -240,33 +254,77 @@ function TimeLabelColumn() {
 
 function DayBody({
   positioned,
+  positionedBlocks,
+  removingBlockId,
+  onHourClick,
   onAppointmentClick,
+  onBlockClick,
 }: {
   positioned: PositionedAppointment[];
+  positionedBlocks: PositionedTimeBlock[];
+  removingBlockId: string | null;
+  onHourClick: (hour: number) => void;
   onAppointmentClick?: (appointment: Appointment) => void;
+  onBlockClick?: (block: TimeBlock) => void;
 }) {
+  const isEmpty = positioned.length === 0 && positionedBlocks.length === 0;
+
   return (
-    <div className="relative">
-      {/* Background hour gridlines — fill the column via `inset-0` + a
-          1fr-row grid so they always match the time-labels column. */}
+    <div className="relative h-full min-h-0">
       <div
-        className="pointer-events-none absolute inset-0 grid"
-        style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+        className="pointer-events-none absolute inset-0 grid h-full"
+        style={{ gridTemplateRows: MODAL_HOUR_GRID_ROWS }}
         aria-hidden="true"
       >
         {Array.from({ length: HOURS }, (_, i) => (
           <div key={i} className="border-t border-stone-200" />
         ))}
       </div>
-      {/* Empty-state placeholder centred over the timeline */}
-      {positioned.length === 0 && (
+
+      <div
+        className="absolute inset-0 grid h-full"
+        style={{ gridTemplateRows: MODAL_HOUR_GRID_ROWS }}
+      >
+        {Array.from({ length: HOURS }, (_, i) => {
+          const hour = START_HOUR + i;
+          const labelDate = new Date();
+          labelDate.setHours(hour, 0, 0, 0);
+          return (
+            <button
+              key={hour}
+              type="button"
+              aria-label={`Block time starting at ${format(labelDate, 'h a')}`}
+              className="w-full border-t border-transparent transition-colors hover:bg-stone-900/[0.04] focus:outline-none focus-visible:bg-stone-900/[0.06] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-400/60"
+              onClick={(e) => {
+                e.stopPropagation();
+                onHourClick(hour);
+              }}
+            />
+          );
+        })}
+      </div>
+
+      {isEmpty && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <p className="text-xs uppercase tracking-[0.28em] text-stone-400">
-            No bookings on this day
+            No bookings — click an hour to block
           </p>
         </div>
       )}
-      {/* Absolute-positioned pills overlay the gridlines */}
+
+      {positionedBlocks.map((pb) => (
+        <TimeBlockPill
+          key={pb.block.id}
+          block={pb.block}
+          topPct={pb.topPct}
+          heightPct={pb.heightPct}
+          removing={removingBlockId === pb.block.id}
+          spacious
+          className="ml-3 w-[calc(100%-1.25rem)] rounded-md"
+          onClick={onBlockClick ? () => onBlockClick(pb.block) : undefined}
+        />
+      ))}
+
       {positioned.map((pa) => (
         <ModalAppointment
           key={pa.appointment.id}
@@ -286,10 +344,6 @@ function ModalAppointment({
   onClick?: (appointment: Appointment) => void;
 }) {
   const { appointment: apt, topPct, heightPct, col, totalCols } = positioned;
-  // Canceled rows are filtered out at DashboardUI before reaching
-  // this modal, so the only special-case left here is no-show: render
-  // it as a struck-through, greyed-out pill so the wasted slot is
-  // visible without looking actionable.
   const isNoShow = (apt.status || '').toLowerCase() === 'no-show';
 
   const start = safeParseISO(apt.booking_time);
@@ -303,30 +357,18 @@ function ModalAppointment({
   const name = clientDisplayName(apt.client_first_name, apt.client_last_name);
   const service = appointmentServiceLabel(apt);
 
-  // Single-pill case (no overlap): renders exactly per the spec —
-  //   absolute w-[calc(100%-1rem)] ml-2
-  // Overlapping case: splits the available width between lanes while
-  // preserving the 8px (ml-2 = 0.5rem) outer margin so the visual
-  // language stays consistent with the simple case.
   const widthPct = 100 / totalCols;
   const leftPct = col * widthPct;
 
-  // stopPropagation guards against the modal's outer
-  // backdrop-click-to-close handler firing when a pill is clicked.
-  // The pill itself opens AppointmentModal on top of this modal.
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     onClick?.(apt);
   };
   const clickable = !!onClick;
 
-  // Same colour-coding contract as TimeGrid / ListView — the whole
-  // pill is painted in the assigned hex with auto-contrasted text,
-  // and the no-show neutral grey treatment is preserved so the
-  // strike-through still reads as "wasted slot".
   const color = isNoShow ? null : getServiceColor(apt);
   const baseClasses =
-    'absolute overflow-hidden rounded-sm p-2 shadow-sm transition-colors text-left';
+    'absolute z-20 overflow-hidden rounded-md p-2.5 shadow-sm transition-colors text-left';
   const variantClasses = isNoShow
     ? 'border-l-[3px] border-stone-400 bg-stone-50 opacity-60'
     : color

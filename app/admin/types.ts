@@ -225,6 +225,23 @@ export interface Appointment {
 export type ViewMode = 'list' | 'month' | '3day' | 'week';
 
 /**
+ * Admin-created hold that blocks public Cal.com availability. Mirrored in
+ * `studio_time_blocks` and backed by a shadow Cal booking with metadata
+ * `admin_time_block: true` so the webhook skips CRM ingest.
+ */
+export interface TimeBlock {
+  id: string;
+  /** ISO 8601 start (inclusive). */
+  start_time: string;
+  /** ISO 8601 end (exclusive in overlap math — stored as scheduled end). */
+  end_time: string;
+  note: string | null;
+  cal_booking_uid: string | null;
+  /** Every Cal.com segment backing this block (multi-part holds). */
+  cal_booking_uids?: string[];
+}
+
+/**
  * Persisted CRM client. Mirrors the shape the API returns from
  * /api/admin/clients (POST upsert + GET lookup + PATCH update).
  *

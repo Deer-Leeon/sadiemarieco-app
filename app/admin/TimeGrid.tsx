@@ -8,16 +8,19 @@ import {
   startOfWeek,
 } from 'date-fns';
 
-import type { Appointment } from './types';
+import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import TimeBlockPill from './components/TimeBlockPill';
 import { getServiceColor } from './serviceColors';
 import {
   HOURS,
   MIN_PILL_HEIGHT_PX,
   START_HOUR,
+  layoutBlocksForDay,
   layoutForDay,
   safeParseISO,
   type PositionedAppointment,
+  type PositionedTimeBlock,
 } from './timeline';
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -25,6 +28,8 @@ import {
 // ──────────────────────────────────────────────────────────────────────────
 interface Props {
   appointments: Appointment[];
+  timeBlocks: TimeBlock[];
+  removingBlockId?: string | null;
   /**
    * Anchor date. For `daysToShow={3}` the visible window starts at
    * `startOfDay(currentDate)` and extends two days forward (today + 2).
@@ -49,11 +54,14 @@ interface Props {
    * AppointmentModal directly without re-looking-up by id.
    */
   onAppointmentClick?: (appointment: Appointment) => void;
+  /** Fired when the user clicks a blocked-time pill. */
+  onBlockClick?: (block: TimeBlock) => void;
 }
 
 interface DayColumn {
   date: Date;
   items: PositionedAppointment[];
+  blocks: PositionedTimeBlock[];
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -70,11 +78,13 @@ function buildDays(currentDate: Date, daysToShow: 3 | 7): Date[] {
 
 function buildColumns(
   days: Date[],
-  appointments: Appointment[]
+  appointments: Appointment[],
+  timeBlocks: TimeBlock[]
 ): DayColumn[] {
   return days.map((date) => ({
     date,
     items: layoutForDay(date, appointments),
+    blocks: layoutBlocksForDay(date, timeBlocks),
   }));
 }
 
@@ -112,13 +122,16 @@ function buildColumns(
  */
 export default function TimeGrid({
   appointments,
+  timeBlocks,
+  removingBlockId = null,
   currentDate,
   daysToShow,
   onDayClick,
   onAppointmentClick,
+  onBlockClick,
 }: Props) {
   const days = buildDays(currentDate, daysToShow);
-  const columns = buildColumns(days, appointments);
+  const columns = buildColumns(days, appointments, timeBlocks);
 
   // Same grid-template-columns string used by both the header row and
   // the body grid so columns line up perfectly across the divider.
@@ -158,7 +171,9 @@ export default function TimeGrid({
           <DayColumnView
             key={col.date.toISOString()}
             column={col}
+            removingBlockId={removingBlockId}
             onAppointmentClick={onAppointmentClick}
+            onBlockClick={onBlockClick}
           />
         ))}
       </div>
@@ -245,10 +260,14 @@ function TimeLabelColumn() {
 
 function DayColumnView({
   column,
+  removingBlockId,
   onAppointmentClick,
+  onBlockClick,
 }: {
   column: DayColumn;
+  removingBlockId: string | null;
   onAppointmentClick?: (appointment: Appointment) => void;
+  onBlockClick?: (block: TimeBlock) => void;
 }) {
   // Day-column body is intentionally inert. The only clickable
   // surfaces inside the time grid are (1) the day header above
@@ -272,6 +291,18 @@ function DayColumnView({
           <div key={i} className="border-t border-stone-200" />
         ))}
       </div>
+      {column.blocks.map((pb) => (
+        <TimeBlockPill
+          key={pb.block.id}
+          block={pb.block}
+          topPct={pb.topPct}
+          heightPct={pb.heightPct}
+          compact
+          removing={removingBlockId === pb.block.id}
+          className="ml-0.5 w-[calc(100%-4px)]"
+          onClick={onBlockClick ? () => onBlockClick(pb.block) : undefined}
+        />
+      ))}
       {column.items.map((pa) => (
         <AppointmentBlock
           key={pa.appointment.id}
@@ -335,7 +366,7 @@ function AppointmentBlock({
   // unmapped services keep their accent colour without bleeding it
   // onto the other three sides.
   const baseClasses =
-    'absolute overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left border border-black';
+    'absolute z-20 overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left border border-black';
   const variantClasses = isNoShow
     ? 'border-l-[3px] border-l-stone-400 bg-stone-50 opacity-60'
     : color
