@@ -47,6 +47,8 @@ const nextConfig = {
   async rewrites() {
     return [
       { source: '/manage', destination: '/manage.html' },
+      { source: '/privacy', destination: '/privacy.html' },
+      { source: '/terms', destination: '/terms.html' },
     ];
   },
 };
