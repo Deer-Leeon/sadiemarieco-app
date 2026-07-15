@@ -2,7 +2,7 @@ import ConsentFormClient from './ConsentFormClient';
 
 export const metadata = {
   title: 'Client intake & consent · Sadie Marie',
-  description: 'Complete your intake and consent form for Sadie Marie Beauty Studio.',
+  description: 'Complete your intake and consent form for Sadie Marie.',
 };
 
 export const dynamic = 'force-dynamic';

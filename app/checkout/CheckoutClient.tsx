@@ -412,7 +412,7 @@ function BrandHeader() {
 function Footnote() {
   return (
     <p className="mt-10 max-w-md text-center text-[11px] leading-relaxed tracking-wide text-stone-400">
-      Payments are processed securely by Stripe. Sadie Marie Beauty Studio
+      Payments are processed securely by Stripe. Sadie Marie
       never sees or stores your full card number.
     </p>
   );

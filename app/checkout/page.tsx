@@ -8,7 +8,7 @@ import CheckoutClient from './CheckoutClient';
 export const metadata = {
   title: 'Secure your appointment · Sadie Marie',
   description:
-    'Save a card on file to confirm your Sadie Marie Beauty Studio booking.',
+    'Save a card on file to confirm your Sadie Marie booking.',
 };
 
 type CheckoutPageProps = {
