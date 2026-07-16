@@ -15,8 +15,8 @@
  *   • Date Overrides — a list of one-off date carve-outs. Each row
  *     is either "Unavailable all day" (encoded on the wire as
  *     startTime === endTime === "00:00") or "Custom hours" with
- *     explicit start/end. The list grows via the "Add date override"
- *     button at the top of the section.
+ *     explicit start/end. "Add date override" opens a dialog to pick
+ *     the date and hours before the row is inserted.
  *
  * Submission groups recurring entries by identical start/end pairs
  * before sending to Cal — `{ days: [Monday, Wednesday], 09:00, 12:45 }`
@@ -30,9 +30,9 @@
  * success state inline on a sticky save bar so the editor never has
  * to chase a corner of the screen for confirmation.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Calendar, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { Calendar, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
 
 import {
   DAY_INDICES,
@@ -130,33 +130,42 @@ function buildInitialWeekly(
 }
 
 function buildInitialOverrides(overrides: ScheduleOverride[]): OverrideRow[] {
-  return overrides.map((o, i) => ({
-    id: `${o.date}-${i}`,
-    date: o.date,
-    unavailable: isUnavailableOverride(o),
-    // Preserve the actual times even if currently flagged unavailable
-    // — toggling to "Custom hours" should restore something sensible
-    // rather than reset to defaults.
-    startTime: isUnavailableOverride(o) ? DEFAULT_START : o.startTime,
-    endTime: isUnavailableOverride(o) ? DEFAULT_END : o.endTime,
-  }));
+  return sortOverrideRows(
+    overrides.map((o, i) => ({
+      id: `${o.date}-${i}`,
+      date: o.date,
+      unavailable: isUnavailableOverride(o),
+      // Preserve the actual times even if currently flagged unavailable
+      // — toggling to "Custom hours" should restore something sensible
+      // rather than reset to defaults.
+      startTime: isUnavailableOverride(o) ? DEFAULT_START : o.startTime,
+      endTime: isUnavailableOverride(o) ? DEFAULT_END : o.endTime,
+    }))
+  );
 }
 
-function newOverrideRow(): OverrideRow {
-  // Default the new row to "today" in the browser's local TZ. Editors
-  // who want a future date can simply pick one — anchoring to today
-  // is friendlier than a blank date field that the editor has to
-  // touch before saving works.
+/** Soonest date first (YYYY-MM-DD sorts lexicographically). */
+function sortOverrideRows(rows: OverrideRow[]): OverrideRow[] {
+  return [...rows].sort((a, b) => {
+    if (a.date !== b.date) return a.date.localeCompare(b.date);
+    return a.id.localeCompare(b.id);
+  });
+}
+
+function todayYmd(): string {
   const today = new Date();
   const yyyy = today.getFullYear();
   const mm = String(today.getMonth() + 1).padStart(2, '0');
   const dd = String(today.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function makeOverrideRow(
+  draft: Omit<OverrideRow, 'id'>
+): OverrideRow {
   return {
     id: `new-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    date: `${yyyy}-${mm}-${dd}`,
-    unavailable: true,
-    startTime: DEFAULT_START,
-    endTime: DEFAULT_END,
+    ...draft,
   };
 }
 
@@ -189,7 +198,7 @@ function buildAvailabilityPayload(
 }
 
 function buildOverridesPayload(rows: OverrideRow[]): ScheduleOverride[] {
-  return rows.map((r) =>
+  return sortOverrideRows(rows).map((r) =>
     r.unavailable
       ? { date: r.date, startTime: UNAVAILABLE_TIME, endTime: UNAVAILABLE_TIME }
       : { date: r.date, startTime: r.startTime, endTime: r.endTime }
@@ -211,6 +220,11 @@ export default function AvailabilityClient({ initial }: Props) {
   // shows a confirmation message while it's non-null and auto-clears
   // after 3 s so the editor can keep working without dismissing it.
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  /** Scroll + highlight the row that was just added (sorted to top). */
+  const [highlightOverrideId, setHighlightOverrideId] = useState<string | null>(
+    null
+  );
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
 
   /**
    * Surface client-side validation as the editor types, so a bad
@@ -252,15 +266,21 @@ export default function AvailabilityClient({ initial }: Props) {
 
   // ── Override mutators ───────────────────────────────────────────────────
 
-  function addOverride() {
-    setOverrides((prev) => [...prev, newOverrideRow()]);
+  function confirmAddOverride(draft: Omit<OverrideRow, 'id'>) {
+    const row = makeOverrideRow(draft);
+    setOverrides((prev) => sortOverrideRows([...prev, row]));
+    setHighlightOverrideId(row.id);
+    setAddDialogOpen(false);
   }
   function removeOverride(id: string) {
     setOverrides((prev) => prev.filter((r) => r.id !== id));
+    setHighlightOverrideId((prev) => (prev === id ? null : prev));
   }
   function patchOverride(id: string, patch: Partial<OverrideRow>) {
     setOverrides((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, ...patch } : r))
+      sortOverrideRows(
+        prev.map((r) => (r.id === id ? { ...r, ...patch } : r))
+      )
     );
   }
 
@@ -377,7 +397,7 @@ export default function AvailabilityClient({ initial }: Props) {
           </div>
           <button
             type="button"
-            onClick={addOverride}
+            onClick={() => setAddDialogOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-[#FAF9F6] transition-colors hover:bg-stone-700"
           >
             <Plus className="h-3 w-3" />
@@ -396,6 +416,8 @@ export default function AvailabilityClient({ initial }: Props) {
               <OverrideEditor
                 key={row.id}
                 row={row}
+                highlighted={highlightOverrideId === row.id}
+                onHighlightDone={() => setHighlightOverrideId(null)}
                 onChange={(patch) => patchOverride(row.id, patch)}
                 onRemove={() => removeOverride(row.id)}
               />
@@ -403,6 +425,13 @@ export default function AvailabilityClient({ initial }: Props) {
           </ul>
         )}
       </section>
+
+      {addDialogOpen && (
+        <AddOverrideDialog
+          onClose={() => setAddDialogOpen(false)}
+          onConfirm={confirmAddOverride}
+        />
+      )}
 
       <DockedSaveBar
         savedAt={savedAt}
@@ -569,15 +598,38 @@ function TimeInput({
 
 function OverrideEditor({
   row,
+  highlighted = false,
+  onHighlightDone,
   onChange,
   onRemove,
 }: {
   row: OverrideRow;
+  highlighted?: boolean;
+  onHighlightDone?: () => void;
   onChange: (patch: Partial<OverrideRow>) => void;
   onRemove: () => void;
 }) {
+  const rowRef = useRef<HTMLLIElement>(null);
+
+  useEffect(() => {
+    if (!highlighted || !rowRef.current) return;
+    rowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const clear = window.setTimeout(() => onHighlightDone?.(), 1600);
+    return () => window.clearTimeout(clear);
+    // onHighlightDone is stable enough for a one-shot highlight clear;
+    // including it would re-fire scroll on every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlighted]);
+
   return (
-    <li className="rounded-lg border border-stone-200 bg-stone-50/50 p-4">
+    <li
+      ref={rowRef}
+      className={`rounded-lg border bg-stone-50/50 p-4 transition-[box-shadow,border-color,background-color] duration-500 ${
+        highlighted
+          ? 'border-stone-900 bg-stone-100 shadow-sm ring-2 ring-stone-900/15'
+          : 'border-stone-200'
+      }`}
+    >
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
           <Calendar className="h-3.5 w-3.5 text-stone-400" aria-hidden="true" />
@@ -641,5 +693,193 @@ function OverrideEditor({
         </button>
       </div>
     </li>
+  );
+}
+
+/**
+ * Collects date + mode (+ optional hours) before committing a new
+ * override into the list. Mirrors BlockTimeDialog styling so the
+ * admin chrome feels consistent.
+ */
+function AddOverrideDialog({
+  onClose,
+  onConfirm,
+}: {
+  onClose: () => void;
+  onConfirm: (draft: Omit<OverrideRow, 'id'>) => void;
+}) {
+  const [date, setDate] = useState(todayYmd);
+  const [unavailable, setUnavailable] = useState(true);
+  const [startTime, setStartTime] = useState<HHMM>(DEFAULT_START);
+  const [endTime, setEndTime] = useState<HHMM>(DEFAULT_END);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setFormError('Pick a valid date.');
+      return;
+    }
+    if (!unavailable && startTime >= endTime) {
+      setFormError('End time must be after start time.');
+      return;
+    }
+
+    onConfirm({
+      date,
+      unavailable,
+      startTime,
+      endTime,
+    });
+  }
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-110 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-stone-200/80 bg-[#FAF9F6] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-override-title"
+      >
+        <div className="flex items-start justify-between gap-3 px-6 pt-6">
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
+              Date override
+            </p>
+            <h3
+              id="add-override-title"
+              className="font-serif text-xl leading-tight text-stone-900"
+            >
+              Add date override
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed text-stone-600">
+              Close a specific day or set different hours. Changes sync to
+              Cal.com when you save.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-full p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="mt-5 space-y-4 px-6 pb-2">
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-stone-500">
+              Date
+            </span>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              required
+              autoFocus
+              className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900"
+            />
+          </label>
+
+          <fieldset>
+            <legend className="mb-1.5 text-xs font-medium uppercase tracking-wide text-stone-500">
+              Hours
+            </legend>
+            <div className="flex flex-col gap-2">
+              <label className="inline-flex items-center gap-2 text-sm text-stone-800">
+                <input
+                  type="radio"
+                  name="override-mode"
+                  checked={unavailable}
+                  onChange={() => setUnavailable(true)}
+                  className="h-3.5 w-3.5 text-stone-900 focus:ring-stone-900"
+                />
+                Unavailable all day
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-stone-800">
+                <input
+                  type="radio"
+                  name="override-mode"
+                  checked={!unavailable}
+                  onChange={() => setUnavailable(false)}
+                  className="h-3.5 w-3.5 text-stone-900 focus:ring-stone-900"
+                />
+                Custom hours
+              </label>
+            </div>
+          </fieldset>
+
+          {!unavailable && (
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-stone-500">
+                  Start
+                </span>
+                <input
+                  type="time"
+                  step={900}
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  required
+                  className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-stone-500">
+                  End
+                </span>
+                <input
+                  type="time"
+                  step={900}
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  required
+                  className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900"
+                />
+              </label>
+            </div>
+          )}
+
+          {formError && (
+            <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+              {formError}
+            </p>
+          )}
+
+          <div className="flex items-center justify-end gap-2 border-t border-stone-200/70 pt-4 pb-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-stone-50 transition-colors hover:bg-stone-800"
+            >
+              Add override
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body
   );
 }
