@@ -9,7 +9,14 @@ import {
  *
  * SMS consent sits immediately after the required phone field so carriers
  * see opt-in at the same step the number is collected.
+ *
+ * Keep the Cal label short — the embed auto-linkifies URLs in loud blue
+ * and we can't restyle inside the iframe. Full disclosure + Privacy/Terms
+ * links live in the booking drawer chrome (`public/index.html`).
  */
+export const STUDIO_SMS_CONSENT_LABEL =
+  'I agree to receive appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). Message frequency varies. Msg & data rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to book.';
+
 export const STUDIO_BOOKING_FIELDS = [
   {
     type: 'splitName' as const,
@@ -30,8 +37,7 @@ export const STUDIO_BOOKING_FIELDS = [
   {
     type: 'boolean' as const,
     slug: 'sms-consent',
-    label:
-      'Yes, I agree to receive automated appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Privacy: https://sadiemarie.co/privacy · Terms: https://sadiemarie.co/terms. Consent is not required to purchase.',
+    label: STUDIO_SMS_CONSENT_LABEL,
     required: true,
   },
 ];
