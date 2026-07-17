@@ -8,14 +8,11 @@ import {
  * Applied via PATCH on create/update and by the backfill script.
  *
  * SMS consent sits immediately after the required phone field so carriers
- * see opt-in at the same step the number is collected.
- *
- * Keep the Cal label short — the embed auto-linkifies URLs in loud blue
- * and we can't restyle inside the iframe. Full disclosure + Privacy/Terms
- * links live in the booking drawer chrome (`public/index.html`).
+ * see opt-in at the same step the number is collected. The checkbox is
+ * required because phone/SMS is the studio's primary client channel.
  */
 export const STUDIO_SMS_CONSENT_LABEL =
-  'I agree to receive appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). Message frequency varies. Msg & data rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to book.';
+  'Required — I agree to receive appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). This is how we reach you about your booking. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out or HELP for help.';
 
 export const STUDIO_BOOKING_FIELDS = [
   {

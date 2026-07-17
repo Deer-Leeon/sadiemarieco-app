@@ -930,29 +930,6 @@ a.service-item:focus-visible .service-action {
   margin: 0;
 }
 .drawer-subtitle:empty { display: none; }
-.drawer-sms-notice {
-  flex-shrink: 0;
-  margin: 0;
-  padding: 12px 28px 14px;
-  border-bottom: 1px solid rgba(13, 27, 42, 0.08);
-  background: rgba(13, 27, 42, 0.02);
-  font-family: var(--sans);
-  font-size: 0.68rem;
-  font-weight: 400;
-  line-height: 1.55;
-  letter-spacing: 0.02em;
-  color: rgba(13, 27, 42, 0.55);
-}
-.drawer-sms-notice a {
-  color: var(--navy);
-  text-decoration: none;
-  border-bottom: 1px solid rgba(13, 27, 42, 0.25);
-  transition: border-color 0.2s ease, color 0.2s ease;
-}
-.drawer-sms-notice a:hover {
-  color: var(--navy);
-  border-bottom-color: var(--navy);
-}
 #close-drawer {
   flex-shrink: 0;
   margin-top: 4px;
