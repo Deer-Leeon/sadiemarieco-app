@@ -4,12 +4,9 @@
  * Usage:
  *   node --env-file=.env.local scripts/backfill-cal-event-studio-defaults.mjs
  *
- * Sets auto-confirm, in-person address, and booking fields.
+ * Sets auto-confirm, in-person address, and booking fields (incl. SMS consent).
  */
 import { sql } from '@vercel/postgres';
-
-const CAL_API_BASE = 'https://api.cal.com/v2';
-const CAL_API_VERSION = '2024-06-14';
 
 const STUDIO_IN_PERSON_ADDRESS =
   '61 W 3200 N, Suite #10, Lehi, UT 84043';
@@ -31,7 +28,17 @@ const STUDIO_BOOKING_FIELDS = [
     placeholder: '+1 555 123 4567',
     hidden: false,
   },
+  {
+    type: 'boolean',
+    slug: 'sms-consent',
+    label:
+      'Yes, I agree to receive automated appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Privacy: https://sadiemarie.co/privacy · Terms: https://sadiemarie.co/terms. Consent is not required to purchase.',
+    required: true,
+  },
 ];
+
+const CAL_API_BASE = 'https://api.cal.com/v2';
+const CAL_API_VERSION = '2024-06-14';
 
 function calHeaders(apiKey) {
   return {
@@ -101,31 +108,26 @@ const { rows } = await sql`
   WHERE is_active = TRUE
     AND is_group = FALSE
     AND cal_event_id IS NOT NULL
-  ORDER BY display_order ASC, id ASC
+  ORDER BY title ASC
 `;
 
-if (rows.length === 0) {
-  console.log('No active bookable services with cal_event_id found.');
-  process.exit(0);
-}
-
-console.log(`Patching ${rows.length} Cal event type(s)...`);
+console.log(`Patching ${rows.length} Cal event type(s)…`);
 
 let ok = 0;
 let failed = 0;
-
 for (const row of rows) {
-  const label = `${row.title} (local #${row.id}, Cal #${row.cal_event_id})`;
   try {
     await patchStudioDefaults(row.cal_event_id, apiKey);
-    console.log(`✓ ${label}`);
     ok += 1;
+    console.log(`✓ ${row.title} (cal ${row.cal_event_id})`);
   } catch (err) {
-    console.error(`✗ ${label}:`, err instanceof Error ? err.message : err);
     failed += 1;
+    console.error(
+      `✗ ${row.title} (cal ${row.cal_event_id}):`,
+      err instanceof Error ? err.message : err
+    );
   }
 }
 
-console.log(`Done. ${ok} succeeded, ${failed} failed.`);
-
+console.log(`Done. ${ok} updated, ${failed} failed.`);
 if (failed > 0) process.exit(1);

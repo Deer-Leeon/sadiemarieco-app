@@ -68,7 +68,7 @@ import {
   CAL_MIN_BOOKING_NOTICE_MIN,
   CAL_SLOT_INTERVAL_MIN,
 } from '@/lib/cal-config';
-import { buildStudioCalEventPatchBody } from '@/lib/cal-event-studio-defaults';
+import { buildStudioCalEventPatchBody, STUDIO_BOOKING_FIELDS } from '@/lib/cal-event-studio-defaults';
 import {
   CalApiError,
   callCal,
@@ -926,7 +926,13 @@ interface CalCreateEventBody {
  * affordance lives in the Cal dashboard, deep-linked from each card
  * on /admin/services.
  */
-type CalBookingField = CalSplitNameField | CalPhoneField;
+/**
+ * Discriminated union of the booking-field shapes we historically typed
+ * here. The live payload now lives in `STUDIO_BOOKING_FIELDS`
+ * (`lib/cal-event-studio-defaults.ts`) so SMS consent stays in sync
+ * across create/update/backfill.
+ */
+type CalBookingField = CalSplitNameField | CalPhoneField | CalBooleanField;
 
 interface CalSplitNameField {
   type: 'splitName';
@@ -934,26 +940,11 @@ interface CalSplitNameField {
   firstNamePlaceholder: string;
   lastNameLabel: string;
   lastNamePlaceholder: string;
-  /**
-   * From the v2 schema: "First name field is required but last name
-   * field is not by default." So firstName is always required and we
-   * only get to toggle lastName. true here = full split name required.
-   */
   lastNameRequired: boolean;
 }
 
 interface CalPhoneField {
   type: 'phone';
-  /**
-   * The special slug `attendeePhoneNumber` is what would tell Cal
-   * this phone field is the substitute identifier for phone-only
-   * bookings (used in combination with email `{ required: false,
-   * hidden: true }` for the org-team flow). We use the same slug on
-   * personal accounts too — Cal accepts it as a regular unique
-   * identifier when the phone-only flow isn't active, and using the
-   * canonical slug means a future Cal-side migration to org-team
-   * won't require changing the wire payload.
-   */
   slug: string;
   label: string;
   required: boolean;
@@ -961,13 +952,13 @@ interface CalPhoneField {
   hidden: boolean;
 }
 
-/**
- * The studio's standard booking-fields config, applied via PATCH to
- * every new event. Constant rather than function because the shape
- * never depends on the inputs — every service collects the same name
- * (split into First + Last, both required) and the same phone
- * (required, visible) up front.
- */
+interface CalBooleanField {
+  type: 'boolean';
+  slug: string;
+  label: string;
+  required: boolean;
+}
+
 /**
  * Apply studio defaults on Cal: booking fields, auto-confirm, in-person location.
  * Email is omitted from bookingFields (Cal personal accounts reject API email tweaks).
@@ -980,9 +971,7 @@ async function patchStudioCalEventDefaultsOnCal(
   try {
     await callCal(`/event-types/${calEventId}`, apiKey, {
       method: 'PATCH',
-      body: JSON.stringify(
-        buildStudioCalEventPatchBody(STUDIO_BOOKING_FIELDS)
-      ),
+      body: JSON.stringify(buildStudioCalEventPatchBody(STUDIO_BOOKING_FIELDS)),
     });
     console.log(`[api/admin/services] ${phase}: Cal studio defaults PATCHed`, {
       calEventId,
@@ -994,25 +983,6 @@ async function patchStudioCalEventDefaultsOnCal(
     );
   }
 }
-
-const STUDIO_BOOKING_FIELDS: CalBookingField[] = [
-  {
-    type: 'splitName',
-    firstNameLabel: 'First name',
-    firstNamePlaceholder: 'First name',
-    lastNameLabel: 'Last name',
-    lastNamePlaceholder: 'Last name',
-    lastNameRequired: true,
-  },
-  {
-    type: 'phone',
-    slug: 'attendeePhoneNumber',
-    label: 'Phone number',
-    required: true,
-    placeholder: '+1 555 123 4567',
-    hidden: false,
-  },
-];
 
 function parseCreatePayload(input: unknown): CreatePayload {
   if (!isRecord(input)) {
