@@ -12,7 +12,7 @@ import {
  * forced consent as a condition of completing a booking.
  */
 export const STUDIO_SMS_CONSENT_LABEL =
-  'Yes, I agree to receive appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to book. Privacy: https://sadiemarie.co/privacy · Terms: https://sadiemarie.co/terms';
+  'Yes, I agree to receive appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to book.\nPrivacy: https://sadiemarie.co/privacy\nTerms: https://sadiemarie.co/terms';
 
 export const STUDIO_BOOKING_FIELDS = [
   {
