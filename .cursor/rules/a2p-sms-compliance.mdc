@@ -1,0 +1,23 @@
+---
+description: A2P 10DLC / Twilio SMS compliance — optional opt-in, Privacy/Terms, no forced consent
+globs: public/privacy.html,public/terms.html,public/index.html,lib/cal-event-studio-defaults.ts,lib/booking-notifications.js,lib/booking-notifications.ts,lib/legacy-handlers/webhook.js,lib/legacy-handlers/remind.js,lib/legacy-handlers/feedback.js,scripts/backfill-cal-event-studio-defaults.mjs,app/api/admin/services/route.ts,docs/a2p-sms-compliance.md
+alwaysApply: false
+---
+
+# A2P SMS compliance
+
+Before changing SMS opt-in, Privacy/Terms, Cal booking fields, or confirmation/reminder SMS, read and follow:
+
+**[docs/a2p-sms-compliance.md](docs/a2p-sms-compliance.md)**
+
+Hard rules (do not violate):
+
+1. **`sms-consent` must stay optional** (`required: false`). Users must book without checking it. Never force SMS as a condition of booking.
+2. **Phone number ≠ SMS consent.** Terms agreement ≠ SMS enrollment.
+3. **Privacy** must keep Twilio’s non-sharing language: do not share/sell/provide mobile numbers **or messaging consent** to third parties **or affiliates** for marketing/promotional purposes; plus frequency, rates, STOP/HELP.
+4. **Brand** on legal pages and SMS copy must stay **Sadie Marie** (match Twilio Brand Registration).
+5. **Website bookings:** only send Twilio SMS when `sms-consent` is explicitly true (`lib/booking-notifications.js` / webhook).
+6. After changing Cal booking fields, run  
+   `node --env-file=.env.local scripts/backfill-cal-event-studio-defaults.mjs`
+
+Intake/PDF consent (`has_consented`) is unrelated to A2P SMS opt-in.

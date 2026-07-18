@@ -20,7 +20,9 @@ $RECYCLE.BIN/
 *.swo
 *.sublime-project
 *.sublime-workspace
-.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 
 # ──────────────────────────────────────────────────────────────
 # Logs
