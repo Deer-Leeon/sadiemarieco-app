@@ -7,12 +7,12 @@ import {
  * Standard Cal.com booking fields for every public service event.
  * Applied via PATCH on create/update and by the backfill script.
  *
- * SMS consent sits immediately after the required phone field so carriers
- * see opt-in at the same step the number is collected. The checkbox is
- * required because phone/SMS is the studio's primary client channel.
+ * SMS consent sits immediately after the required phone field.
+ * It must remain optional (required: false) — A2P 10DLC rejects
+ * forced consent as a condition of completing a booking.
  */
 export const STUDIO_SMS_CONSENT_LABEL =
-  'Required — I agree to receive appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). This is how we reach you about your booking. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out or HELP for help.';
+  'Yes, I agree to receive appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to book. Privacy: https://sadiemarie.co/privacy · Terms: https://sadiemarie.co/terms';
 
 export const STUDIO_BOOKING_FIELDS = [
   {
@@ -35,7 +35,7 @@ export const STUDIO_BOOKING_FIELDS = [
     type: 'boolean' as const,
     slug: 'sms-consent',
     label: STUDIO_SMS_CONSENT_LABEL,
-    required: true,
+    required: false,
   },
 ];
 

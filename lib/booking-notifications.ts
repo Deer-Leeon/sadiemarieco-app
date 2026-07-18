@@ -14,6 +14,7 @@ const impl = require('./booking-notifications.js') as {
     clientEmail?: string | null;
     endTime?: string | null;
     skipIfAlreadySent?: boolean;
+    smsOptIn?: boolean | null;
   }) => Promise<Record<string, unknown>>;
   rescheduleAppointmentReminderEmails: (
     bookingUid: string,

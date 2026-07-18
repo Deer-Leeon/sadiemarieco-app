@@ -389,6 +389,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       clientId,
       clientEmail: parsed.clientEmail,
       skipIfAlreadySent: true,
+      // Admin-created bookings: staff is initiating outreach for the client.
+      smsOptIn: true,
     });
 
     return NextResponse.json({

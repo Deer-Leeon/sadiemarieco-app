@@ -32,8 +32,8 @@ const STUDIO_BOOKING_FIELDS = [
     type: 'boolean',
     slug: 'sms-consent',
     label:
-      'Required — I agree to receive appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). This is how we reach you about your booking. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out or HELP for help.',
-    required: true,
+      'Yes, I agree to receive appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to book. Privacy: https://sadiemarie.co/privacy · Terms: https://sadiemarie.co/terms',
+    required: false,
   },
 ];
 
