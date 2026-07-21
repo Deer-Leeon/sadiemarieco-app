@@ -292,7 +292,7 @@ async function checkDatabase(): Promise<HealthCheckResult[]> {
         category: 'Database',
         status: pendingHolds > 20 ? 'degraded' : 'healthy',
         message: `${pendingHolds} pending appointment(s)`,
-        detail: `Abandoned holds should clear within ${CHECKOUT_HOLD_MINUTES} minutes via /api/cron/cleanup-abandoned`,
+        detail: `Abandoned holds should clear within ${CHECKOUT_HOLD_MINUTES} minutes via QStash delayed /api/qstash/release-hold`,
       })
     );
 
@@ -304,11 +304,11 @@ async function checkDatabase(): Promise<HealthCheckResult[]> {
         status: stalePending > 5 ? 'degraded' : 'healthy',
         message:
           stalePending === 0
-            ? 'No abandoned checkout holds older than 8 minutes'
+            ? `No abandoned checkout holds older than ${CHECKOUT_HOLD_MINUTES} minutes`
             : `${stalePending} pending hold(s) older than ${CHECKOUT_HOLD_MINUTES} minutes`,
         detail:
           stalePending > 0
-            ? 'Cron cleanup may be failing or not scheduled'
+            ? 'Delayed QStash release may be failing or QSTASH_TOKEN missing on init'
             : undefined,
       })
     );
@@ -740,7 +740,7 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
         name: 'QStash publish token',
         category: 'Scheduled jobs (QStash)',
         status: 'unhealthy',
-        message: 'QSTASH_TOKEN missing — reminder and feedback SMS will not be scheduled',
+        message: 'QSTASH_TOKEN missing — reminder/feedback SMS and abandoned-hold release will not be scheduled',
       })
     );
   } else {
@@ -750,7 +750,7 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
         name: 'QStash publish token',
         category: 'Scheduled jobs (QStash)',
         message: 'QSTASH_TOKEN configured',
-        detail: 'Schedules POST /api/remind (24h before) and POST /api/feedback (24h after)',
+        detail: 'Schedules POST /api/remind, /api/feedback, and delayed /api/qstash/release-hold',
       })
     );
   }
@@ -765,7 +765,7 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
         ? nextKey
           ? 'Signing key set (rotation key also configured)'
           : 'Signing key set'
-        : 'QSTASH_CURRENT_SIGNING_KEY missing — /api/remind and /api/feedback will reject callbacks',
+        : 'QSTASH_CURRENT_SIGNING_KEY missing — QStash callbacks will reject',
     })
   );
 
@@ -776,8 +776,8 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
         name: 'QStash callback URLs',
         category: 'Scheduled jobs (QStash)',
         status: 'healthy',
-        message: 'Reminder and feedback endpoints',
-        detail: `${publicBase.replace(/\/$/, '')}/api/remind · ${publicBase.replace(/\/$/, '')}/api/feedback`,
+        message: 'Reminder, feedback, and abandoned-hold release endpoints',
+        detail: `${publicBase.replace(/\/$/, '')}/api/remind · ${publicBase.replace(/\/$/, '')}/api/feedback · ${publicBase.replace(/\/$/, '')}/api/qstash/release-hold`,
       })
     );
   }
@@ -826,12 +826,12 @@ async function checkCron(): Promise<HealthCheckResult[]> {
         : 'CRON_SECRET missing — scheduled jobs cannot run',
     }),
     result({
-      id: 'cron-cleanup-abandoned',
-      name: 'Abandoned checkout cleanup',
-      category: 'Cron jobs',
-      status: cronSecret ? 'healthy' : 'degraded',
-      message: `GET /api/cron/cleanup-abandoned — releases stale pending holds after ${CHECKOUT_HOLD_MINUTES} min`,
-      detail: `${publicBase}/api/cron/cleanup-abandoned (schedule in Vercel Cron)`,
+      id: 'qstash-release-hold',
+      name: 'Abandoned checkout release',
+      category: 'Scheduled jobs (QStash)',
+      status: process.env.QSTASH_TOKEN?.trim() ? 'healthy' : 'degraded',
+      message: `POST /api/qstash/release-hold — releases pending holds ${CHECKOUT_HOLD_MINUTES} min after /api/booking/init`,
+      detail: `${publicBase}/api/qstash/release-hold (delayed QStash; disable any Vercel Cron still pointed at /api/cron/cleanup-abandoned)`,
     }),
     result({
       id: 'cron-sync-reviews',

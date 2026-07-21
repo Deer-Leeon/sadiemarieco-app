@@ -36,7 +36,8 @@
  *                             and the automated $20 late fee succeeded.
  *   • 'canceled_by_system'  — abandoned-checkout sweep released the
  *                             hold automatically. Written by the
- *                             `/api/cron/cleanup-abandoned` route when
+ *                             `/api/qstash/release-hold` (delayed from
+ *                             `/api/booking/init`) when a 'pending' row
  *                             a 'pending' row has been sitting for
  *                             longer than the abandonment window
  *                             (10 minutes) without a card on file.

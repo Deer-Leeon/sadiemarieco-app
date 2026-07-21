@@ -256,7 +256,7 @@ export default function CheckoutClient({
     };
   }, [uid]);
 
-  // 8-minute countdown from `appointments.created_at`.
+  // 10-minute countdown from `appointments.created_at`.
   useEffect(() => {
     if (!holdCreatedAt) {
       setCountdownLabel('');

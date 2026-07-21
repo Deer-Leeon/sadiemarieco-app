@@ -19,7 +19,7 @@ type CheckoutPageProps = {
  * Cal.com redirects clients here after they pick a slot. The booking is
  * created on Cal in PENDING status (configured on the event-type so it
  * requires confirmation), the client lands on this page to vault a card
- * within an 8-minute hold window, and our `/api/booking/confirm` route
+ * within a 10-minute hold window, and our `/api/booking/confirm` route
  * accepts the booking on Cal once the card is saved.
  *
  * Why this is a Server Component wrapping a Suspense:

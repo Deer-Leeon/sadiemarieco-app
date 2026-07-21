@@ -19,6 +19,7 @@ import {
 } from '@/lib/client-identity';
 import { extractCalBookingNotes } from '@/lib/cal-booking-notes';
 import { upsertClientByPhonePrimary } from '@/lib/client-upsert';
+import { scheduleAbandonedHoldRelease } from '@/lib/schedule-abandoned-hold-release';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -261,11 +262,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         booking_notes = COALESCE(EXCLUDED.booking_notes, appointments.booking_notes)
     `;
 
+    // One-shot delayed release — replaces the high-frequency cleanup cron.
+    // Failures are logged inside the helper; never block checkout init.
+    const releaseJob = await scheduleAbandonedHoldRelease(data.calBookingUid);
+    if (!releaseJob.scheduled) {
+      console.warn('[api/booking/init] abandoned-hold release not scheduled', {
+        calBookingUid: data.calBookingUid,
+        reason: releaseJob.reason,
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       calBookingUid: data.calBookingUid,
       inserted: (rowCount ?? 0) > 0,
       status: 'pending',
+      releaseScheduled: releaseJob.scheduled,
     });
   } catch (err) {
     const msg = errorMessage(err);

@@ -3,7 +3,7 @@
 --
 -- Amends the `check_status` CHECK constraint on `appointments` to allow
 -- a sixth value, 'canceled_by_system'. Written by the
--- `/api/cron/cleanup-abandoned` Vercel Cron route when a 'pending' row
+-- `/api/qstash/release-hold` (delayed from `/api/booking/init`) when a 'pending' row
 -- has been sitting for longer than the abandonment window without a
 -- vaulted card — the row stays in the DB for drop-off analytics, but
 -- the Cal.com hold is released upstream so the slot is bookable again.

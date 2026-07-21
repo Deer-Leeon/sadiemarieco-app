@@ -119,9 +119,9 @@ idempotency and graceful degradation:
    the canonical CRM identifier — see `lib/client-identity.ts` /
    `lib/client-upsert.ts`).
 2. Client reaches `/checkout` (`app/checkout/`), which has an
-   `CHECKOUT_HOLD_MINUTES` (8 min, `lib/booking-hold.ts`) countdown — read via
-   `GET /api/booking/hold`. `app/api/cron/cleanup-abandoned` cancels expired
-   holds on Cal and flips status.
+   `CHECKOUT_HOLD_MINUTES` (10 min, `lib/booking-hold.ts`) countdown — read via
+   `GET /api/booking/hold`. A QStash delayed job from `/api/booking/init` hits
+   `/api/qstash/release-hold` to cancel expired holds on Cal and flip status.
 3. `POST /api/booking/confirm` runs after Stripe's `confirmSetup()`: verifies
    the SetupIntent, attaches the vaulted PaymentMethod to the Stripe
    Customer (for future no-show/late-cancel off-session charges — see
@@ -182,11 +182,13 @@ bypass the public Cal availability via the "admin override" event type in
 
 ### Cron & background jobs
 
-Routes under `app/api/cron/**` (review sync, abandoned-checkout cleanup) are
+Routes under `app/api/cron/**` (e.g. review sync) are
 gated by `lib/cron-auth.ts`'s `rejectUnlessCronAuthorized`, which accepts
 `Authorization: Bearer`, `X-Cron-Secret`, or `?cron_secret=` (in that
 priority order — the header form survives the apex→www redirect that strips
 query strings on `curl -L`). These are excluded from the Clerk proxy matcher.
+Abandoned checkout holds are released by a per-booking QStash delay to
+`/api/qstash/release-hold` (not a high-frequency cron).
 
 ## Twilio A2P 10DLC / SMS compliance
 

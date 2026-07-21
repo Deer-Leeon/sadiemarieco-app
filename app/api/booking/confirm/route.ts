@@ -19,7 +19,7 @@
  *
  * Cal.com sync (tried in order):
  *   1. PATCH v1 `/bookings/<uid>?apiKey=…` with `{ status: 'ACCEPTED' }`
- *      — same pattern as `/api/cron/cleanup-abandoned` rejectOnCal.
+ *      — same pattern as `/api/qstash/release-hold` Cal cancel.
  *   2. If v1 fails, POST v2 `/bookings/<uid>/confirm` with Bearer
  *      auth — same family as `api/cancel-booking.js`.
  *

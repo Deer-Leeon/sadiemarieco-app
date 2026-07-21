@@ -1,15 +1,24 @@
 /**
  * Abandoned-checkout hold window — keep in sync with:
- *   • `app/api/cron/cleanup-abandoned/route.ts` (CAL_CANCEL_REASON)
+ *   • `lib/release-abandoned-hold.ts` (Cal cancel reason)
+ *   • `app/api/qstash/release-hold/route.ts` (QStash delay)
  *   • `api/webhook.js` (SYSTEM_ABANDON_CANCEL_REASON + legacy list)
+ *
+ * Holds are released by a per-booking QStash delayed message scheduled
+ * from `/api/booking/init` — not by a high-frequency cron sweep.
  */
-export const CHECKOUT_HOLD_MINUTES = 8;
+export const CHECKOUT_HOLD_MINUTES = 10;
 
 export const CHECKOUT_HOLD_MS = CHECKOUT_HOLD_MINUTES * 60 * 1000;
 
 export const CAL_ABANDON_CANCEL_REASON = `Checkout abandoned after ${CHECKOUT_HOLD_MINUTES} minutes.`;
 
-export const HOLD_EXPIRED_MESSAGE = `Your ${CHECKOUT_HOLD_MINUTES}-minute hold has expired. To re-book this exact time, please check the calendar again in 2 minutes.`;
+/** Older cancel reasons still echoed by Cal for holds released before the window changed. */
+export const LEGACY_ABANDON_CANCEL_REASONS = [
+  'Checkout abandoned after 8 minutes.',
+] as const;
+
+export const HOLD_EXPIRED_MESSAGE = `Your ${CHECKOUT_HOLD_MINUTES}-minute hold has expired. Please pick a time on the calendar again to continue.`;
 
 export function holdDeadlineMs(createdAt: Date | string): number {
   const start =
@@ -33,4 +42,11 @@ export function formatCountdownMmSs(remainingMs: number): string {
   const mm = Math.floor(totalSec / 60);
   const ss = totalSec % 60;
   return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+export function isAbandonCancelReason(reason: unknown): boolean {
+  if (typeof reason !== 'string') return false;
+  const trimmed = reason.trim();
+  if (trimmed === CAL_ABANDON_CANCEL_REASON) return true;
+  return (LEGACY_ABANDON_CANCEL_REASONS as readonly string[]).includes(trimmed);
 }
