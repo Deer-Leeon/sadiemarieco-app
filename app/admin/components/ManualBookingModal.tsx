@@ -3,6 +3,11 @@
 import { useEffect, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 
+import ManualBookingClientStep, {
+  canAdvanceManualBookingClientStep,
+  type ClientEntryMode,
+  type ManualBookingClientFields,
+} from './ManualBookingClientStep';
 import ManualBookingServicePicker from './ManualBookingServicePicker';
 import ManualBookingSlotPicker from './ManualBookingSlotPicker';
 import type {
@@ -10,12 +15,13 @@ import type {
   ManualBookingServiceOption,
 } from './manual-booking-utils';
 import {
-  CLIENT_PHONE_HINT,
   clientPhoneValidationMessage,
   formatPhoneInputDisplay,
+  isPlaceholderClientEmail,
   parseClientPhone,
 } from '@/lib/client-identity';
 
+import type { Client } from '../types';
 import {
   bookingEndFromDuration,
   extractCalBookingFromResponse,
@@ -32,9 +38,6 @@ interface Props {
   onSuccess: () => void;
 }
 
-const INPUT_CLASS =
-  'block w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 transition-colors focus:border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-200';
-
 const BTN_SECONDARY =
   'rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 disabled:opacity-50';
 
@@ -45,7 +48,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function requiredEmailForApi(raw: string): string | null {
   const trimmed = raw.trim().toLowerCase();
-  if (!trimmed) return null;
+  if (!trimmed || isPlaceholderClientEmail(trimmed)) return null;
   return EMAIL_RE.test(trimmed) ? trimmed : null;
 }
 
@@ -59,6 +62,13 @@ function ManualBookingCompletingOverlay() {
   );
 }
 
+const EMPTY_FIELDS: ManualBookingClientFields = {
+  firstName: '',
+  lastName: '',
+  phone: '',
+  email: '',
+};
+
 export default function ManualBookingModal({
   services,
   groupHeaders,
@@ -68,10 +78,10 @@ export default function ManualBookingModal({
   const [step, setStep] = useState<WizardStep>(1);
   const [selectedService, setSelectedService] =
     useState<ManualBookingServiceOption | null>(null);
-  const [clientFirstName, setClientFirstName] = useState('');
-  const [clientLastName, setClientLastName] = useState('');
-  const [clientEmail, setClientEmail] = useState('');
-  const [clientPhone, setClientPhone] = useState('');
+  const [clientMode, setClientMode] = useState<ClientEntryMode>('existing');
+  const [clientFields, setClientFields] =
+    useState<ManualBookingClientFields>(EMPTY_FIELDS);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
@@ -99,6 +109,21 @@ export default function ManualBookingModal({
     }
   }, [step]);
 
+  function resolvedClientFields(): ManualBookingClientFields {
+    if (clientMode === 'existing' && selectedClient) {
+      return {
+        firstName:
+          selectedClient.first_name?.trim() || clientFields.firstName,
+        lastName: selectedClient.last_name?.trim() || clientFields.lastName,
+        phone: selectedClient.phone
+          ? formatPhoneInputDisplay(selectedClient.phone)
+          : clientFields.phone,
+        email: (clientFields.email || selectedClient.email || '').trim(),
+      };
+    }
+    return clientFields;
+  }
+
   async function handleBook() {
     if (!selectedService || !selectedSlot) return;
 
@@ -114,16 +139,17 @@ export default function ManualBookingModal({
       return;
     }
 
-    const trimmedFirst = clientFirstName.trim();
-    const trimmedLast = clientLastName.trim();
+    const resolved = resolvedClientFields();
+    const trimmedFirst = resolved.firstName.trim();
+    const trimmedLast = resolved.lastName.trim();
     const trimmedName = joinFullName(trimmedFirst, trimmedLast);
-    const trimmedEmail = requiredEmailForApi(clientEmail);
+    const trimmedEmail = requiredEmailForApi(resolved.email);
     if (!trimmedEmail) {
       setError('Enter a valid email address.');
       setCompleting(false);
       return;
     }
-    const parsedPhone = parseClientPhone(clientPhone);
+    const parsedPhone = parseClientPhone(resolved.phone);
     if (!parsedPhone) {
       setPhoneTouched(true);
       setError(clientPhoneValidationMessage());
@@ -218,22 +244,39 @@ export default function ManualBookingModal({
     }
   }
 
-  const parsedClientPhone = parseClientPhone(clientPhone);
-  const phoneInvalid = phoneTouched && clientPhone.trim().length > 0 && !parsedClientPhone;
-
   const canAdvanceFromStep1 = selectedService !== null;
-  const emailInvalid =
-    clientEmail.trim().length > 0 && !EMAIL_RE.test(clientEmail.trim());
-  const canAdvanceFromStep2 =
-    clientFirstName.trim().length > 0 &&
-    clientLastName.trim().length > 0 &&
-    parsedClientPhone !== null &&
-    EMAIL_RE.test(clientEmail.trim());
+  const canAdvanceFromStep2 = canAdvanceManualBookingClientStep(
+    clientMode,
+    clientFields,
+    selectedClient
+  );
 
-  function formatPhoneField() {
-    const formatted = formatPhoneInputDisplay(clientPhone);
-    if (formatted !== clientPhone.trim()) setClientPhone(formatted);
+  function handleSelectClient(client: Client | null) {
+    setSelectedClient(client);
+    setError(null);
+    if (!client) {
+      setClientFields(EMPTY_FIELDS);
+      return;
+    }
+    setClientFields({
+      firstName: client.first_name?.trim() || '',
+      lastName: client.last_name?.trim() || '',
+      phone: client.phone ? formatPhoneInputDisplay(client.phone) : '',
+      email:
+        client.email && !isPlaceholderClientEmail(client.email)
+          ? client.email.trim()
+          : '',
+    });
   }
+
+  function handleModeChange(mode: ClientEntryMode) {
+    setClientMode(mode);
+    setError(null);
+    setSelectedClient(null);
+    setClientFields(EMPTY_FIELDS);
+    setPhoneTouched(false);
+  }
+
   const canBook = selectedSlot !== null && !completing;
 
   const isScheduleStep = step === 3;
@@ -248,6 +291,12 @@ export default function ManualBookingModal({
       : step === 2
         ? 'Client details · Step 2 of 3'
         : 'Pick an open date & time · Step 3 of 3';
+
+  const resolvedForDisplay = resolvedClientFields();
+  const displayName = joinFullName(
+    resolvedForDisplay.firstName.trim(),
+    resolvedForDisplay.lastName.trim()
+  );
 
   return (
     <div
@@ -312,84 +361,18 @@ export default function ManualBookingModal({
           )}
 
           {step === 2 && (
-            <div className="space-y-4">
-              <p className="text-sm text-stone-600">Client details</p>
-              <p className="text-xs text-stone-500">
-                Phone is required and identifies the client in your CRM. Email
-                is optional — you can add it later from the client profile.
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-                    First name
-                  </span>
-                  <input
-                    type="text"
-                    value={clientFirstName}
-                    onChange={(e) => setClientFirstName(e.target.value)}
-                    autoComplete="given-name"
-                    className={INPUT_CLASS}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-                    Last name
-                  </span>
-                  <input
-                    type="text"
-                    value={clientLastName}
-                    onChange={(e) => setClientLastName(e.target.value)}
-                    autoComplete="family-name"
-                    className={INPUT_CLASS}
-                  />
-                </label>
-              </div>
-              <label className="block">
-                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-                  Phone
-                </span>
-                <input
-                  type="tel"
-                  inputMode="tel"
-                  value={clientPhone}
-                  onChange={(e) => setClientPhone(e.target.value)}
-                  onBlur={() => {
-                    setPhoneTouched(true);
-                    formatPhoneField();
-                  }}
-                  autoComplete="tel"
-                  placeholder="(801) 555-1234"
-                  aria-invalid={phoneInvalid}
-                  className={`${INPUT_CLASS}${phoneInvalid ? ' border-rose-200 focus:border-rose-300 focus:ring-rose-100' : ''}`}
-                />
-                <p className="mt-1.5 text-xs text-stone-500">{CLIENT_PHONE_HINT}</p>
-                {phoneInvalid && (
-                  <p className="mt-1 text-xs text-rose-600" role="alert">
-                    {clientPhoneValidationMessage()}
-                  </p>
-                )}
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-                  Email
-                </span>
-                <input
-                  type="email"
-                  required
-                  value={clientEmail}
-                  onChange={(e) => setClientEmail(e.target.value)}
-                  autoComplete="email"
-                  aria-invalid={emailInvalid}
-                  className={`${INPUT_CLASS}${emailInvalid ? ' border-rose-200 focus:border-rose-300 focus:ring-rose-100' : ''}`}
-                  placeholder="client@example.com"
-                />
-                {emailInvalid && (
-                  <p className="mt-1 text-xs text-rose-600" role="alert">
-                    Enter a valid email address.
-                  </p>
-                )}
-              </label>
-            </div>
+            <ManualBookingClientStep
+              mode={clientMode}
+              onModeChange={handleModeChange}
+              fields={clientFields}
+              onFieldsChange={(patch) =>
+                setClientFields((prev) => ({ ...prev, ...patch }))
+              }
+              phoneTouched={phoneTouched}
+              onPhoneTouched={() => setPhoneTouched(true)}
+              selectedClientId={selectedClient?.id ?? null}
+              onSelectClient={handleSelectClient}
+            />
           )}
 
           {step === 3 && selectedService && (
@@ -399,10 +382,7 @@ export default function ManualBookingModal({
               ) : (
                 <ManualBookingSlotPicker
                   eventTypeId={selectedService.eventTypeId}
-                  clientName={joinFullName(
-                    clientFirstName.trim(),
-                    clientLastName.trim()
-                  )}
+                  clientName={displayName}
                   selectedSlot={selectedSlot}
                   onSelectSlot={setSelectedSlot}
                 />
@@ -432,8 +412,12 @@ export default function ManualBookingModal({
                 setError(null);
                 if (step === 2) {
                   setPhoneTouched(true);
-                  formatPhoneField();
-                  if (!parseClientPhone(clientPhone)) return;
+                  const resolved = resolvedClientFields();
+                  const formatted = formatPhoneInputDisplay(resolved.phone);
+                  if (formatted !== resolved.phone.trim()) {
+                    setClientFields((prev) => ({ ...prev, phone: formatted }));
+                  }
+                  if (!parseClientPhone(resolved.phone)) return;
                 }
                 setStep((s) => (s + 1) as WizardStep);
               }}
