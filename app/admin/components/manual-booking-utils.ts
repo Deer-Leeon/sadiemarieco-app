@@ -273,6 +273,15 @@ export function slotToStudioLocalStart(isoUtc: string): string {
   return `${pick('year')}-${pick('month')}-${pick('day')}T${pick('hour')}:${pick('minute')}:${pick('second')}`;
 }
 
+/** Studio-local `HH:MM` for comparing a slot start against schedule windows. */
+export function slotToStudioLocalHhmm(isoUtc: string): string | null {
+  try {
+    return slotToStudioLocalStart(isoUtc).slice(11, 16);
+  } catch {
+    return null;
+  }
+}
+
 export function todayInStudio(): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: STUDIO_TIMEZONE,
