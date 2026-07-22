@@ -352,13 +352,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       INSERT INTO appointments (
         client_id, service_name, booking_time, end_time, cal_event_id,
         client_first_name, client_last_name, client_email, client_phone,
-        status
+        status, sms_opt_in
       )
       VALUES (
         ${clientId}, ${appointmentServiceName}, ${bookingTime},
         ${endTime}, ${parsed.calBookingUid},
         ${first}, ${last}, ${parsed.clientEmail}, ${parsed.clientPhone},
-        'confirmed'
+        'confirmed', TRUE
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,
@@ -369,7 +369,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         client_last_name = EXCLUDED.client_last_name,
         client_email = COALESCE(EXCLUDED.client_email, appointments.client_email),
         client_phone = EXCLUDED.client_phone,
-        status = 'confirmed'
+        status = 'confirmed',
+        sms_opt_in = TRUE
     `;
 
     const notifications = await notifyBookingConfirmed({

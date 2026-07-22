@@ -16,6 +16,9 @@
  *      dashboard + attendee emails show "Confirmed" (not
  *      "Unconfirmed"). Runs AFTER Postgres so a Cal hiccup never
  *      blocks the card vault. Local DB is source of truth.
+ *   4. Notifications — confirmation SMS + QStash 24h/1h reminders
+ *      (and reminder emails) via `notifyBookingConfirmed`, gated on
+ *      `appointments.sms_opt_in` from the Cal sms-consent checkbox.
  *
  * Cal.com sync (tried in order):
  *   1. PATCH v1 `/bookings/<uid>?apiKey=…` with `{ status: 'ACCEPTED' }`
@@ -44,6 +47,7 @@ import {
   STRIPE_CUSTOMER_ID_RE,
 } from '@/lib/appointment-stripe';
 import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
+import { notifyBookingConfirmed } from '@/lib/booking-notifications';
 import {
   CAL_BOOKINGS_API_VERSION,
   calUpstreamErrorMessage,
@@ -511,6 +515,131 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     calError = `Could not reach Cal.com (${msg})`;
   }
 
+  // ── 5. NOTIFICATIONS: SMS + reminder emails (after card vaulted) ───
+  // Non-blocking: Stripe + DB already succeeded. Idempotent via
+  // webhook_events. SMS only when sms_opt_in === true (A2P).
+  let notifications: Record<string, unknown> | null = null;
+  try {
+    const { rows } = await sql<{
+      booking_time: Date | string | null;
+      end_time: Date | string | null;
+      service_name: string | null;
+      client_phone: string | null;
+      client_email: string | null;
+      client_first_name: string | null;
+      client_last_name: string | null;
+      client_id: string | null;
+      sms_opt_in: boolean | null;
+    }>`
+      SELECT booking_time, end_time, service_name, client_phone, client_email,
+             client_first_name, client_last_name, client_id, sms_opt_in
+      FROM appointments
+      WHERE cal_event_id = ${calBookingUid}
+      LIMIT 1
+    `;
+    const appt = rows[0];
+    if (appt) {
+      let smsOptIn = appt.sms_opt_in === true;
+
+      // Race: confirm can beat the Cal webhook that writes sms_opt_in.
+      // Hydrate once from Cal when the column is still null.
+      if (appt.sms_opt_in == null) {
+        try {
+          const apiKey =
+            process.env.CALCOM_API_KEY?.trim() ||
+            process.env.CAL_API_KEY?.trim();
+          if (apiKey) {
+            const calRes = await fetch(
+              `${CAL_V2_BASE}/bookings/${encodeURIComponent(calBookingUid)}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${apiKey}`,
+                  'cal-api-version': CAL_BOOKINGS_API_VERSION,
+                  Accept: 'application/json',
+                },
+              }
+            );
+            if (calRes.ok) {
+              const calJson = (await calRes.json()) as {
+                data?: {
+                  bookingFieldsResponses?: Record<string, unknown>;
+                  responses?: Record<string, unknown>;
+                };
+              };
+              const fields =
+                calJson.data?.bookingFieldsResponses ||
+                calJson.data?.responses ||
+                {};
+              const raw =
+                fields['sms-consent'] ??
+                fields.smsConsent ??
+                fields.sms_consent;
+              const hydrated =
+                raw === true ||
+                raw === 'true' ||
+                raw === 1 ||
+                raw === '1' ||
+                (typeof raw === 'object' &&
+                  raw !== null &&
+                  (raw as { value?: unknown }).value === true);
+              smsOptIn = hydrated;
+              await sql`
+                UPDATE appointments
+                SET sms_opt_in = ${hydrated}
+                WHERE cal_event_id = ${calBookingUid}
+                  AND sms_opt_in IS NULL
+              `;
+            }
+          }
+        } catch (hydrateErr) {
+          console.warn(
+            '[api/booking/confirm] sms_opt_in hydrate from Cal failed',
+            errorMessage(hydrateErr)
+          );
+        }
+      }
+
+      const bookingTime =
+        appt.booking_time instanceof Date
+          ? appt.booking_time.toISOString()
+          : appt.booking_time
+            ? String(appt.booking_time)
+            : null;
+      const endTime =
+        appt.end_time instanceof Date
+          ? appt.end_time.toISOString()
+          : appt.end_time
+            ? String(appt.end_time)
+            : null;
+      const clientName = [appt.client_first_name, appt.client_last_name]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      notifications = await notifyBookingConfirmed({
+        bookingUid: calBookingUid,
+        bookingTime,
+        endTime,
+        clientPhone: appt.client_phone || '',
+        clientName: clientName || name,
+        serviceName: appt.service_name || 'appointment',
+        clientId: appt.client_id,
+        clientEmail: appt.client_email || email || null,
+        skipIfAlreadySent: true,
+        smsOptIn,
+      });
+    } else {
+      console.warn(
+        '[api/booking/confirm] no appointment row for notifications',
+        { calBookingUid }
+      );
+    }
+  } catch (err) {
+    console.error('[api/booking/confirm] notifications failed (non-blocking)', {
+      calBookingUid,
+      error: errorMessage(err),
+    });
+  }
+
   return NextResponse.json({
     ok: true,
     stripeCustomerId,
@@ -519,5 +648,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // but Stripe + DB succeeded. The UI can show "card saved — admin
     // will confirm shortly" so the client isn't left wondering.
     cal_accept_error: calError,
+    notifications,
   });
 }

@@ -120,7 +120,36 @@ End users opt in on the Sadie Marie website at https://sadiemarie.co when bookin
 
 Sample messages should identify **Sadie Marie** by name and include opt-out language in at least one sample (e.g. Reply STOP to opt out).
 
----
+### Sample messages (canonical — keep code in sync)
+
+**Opt-in reply** (START / YES / UNSTOP — configure in Twilio Console):
+
+```text
+Sadie Marie: You are opted in to appointment messages (confirmations, reminders, and follow-ups). Msg frequency varies. Msg & data rates may apply. Reply HELP for help. Reply STOP to opt out. Privacy: https://sadiemarie.co/privacy
+```
+
+**#1 – Confirmation** (sent from `/api/booking/confirm` after card vault):
+
+```text
+Sadie Marie: Your [service] is confirmed for [date] at [time]. Manage, reschedule, or cancel: [link]. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+**#2 – 24h reminder** (`/api/remind` kind=`24h`):
+
+```text
+Sadie Marie: Reminder — your [service] is tomorrow at [time]. Please arrive with clean lashes and no eye makeup. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+(Brows services substitute clean-brows arrival copy in code.)
+
+**#3 – 1h reminder** (`/api/remind` kind=`1h`):
+
+```text
+Sadie Marie: Your [service] is in one hour. Please arrive with clean lashes and no eye makeup. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+**Code:** `lib/sms-appointment-copy.js`, `lib/booking-notifications.js`, `lib/legacy-handlers/remind.js`  
+**Send timing:** confirmation + QStash schedules run after checkout confirm (not on Cal `BOOKING_CREATED`).
 
 ## File map
 
@@ -131,8 +160,9 @@ Sample messages should identify **Sadie Marie** by name and include opt-out lang
 | Privacy Policy | `public/privacy.html` |
 | Terms | `public/terms.html` |
 | Footer legal links | `public/index.html` |
-| Gate SMS on opt-in | `lib/booking-notifications.js`, `lib/legacy-handlers/webhook.js` |
-| Reminder / feedback SMS | `lib/legacy-handlers/remind.js`, `lib/legacy-handlers/feedback.js` (only run if QStash was scheduled — which requires opt-in on confirm) |
+| Gate SMS on opt-in | `lib/booking-notifications.js`, `app/api/booking/confirm/route.ts`, `appointments.sms_opt_in` |
+| Reminder SMS | `lib/legacy-handlers/remind.js` (24h + 1h; only if QStash scheduled after confirm + opt-in) |
+| SMS copy | `lib/sms-appointment-copy.js` |
 | Apply studio fields on new services | `app/api/admin/services/route.ts` |
 
 ---
@@ -145,7 +175,8 @@ Sample messages should identify **Sadie Marie** by name and include opt-out lang
 - [ ] Privacy still has the **non-sharing** sentence (mobile + messaging consent; third parties + affiliates; marketing/promotional)
 - [ ] Privacy/Terms still say phone ≠ SMS consent and Terms agreement ≠ SMS enrollment
 - [ ] Brand string is still **Sadie Marie** on Privacy, Terms, SMS bodies, and Twilio Brand
-- [ ] Website bookings only send SMS when `sms-consent === true`
+- [ ] Website bookings only send SMS when `sms-consent === true` (stored as `appointments.sms_opt_in`, sent from `/api/booking/confirm`)
+- [ ] Confirmation SMS fires after checkout, not on Cal `BOOKING_CREATED`
 - [ ] After changing Cal booking fields, ran the **backfill** script
 - [ ] If campaign fields / legal URLs changed, update Twilio Console and resubmit the **same** campaign
 
