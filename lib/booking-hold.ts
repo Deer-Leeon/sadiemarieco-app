@@ -5,14 +5,12 @@
  *   • `api/webhook.js` (SYSTEM_ABANDON_CANCEL_REASON + legacy list)
  *
  * Holds are released by a per-booking QStash delayed message scheduled
- * from `/api/booking/init` — not by a high-frequency cron sweep.
+ * from `/api/booking/init`, the checkout page at 00:00, and a 5‑minute
+ * Vercel cron sweep (`/api/cron/cleanup-abandoned`).
  */
 
-/**
- * TEMP for testing slot release — restore to `10 * 60` after verifying.
- * Source of truth for countdown + QStash delay.
- */
-export const CHECKOUT_HOLD_SECONDS = 30;
+/** Source of truth for countdown + QStash delay. */
+export const CHECKOUT_HOLD_SECONDS = 10 * 60;
 
 export const CHECKOUT_HOLD_MS = CHECKOUT_HOLD_SECONDS * 1000;
 

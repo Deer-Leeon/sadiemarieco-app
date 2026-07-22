@@ -203,6 +203,27 @@
   // capping cross-user staleness to a single minute.
   const FRESHNESS_MS = 60 * 1000;
 
+  // Abandoned-checkout return link (`/?cal_refresh=1#services`) forces a
+  // full rebuild so the booker doesn't show the just-cancelled hold as
+  // still occupying the only Saturday slot.
+  let forceRefreshAllMounts = false;
+  try {
+    const landingUrl = new URL(window.location.href);
+    if (landingUrl.searchParams.get('cal_refresh') === '1') {
+      forceRefreshAllMounts = true;
+      landingUrl.searchParams.delete('cal_refresh');
+      const next =
+        landingUrl.pathname +
+        (landingUrl.searchParams.toString()
+          ? `?${landingUrl.searchParams.toString()}`
+          : '') +
+        landingUrl.hash;
+      window.history.replaceState(null, '', next);
+    }
+  } catch (_) {
+    /* ignore */
+  }
+
   /** Drawer shell stays fixed; reset any stray scroll offsets on step changes. */
   const scrollDrawerToTop = () => {
     if (drawer) drawer.scrollTop = 0;
@@ -425,6 +446,12 @@
       linkIndices.set(link, idx);
       createCalMount(link);
     });
+    if (forceRefreshAllMounts) {
+      // Preload already created fresh mounts on this page load; clear the
+      // flag so later opens use the normal 60s freshness window.
+      forceRefreshAllMounts = false;
+      mountsByLink.forEach((_, link) => staleLinks.add(link));
+    }
   };
 
   // Tear down + rebuild a single mount, regardless of why it's gone stale.
@@ -451,9 +478,10 @@
   // overwhelmingly unlikely to *see* a slot that's already been claimed.
   const ensureFreshMount = (link) => {
     const createdAt = mountCreatedAt.get(link);
-    const isStale = staleLinks.has(link);
+    const isStale = staleLinks.has(link) || forceRefreshAllMounts;
     const isExpired = !createdAt || Date.now() - createdAt > FRESHNESS_MS;
     if (isStale || isExpired) rebuildMount(link);
+    if (forceRefreshAllMounts) forceRefreshAllMounts = false;
   };
 
   // Defer the heavy pre-render until the browser is idle so it doesn't

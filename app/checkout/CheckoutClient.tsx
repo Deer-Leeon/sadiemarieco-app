@@ -221,6 +221,10 @@ export default function CheckoutClient({
   );
   const [holdExpired, setHoldExpired] = useState(initialHoldExpired);
   const [countdownLabel, setCountdownLabel] = useState('');
+  /** Gate the return CTA until Cal cancel finishes — otherwise the booker can reopen while the only Saturday slot is still held. */
+  const [holdReleaseState, setHoldReleaseState] = useState<
+    'idle' | 'releasing' | 'released' | 'failed'
+  >('idle');
 
   // Poll the hold row so a cron-driven `canceled_by_system` flip disables
   // checkout even if the local timer hasn't ticked yet.
@@ -283,14 +287,20 @@ export default function CheckoutClient({
   }, [holdCreatedAt, holdExpired]);
 
   // When the local countdown expires, release the Cal hold immediately so
-  // the slot reopens even if the QStash delayed job never fired.
+  // the slot reopens even if the QStash delayed job never fired. Wait for
+  // success (plus a short settle) before offering "return to calendar" —
+  // a 180‑min Saturday service often has only one start time; returning
+  // while cancel is in flight makes the whole day look empty.
   useEffect(() => {
     if (!holdExpired || !uid) return;
 
     let cancelled = false;
+    setHoldReleaseState('releasing');
+
     (async () => {
+      let releasedOk = false;
       try {
-        await fetch('/api/booking/release-hold', {
+        const res = await fetch('/api/booking/release-hold', {
           method: 'POST',
           headers: {
             Accept: 'application/json',
@@ -298,22 +308,46 @@ export default function CheckoutClient({
           },
           body: JSON.stringify({ calBookingUid: uid }),
         });
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          released?: boolean;
+          skipped?: string;
+        } | null;
+        // QStash may have won the race — skipped status_canceled_* still means free.
+        const skipped = typeof data?.skipped === 'string' ? data.skipped : '';
+        releasedOk =
+          res.ok &&
+          (data?.released === true ||
+            skipped.startsWith('status_canceled') ||
+            skipped === 'not_found' ||
+            skipped === 'appointment_not_found');
       } catch {
-        // Non-fatal — cron sweep / next poll still clears it.
+        // Cron sweep still clears leftovers.
       }
-      if (!cancelled) {
-        // Refresh hold status so UI reflects canceled_by_system promptly.
-        try {
-          const res = await fetch(
-            `/api/booking/hold?uid=${encodeURIComponent(uid)}`,
-            { headers: { Accept: 'application/json' } }
-          );
-          if (!res.ok || cancelled) return;
+
+      if (cancelled) return;
+
+      try {
+        const res = await fetch(
+          `/api/booking/hold?uid=${encodeURIComponent(uid)}`,
+          { headers: { Accept: 'application/json' } }
+        );
+        if (res.ok) {
           const data = (await res.json()) as { expired?: boolean };
           if (data.expired) setHoldExpired(true);
-        } catch {
-          /* ignore */
         }
+      } catch {
+        /* ignore */
+      }
+
+      if (cancelled) return;
+
+      if (releasedOk) {
+        // Brief settle so Cal's public slots cache can catch up with cancel.
+        await new Promise((r) => window.setTimeout(r, 1500));
+        if (!cancelled) setHoldReleaseState('released');
+      } else {
+        setHoldReleaseState('failed');
       }
     })();
 
@@ -403,7 +437,7 @@ export default function CheckoutClient({
 
       <section className="mt-10 w-full max-w-md">
         {holdExpired ? (
-          <ExpiredHoldCard />
+          <ExpiredHoldCard releaseState={holdReleaseState} />
         ) : threeDsSetupIntentId ? (
           <CheckoutThreeDSResume
             uid={uid}
@@ -781,7 +815,15 @@ function ErrorCard({ message }: { message: string }) {
   );
 }
 
-function ExpiredHoldCard() {
+function ExpiredHoldCard({
+  releaseState,
+}: {
+  releaseState: 'idle' | 'releasing' | 'released' | 'failed';
+}) {
+  const stillReleasing =
+    releaseState === 'idle' || releaseState === 'releasing';
+  const canReturn = releaseState === 'released' || releaseState === 'failed';
+
   return (
     <div className="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center shadow-sm shadow-stone-900/[0.03] sm:p-10">
       <h2 className="font-serif text-2xl text-rose-900">
@@ -790,12 +832,35 @@ function ExpiredHoldCard() {
       <p className="mt-3 text-sm leading-relaxed text-rose-800">
         {HOLD_EXPIRED_MESSAGE}
       </p>
-      <Link
-        href="/#services"
-        className="mt-8 inline-flex w-full items-center justify-center rounded-md bg-stone-900 px-5 py-3 text-sm font-medium tracking-wide text-stone-50 transition-colors hover:bg-stone-800"
-      >
-        Return to booking calendar
-      </Link>
+      {stillReleasing ? (
+        <p className="mt-4 text-sm text-rose-700">
+          Freeing your time on the calendar&hellip;
+        </p>
+      ) : releaseState === 'released' ? (
+        <p className="mt-4 text-sm text-rose-700">
+          Your time is free again — pick a new slot to continue.
+        </p>
+      ) : (
+        <p className="mt-4 text-sm text-rose-700">
+          If a time still looks unavailable, wait a moment and refresh the
+          calendar.
+        </p>
+      )}
+      {canReturn ? (
+        <Link
+          href="/?cal_refresh=1#services"
+          className="mt-8 inline-flex w-full items-center justify-center rounded-md bg-stone-900 px-5 py-3 text-sm font-medium tracking-wide text-stone-50 transition-colors hover:bg-stone-800"
+        >
+          Return to booking calendar
+        </Link>
+      ) : (
+        <div
+          className="mt-8 inline-flex w-full items-center justify-center rounded-md bg-stone-900/40 px-5 py-3 text-sm font-medium tracking-wide text-stone-50"
+          aria-busy="true"
+        >
+          Freeing your time&hellip;
+        </div>
+      )}
     </div>
   );
 }
