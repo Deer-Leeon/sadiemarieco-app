@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
-  CHECKOUT_HOLD_MINUTES,
+  checkoutHoldDurationLabel,
   formatCountdownMmSs,
   holdDeadlineMs,
   HOLD_EXPIRED_MESSAGE,
@@ -256,7 +256,7 @@ export default function CheckoutClient({
     };
   }, [uid]);
 
-  // 10-minute countdown from `appointments.created_at`.
+  // Countdown from `appointments.created_at` using CHECKOUT_HOLD_SECONDS.
   useEffect(() => {
     if (!holdCreatedAt) {
       setCountdownLabel('');
@@ -630,7 +630,7 @@ function CheckoutForm({
       )}
       {countdownLabel && (
         <p className="mt-2 text-center text-[11px] text-stone-400">
-          Complete checkout within {CHECKOUT_HOLD_MINUTES} minutes to hold
+          Complete checkout within {checkoutHoldDurationLabel()} to hold
           your time slot.
         </p>
       )}

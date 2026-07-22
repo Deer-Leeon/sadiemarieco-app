@@ -1,12 +1,12 @@
 /**
  * Schedule a one-shot QStash delayed job to release an abandoned checkout
- * hold after CHECKOUT_HOLD_MINUTES. Fire-and-forget: failures are logged
+ * hold after CHECKOUT_HOLD_SECONDS. Fire-and-forget: failures are logged
  * but must not block `/api/booking/init`.
  */
 
 import { Client as QStashClient } from '@upstash/qstash';
 
-import { CHECKOUT_HOLD_MINUTES } from '@/lib/booking-hold';
+import { CHECKOUT_HOLD_SECONDS } from '@/lib/booking-hold';
 
 const PUBLIC_BASE_URL =
   process.env.PUBLIC_BASE_URL || 'https://www.sadiemarie.co';
@@ -32,7 +32,7 @@ export async function scheduleAbandonedHoldRelease(
     const res = await qstash.publishJSON({
       url: `${PUBLIC_BASE_URL.replace(/\/$/, '')}/api/qstash/release-hold`,
       body: { calBookingUid: uid },
-      delay: CHECKOUT_HOLD_MINUTES * 60,
+      delay: CHECKOUT_HOLD_SECONDS,
     });
     return {
       scheduled: true,

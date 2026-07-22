@@ -7,18 +7,35 @@
  * Holds are released by a per-booking QStash delayed message scheduled
  * from `/api/booking/init` — not by a high-frequency cron sweep.
  */
-export const CHECKOUT_HOLD_MINUTES = 10;
 
-export const CHECKOUT_HOLD_MS = CHECKOUT_HOLD_MINUTES * 60 * 1000;
+/**
+ * TEMP for testing slot release — restore to `10 * 60` after verifying.
+ * Source of truth for countdown + QStash delay.
+ */
+export const CHECKOUT_HOLD_SECONDS = 30;
 
-export const CAL_ABANDON_CANCEL_REASON = `Checkout abandoned after ${CHECKOUT_HOLD_MINUTES} minutes.`;
+export const CHECKOUT_HOLD_MS = CHECKOUT_HOLD_SECONDS * 1000;
+
+/** Fractional minutes — used by SQL interval helpers / older call sites. */
+export const CHECKOUT_HOLD_MINUTES = CHECKOUT_HOLD_SECONDS / 60;
+
+export function checkoutHoldDurationLabel(): string {
+  if (CHECKOUT_HOLD_SECONDS < 60) {
+    return `${CHECKOUT_HOLD_SECONDS} seconds`;
+  }
+  const mins = CHECKOUT_HOLD_SECONDS / 60;
+  return mins === 1 ? '1 minute' : `${mins} minutes`;
+}
+
+export const CAL_ABANDON_CANCEL_REASON = `Checkout abandoned after ${checkoutHoldDurationLabel()}.`;
 
 /** Older cancel reasons still echoed by Cal for holds released before the window changed. */
 export const LEGACY_ABANDON_CANCEL_REASONS = [
   'Checkout abandoned after 8 minutes.',
+  'Checkout abandoned after 10 minutes.',
 ] as const;
 
-export const HOLD_EXPIRED_MESSAGE = `Your ${CHECKOUT_HOLD_MINUTES}-minute hold has expired. Please pick a time on the calendar again to continue.`;
+export const HOLD_EXPIRED_MESSAGE = `Your ${checkoutHoldDurationLabel()} hold has expired. Please pick a time on the calendar again to continue.`;
 
 export function holdDeadlineMs(createdAt: Date | string): number {
   const start =
