@@ -9,6 +9,7 @@ import {
   holdDeadlineMs,
   HOLD_EXPIRED_MESSAGE,
 } from '@/lib/booking-hold';
+import { isValidEmail } from '@/lib/client-identity';
 import {
   formatAppointmentWhen,
   formatServiceTitleForDisplay,
@@ -218,7 +219,9 @@ export default function CheckoutClient({
   // collects from the visitor on this page.
   const uid = params.get('uid')?.trim() ?? '';
   const name = params.get('name')?.trim() ?? '';
-  const email = params.get('email')?.trim() ?? '';
+  // Cal phone-only bookings pass <digits>@sms.cal.com — never prefill Stripe Link with that.
+  const emailRaw = params.get('email')?.trim() ?? '';
+  const email = isValidEmail(emailRaw) ? emailRaw.trim().toLowerCase() : '';
   const threeDsSetupIntentId = useMemo(
     () => readThreeDsSetupIntentId(params),
     [params]
@@ -766,13 +769,15 @@ function CheckoutForm({
         </p>
       )}
 
-      {name && email && (
+      {name && (
         <div className="mt-6 rounded-md border border-stone-200 bg-stone-50 px-4 py-3">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
             Booking for
           </p>
           <p className="mt-1 text-sm font-medium text-stone-900">{name}</p>
-          <p className="text-xs text-stone-500">{email}</p>
+          {email ? (
+            <p className="text-xs text-stone-500">{email}</p>
+          ) : null}
         </div>
       )}
 

@@ -363,7 +363,14 @@
 
       const search = new URLSearchParams({ uid });
       if (name) search.set('name', name);
-      if (email) search.set('email', email);
+      // Never put Cal phone-gateway placeholders in the checkout URL
+      // (e.g. 18018224166@sms.cal.com) — Stripe Link would prefill them.
+      const emailLooksReal =
+        email &&
+        email.includes('@') &&
+        !/@sms\.cal\.com$/i.test(email) &&
+        !/^bookings\+/i.test(email);
+      if (emailLooksReal) search.set('email', email);
 
       // Do not await — navigation must start immediately. Init hydrates
       // missing email/time from Cal when the embed omitted them (V2).
