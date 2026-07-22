@@ -65,5 +65,6 @@ export function isAbandonCancelReason(reason: unknown): boolean {
   if (typeof reason !== 'string') return false;
   const trimmed = reason.trim();
   if (trimmed === CAL_ABANDON_CANCEL_REASON) return true;
+  if (trimmed.startsWith('Checkout abandoned after ')) return true;
   return (LEGACY_ABANDON_CANCEL_REASONS as readonly string[]).includes(trimmed);
 }

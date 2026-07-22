@@ -282,6 +282,46 @@ export default function CheckoutClient({
     return () => window.clearInterval(id);
   }, [holdCreatedAt, holdExpired]);
 
+  // When the local countdown expires, release the Cal hold immediately so
+  // the slot reopens even if the QStash delayed job never fired.
+  useEffect(() => {
+    if (!holdExpired || !uid) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        await fetch('/api/booking/release-hold', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ calBookingUid: uid }),
+        });
+      } catch {
+        // Non-fatal — cron sweep / next poll still clears it.
+      }
+      if (!cancelled) {
+        // Refresh hold status so UI reflects canceled_by_system promptly.
+        try {
+          const res = await fetch(
+            `/api/booking/hold?uid=${encodeURIComponent(uid)}`,
+            { headers: { Accept: 'application/json' } }
+          );
+          if (!res.ok || cancelled) return;
+          const data = (await res.json()) as { expired?: boolean };
+          if (data.expired) setHoldExpired(true);
+        } catch {
+          /* ignore */
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [holdExpired, uid]);
+
   // Fetch a fresh SetupIntent client_secret on mount. We don't re-fetch
   // when the URL params change (they shouldn't — Cal lands once and
   // stays put) and we don't share intents across reloads since the

@@ -7,7 +7,8 @@ import { clerkClient } from '@clerk/nextjs/server';
 import { sql } from '@vercel/postgres';
 
 import { ALLOWED_ADMIN_EMAILS } from '@/app/admin/auth';
-import { CHECKOUT_HOLD_MINUTES } from '@/lib/booking-hold';
+import { CHECKOUT_HOLD_SECONDS } from '@/lib/booking-hold';
+import { getQStashBaseUrl, getQStashToken } from '@/lib/qstash-client';
 import {
   getCalComApiKey,
   parseAdminOverrideEventId,
@@ -254,7 +255,7 @@ async function checkDatabase(): Promise<HealthCheckResult[]> {
           (SELECT COUNT(*)::text FROM appointments
            WHERE status = 'pending'
              AND created_at IS NOT NULL
-             AND created_at < NOW() - (${CHECKOUT_HOLD_MINUTES} || ' minutes')::interval) AS stale_pending,
+             AND created_at < NOW() - (${CHECKOUT_HOLD_SECONDS} || ' seconds')::interval) AS stale_pending,
           (SELECT COUNT(*)::text FROM webhook_events
            WHERE processed_at > NOW() - INTERVAL '7 days') AS recent_webhooks,
           (SELECT COUNT(*)::text FROM appointments
@@ -292,7 +293,7 @@ async function checkDatabase(): Promise<HealthCheckResult[]> {
         category: 'Database',
         status: pendingHolds > 20 ? 'degraded' : 'healthy',
         message: `${pendingHolds} pending appointment(s)`,
-        detail: `Abandoned holds should clear within ${CHECKOUT_HOLD_MINUTES} minutes via QStash delayed /api/qstash/release-hold`,
+        detail: `Abandoned holds should clear within ${CHECKOUT_HOLD_SECONDS}s via checkout release, QStash delay, or /api/cron/cleanup-abandoned`,
       })
     );
 
@@ -304,11 +305,11 @@ async function checkDatabase(): Promise<HealthCheckResult[]> {
         status: stalePending > 5 ? 'degraded' : 'healthy',
         message:
           stalePending === 0
-            ? `No abandoned checkout holds older than ${CHECKOUT_HOLD_MINUTES} minutes`
-            : `${stalePending} pending hold(s) older than ${CHECKOUT_HOLD_MINUTES} minutes`,
+            ? `No abandoned checkout holds older than ${CHECKOUT_HOLD_SECONDS}s`
+            : `${stalePending} pending hold(s) older than ${CHECKOUT_HOLD_SECONDS}s`,
         detail:
           stalePending > 0
-            ? 'Delayed QStash release may be failing or QSTASH_TOKEN missing on init'
+            ? 'Hit GET /api/cron/cleanup-abandoned with CRON_SECRET, and verify QSTASH_URL matches your Upstash region'
             : undefined,
       })
     );
@@ -728,10 +729,12 @@ async function checkStripe(): Promise<HealthCheckResult[]> {
 
 async function checkQStash(): Promise<HealthCheckResult[]> {
   const checks: HealthCheckResult[] = [];
-  const token = process.env.QSTASH_TOKEN?.trim();
+  const token = getQStashToken();
   const currentKey = process.env.QSTASH_CURRENT_SIGNING_KEY?.trim();
   const nextKey = process.env.QSTASH_NEXT_SIGNING_KEY?.trim();
   const publicBase = process.env.PUBLIC_BASE_URL?.trim() || '';
+  const qstashUrl = getQStashBaseUrl();
+  const qstashUrlFromEnv = Boolean(process.env.QSTASH_URL?.trim());
 
   if (!token) {
     checks.push(
@@ -754,6 +757,20 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
       })
     );
   }
+
+  checks.push(
+    result({
+      id: 'qstash-url',
+      name: 'QStash regional endpoint',
+      category: 'Scheduled jobs (QStash)',
+      status: qstashUrlFromEnv ? 'healthy' : 'degraded',
+      message: qstashUrlFromEnv
+        ? `QSTASH_URL = ${qstashUrl}`
+        : `QSTASH_URL unset — using ${qstashUrl}`,
+      detail:
+        'Must match the region of your Upstash QStash token (US: https://qstash-us-east-1.upstash.io). Wrong region → every publish 404s and holds never auto-release.',
+    })
+  );
 
   checks.push(
     result({
@@ -830,8 +847,16 @@ async function checkCron(): Promise<HealthCheckResult[]> {
       name: 'Abandoned checkout release',
       category: 'Scheduled jobs (QStash)',
       status: process.env.QSTASH_TOKEN?.trim() ? 'healthy' : 'degraded',
-      message: `POST /api/qstash/release-hold — releases pending holds ${CHECKOUT_HOLD_MINUTES} min after /api/booking/init`,
-      detail: `${publicBase}/api/qstash/release-hold (delayed QStash; disable any Vercel Cron still pointed at /api/cron/cleanup-abandoned)`,
+      message: `Delayed QStash + checkout timer + cron sweep (${CHECKOUT_HOLD_SECONDS}s hold)`,
+      detail: `${publicBase}/api/qstash/release-hold · ${publicBase}/api/booking/release-hold · ${publicBase}/api/cron/cleanup-abandoned`,
+    }),
+    result({
+      id: 'cron-cleanup-abandoned',
+      name: 'Abandoned hold safety sweep',
+      category: 'Cron jobs',
+      status: cronSecret ? 'healthy' : 'degraded',
+      message: 'GET /api/cron/cleanup-abandoned — clears stale pending holds if QStash missed them',
+      detail: `${publicBase}/api/cron/cleanup-abandoned`,
     }),
     result({
       id: 'cron-sync-reviews',

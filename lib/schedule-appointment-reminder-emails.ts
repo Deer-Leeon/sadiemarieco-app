@@ -1,5 +1,6 @@
-import { Client as QStashClient } from '@upstash/qstash';
-
+import {
+  createQStashClient,
+} from '@/lib/qstash-client';
 import {
   inferReminderKindFromServiceName,
   resolveAppointmentService,
@@ -41,7 +42,10 @@ async function publishReminderJob(args: {
   timing: 'lead' | '1h';
   notBefore: number;
 }): Promise<unknown> {
-  const qstash = new QStashClient({ token: process.env.QSTASH_TOKEN! });
+  const qstash = createQStashClient();
+  if (!qstash) {
+    throw new Error('qstash_not_configured');
+  }
   const res = await qstash.publishJSON({
     url: `${PUBLIC_BASE_URL.replace(/\/$/, '')}/api/remind-email`,
     body: {
