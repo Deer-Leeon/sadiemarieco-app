@@ -49,7 +49,8 @@ function rowToClient(row: ClientRow): Client {
     phone: row.phone,
     first_name: row.first_name,
     last_name: row.last_name,
-    email: row.email,
+    // Never surface Cal placeholders (@sms.cal.com, bookings+…) in admin UI.
+    email: parseOptionalClientEmail(row.email),
     created_at: row.created_at,
     has_consented: Boolean(row.has_consented),
     consent_form_url: row.consent_form_url,

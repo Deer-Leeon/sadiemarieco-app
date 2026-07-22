@@ -22,6 +22,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Client } from '@/app/admin/types';
+import { parseOptionalClientEmail } from '@/lib/client-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -64,7 +65,7 @@ function rowToClient(row: ClientRow): Client {
     phone: row.phone,
     first_name: row.first_name,
     last_name: row.last_name,
-    email: row.email,
+    email: parseOptionalClientEmail(row.email),
     created_at: serializeDate(row.created_at),
     has_consented: Boolean(row.has_consented),
     consent_form_url: row.consent_form_url,

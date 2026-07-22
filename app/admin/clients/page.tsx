@@ -23,6 +23,7 @@ import AdminHeader from '../AdminHeader';
 import AdminSectionTabs from '../AdminSectionTabs';
 import type { Client } from '../types';
 import ClientDirectory from './ClientDirectory';
+import { parseOptionalClientEmail } from '@/lib/client-identity';
 
 // Same dynamic posture as the other admin pages: this route reads
 // Clerk cookies and queries Postgres on every render. Static
@@ -185,7 +186,7 @@ export default async function ClientsPage() {
       phone: r.phone,
       first_name: r.first_name,
       last_name: r.last_name,
-      email: r.email,
+      email: parseOptionalClientEmail(r.email),
       created_at: serializeDate(r.created_at),
       has_consented: Boolean(r.has_consented),
       consent_form_url: r.consent_form_url,

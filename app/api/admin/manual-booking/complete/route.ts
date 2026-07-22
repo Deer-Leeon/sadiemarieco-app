@@ -252,7 +252,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           phone = ${normPhone},
           first_name = ${first},
           last_name = ${last},
-          email = COALESCE(${parsed.clientEmail}, clients.email)
+          email = COALESCE(
+            ${parsed.clientEmail},
+            CASE
+              WHEN clients.email IS NULL THEN NULL
+              WHEN LOWER(TRIM(clients.email)) LIKE '%@sms.cal.com' THEN NULL
+              WHEN LOWER(TRIM(clients.email)) LIKE 'bookings+%' THEN NULL
+              WHEN LOWER(TRIM(clients.email)) LIKE '%@placeholder.sadiemarie.co' THEN NULL
+              ELSE clients.email
+            END
+          )
         WHERE id = ${clientId}
       `;
     } else if (parsed.clientEmail && !(await clientPhoneExistsInDb(normPhone))) {
@@ -323,7 +332,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             phone = ${normPhone},
             first_name = ${first},
             last_name = ${last},
-            email = COALESCE(${parsed.clientEmail}, clients.email)
+            email = COALESCE(
+              ${parsed.clientEmail},
+              CASE
+                WHEN clients.email IS NULL THEN NULL
+                WHEN LOWER(TRIM(clients.email)) LIKE '%@sms.cal.com' THEN NULL
+                WHEN LOWER(TRIM(clients.email)) LIKE 'bookings+%' THEN NULL
+                WHEN LOWER(TRIM(clients.email)) LIKE '%@placeholder.sadiemarie.co' THEN NULL
+                ELSE clients.email
+              END
+            )
           WHERE id = ${clientId}
         `;
       } else {
@@ -367,7 +385,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         end_time = EXCLUDED.end_time,
         client_first_name = EXCLUDED.client_first_name,
         client_last_name = EXCLUDED.client_last_name,
-        client_email = COALESCE(EXCLUDED.client_email, appointments.client_email),
+        client_email = COALESCE(
+          EXCLUDED.client_email,
+          CASE
+            WHEN appointments.client_email IS NULL THEN NULL
+            WHEN LOWER(TRIM(appointments.client_email)) LIKE '%@sms.cal.com' THEN NULL
+            WHEN LOWER(TRIM(appointments.client_email)) LIKE 'bookings+%' THEN NULL
+            WHEN LOWER(TRIM(appointments.client_email)) LIKE '%@placeholder.sadiemarie.co' THEN NULL
+            ELSE appointments.client_email
+          END
+        ),
         client_phone = EXCLUDED.client_phone,
         status = 'confirmed',
         sms_opt_in = TRUE

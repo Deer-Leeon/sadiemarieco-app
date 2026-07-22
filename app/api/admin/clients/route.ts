@@ -40,6 +40,7 @@ import {
 import {
   normaliseClientPhone,
   parseOptionalClientEmail,
+  isPlaceholderClientEmail,
   sqlPhoneVariants,
 } from '@/lib/client-identity';
 
@@ -80,7 +81,7 @@ function rowToClient(row: ClientRow): Client {
     phone: row.phone,
     first_name: row.first_name,
     last_name: row.last_name,
-    email: row.email,
+    email: parseOptionalClientEmail(row.email),
     created_at: row.created_at,
     has_consented: Boolean(row.has_consented),
     consent_form_url: row.consent_form_url,
@@ -222,12 +223,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const firstName = sanitiseName(payload.first_name);
   const lastName = sanitiseName(payload.last_name);
+  const rawEmail =
+    typeof payload.email === 'string' ? payload.email.trim() : '';
   const email = parseOptionalClientEmail(payload.email);
-  if (
-    typeof payload.email === 'string' &&
-    payload.email.trim().length > 0 &&
-    !email
-  ) {
+  // Cal placeholders (@sms.cal.com, bookings+…) are treated as "no email".
+  // Only reject strings that look like a failed real-email attempt.
+  if (rawEmail && !email && !isPlaceholderClientEmail(rawEmail)) {
     return NextResponse.json(
       { error: 'invalid_email', message: 'Enter a valid email address.' },
       { status: 400 }
