@@ -359,14 +359,11 @@ function AppointmentBlock({
   // "this didn't happen" regardless of what was booked. Unmapped
   // services fall back to the original stone palette.
   const color = isNoShow ? null : getServiceColor(apt);
-  // Hairline black wrap so adjacent same-colour pills (back-to-back
-  // bookings of the same service) read as distinct blocks instead of
-  // a single tall stripe. Per-side utilities are used in the variants
-  // below so the existing thicker left-stripe accents for no-show and
-  // unmapped services keep their accent colour without bleeding it
-  // onto the other three sides.
+  // Match SingleDayModal pills: solid fill, no black outline. Gap between
+  // back-to-back same-colour bookings comes from layout packing / height,
+  // not a stroke. No-show and unmapped services keep a left accent stripe.
   const baseClasses =
-    'absolute z-20 overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left border border-black';
+    'absolute z-20 overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left';
   const variantClasses = isNoShow
     ? 'border-l-[3px] border-l-stone-400 bg-stone-50 opacity-60'
     : color
