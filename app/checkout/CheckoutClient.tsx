@@ -683,8 +683,8 @@ function CheckoutForm({
         Secure your appointment
       </h2>
       <p className="mt-2 text-sm leading-relaxed text-stone-500">
-        We&rsquo;ll save your card on file to confirm the booking.{' '}
-        <span className="font-medium text-stone-700">
+        We&rsquo;ll save your card on file to confirm the booking.
+        <span className="mt-1 block font-medium text-stone-700">
           No charge today.
         </span>
       </p>
