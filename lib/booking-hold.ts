@@ -9,11 +9,8 @@
  * Vercel cron sweep (`/api/cron/cleanup-abandoned`).
  */
 
-/**
- * TEMP for testing slot release — restore to `10 * 60` after verifying.
- * Source of truth for countdown + QStash delay.
- */
-export const CHECKOUT_HOLD_SECONDS = 30;
+/** Source of truth for countdown + QStash delay. */
+export const CHECKOUT_HOLD_SECONDS = 10 * 60;
 
 export const CHECKOUT_HOLD_MS = CHECKOUT_HOLD_SECONDS * 1000;
 
