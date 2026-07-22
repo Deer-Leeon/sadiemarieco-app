@@ -56,9 +56,9 @@ export interface PositionedAppointment {
    *  Consumers should ALSO apply `min-height: MIN_PILL_HEIGHT_PX` via CSS
    *  so micro-appointments stay clickable when the parent is short. */
   heightPct: number;
-  /** 0-indexed lane within the overlap-packed layout for the day. */
+  /** 0-indexed lane within this appointment's overlap cluster. */
   col: number;
-  /** Total number of lanes the day needs — uniform across the day. */
+  /** Lane count for this overlap cluster only — 1 means full-width. */
   totalCols: number;
 }
 
@@ -146,47 +146,119 @@ export function positionInterval(
 // Lane packing (overlap layout)
 // ──────────────────────────────────────────────────────────────────────────
 
-/**
- * Greedy interval-graph colouring: place each appointment in the lowest-
- * indexed lane whose previous item has already ended, opening new lanes
- * as needed. The same `totalCols` value is assigned to every item so
- * column widths stay visually uniform across the day (slightly under-
- * utilising horizontal space for sparse clusters in exchange for a
- * predictable, calmer-looking grid).
- */
-function packLanes(
-  raw: { apt: Appointment; topPct: number; heightPct: number }[]
-): PositionedAppointment[] {
-  const sorted = [...raw].sort((a, b) => a.topPct - b.topPct);
-  const lanes: { end: number }[] = [];
-  const colByIdx: number[] = [];
+interface RawPositioned {
+  apt: Appointment;
+  topPct: number;
+  heightPct: number;
+  /** Epoch ms — overlap math uses real timestamps, not % floats. */
+  startMs: number;
+  endMs: number;
+}
 
-  sorted.forEach((it) => {
-    const start = it.topPct;
-    const end = it.topPct + it.heightPct;
-    let placed = false;
-    for (let i = 0; i < lanes.length; i++) {
-      if (lanes[i].end <= start) {
-        lanes[i].end = end;
-        colByIdx.push(i);
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      lanes.push({ end });
-      colByIdx.push(lanes.length - 1);
-    }
+/**
+ * Pack appointments into horizontal lanes, scoped per overlap cluster.
+ *
+ * Two appointments share a "cluster" only when their times transitively
+ * overlap. Within a cluster we greedy-colour into the fewest lanes and
+ * set `totalCols` to that cluster's concurrency. Appointments that don't
+ * overlap anyone get `totalCols = 1` (full day-column width).
+ *
+ * Previously every item inherited the day's global max concurrency, so a
+ * single overlapping pair made the whole day render as half-width rails
+ * even for back-to-back bookings that fit in one column.
+ */
+function packLanes(raw: RawPositioned[]): PositionedAppointment[] {
+  if (raw.length === 0) return [];
+
+  const sorted = [...raw].sort((a, b) => {
+    if (a.startMs !== b.startMs) return a.startMs - b.startMs;
+    return b.endMs - a.endMs;
   });
 
-  const totalCols = Math.max(lanes.length, 1);
-  return sorted.map((it, i) => ({
-    appointment: it.apt,
-    topPct: it.topPct,
-    heightPct: it.heightPct,
-    col: colByIdx[i],
-    totalCols,
-  }));
+  // Union-find so transitive overlaps share one cluster
+  // (A overlaps B, B overlaps C ⇒ A/B/C pack together).
+  const parent = sorted.map((_, i) => i);
+  const find = (i: number): number => {
+    let root = i;
+    while (parent[root] !== root) root = parent[root];
+    let cur = i;
+    while (parent[cur] !== root) {
+      const next = parent[cur];
+      parent[cur] = root;
+      cur = next;
+    }
+    return root;
+  };
+  const union = (a: number, b: number) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+
+  for (let i = 0; i < sorted.length; i++) {
+    for (let j = i + 1; j < sorted.length; j++) {
+      // Sorted by start — once j starts at/after i ends, later j's can't
+      // overlap i either.
+      if (sorted[j].startMs >= sorted[i].endMs) break;
+      if (sorted[i].startMs < sorted[j].endMs) {
+        union(i, j);
+      }
+    }
+  }
+
+  const clusters = new Map<number, number[]>();
+  for (let i = 0; i < sorted.length; i++) {
+    const root = find(i);
+    const list = clusters.get(root);
+    if (list) list.push(i);
+    else clusters.set(root, [i]);
+  }
+
+  const out: PositionedAppointment[] = new Array(sorted.length);
+
+  for (const memberIdxs of clusters.values()) {
+    const members = memberIdxs
+      .map((i) => ({ i, item: sorted[i] }))
+      .sort((a, b) => {
+        if (a.item.startMs !== b.item.startMs) {
+          return a.item.startMs - b.item.startMs;
+        }
+        return b.item.endMs - a.item.endMs;
+      });
+
+    const lanes: { endMs: number }[] = [];
+    const colByMember: number[] = [];
+
+    for (const { item } of members) {
+      let placed = false;
+      for (let lane = 0; lane < lanes.length; lane++) {
+        // Back-to-back (prev ends exactly when next starts) reuses the lane.
+        if (lanes[lane].endMs <= item.startMs) {
+          lanes[lane].endMs = item.endMs;
+          colByMember.push(lane);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        lanes.push({ endMs: item.endMs });
+        colByMember.push(lanes.length - 1);
+      }
+    }
+
+    const totalCols = Math.max(lanes.length, 1);
+    members.forEach(({ i, item }, memberOrder) => {
+      out[i] = {
+        appointment: item.apt,
+        topPct: item.topPct,
+        heightPct: item.heightPct,
+        col: colByMember[memberOrder],
+        totalCols,
+      };
+    });
+  }
+
+  return out;
 }
 
 /**
@@ -199,14 +271,22 @@ export function layoutForDay(
   date: Date,
   appointments: Appointment[]
 ): PositionedAppointment[] {
-  const positioned: { apt: Appointment; topPct: number; heightPct: number }[] =
-    [];
+  const positioned: RawPositioned[] = [];
   for (const apt of appointments) {
     const start = safeParseISO(apt.booking_time);
     if (!start || !isSameDay(start, date)) continue;
     const pos = positionFor(apt);
     if (!pos) continue;
-    positioned.push({ apt, topPct: pos.topPct, heightPct: pos.heightPct });
+    const end =
+      safeParseISO(apt.end_time) ??
+      new Date(start.getTime() + 60 * 60 * 1000);
+    positioned.push({
+      apt,
+      topPct: pos.topPct,
+      heightPct: pos.heightPct,
+      startMs: start.getTime(),
+      endMs: end.getTime(),
+    });
   }
   return packLanes(positioned);
 }
