@@ -316,33 +316,45 @@ export default function AppointmentModal({
   // hard-coding '' on cleanup means we cooperate with any parent
   // modal that already locked overflow — when we close, the outer
   // lock survives instead of getting clobbered to "auto".
+  // Lock both <html> and <body>: Cal's embed can scroll documentElement
+  // via __scrollByDistance even when body overflow is hidden.
   useEffect(() => {
-    const previous = document.body.style.overflow;
+    const previousBody = document.body.style.overflow;
+    const previousHtml = document.documentElement.style.overflow;
     document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = previous;
+      document.body.style.overflow = previousBody;
+      document.documentElement.style.overflow = previousHtml;
     };
   }, []);
 
   // The reschedule embed needs noticeably more width than the
   // details view — Cal's month picker + the time-slot column don't
-  // breathe at `max-w-lg`. Same vertical envelope.
+  // breathe at `max-w-lg`. When rescheduling we also pin height to
+  // the viewport so Cal can't grow the card and scroll the page
+  // behind it (same approach as the public booking drawer).
   const cardWidthClass = isRescheduling ? 'max-w-4xl' : 'max-w-lg';
+  const cardHeightClass = isRescheduling
+    ? 'h-[calc(100dvh-1.25rem)] max-h-[calc(100dvh-1.25rem)]'
+    : 'max-h-[90dvh]';
 
   return (
     <div
-      className={`fixed inset-0 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm ${
+      className={`fixed inset-0 flex items-center justify-center overflow-hidden overscroll-none bg-stone-900/40 p-2.5 backdrop-blur-sm sm:p-4 ${
         stacked ? 'z-70' : 'z-60'
       }`}
       onClick={() => {
         if (statusConfirm) setStatusConfirm(null);
         else onClose();
       }}
+      onWheel={(e) => e.stopPropagation()}
       role="presentation"
     >
       <div
-        className={`relative flex max-h-[90vh] w-full ${cardWidthClass} flex-col overflow-hidden rounded-2xl bg-[#FAF9F6] shadow-2xl transition-[max-width] duration-200`}
+        className={`relative flex w-full ${cardWidthClass} ${cardHeightClass} flex-col overflow-hidden overscroll-contain rounded-2xl bg-[#FAF9F6] shadow-2xl transition-[max-width] duration-200`}
         onClick={(e) => e.stopPropagation()}
+        onWheel={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label={
@@ -868,6 +880,47 @@ function RescheduleView({
   // After blocking a no-op reschedule, Cal sometimes emits linkFailed
   // while its iframe settles — ignore those for a few seconds.
   const ignoreLinkFailedRef = useRef(false);
+  const embedMountRef = useRef<HTMLDivElement | null>(null);
+
+  // Cal's inline embed grows the iframe to content height and asks the
+  // parent to scroll. Pin the iframe to the mount's remaining height so
+  // the booker scrolls internally and the admin calendar stays put.
+  useEffect(() => {
+    if (phase !== 'embed') return;
+    const mount = embedMountRef.current;
+    if (!mount) return;
+
+    const applyFrameBounds = () => {
+      const iframe = mount.querySelector('iframe');
+      if (!iframe) return;
+      const h = mount.clientHeight;
+      if (h <= 0) return;
+      iframe.style.setProperty('width', '100%', 'important');
+      iframe.style.setProperty('height', `${h}px`, 'important');
+      iframe.style.setProperty('max-height', `${h}px`, 'important');
+      iframe.style.setProperty('min-height', '0', 'important');
+    };
+
+    const ro = new ResizeObserver(applyFrameBounds);
+    ro.observe(mount);
+
+    const mo = new MutationObserver(applyFrameBounds);
+    mo.observe(mount, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style', 'height'],
+    });
+
+    applyFrameBounds();
+    const raf = requestAnimationFrame(applyFrameBounds);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, [phase, embedKey]);
 
   useEffect(() => {
     if (!serviceSlug || phase !== 'embed') return;
@@ -1087,8 +1140,8 @@ function RescheduleView({
       : null;
 
   return (
-    <>
-      <div className="flex items-center justify-between border-b border-stone-200 bg-[#FAF9F6] px-6 py-4">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex shrink-0 items-center justify-between border-b border-stone-200 bg-[#FAF9F6] px-4 py-3 sm:px-6 sm:py-4">
         <button
           type="button"
           onClick={onBack}
@@ -1102,7 +1155,7 @@ function RescheduleView({
           <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
             Reschedule
           </p>
-          <h2 className="font-serif text-xl text-stone-900">
+          <h2 className="font-serif text-lg text-stone-900 sm:text-xl">
             {embedMode === 'new_slot' ? 'Pick a new time' : 'Move appointment'}
           </h2>
         </div>
@@ -1131,7 +1184,7 @@ function RescheduleView({
         )}
 
         {phase === 'error' && errorMessage && (
-          <div className="flex flex-1 flex-col items-center justify-center px-6 py-8 text-center">
+          <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-8 text-center">
             <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-700">
               <AlertCircle className="h-6 w-6" />
             </div>
@@ -1180,14 +1233,17 @@ function RescheduleView({
         )}
 
         {phase === 'embed' && calLink && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 sm:p-6">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 sm:p-4">
             {!sameSlotNotice && (
-              <p className="mb-3 text-center text-xs leading-relaxed text-stone-500">
+              <p className="mb-2 shrink-0 text-center text-xs leading-relaxed text-stone-500 sm:mb-3">
                 Pick a new date or time below — your current booking stays
                 until you confirm a different slot.
               </p>
             )}
-            <div className="relative flex min-h-0 flex-1 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+            <div
+              ref={embedMountRef}
+              className="relative flex min-h-0 flex-1 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm"
+            >
               <Cal
                 key={embedKey}
                 namespace={CAL_RESCHEDULE_NAMESPACE}
@@ -1195,12 +1251,16 @@ function RescheduleView({
                 style={{
                   width: '100%',
                   height: '100%',
-                  overflow: 'scroll',
+                  overflow: 'auto',
                 }}
-                config={{ layout: 'month_view', theme: 'light' }}
+                config={{
+                  layout: 'month_view',
+                  theme: 'light',
+                  disableAutoScroll: true,
+                }}
               />
               {sameSlotNotice && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#FAF9F6]/90 p-6 backdrop-blur-[2px]">
+                <div className="absolute inset-0 z-10 flex items-center justify-center overflow-y-auto bg-[#FAF9F6]/90 p-6 backdrop-blur-[2px]">
                   <div className="max-w-sm rounded-2xl border border-stone-200 bg-white px-6 py-7 text-center shadow-sm">
                     <div className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-stone-100 text-stone-600">
                       <Calendar className="h-5 w-5" aria-hidden="true" />
@@ -1244,7 +1304,7 @@ function RescheduleView({
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }
 

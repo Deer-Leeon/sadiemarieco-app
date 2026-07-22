@@ -79,6 +79,9 @@ export const ADMIN_CAL_UI_CONFIG = {
   styles: { branding: { brandColor: '#292524' } },
   hideEventTypeDetails: false,
   layout: 'month_view' as const,
+  /** Keep parent (admin modal / calendar) from scrolling when Cal steps. */
+  disableAutoScroll: true,
+  'ui.autoscroll': 'false',
   cssVarsPerTheme: {
     light: {
       'cal-brand': '#1c1917',
