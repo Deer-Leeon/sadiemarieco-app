@@ -1256,7 +1256,9 @@ function RescheduleView({
                 config={{
                   layout: 'month_view',
                   theme: 'light',
-                  disableAutoScroll: true,
+                  // Cal's typed config is string-valued; auto-scroll is
+                  // also disabled via ADMIN_CAL_UI_CONFIG in getCalApi.
+                  disableAutoScroll: 'true',
                 }}
               />
               {sameSlotNotice && (
