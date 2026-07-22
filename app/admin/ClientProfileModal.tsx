@@ -1908,19 +1908,13 @@ function EditInfoView({
     if (next.last_name !== prev.last_name) {
       payload.last_name = next.last_name.length ? next.last_name : null;
     }
-    if (!next.email) {
-      setError('Email is required.');
-      setSubmitting(false);
-      return;
-    }
-    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email);
-    if (!emailOk) {
+    if (next.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) {
       setError('Enter a valid email address.');
       setSubmitting(false);
       return;
     }
     if (next.email !== prev.email) {
-      payload.email = next.email;
+      payload.email = next.email.length ? next.email : null;
     }
     if (Object.keys(payload).length === 0) {
       onCancel();
@@ -1977,7 +1971,7 @@ function EditInfoView({
           </div>
           <LabeledInput
             id="email"
-            label="Email"
+            label="Email (optional)"
             value={email}
             onChange={setEmail}
             type="email"

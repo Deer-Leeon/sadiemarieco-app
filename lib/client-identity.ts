@@ -1,6 +1,7 @@
 /**
- * Client CRM identity helpers — phone is the canonical CRM key; email is required
- * for new bookings and client records.
+ * Client CRM identity helpers — phone is the canonical CRM key.
+ * Email is optional on bookings and client records (Cal gets a
+ * phone-based placeholder attendee email when it's missing).
  */
 
 import {

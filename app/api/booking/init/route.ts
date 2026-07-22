@@ -4,7 +4,7 @@
  * Creates (or refreshes) a `pending` appointments row immediately after
  * the Cal.com embed fires `bookingSuccessful` — before the client reaches
  * /checkout. Clients are upserted by phone (CRM identifier); email is
- * still required for Stripe checkout and receipts.
+ * optional (receipts / Cal attendee fall back when absent).
  *
  * Idempotent on `cal_event_id`. Never downgrades status on conflict.
  */
@@ -195,12 +195,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     data = await hydrateFromCal(data.calBookingUid, data);
   }
 
-  if (!isValidEmail(data.email)) {
-    return NextResponse.json(
-      { error: 'no_email', message: 'Email is required for checkout and receipts.' },
-      { status: 400 }
-    );
-  }
+  // Email is optional on Cal bookings. Prefer a real address when Cal
+  // (or the client) provided one; otherwise store NULL and let receipt /
+  // reminder emails skip gracefully.
+  const storedEmail = isValidEmail(data.email) ? data.email : null;
 
   const nameParts = splitName(data.name);
   const firstName = nameParts.first;
@@ -223,7 +221,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const upserted = await upsertClientByPhonePrimary({
       firstName,
       lastName,
-      email: data.email,
+      email: storedEmail,
       phoneRaw: data.phone,
     });
     clientId = upserted.clientId;
@@ -247,7 +245,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       VALUES (
         ${clientId}, ${data.serviceName}, ${data.bookingTime}, ${data.endTime},
         ${data.calBookingUid},
-        ${firstName}, ${lastName}, ${data.email}, ${appointmentPhone},
+        ${firstName}, ${lastName}, ${storedEmail}, ${appointmentPhone},
         ${data.bookingNotes}, 'pending'
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET

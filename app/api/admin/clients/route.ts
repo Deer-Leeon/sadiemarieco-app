@@ -39,8 +39,7 @@ import {
 } from '@/lib/client-phone-db';
 import {
   normaliseClientPhone,
-  parseRequiredClientEmail,
-  REQUIRED_CLIENT_EMAIL_MESSAGE,
+  parseOptionalClientEmail,
   sqlPhoneVariants,
 } from '@/lib/client-identity';
 
@@ -223,15 +222,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const firstName = sanitiseName(payload.first_name);
   const lastName = sanitiseName(payload.last_name);
-  const email = parseRequiredClientEmail(payload.email);
-  if (!email) {
+  const email = parseOptionalClientEmail(payload.email);
+  if (
+    typeof payload.email === 'string' &&
+    payload.email.trim().length > 0 &&
+    !email
+  ) {
     return NextResponse.json(
-      { error: 'missing_email', message: REQUIRED_CLIENT_EMAIL_MESSAGE },
+      { error: 'invalid_email', message: 'Enter a valid email address.' },
       { status: 400 }
     );
   }
 
-  // Phone is the CRM identifier; email is required on every client record.
+  // Phone is the CRM identifier. Email is optional — Cal.com gets a
+  // phone-based placeholder when it's missing.
   //
   // Why this branch matters:
   //   Pre-CRM, the webhook created clients keyed by email alone. After

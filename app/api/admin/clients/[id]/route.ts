@@ -26,10 +26,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
-import {
-  parseRequiredClientEmail,
-  REQUIRED_CLIENT_EMAIL_MESSAGE,
-} from '@/lib/client-identity';
+import { parseOptionalClientEmail } from '@/lib/client-identity';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -77,7 +74,7 @@ function sanitiseEmail(raw: unknown): string | null | undefined {
   if (typeof raw !== 'string') return undefined;
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  return parseRequiredClientEmail(trimmed);
+  return parseOptionalClientEmail(trimmed);
 }
 
 // Cheap UUID format check so we can short-circuit obviously-malformed
@@ -194,12 +191,6 @@ export async function PATCH(
     );
   }
 
-  if (changedEmail && (nextEmail === null || payload.email === null)) {
-    return NextResponse.json(
-      { error: 'missing_email', message: REQUIRED_CLIENT_EMAIL_MESSAGE },
-      { status: 400 }
-    );
-  }
   if (
     changedEmail &&
     payload.email !== undefined &&
@@ -209,7 +200,7 @@ export async function PATCH(
     nextEmail === null
   ) {
     return NextResponse.json(
-      { error: 'invalid_email', message: REQUIRED_CLIENT_EMAIL_MESSAGE },
+      { error: 'invalid_email', message: 'Enter a valid email address.' },
       { status: 400 }
     );
   }

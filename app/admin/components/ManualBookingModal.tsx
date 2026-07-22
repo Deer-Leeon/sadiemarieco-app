@@ -46,9 +46,6 @@ interface Props {
   onSuccess: () => void;
 }
 
-const INPUT_CLASS =
-  'block w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 transition-colors focus:border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-200';
-
 const BTN_SECONDARY =
   'rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 disabled:opacity-50';
 
@@ -57,7 +54,8 @@ const BTN_PRIMARY =
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function requiredEmailForApi(raw: string): string | null {
+/** Optional email for the API — null when blank / placeholder / invalid. */
+function optionalEmailForApi(raw: string): string | null {
   const trimmed = raw.trim().toLowerCase();
   if (!trimmed || isPlaceholderClientEmail(trimmed)) return null;
   return EMAIL_RE.test(trimmed) ? trimmed : null;
@@ -251,12 +249,7 @@ export default function ManualBookingModal({
     const trimmedFirst = resolved.firstName.trim();
     const trimmedLast = resolved.lastName.trim();
     const trimmedName = joinFullName(trimmedFirst, trimmedLast);
-    const trimmedEmail = requiredEmailForApi(resolved.email);
-    if (!trimmedEmail) {
-      setError('Enter a valid email address.');
-      setCompleting(false);
-      return;
-    }
+    const trimmedEmail = optionalEmailForApi(resolved.email);
     const parsedPhone = parseClientPhone(resolved.phone);
     if (!parsedPhone) {
       setPhoneTouched(true);
@@ -357,8 +350,7 @@ export default function ManualBookingModal({
     !clientLocked ||
     (resolvedForGates.firstName.trim().length > 0 &&
       resolvedForGates.lastName.trim().length > 0 &&
-      parseClientPhone(resolvedForGates.phone) !== null &&
-      requiredEmailForApi(resolvedForGates.email) !== null);
+      parseClientPhone(resolvedForGates.phone) !== null);
 
   const canAdvanceFromStep1 =
     selectedService !== null &&
@@ -410,7 +402,7 @@ export default function ManualBookingModal({
       if (clientLocked) {
         if (!prefilledClientReady) {
           setError(
-            'This client needs a first name, last name, phone, and email before booking.'
+            'This client needs a first name, last name, and phone before booking.'
           );
           return;
         }
@@ -433,11 +425,6 @@ export default function ManualBookingModal({
   }
 
   const canBook = selectedSlot !== null && !completing;
-  const needsEmailForPrefill =
-    clientLocked && requiredEmailForApi(clientFields.email) === null;
-  const emailInvalid =
-    clientFields.email.trim().length > 0 &&
-    !EMAIL_RE.test(clientFields.email.trim());
 
   const isScheduleStep = step === 3;
   const modalWidth = isScheduleStep ? 'max-w-[460px]' : 'max-w-lg';
@@ -554,31 +541,6 @@ export default function ManualBookingModal({
                     setError(null);
                   }}
                 />
-              )}
-              {needsEmailForPrefill && (
-                <label className="block pt-2">
-                  <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-                    Email needed for this booking
-                  </span>
-                  <input
-                    type="email"
-                    value={clientFields.email}
-                    onChange={(e) =>
-                      setClientFields((prev) => ({
-                        ...prev,
-                        email: e.target.value,
-                      }))
-                    }
-                    autoComplete="email"
-                    aria-invalid={emailInvalid}
-                    className={`${INPUT_CLASS}${emailInvalid ? ' border-rose-200 focus:border-rose-300 focus:ring-rose-100' : ''}`}
-                    placeholder="client@example.com"
-                  />
-                  <p className="mt-1.5 text-xs text-stone-500">
-                    This client has no email on file. Add one to continue —
-                    Cal.com needs it for the booking.
-                  </p>
-                </label>
               )}
             </div>
           )}

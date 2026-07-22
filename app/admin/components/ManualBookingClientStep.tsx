@@ -179,11 +179,6 @@ export default function ManualBookingClientStep({
   const emailInvalid =
     fields.email.trim().length > 0 && !EMAIL_RE.test(fields.email.trim());
 
-  const selectedNeedsEmail =
-    mode === 'existing' &&
-    selectedClient != null &&
-    !usableClientEmail(fields.email || selectedClient.email);
-
   function formatPhoneField() {
     const formatted = formatPhoneInputDisplay(fields.phone);
     if (formatted !== fields.phone.trim()) {
@@ -356,38 +351,12 @@ export default function ManualBookingClientStep({
               )}
             </ul>
           )}
-
-          {selectedNeedsEmail && (
-            <label className="block">
-              <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-                Email needed for this booking
-              </span>
-              <input
-                type="email"
-                value={fields.email}
-                onChange={(e) => onFieldsChange({ email: e.target.value })}
-                autoComplete="email"
-                aria-invalid={emailInvalid}
-                className={`${INPUT_CLASS}${emailInvalid ? ' border-rose-200 focus:border-rose-300 focus:ring-rose-100' : ''}`}
-                placeholder="client@example.com"
-              />
-              <p className="mt-1.5 text-xs text-stone-500">
-                This client has no email on file. Add one to continue — Cal.com
-                needs it for the booking.
-              </p>
-              {emailInvalid && (
-                <p className="mt-1 text-xs text-rose-600" role="alert">
-                  Enter a valid email address.
-                </p>
-              )}
-            </label>
-          )}
         </div>
       ) : (
         <div className="space-y-4">
           <p className="text-xs text-stone-500">
             Phone is required and identifies the client in your CRM. Email is
-            required for Cal.com confirmations.
+            optional.
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block">
@@ -442,11 +411,10 @@ export default function ManualBookingClientStep({
           </label>
           <label className="block">
             <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-              Email
+              Email <span className="normal-case tracking-normal text-stone-400">(optional)</span>
             </span>
             <input
               type="email"
-              required
               value={fields.email}
               onChange={(e) => onFieldsChange({ email: e.target.value })}
               autoComplete="email"
@@ -477,12 +445,10 @@ export function canAdvanceManualBookingClientStep(
     const first = (selectedClient.first_name || fields.firstName).trim();
     const last = (selectedClient.last_name || fields.lastName).trim();
     const phoneRaw = selectedClient.phone || fields.phone;
-    const email = usableClientEmail(fields.email || selectedClient.email);
     return (
       first.length > 0 &&
       last.length > 0 &&
-      parseClientPhone(phoneRaw) !== null &&
-      email.length > 0
+      parseClientPhone(phoneRaw) !== null
     );
   }
 
@@ -490,6 +456,7 @@ export function canAdvanceManualBookingClientStep(
     fields.firstName.trim().length > 0 &&
     fields.lastName.trim().length > 0 &&
     parseClientPhone(fields.phone) !== null &&
-    usableClientEmail(fields.email).length > 0
+    (fields.email.trim().length === 0 ||
+      usableClientEmail(fields.email).length > 0)
   );
 }

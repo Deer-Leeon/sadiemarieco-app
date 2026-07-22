@@ -109,26 +109,17 @@ export default async function ServicesPage() {
           </p>
         </div>
 
-        {/*
-          Editor-facing note about the one config field this CMS can't
-          flip from here. Cal's v2 API blocks marking email as optional
-          on personal accounts (their issue #25430); the workaround is a
-          one-click toggle in Cal's own dashboard, reachable via the
-          "Open in Cal" link on each service card. We surface this
-          context once at the page level rather than next to every
-          card — keeps the cards themselves uncluttered while ensuring
-          the editor has the mental model.
-        */}
         {services.length > 0 && (
           <div className="rounded-md border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">
             <p>
               <span className="font-medium text-stone-900">Heads up:</span>{' '}
               New and updated services collect{' '}
               <span className="font-medium">
-                First name, Last name, Phone, and Email
+                First name, Last name, and Phone
               </span>{' '}
-              on every booking. Email stays required on the Cal.com booking
-              form (we do not expose a way to make it optional from here).
+              on every booking. Email is optional (configure that on each
+              event type in Cal.com if needed — this CMS does not push that
+              toggle).
             </p>
             <p className="mt-2">
               Every new service gets a{' '}

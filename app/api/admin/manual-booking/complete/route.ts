@@ -18,8 +18,7 @@ import {
 import {
   clientPhoneValidationMessage,
   parseClientPhone,
-  parseRequiredClientEmail,
-  REQUIRED_CLIENT_EMAIL_MESSAGE,
+  parseOptionalClientEmail,
   sqlPhoneVariants,
 } from '@/lib/client-identity';
 import {
@@ -71,7 +70,7 @@ function parseBody(input: unknown):
     typeof body.calBookingUid === 'string' ? body.calBookingUid.trim() : '';
   const clientName =
     typeof body.clientName === 'string' ? body.clientName.trim() : '';
-  const clientEmail = parseRequiredClientEmail(body.clientEmail);
+  const clientEmail = parseOptionalClientEmail(body.clientEmail);
   const parsedPhone = parseClientPhone(body.clientPhone);
   const serviceName =
     typeof body.serviceName === 'string' ? body.serviceName.trim() : '';
@@ -93,12 +92,6 @@ function parseBody(input: unknown):
   }
   if (!clientName) {
     return { error: 'invalid_client_name', message: 'clientName is required' };
-  }
-  if (!clientEmail) {
-    return {
-      error: 'missing_client_email',
-      message: REQUIRED_CLIENT_EMAIL_MESSAGE,
-    };
   }
   if (!parsedPhone) {
     return {
