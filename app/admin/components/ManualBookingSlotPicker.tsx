@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
 import {
-  isSlotStartInStudioWindows,
+  isAppointmentWithinStudioWindows,
   studioDaysInRange,
   studioWindowsForDate,
   type StudioAvailabilityBlock,
@@ -75,6 +75,8 @@ function parseSchedulePayload(data: unknown): {
 interface Props {
   eventTypeId: number;
   clientName: string;
+  /** Service length — used so dots go black when the appointment would overrun studio hours. */
+  durationMins: number | null;
   selectedSlot: string | null;
   onSelectSlot: (isoUtc: string | null) => void;
 }
@@ -82,6 +84,7 @@ interface Props {
 export default function ManualBookingSlotPicker({
   eventTypeId,
   clientName,
+  durationMins,
   selectedSlot,
   onSelectSlot,
 }: Props) {
@@ -414,7 +417,11 @@ export default function ManualBookingSlotPicker({
                 const hhmm = slotToStudioLocalHhmm(slot);
                 const inStudio =
                   hhmm != null &&
-                  isSlotStartInStudioWindows(hhmm, selectedDayWindows);
+                  isAppointmentWithinStudioWindows(
+                    hhmm,
+                    durationMins,
+                    selectedDayWindows
+                  );
                 return (
                   <button
                     key={slot}
@@ -444,7 +451,7 @@ export default function ManualBookingSlotPicker({
               })}
             </div>
             <p className="mt-2 text-center text-[10px] uppercase tracking-[0.18em] text-stone-400">
-              Green = studio hours · Black = outside hours
+              Green = fits studio hours · Black = outside or overruns
             </p>
           </>
         ) : (

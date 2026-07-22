@@ -130,20 +130,47 @@ export function studioDaysInRange(
 }
 
 /**
- * True when the slot's start (in studio-local HH:MM) falls inside any
- * planned window: startTime <= slot < endTime.
+ * True when the full appointment fits inside a planned studio window:
+ * start is in [windowStart, windowEnd) and end (start + duration) is
+ * ≤ windowEnd. A 3:00 start for a 90-minute service on a 10:00–16:00 day
+ * is out-of-hours (ends 4:30) even though 3:00 itself is during studio time.
+ *
+ * When duration is missing/invalid, falls back to start-only membership.
+ */
+export function isAppointmentWithinStudioWindows(
+  slotLocalHhmm: string,
+  durationMins: number | null | undefined,
+  windows: StudioTimeWindow[]
+): boolean {
+  const slotMins = hhmmToMinutes(slotLocalHhmm);
+  if (slotMins == null) return false;
+
+  const duration =
+    typeof durationMins === 'number' &&
+    Number.isFinite(durationMins) &&
+    durationMins > 0
+      ? durationMins
+      : null;
+  const endMins = duration == null ? null : slotMins + duration;
+
+  for (const w of windows) {
+    const start = hhmmToMinutes(w.startTime);
+    const end = hhmmToMinutes(w.endTime);
+    if (start == null || end == null) continue;
+    if (slotMins < start || slotMins >= end) continue;
+    if (endMins != null && endMins > end) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * @deprecated Prefer {@link isAppointmentWithinStudioWindows} so long
+ * services that overrun studio end are marked out-of-hours.
  */
 export function isSlotStartInStudioWindows(
   slotLocalHhmm: string,
   windows: StudioTimeWindow[]
 ): boolean {
-  const slotMins = hhmmToMinutes(slotLocalHhmm);
-  if (slotMins == null) return false;
-  for (const w of windows) {
-    const start = hhmmToMinutes(w.startTime);
-    const end = hhmmToMinutes(w.endTime);
-    if (start == null || end == null) continue;
-    if (slotMins >= start && slotMins < end) return true;
-  }
-  return false;
+  return isAppointmentWithinStudioWindows(slotLocalHhmm, null, windows);
 }

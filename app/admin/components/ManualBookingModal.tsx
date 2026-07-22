@@ -567,6 +567,7 @@ export default function ManualBookingModal({
               ) : (
                 <ManualBookingSlotPicker
                   eventTypeId={selectedService.eventTypeId}
+                  durationMins={selectedService.durationMins}
                   clientName={displayName}
                   selectedSlot={selectedSlot}
                   onSelectSlot={setSelectedSlot}

@@ -96,11 +96,15 @@ export const REQUIRED_CLIENT_EMAIL_MESSAGE =
  * Cal.com v2 requires `attendee.email`. When the admin omits email we send a
  * stable placeholder tied to the phone so bookings still succeed; our DB keeps
  * email NULL.
+ *
+ * Domain must accept mail (MX) — Cal returns `email_domain_cannot_receive_mail`
+ * for invented domains like placeholder.sadiemarie.co.
  */
 export function calAttendeeEmailForBooking(
   phoneDigits: string,
   email: string | null
 ): string {
   if (email && isValidEmail(email)) return email;
-  return `bookings+${phoneDigits}@placeholder.sadiemarie.co`;
+  const digits = phoneDigits.replace(/\D/g, '') || 'unknown';
+  return `bookings+${digits}@sadiemarie.co`;
 }
