@@ -2,9 +2,9 @@
  * Service → colour mapping for appointment chrome across the admin
  * dashboard (list view, 3-day / week time grid, month grid, single-
  * day modal, client-profile history). The full appointment block is
- * painted in the service's colour with auto-contrasted text (white
- * on dark backgrounds, near-black on pastels) chosen by YIQ
- * luminance so every hex stays legible.
+ * painted in the service's colour with white labels by default;
+ * only three pastel accents (lightest pink, lightest green, yellow)
+ * flip to black text for contrast.
  *
  * Resolution strategy:
  *   The hex comes from `site_services.color` exclusively — the
@@ -27,34 +27,57 @@
 export interface ServiceColor {
   /** Solid hex painted as the appointment block's full background. */
   accent: string;
-  /** Primary text colour to use on top of `accent`. Auto-chosen per
-   *  background luminance so saturated blues / magentas / greens
-   *  keep white text while pastel pinks, mints, and yellows flip to
-   *  near-black for contrast. */
+  /** Primary text colour on top of `accent`. White for nearly every
+   *  service; black only for the three pastel accents listed in
+   *  {@link BLACK_TEXT_ACCENTS}. */
   text: string;
   /** De-emphasised secondary text colour (timestamp lines, service
-   *  subtitles) — same luminance bucket as `text` but at reduced
-   *  opacity so the hierarchy survives the high-contrast colour shift. */
+   *  subtitles) — same light/dark bucket as `text` at reduced opacity. */
   textMuted: string;
 }
 
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 
 /**
+ * The only backgrounds that render black labels. Everything else —
+ * including medium pinks, sky blue, sage green, and hot magenta —
+ * keeps white text.
+ *
+ * Values match the studio's current pastel picks (screenshot-sampled
+ * / palette). A small RGB distance tolerance absorbs colour-picker
+ * rounding without sweeping in neighbouring mid-tones like `#FEC2D6`.
+ */
+const BLACK_TEXT_ACCENTS: readonly { r: number; g: number; b: number }[] = [
+  { r: 0xfe, g: 0xdc, b: 0xea }, // lightest pink
+  { r: 0xcb, g: 0xe5, b: 0xcb }, // lightest green (Brow Add-On `#CBE5CB`)
+  { r: 0xfe, g: 0xf4, b: 0xb4 }, // yellow
+];
+
+/** Max city-block RGB distance to count as one of the three pastels. */
+const BLACK_TEXT_RGB_SLOP = 18;
+
+function usesBlackText(hex: string): boolean {
+  const { r, g, b } = hexToRgb(hex);
+  return BLACK_TEXT_ACCENTS.some(
+    (target) =>
+      Math.abs(r - target.r) +
+        Math.abs(g - target.g) +
+        Math.abs(b - target.b) <=
+      BLACK_TEXT_RGB_SLOP
+  );
+}
+
+/**
  * Build a {@link ServiceColor} from a single source-of-truth hex.
- * Picks the foreground text colour based on the background's YIQ
- * luminance — the 150 threshold flips deep magentas / forest-greens
- * onto white text while leaving pastels (light pink, mint, yellow)
- * on near-black so labels stay readable.
+ * Default foreground is white; only the three pastel accents in
+ * {@link BLACK_TEXT_ACCENTS} flip to black.
  */
 function makeColor(hex: string): ServiceColor {
-  const { r, g, b } = hexToRgb(hex);
-  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
-  const isDark = yiq < 150;
+  const black = usesBlackText(hex);
   return {
     accent: hex,
-    text: isDark ? '#ffffff' : '#000000',
-    textMuted: isDark ? 'rgba(255, 255, 255, 0.78)' : 'rgba(0, 0, 0, 0.65)',
+    text: black ? '#000000' : '#ffffff',
+    textMuted: black ? 'rgba(0, 0, 0, 0.65)' : 'rgba(255, 255, 255, 0.78)',
   };
 }
 
