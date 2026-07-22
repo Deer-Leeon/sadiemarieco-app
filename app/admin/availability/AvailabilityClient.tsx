@@ -13,8 +13,8 @@
  *     interprets "no entry for Tuesday" as "Tuesday is unbookable").
  *
  *   • Date Overrides — upcoming one-off carve-outs. Past dates move into
- *     an Archived section automatically and are dropped from Cal.com so
- *     the live schedule stays clean.
+ *     an Archived section automatically but stay on Cal.com so they remain
+ *     visible after reload. Dismiss + Save permanently deletes them.
  *
  * Submission groups recurring entries by identical start/end pairs
  * before sending to Cal — `{ days: [Monday, Wednesday], 09:00, 12:45 }`
@@ -270,8 +270,9 @@ export default function AvailabilityClient({ initial }: Props) {
   const [archivedOverrides, setArchivedOverrides] = useState<OverrideRow[]>(
     () => initialPartition.archived
   );
-  const [archiveOpen, setArchiveOpen] = useState(false);
-  const [archiveNotice, setArchiveNotice] = useState<string | null>(null);
+  const [archiveOpen, setArchiveOpen] = useState(
+    () => initialPartition.archived.length > 0
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // `savedAt` is the timestamp of the last successful save; the UI
@@ -283,8 +284,6 @@ export default function AvailabilityClient({ initial }: Props) {
     null
   );
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  /** Prevent Strict Mode double-fire of the auto-archive Cal sync. */
-  const didAutoArchiveRef = useRef(false);
 
   /**
    * Surface client-side validation as the editor types, so a bad
@@ -308,53 +307,6 @@ export default function AvailabilityClient({ initial }: Props) {
     }
     return out;
   }, [weekly, overrides]);
-
-  // Past override dates leave the active list and are dropped from Cal
-  // on the next sync so they don't clutter the live schedule.
-  useEffect(() => {
-    if (didAutoArchiveRef.current) return;
-    if (initialPartition.archived.length === 0) return;
-    didAutoArchiveRef.current = true;
-
-    const count = initialPartition.archived.length;
-    setArchiveNotice(
-      count === 1
-        ? '1 past date override was archived and removed from Cal.com.'
-        : `${count} past date overrides were archived and removed from Cal.com.`
-    );
-    setArchiveOpen(true);
-
-    void (async () => {
-      try {
-        const res = await fetch('/api/admin/availability', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            scheduleId: initial.id,
-            availability: buildAvailabilityPayload(
-              buildInitialWeekly(initial.availability)
-            ),
-            overrides: buildOverridesPayload(initialPartition.active),
-          }),
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          console.error(
-            '[admin/availability] auto-archive Cal sync failed',
-            data
-          );
-          setArchiveNotice(
-            'Past overrides are archived here, but Cal.com could not be updated automatically — hit Save to sync.'
-          );
-        }
-      } catch (err) {
-        console.error('[admin/availability] auto-archive Cal sync failed', err);
-        setArchiveNotice(
-          'Past overrides are archived here, but Cal.com could not be updated automatically — hit Save to sync.'
-        );
-      }
-    })();
-  }, [initial.availability, initial.id, initialPartition]);
 
   // ── Weekly mutators ─────────────────────────────────────────────────────
 
@@ -428,14 +380,13 @@ export default function AvailabilityClient({ initial }: Props) {
     setIsSaving(true);
     try {
       // Re-partition in case "today" rolled over while the page was open.
-      const partitioned = partitionOverridesByDate(overrides, todayYmd());
-      if (partitioned.archived.length > 0) {
-        setOverrides(partitioned.active);
-        setArchivedOverrides((prev) =>
-          sortArchivedOverrideRows([...prev, ...partitioned.archived])
-        );
-        setArchiveOpen(true);
-      }
+      const partitioned = partitionOverridesByDate(
+        [...overrides, ...archivedOverrides],
+        todayYmd()
+      );
+      setOverrides(partitioned.active);
+      setArchivedOverrides(partitioned.archived);
+      if (partitioned.archived.length > 0) setArchiveOpen(true);
 
       const res = await fetch('/api/admin/availability', {
         method: 'PATCH',
@@ -443,8 +394,12 @@ export default function AvailabilityClient({ initial }: Props) {
         body: JSON.stringify({
           scheduleId: initial.id,
           availability: buildAvailabilityPayload(weekly),
-          // Past overrides stay in the Archive UI only — never re-pushed to Cal.
-          overrides: buildOverridesPayload(partitioned.active),
+          // Keep archived overrides on Cal so they reappear after reload.
+          // Dismiss removes them from local archive; save then drops them.
+          overrides: buildOverridesPayload([
+            ...partitioned.active,
+            ...partitioned.archived,
+          ]),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -546,12 +501,6 @@ export default function AvailabilityClient({ initial }: Props) {
           </button>
         </header>
 
-        {archiveNotice && (
-          <p className="mb-4 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">
-            {archiveNotice}
-          </p>
-        )}
-
         {overrides.length === 0 ? (
           <p className="py-8 text-center text-sm italic text-stone-400">
             No upcoming date overrides. Add one to close a specific date or
@@ -594,7 +543,7 @@ export default function AvailabilityClient({ initial }: Props) {
                 </span>
               </span>
               <span className="text-xs text-stone-400">
-                Past dates — kept for reference, not sent to Cal
+                Past dates — kept for reference · Dismiss to delete
               </span>
             </button>
 

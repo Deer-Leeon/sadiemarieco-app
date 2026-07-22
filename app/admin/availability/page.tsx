@@ -76,8 +76,8 @@ export default async function AvailabilityPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <p className="max-w-2xl text-sm text-stone-500">
             Set the studio's weekly recurring hours and add one-off date
-            overrides. Past override dates archive automatically and are
-            removed from Cal.com so only upcoming carve-outs stay active.
+            overrides. Past override dates move into Archived automatically
+            and stay there for reference until you dismiss them.
           </p>
           <p className="shrink-0 text-[10px] font-medium uppercase tracking-[0.28em] text-stone-400">
             Timezone · {STUDIO_TIMEZONE.replace('_', ' ')}
