@@ -34,6 +34,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Appointment } from '@/app/admin/types';
+import { normalizeStoredBookingNotes } from '@/lib/cal-booking-notes';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
 import { sqlPhoneVariants } from '@/lib/client-identity';
 
@@ -99,7 +100,7 @@ function rowToAppointment(row: AppointmentRow): Appointment {
     status: row.status,
     client_phone: row.client_phone,
     client_email: row.client_email,
-    booking_notes: row.booking_notes,
+    booking_notes: normalizeStoredBookingNotes(row.booking_notes),
     service_price:
       row.service_price === null
         ? null

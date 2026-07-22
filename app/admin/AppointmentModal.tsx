@@ -24,6 +24,7 @@ import {
   isSameAppointmentSlot,
   rescheduleSameSlotNotice,
 } from '@/lib/appointment-slot';
+import { normalizeStoredBookingNotes } from '@/lib/cal-booking-notes';
 import {
   ADMIN_CAL_UI_CONFIG,
   CAL_USERNAME,
@@ -338,6 +339,9 @@ export default function AppointmentModal({
   const cardHeightClass = isRescheduling
     ? 'h-[calc(100dvh-1.25rem)] max-h-[calc(100dvh-1.25rem)]'
     : 'max-h-[90dvh]';
+  const displayBookingNotes = normalizeStoredBookingNotes(
+    appointment.booking_notes
+  );
 
   return (
     <div
@@ -401,8 +405,8 @@ export default function AppointmentModal({
                       : undefined
                   }
                 />
-                {appointment.booking_notes?.trim() ? (
-                  <BookingNotesBox notes={appointment.booking_notes.trim()} />
+                {displayBookingNotes ? (
+                  <BookingNotesBox notes={displayBookingNotes} />
                 ) : null}
                 <DateTimeBox appointment={appointment} />
                 <ServiceBox appointment={appointment} />
