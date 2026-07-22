@@ -12,11 +12,9 @@
  *     toggled off are simply omitted from the payload on save (Cal
  *     interprets "no entry for Tuesday" as "Tuesday is unbookable").
  *
- *   • Date Overrides — a list of one-off date carve-outs. Each row
- *     is either "Unavailable all day" (encoded on the wire as
- *     startTime === endTime === "00:00") or "Custom hours" with
- *     explicit start/end. "Add date override" opens a dialog to pick
- *     the date and hours before the row is inserted.
+ *   • Date Overrides — upcoming one-off carve-outs. Past dates move into
+ *     an Archived section automatically and are dropped from Cal.com so
+ *     the live schedule stays clean.
  *
  * Submission groups recurring entries by identical start/end pairs
  * before sending to Cal — `{ days: [Monday, Wednesday], 09:00, 12:45 }`
@@ -32,7 +30,16 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Calendar, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
+import {
+  Calendar,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Plus,
+  Save,
+  Trash2,
+  X,
+} from 'lucide-react';
 
 import {
   DAY_INDICES,
@@ -152,12 +159,47 @@ function sortOverrideRows(rows: OverrideRow[]): OverrideRow[] {
   });
 }
 
+/** Most recent past date first in the archive. */
+function sortArchivedOverrideRows(rows: OverrideRow[]): OverrideRow[] {
+  return [...rows].sort((a, b) => {
+    if (a.date !== b.date) return b.date.localeCompare(a.date);
+    return a.id.localeCompare(b.id);
+  });
+}
+
+/** Studio-local YYYY-MM-DD (America/Denver), not the browser's timezone. */
 function todayYmd(): string {
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: STUDIO_TIMEZONE,
+  }).format(new Date());
+}
+
+function partitionOverridesByDate(
+  rows: OverrideRow[],
+  today: string
+): { active: OverrideRow[]; archived: OverrideRow[] } {
+  const active: OverrideRow[] = [];
+  const archived: OverrideRow[] = [];
+  for (const row of rows) {
+    if (row.date < today) archived.push(row);
+    else active.push(row);
+  }
+  return {
+    active: sortOverrideRows(active),
+    archived: sortArchivedOverrideRows(archived),
+  };
+}
+
+function formatOverrideDateLabel(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m || !d) return ymd;
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: STUDIO_TIMEZONE,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(Date.UTC(y, m - 1, d, 12)));
 }
 
 function makeOverrideRow(
@@ -208,12 +250,28 @@ function buildOverridesPayload(rows: OverrideRow[]): ScheduleOverride[] {
 // ─── Component ────────────────────────────────────────────────────────────
 
 export default function AvailabilityClient({ initial }: Props) {
+  const initialPartition = useMemo(
+    () =>
+      partitionOverridesByDate(
+        buildInitialOverrides(initial.overrides),
+        todayYmd()
+      ),
+    // Only hydrate from the server snapshot once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [initial.id]
+  );
+
   const [weekly, setWeekly] = useState(() =>
     buildInitialWeekly(initial.availability)
   );
-  const [overrides, setOverrides] = useState<OverrideRow[]>(() =>
-    buildInitialOverrides(initial.overrides)
+  const [overrides, setOverrides] = useState<OverrideRow[]>(
+    () => initialPartition.active
   );
+  const [archivedOverrides, setArchivedOverrides] = useState<OverrideRow[]>(
+    () => initialPartition.archived
+  );
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveNotice, setArchiveNotice] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // `savedAt` is the timestamp of the last successful save; the UI
@@ -225,6 +283,8 @@ export default function AvailabilityClient({ initial }: Props) {
     null
   );
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  /** Prevent Strict Mode double-fire of the auto-archive Cal sync. */
+  const didAutoArchiveRef = useRef(false);
 
   /**
    * Surface client-side validation as the editor types, so a bad
@@ -249,6 +309,53 @@ export default function AvailabilityClient({ initial }: Props) {
     return out;
   }, [weekly, overrides]);
 
+  // Past override dates leave the active list and are dropped from Cal
+  // on the next sync so they don't clutter the live schedule.
+  useEffect(() => {
+    if (didAutoArchiveRef.current) return;
+    if (initialPartition.archived.length === 0) return;
+    didAutoArchiveRef.current = true;
+
+    const count = initialPartition.archived.length;
+    setArchiveNotice(
+      count === 1
+        ? '1 past date override was archived and removed from Cal.com.'
+        : `${count} past date overrides were archived and removed from Cal.com.`
+    );
+    setArchiveOpen(true);
+
+    void (async () => {
+      try {
+        const res = await fetch('/api/admin/availability', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scheduleId: initial.id,
+            availability: buildAvailabilityPayload(
+              buildInitialWeekly(initial.availability)
+            ),
+            overrides: buildOverridesPayload(initialPartition.active),
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          console.error(
+            '[admin/availability] auto-archive Cal sync failed',
+            data
+          );
+          setArchiveNotice(
+            'Past overrides are archived here, but Cal.com could not be updated automatically — hit Save to sync.'
+          );
+        }
+      } catch (err) {
+        console.error('[admin/availability] auto-archive Cal sync failed', err);
+        setArchiveNotice(
+          'Past overrides are archived here, but Cal.com could not be updated automatically — hit Save to sync.'
+        );
+      }
+    })();
+  }, [initial.availability, initial.id, initialPartition]);
+
   // ── Weekly mutators ─────────────────────────────────────────────────────
 
   function setDayEnabled(idx: DayIndex, enabled: boolean) {
@@ -268,6 +375,14 @@ export default function AvailabilityClient({ initial }: Props) {
 
   function confirmAddOverride(draft: Omit<OverrideRow, 'id'>) {
     const row = makeOverrideRow(draft);
+    if (row.date < todayYmd()) {
+      setArchivedOverrides((prev) =>
+        sortArchivedOverrideRows([...prev, row])
+      );
+      setArchiveOpen(true);
+      setAddDialogOpen(false);
+      return;
+    }
     setOverrides((prev) => sortOverrideRows([...prev, row]));
     setHighlightOverrideId(row.id);
     setAddDialogOpen(false);
@@ -276,12 +391,27 @@ export default function AvailabilityClient({ initial }: Props) {
     setOverrides((prev) => prev.filter((r) => r.id !== id));
     setHighlightOverrideId((prev) => (prev === id ? null : prev));
   }
+  function removeArchivedOverride(id: string) {
+    setArchivedOverrides((prev) => prev.filter((r) => r.id !== id));
+  }
   function patchOverride(id: string, patch: Partial<OverrideRow>) {
-    setOverrides((prev) =>
-      sortOverrideRows(
-        prev.map((r) => (r.id === id ? { ...r, ...patch } : r))
-      )
-    );
+    setOverrides((prev) => {
+      const next = prev.map((r) => (r.id === id ? { ...r, ...patch } : r));
+      const todayStudio = todayYmd();
+      const stillActive: OverrideRow[] = [];
+      const movedToArchive: OverrideRow[] = [];
+      for (const row of next) {
+        if (row.date < todayStudio) movedToArchive.push(row);
+        else stillActive.push(row);
+      }
+      if (movedToArchive.length > 0) {
+        setArchivedOverrides((archived) =>
+          sortArchivedOverrideRows([...archived, ...movedToArchive])
+        );
+        setArchiveOpen(true);
+      }
+      return sortOverrideRows(stillActive);
+    });
   }
 
   // ── Save ────────────────────────────────────────────────────────────────
@@ -297,13 +427,24 @@ export default function AvailabilityClient({ initial }: Props) {
     }
     setIsSaving(true);
     try {
+      // Re-partition in case "today" rolled over while the page was open.
+      const partitioned = partitionOverridesByDate(overrides, todayYmd());
+      if (partitioned.archived.length > 0) {
+        setOverrides(partitioned.active);
+        setArchivedOverrides((prev) =>
+          sortArchivedOverrideRows([...prev, ...partitioned.archived])
+        );
+        setArchiveOpen(true);
+      }
+
       const res = await fetch('/api/admin/availability', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           scheduleId: initial.id,
           availability: buildAvailabilityPayload(weekly),
-          overrides: buildOverridesPayload(overrides),
+          // Past overrides stay in the Archive UI only — never re-pushed to Cal.
+          overrides: buildOverridesPayload(partitioned.active),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -405,10 +546,16 @@ export default function AvailabilityClient({ initial }: Props) {
           </button>
         </header>
 
+        {archiveNotice && (
+          <p className="mb-4 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">
+            {archiveNotice}
+          </p>
+        )}
+
         {overrides.length === 0 ? (
           <p className="py-8 text-center text-sm italic text-stone-400">
-            No date overrides. Add one to close a specific date or carve out
-            different hours.
+            No upcoming date overrides. Add one to close a specific date or
+            carve out different hours.
           </p>
         ) : (
           <ul className="space-y-3">
@@ -423,6 +570,65 @@ export default function AvailabilityClient({ initial }: Props) {
               />
             ))}
           </ul>
+        )}
+
+        {archivedOverrides.length > 0 && (
+          <div className="mt-6 border-t border-stone-100 pt-4">
+            <button
+              type="button"
+              onClick={() => setArchiveOpen((open) => !open)}
+              className="flex w-full items-center justify-between gap-3 text-left"
+              aria-expanded={archiveOpen}
+            >
+              <span className="flex items-center gap-2">
+                {archiveOpen ? (
+                  <ChevronDown className="h-4 w-4 text-stone-400" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-stone-400" />
+                )}
+                <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+                  Archived
+                </span>
+                <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-medium tabular-nums text-stone-500">
+                  {archivedOverrides.length}
+                </span>
+              </span>
+              <span className="text-xs text-stone-400">
+                Past dates — kept for reference, not sent to Cal
+              </span>
+            </button>
+
+            {archiveOpen && (
+              <ul className="mt-3 space-y-2">
+                {archivedOverrides.map((row) => (
+                  <li
+                    key={row.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200 bg-stone-50/80 px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-stone-700">
+                        {formatOverrideDateLabel(row.date)}
+                      </p>
+                      <p className="mt-0.5 text-xs text-stone-500">
+                        {row.unavailable
+                          ? 'Unavailable all day'
+                          : `${row.startTime} – ${row.endTime}`}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeArchivedOverride(row.id)}
+                      aria-label={`Dismiss archived override ${row.date}`}
+                      className="inline-flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 text-xs font-medium text-stone-500 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      Dismiss
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </section>
 
@@ -790,6 +996,7 @@ function AddOverrideDialog({
             <input
               type="date"
               value={date}
+              min={todayYmd()}
               onChange={(e) => setDate(e.target.value)}
               required
               autoFocus
