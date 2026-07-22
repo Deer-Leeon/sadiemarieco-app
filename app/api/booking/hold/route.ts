@@ -50,6 +50,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       expiresAt,
       holdMinutes: CHECKOUT_HOLD_MINUTES,
       expired: expiredByTime || expiredByStatus,
+      bookingTime: row.booking_time,
+      endTime: row.end_time,
+      serviceName: row.service_name,
     });
   } catch (err) {
     console.error('[api/booking/hold] GET failed:', errorMessage(err));

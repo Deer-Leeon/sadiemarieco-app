@@ -1,8 +1,10 @@
 import { sql } from '@vercel/postgres';
 import { Resend } from 'resend';
 
-import { STUDIO_TIMEZONE } from '@/lib/cal-config';
 import { generateConfirmationHtml } from '@/lib/email-templates';
+import { formatBookingStartParts } from '@/lib/format-booking-time';
+
+export { formatBookingStartParts } from '@/lib/format-booking-time';
 
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL || 'Sadie Marie <bookings@sadiemarie.co>';
@@ -11,40 +13,6 @@ function maskEmail(email: string): string {
   if (!email.includes('@')) return '[redacted]';
   const [local, domain] = email.split('@');
   return `${local.slice(0, 1)}***@${domain}`;
-}
-
-export function formatBookingStartParts(iso: string): {
-  date: string;
-  time: string;
-  combined: string;
-} {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return { date: iso, time: '', combined: iso };
-  }
-
-  const datePart = new Intl.DateTimeFormat('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    timeZone: STUDIO_TIMEZONE,
-  }).format(date);
-
-  const timePart = new Intl.DateTimeFormat('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-    timeZone: STUDIO_TIMEZONE,
-  })
-    .format(date)
-    .replace(/\s?AM$/i, 'am')
-    .replace(/\s?PM$/i, 'pm');
-
-  return {
-    date: datePart,
-    time: timePart,
-    combined: `${datePart} at ${timePart}`,
-  };
 }
 
 /** Idempotent per booking — prevents duplicate sends from parallel webhooks. */

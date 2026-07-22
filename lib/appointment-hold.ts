@@ -3,6 +3,9 @@ import { sql } from '@vercel/postgres';
 export interface AppointmentHoldRow {
   created_at: string | null;
   status: string | null;
+  booking_time: string | null;
+  end_time: string | null;
+  service_name: string | null;
 }
 
 function serializeTimestamp(value: Date | string | null): string | null {
@@ -16,8 +19,14 @@ function serializeTimestamp(value: Date | string | null): string | null {
 export async function getAppointmentHoldByCalUid(
   calBookingUid: string
 ): Promise<AppointmentHoldRow | null> {
-  const { rows } = await sql<{ created_at: Date | string | null; status: string | null }>`
-    SELECT created_at, status
+  const { rows } = await sql<{
+    created_at: Date | string | null;
+    status: string | null;
+    booking_time: Date | string | null;
+    end_time: Date | string | null;
+    service_name: string | null;
+  }>`
+    SELECT created_at, status, booking_time, end_time, service_name
     FROM appointments
     WHERE cal_event_id = ${calBookingUid}
     LIMIT 1
@@ -26,5 +35,8 @@ export async function getAppointmentHoldByCalUid(
   return {
     created_at: serializeTimestamp(rows[0].created_at),
     status: rows[0].status,
+    booking_time: serializeTimestamp(rows[0].booking_time),
+    end_time: serializeTimestamp(rows[0].end_time),
+    service_name: rows[0].service_name,
   };
 }

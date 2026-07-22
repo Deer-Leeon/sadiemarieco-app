@@ -9,6 +9,10 @@ import {
   holdDeadlineMs,
   HOLD_EXPIRED_MESSAGE,
 } from '@/lib/booking-hold';
+import {
+  formatAppointmentWhen,
+  formatServiceTitleForDisplay,
+} from '@/lib/format-booking-time';
 import { loadStripe, type Stripe, type StripeElementsOptions } from '@stripe/stripe-js';
 import {
   Elements,
@@ -193,11 +197,17 @@ const STRIPE_APPEARANCE: StripeElementsOptions['appearance'] = {
 interface CheckoutClientProps {
   initialHoldCreatedAt?: string | null;
   initialHoldExpired?: boolean;
+  initialBookingTime?: string | null;
+  initialEndTime?: string | null;
+  initialServiceName?: string | null;
 }
 
 export default function CheckoutClient({
   initialHoldCreatedAt = null,
   initialHoldExpired = false,
+  initialBookingTime = null,
+  initialEndTime = null,
+  initialServiceName = null,
 }: CheckoutClientProps) {
   const params = useSearchParams();
   // The Cal.com embed handler in `public/js/main.js` redirects here on
@@ -221,10 +231,26 @@ export default function CheckoutClient({
   );
   const [holdExpired, setHoldExpired] = useState(initialHoldExpired);
   const [countdownLabel, setCountdownLabel] = useState('');
+  const [bookingTime, setBookingTime] = useState<string | null>(
+    initialBookingTime
+  );
+  const [endTime, setEndTime] = useState<string | null>(initialEndTime);
+  const [serviceName, setServiceName] = useState<string | null>(
+    initialServiceName
+  );
   /** Gate the return CTA until Cal cancel finishes — otherwise the booker can reopen while the only Saturday slot is still held. */
   const [holdReleaseState, setHoldReleaseState] = useState<
     'idle' | 'releasing' | 'released' | 'failed'
   >('idle');
+
+  const appointmentWhen = useMemo(
+    () => (bookingTime ? formatAppointmentWhen(bookingTime, endTime) : null),
+    [bookingTime, endTime]
+  );
+  const serviceLabel = useMemo(
+    () => formatServiceTitleForDisplay(serviceName),
+    [serviceName]
+  );
 
   // Poll the hold row so a cron-driven `canceled_by_system` flip disables
   // checkout even if the local timer hasn't ticked yet.
@@ -244,9 +270,15 @@ export default function CheckoutClient({
         const data = (await res.json()) as {
           createdAt?: string | null;
           expired?: boolean;
+          bookingTime?: string | null;
+          endTime?: string | null;
+          serviceName?: string | null;
         };
         if (data.createdAt) setHoldCreatedAt(data.createdAt);
         if (data.expired) setHoldExpired(true);
+        if (data.bookingTime) setBookingTime(data.bookingTime);
+        if (data.endTime !== undefined) setEndTime(data.endTime ?? null);
+        if (data.serviceName) setServiceName(data.serviceName);
       } catch {
         // Non-fatal — the local countdown still enforces the window.
       }
@@ -457,6 +489,8 @@ export default function CheckoutClient({
               email={email}
               holdExpired={holdExpired}
               countdownLabel={countdownLabel}
+              appointmentWhen={appointmentWhen}
+              serviceLabel={serviceLabel}
             />
           </Elements>
         )}
@@ -563,6 +597,8 @@ interface FormProps {
   email: string;
   holdExpired: boolean;
   countdownLabel: string;
+  appointmentWhen: { date: string; timeRange: string } | null;
+  serviceLabel: string;
 }
 
 function CheckoutForm({
@@ -571,6 +607,8 @@ function CheckoutForm({
   email,
   holdExpired,
   countdownLabel,
+  appointmentWhen,
+  serviceLabel,
 }: FormProps) {
   const stripe = useStripe();
   const elements = useElements();
@@ -688,6 +726,25 @@ function CheckoutForm({
           No charge today.
         </span>
       </p>
+
+      {appointmentWhen && (
+        <div className="mt-6 rounded-md border border-stone-200 bg-stone-50 px-4 py-4">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+            Appointment
+          </p>
+          <p className="mt-2 font-serif text-xl leading-snug text-stone-900">
+            {appointmentWhen.date}
+          </p>
+          <p className="mt-1 text-sm font-medium tabular-nums text-stone-700">
+            {appointmentWhen.timeRange}
+          </p>
+          {serviceLabel ? (
+            <p className="mt-2 text-xs leading-relaxed text-stone-500">
+              {serviceLabel}
+            </p>
+          ) : null}
+        </div>
+      )}
 
       {countdownLabel && (
         <div

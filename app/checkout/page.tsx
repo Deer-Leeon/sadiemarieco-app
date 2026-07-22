@@ -40,6 +40,9 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
 
   let initialHoldCreatedAt: string | null = null;
   let initialHoldExpired = false;
+  let initialBookingTime: string | null = null;
+  let initialEndTime: string | null = null;
+  let initialServiceName: string | null = null;
 
   if (uid) {
     const hold = await getAppointmentHoldByCalUid(uid);
@@ -48,6 +51,9 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
       initialHoldExpired =
         (hold.status || '').toLowerCase() === 'canceled_by_system' ||
         isHoldExpired(hold.created_at);
+      initialBookingTime = hold.booking_time;
+      initialEndTime = hold.end_time;
+      initialServiceName = hold.service_name;
     }
   }
 
@@ -56,6 +62,9 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
       <CheckoutClient
         initialHoldCreatedAt={initialHoldCreatedAt}
         initialHoldExpired={initialHoldExpired}
+        initialBookingTime={initialBookingTime}
+        initialEndTime={initialEndTime}
+        initialServiceName={initialServiceName}
       />
     </Suspense>
   );
