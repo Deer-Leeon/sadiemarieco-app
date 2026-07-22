@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Loader2, X } from 'lucide-react';
 
 import ManualBookingClientStep, {
@@ -21,6 +22,7 @@ import {
   parseClientPhone,
 } from '@/lib/client-identity';
 
+import { clientDisplayName } from '../helpers';
 import type { Client } from '../types';
 import {
   bookingEndFromDuration,
@@ -32,11 +34,20 @@ import {
 type WizardStep = 1 | 2 | 3;
 
 interface Props {
-  services: ManualBookingServiceOption[];
-  groupHeaders: ManualBookingServiceGroupHeader[];
+  /** When omitted, the modal loads the catalogue from the API. */
+  services?: ManualBookingServiceOption[];
+  groupHeaders?: ManualBookingServiceGroupHeader[];
+  /**
+   * When set, skips the client-details step — the booking is for this
+   * CRM client (service → schedule only).
+   */
+  prefilledClient?: Client;
   onClose: () => void;
   onSuccess: () => void;
 }
+
+const INPUT_CLASS =
+  'block w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 transition-colors focus:border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-200';
 
 const BTN_SECONDARY =
   'rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 disabled:opacity-50';
@@ -50,6 +61,18 @@ function requiredEmailForApi(raw: string): string | null {
   const trimmed = raw.trim().toLowerCase();
   if (!trimmed || isPlaceholderClientEmail(trimmed)) return null;
   return EMAIL_RE.test(trimmed) ? trimmed : null;
+}
+
+function fieldsFromClient(client: Client): ManualBookingClientFields {
+  return {
+    firstName: client.first_name?.trim() || '',
+    lastName: client.last_name?.trim() || '',
+    phone: client.phone ? formatPhoneInputDisplay(client.phone) : '',
+    email:
+      client.email && !isPlaceholderClientEmail(client.email)
+        ? client.email.trim()
+        : '',
+  };
 }
 
 function ManualBookingCompletingOverlay() {
@@ -70,22 +93,107 @@ const EMPTY_FIELDS: ManualBookingClientFields = {
 };
 
 export default function ManualBookingModal({
-  services,
-  groupHeaders,
+  services: servicesProp,
+  groupHeaders: groupHeadersProp,
+  prefilledClient,
   onClose,
   onSuccess,
 }: Props) {
+  const clientLocked = Boolean(prefilledClient);
+
+  const [services, setServices] = useState<ManualBookingServiceOption[]>(
+    servicesProp ?? []
+  );
+  const [groupHeaders, setGroupHeaders] = useState<
+    ManualBookingServiceGroupHeader[]
+  >(groupHeadersProp ?? []);
+  const [catalogLoading, setCatalogLoading] = useState(
+    !(servicesProp && servicesProp.length > 0)
+  );
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+
   const [step, setStep] = useState<WizardStep>(1);
   const [selectedService, setSelectedService] =
     useState<ManualBookingServiceOption | null>(null);
   const [clientMode, setClientMode] = useState<ClientEntryMode>('existing');
-  const [clientFields, setClientFields] =
-    useState<ManualBookingClientFields>(EMPTY_FIELDS);
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [clientFields, setClientFields] = useState<ManualBookingClientFields>(
+    () => (prefilledClient ? fieldsFromClient(prefilledClient) : EMPTY_FIELDS)
+  );
+  const [selectedClient, setSelectedClient] = useState<Client | null>(
+    prefilledClient ?? null
+  );
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (servicesProp && servicesProp.length > 0) {
+      setServices(servicesProp);
+      setGroupHeaders(groupHeadersProp ?? []);
+      setCatalogLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCatalogLoading(true);
+    setCatalogError(null);
+
+    void (async () => {
+      try {
+        const res = await fetch('/api/admin/manual-booking/services');
+        const payload: unknown = await res.json().catch(() => null);
+        if (!res.ok) {
+          const message =
+            payload &&
+            typeof payload === 'object' &&
+            'message' in payload &&
+            typeof (payload as { message: unknown }).message === 'string'
+              ? (payload as { message: string }).message
+              : `Could not load services (HTTP ${res.status})`;
+          if (!cancelled) setCatalogError(message);
+          return;
+        }
+        const nextServices =
+          payload &&
+          typeof payload === 'object' &&
+          'services' in payload &&
+          Array.isArray((payload as { services: unknown }).services)
+            ? ((payload as { services: ManualBookingServiceOption[] }).services)
+            : [];
+        const nextHeaders =
+          payload &&
+          typeof payload === 'object' &&
+          'groupHeaders' in payload &&
+          Array.isArray((payload as { groupHeaders: unknown }).groupHeaders)
+            ? ((
+                payload as { groupHeaders: ManualBookingServiceGroupHeader[] }
+              ).groupHeaders)
+            : [];
+        if (!cancelled) {
+          setServices(nextServices);
+          setGroupHeaders(nextHeaders);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setCatalogError(
+            err instanceof Error ? err.message : 'Could not load services'
+          );
+        }
+      } finally {
+        if (!cancelled) setCatalogLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [servicesProp, groupHeadersProp]);
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -244,7 +352,19 @@ export default function ManualBookingModal({
     }
   }
 
-  const canAdvanceFromStep1 = selectedService !== null;
+  const resolvedForGates = resolvedClientFields();
+  const prefilledClientReady =
+    !clientLocked ||
+    (resolvedForGates.firstName.trim().length > 0 &&
+      resolvedForGates.lastName.trim().length > 0 &&
+      parseClientPhone(resolvedForGates.phone) !== null &&
+      requiredEmailForApi(resolvedForGates.email) !== null);
+
+  const canAdvanceFromStep1 =
+    selectedService !== null &&
+    (!clientLocked || prefilledClientReady) &&
+    !catalogLoading &&
+    !catalogError;
   const canAdvanceFromStep2 = canAdvanceManualBookingClientStep(
     clientMode,
     clientFields,
@@ -252,24 +372,18 @@ export default function ManualBookingModal({
   );
 
   function handleSelectClient(client: Client | null) {
+    if (clientLocked) return;
     setSelectedClient(client);
     setError(null);
     if (!client) {
       setClientFields(EMPTY_FIELDS);
       return;
     }
-    setClientFields({
-      firstName: client.first_name?.trim() || '',
-      lastName: client.last_name?.trim() || '',
-      phone: client.phone ? formatPhoneInputDisplay(client.phone) : '',
-      email:
-        client.email && !isPlaceholderClientEmail(client.email)
-          ? client.email.trim()
-          : '',
-    });
+    setClientFields(fieldsFromClient(client));
   }
 
   function handleModeChange(mode: ClientEntryMode) {
+    if (clientLocked) return;
     setClientMode(mode);
     setError(null);
     setSelectedClient(null);
@@ -277,30 +391,87 @@ export default function ManualBookingModal({
     setPhoneTouched(false);
   }
 
+  function goBack() {
+    setError(null);
+    if (step === 1) {
+      onClose();
+      return;
+    }
+    if (step === 3 && clientLocked) {
+      setStep(1);
+      return;
+    }
+    setStep((s) => (s - 1) as WizardStep);
+  }
+
+  function goForward() {
+    setError(null);
+    if (step === 1) {
+      if (clientLocked) {
+        if (!prefilledClientReady) {
+          setError(
+            'This client needs a first name, last name, phone, and email before booking.'
+          );
+          return;
+        }
+        setStep(3);
+        return;
+      }
+      setStep(2);
+      return;
+    }
+    if (step === 2) {
+      setPhoneTouched(true);
+      const resolved = resolvedClientFields();
+      const formatted = formatPhoneInputDisplay(resolved.phone);
+      if (formatted !== resolved.phone.trim()) {
+        setClientFields((prev) => ({ ...prev, phone: formatted }));
+      }
+      if (!parseClientPhone(resolved.phone)) return;
+      setStep(3);
+    }
+  }
+
   const canBook = selectedSlot !== null && !completing;
+  const needsEmailForPrefill =
+    clientLocked && requiredEmailForApi(clientFields.email) === null;
+  const emailInvalid =
+    clientFields.email.trim().length > 0 &&
+    !EMAIL_RE.test(clientFields.email.trim());
 
   const isScheduleStep = step === 3;
   const modalWidth = isScheduleStep ? 'max-w-[460px]' : 'max-w-lg';
+  const lockedClientName = prefilledClient
+    ? clientDisplayName(prefilledClient.first_name, prefilledClient.last_name)
+    : '';
+
   const headerTitle =
     (isScheduleStep || step === 2) && selectedService
       ? selectedService.title
-      : 'New appointment';
-  const headerSubtitle =
-    step === 1
+      : clientLocked
+        ? lockedClientName || 'Book appointment'
+        : 'New appointment';
+
+  const headerSubtitle = clientLocked
+    ? step === 1
+      ? `Choose a service for ${lockedClientName} · Step 1 of 2`
+      : `Pick an open date & time · Step 2 of 2`
+    : step === 1
       ? 'Choose a service · Step 1 of 3'
       : step === 2
         ? 'Client details · Step 2 of 3'
         : 'Pick an open date & time · Step 3 of 3';
 
-  const resolvedForDisplay = resolvedClientFields();
   const displayName = joinFullName(
-    resolvedForDisplay.firstName.trim(),
-    resolvedForDisplay.lastName.trim()
+    resolvedForGates.firstName.trim(),
+    resolvedForGates.lastName.trim()
   );
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-stone-900/40 p-3 backdrop-blur-sm sm:p-4"
+      className="fixed inset-0 z-80 flex items-center justify-center bg-stone-900/40 p-3 backdrop-blur-sm sm:p-4"
       onClick={completing ? undefined : onClose}
       role="presentation"
     >
@@ -336,31 +507,83 @@ export default function ManualBookingModal({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {error && (
+          {(error || catalogError) && (
             <div
               role="alert"
               className="mb-3 shrink-0 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800"
             >
-              {error}
+              {error || catalogError}
             </div>
           )}
 
           {step === 1 && (
             <div className="space-y-3">
+              {clientLocked && (
+                <p className="rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-600">
+                  Booking for{' '}
+                  <span className="font-medium text-stone-900">
+                    {lockedClientName}
+                  </span>
+                </p>
+              )}
+              {clientLocked &&
+                (!resolvedForGates.firstName.trim() ||
+                  !resolvedForGates.lastName.trim() ||
+                  !parseClientPhone(resolvedForGates.phone)) && (
+                  <p
+                    className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800"
+                    role="alert"
+                  >
+                    This client is missing a name or phone. Update their profile
+                    before booking.
+                  </p>
+                )}
               <p className="text-sm text-stone-600">Choose a service</p>
-              <ManualBookingServicePicker
-                services={services}
-                groupHeaders={groupHeaders}
-                selectedService={selectedService}
-                onSelectService={(service) => {
-                  setSelectedService(service);
-                  setError(null);
-                }}
-              />
+              {catalogLoading ? (
+                <div className="flex items-center gap-2 py-10 text-sm text-stone-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading services…
+                </div>
+              ) : (
+                <ManualBookingServicePicker
+                  services={services}
+                  groupHeaders={groupHeaders}
+                  selectedService={selectedService}
+                  onSelectService={(service) => {
+                    setSelectedService(service);
+                    setError(null);
+                  }}
+                />
+              )}
+              {needsEmailForPrefill && (
+                <label className="block pt-2">
+                  <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+                    Email needed for this booking
+                  </span>
+                  <input
+                    type="email"
+                    value={clientFields.email}
+                    onChange={(e) =>
+                      setClientFields((prev) => ({
+                        ...prev,
+                        email: e.target.value,
+                      }))
+                    }
+                    autoComplete="email"
+                    aria-invalid={emailInvalid}
+                    className={`${INPUT_CLASS}${emailInvalid ? ' border-rose-200 focus:border-rose-300 focus:ring-rose-100' : ''}`}
+                    placeholder="client@example.com"
+                  />
+                  <p className="mt-1.5 text-xs text-stone-500">
+                    This client has no email on file. Add one to continue —
+                    Cal.com needs it for the booking.
+                  </p>
+                </label>
+              )}
             </div>
           )}
 
-          {step === 2 && (
+          {step === 2 && !clientLocked && (
             <ManualBookingClientStep
               mode={clientMode}
               onModeChange={handleModeChange}
@@ -394,11 +617,7 @@ export default function ManualBookingModal({
         <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-stone-200 bg-[#FAF9F6] px-5 py-3">
           <button
             type="button"
-            onClick={() => {
-              setError(null);
-              if (step === 1) onClose();
-              else setStep((s) => (s - 1) as WizardStep);
-            }}
+            onClick={goBack}
             disabled={completing}
             className={BTN_SECONDARY}
           >
@@ -408,19 +627,7 @@ export default function ManualBookingModal({
           {step < 3 ? (
             <button
               type="button"
-              onClick={() => {
-                setError(null);
-                if (step === 2) {
-                  setPhoneTouched(true);
-                  const resolved = resolvedClientFields();
-                  const formatted = formatPhoneInputDisplay(resolved.phone);
-                  if (formatted !== resolved.phone.trim()) {
-                    setClientFields((prev) => ({ ...prev, phone: formatted }));
-                  }
-                  if (!parseClientPhone(resolved.phone)) return;
-                }
-                setStep((s) => (s + 1) as WizardStep);
-              }}
+              onClick={goForward}
               disabled={
                 (step === 1 && !canAdvanceFromStep1) ||
                 (step === 2 && !canAdvanceFromStep2) ||
@@ -449,6 +656,7 @@ export default function ManualBookingModal({
           )}
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

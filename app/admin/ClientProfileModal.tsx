@@ -55,6 +55,7 @@ import {
 } from 'lucide-react';
 
 import ClientNotesHistoryModal from './components/ClientNotesHistoryModal';
+import ManualBookingModal from './components/ManualBookingModal';
 
 import {
   consentDocumentAbsoluteUrl,
@@ -418,6 +419,8 @@ function DossierSection({
     null
   );
   const [refreshKey, setRefreshKey] = useState(0);
+  const [bookingOpen, setBookingOpen] = useState(false);
+  const [bookingToast, setBookingToast] = useState<string | null>(null);
   const [crmStats, setCrmStats] = useState<ClientCrmStats>({
     total_bookings: client.total_bookings,
     lifetime_value: client.lifetime_value,
@@ -494,6 +497,25 @@ function DossierSection({
     <>
       <CrmStatsBar stats={crmStats} />
 
+      <button
+        type="button"
+        onClick={() => setBookingOpen(true)}
+        className="flex w-full items-center gap-3 rounded-lg border border-stone-200 bg-white px-4 py-3 text-left transition-colors hover:border-stone-300 hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-300"
+      >
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-900 text-white">
+          <Plus className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+            Book appointment
+          </span>
+          <span className="mt-0.5 block text-sm text-stone-700">
+            Choose a service and open time for this client.
+          </span>
+        </span>
+        <ChevronRight className="h-4 w-4 shrink-0 text-stone-400" aria-hidden="true" />
+      </button>
+
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <ActionBox
           icon={<Camera className="h-3 w-3" />}
@@ -527,6 +549,36 @@ function DossierSection({
           stacked
           allowClientProfileLink={false}
         />
+      )}
+
+      {bookingOpen && (
+        <ManualBookingModal
+          prefilledClient={client}
+          onClose={() => setBookingOpen(false)}
+          onSuccess={() => {
+            setBookingOpen(false);
+            setBookingToast('Appointment booked successfully.');
+            setRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
+
+      {bookingToast && (
+        <div
+          role="status"
+          className="fixed top-4 left-1/2 z-90 max-w-md -translate-x-1/2 rounded-full border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-sm text-emerald-900 shadow-lg"
+        >
+          <div className="flex items-center gap-3">
+            <span>{bookingToast}</span>
+            <button
+              type="button"
+              onClick={() => setBookingToast(null)}
+              className="text-emerald-700 underline-offset-2 hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
       )}
     </>
   );
