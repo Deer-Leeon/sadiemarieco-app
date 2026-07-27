@@ -55,10 +55,20 @@ Sadie Marie: Your 2 Week Fill on Saturday, July 25 at 10:00am was canceled. A la
 
 ### Gets the day-before reminder
 
+**Lash Services** — ~24h before
+
 **SMS** (lash/fill example)
 
 ```
 Sadie Marie: Reminder — your 2 Week Fill is tomorrow at 10:00am. Please arrive with clean lashes and no eye makeup. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+**Brow Services** — ~48h before (same pattern as reminder emails)
+
+**SMS** (brow example)
+
+```
+Sadie Marie: Reminder — your Brow Lamination is in two days at 10:00am. Please arrive with clean brows and no makeup. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 ---
@@ -147,7 +157,8 @@ Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July
 | Client | Cancel (early) | none |
 | Client | Cancel late + $20 charged | Late-fee receipt |
 | Client | Cancel late, no charge | none |
-| Client | ~24h before | Reminder |
+| Client | ~48h before (brows) | Reminder |
+| Client | ~24h before (lashes) | Reminder |
 | Client | ~1h before | Reminder |
 | Client | Abandon checkout | none |
 | Admin | Book for client | Confirmation |

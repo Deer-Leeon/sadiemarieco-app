@@ -136,13 +136,19 @@ Sadie Marie: You are opted in to appointment messages (confirmations, reminders,
 Sadie Marie: Your [service] is confirmed for [date] at [time]. Manage, reschedule, or cancel: [link]. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
-**#2 – 24h reminder** (`/api/remind` kind=`24h`):
+**#2a – 48h reminder (Brow Services)** (`/api/remind` kind=`48h`):
+
+```text
+Sadie Marie: Reminder — your [service] is in two days at [time]. Please arrive with clean brows and no makeup. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+**#2b – 24h reminder (Lash Services)** (`/api/remind` kind=`24h`):
 
 ```text
 Sadie Marie: Reminder — your [service] is tomorrow at [time]. Please arrive with clean lashes and no eye makeup. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
-(Brows services substitute clean-brows arrival copy in code.)
+(Brows services substitute clean-brows arrival copy in code; lead timing matches reminder emails.)
 
 **#3 – 1h reminder** (`/api/remind` kind=`1h`):
 
