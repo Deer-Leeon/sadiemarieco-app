@@ -3,7 +3,8 @@
  * Stripe charging lives in `no-show-charge.ts`.
  */
 
-export const NO_SHOW_PENALTY_FRACTION = 0.5;
+/** Full service price. Kept as a named fraction so UI/docs can render the %. */
+export const NO_SHOW_PENALTY_FRACTION = 1;
 
 export function penaltyAmountCents(servicePriceDollars: number): number {
   if (!Number.isFinite(servicePriceDollars) || servicePriceDollars <= 0) {

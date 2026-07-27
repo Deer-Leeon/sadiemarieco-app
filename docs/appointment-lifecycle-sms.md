@@ -6,7 +6,7 @@ Every way an appointment can be created or altered in the Sadie Marie app, with 
 
 - Sent only when `appointments.sms_opt_in === true` (client checked SMS consent), except admin manual booking which forces `sms_opt_in = true`.
 - Copy lives in `lib/sms-appointment-copy.js`.
-- Example values below use a **2 Week Fill** on **Saturday, July 25 at 10:00am** (Mountain), manage link `https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA`, and a **$65** no-show fee (50% of a $130 service). Real sends substitute the actual service, time, UID, and amount.
+- Example values below use a **2 Week Fill** on **Saturday, July 25 at 10:00am** (Mountain), manage link `https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA`, and a **$130** no-show fee (100% of a $130 service). Real sends substitute the actual service, time, UID, and amount.
 
 ---
 
@@ -166,17 +166,17 @@ Sadie Marie: Your 2 Week Fill on Saturday, July 25 at 10:00am has been canceled.
 Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July 25 at 10:00am. Please reach out if you'd like to rebook. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
-### 15. Admin marks no-show — charge 50%
+### 15. Admin marks no-show — charge 100%
 
-| | |
-|---|---|
+| Field | Value |
+|-------|-------|
 | **Who** | Admin |
-| **Status** | `no-show` |
+| **Where** | Appointment modal → mark no-show + charge |
 | **SMS** | Yes — no-show with fee (below) |
-| **Notes** | Amount = 50% of matched `site_services` price. Example `$65` = 50% of `$130`. Status is **not** updated if Stripe fails. `no_show_strike = false`. |
+| **Notes** | Amount = 100% of matched `site_services` price. Example `$130` = full `$130` service. Status is **not** updated if Stripe fails. `no_show_strike = false`. |
 
 ```
-Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July 25 at 10:00am. A no-show fee of $65 was charged to your card on file. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July 25 at 10:00am. A no-show fee of $130 was charged to your card on file. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 ### 16. Admin reschedule from dashboard
@@ -326,7 +326,7 @@ Sadie Marie: Your Consultation is in one hour. Please arrive a few minutes early
 | 12 | Client reschedule | reschedule |
 | 13 | Admin cancel | admin cancel |
 | 14 | Admin no-show, no charge | no-show (no fee) |
-| 15 | Admin no-show, charge 50% | no-show (with fee) |
+| 15 | Admin no-show, charge 100% | no-show (with fee) |
 | 16 | Admin reschedule | reschedule |
 | 17 | Admin other status PATCH | **none** |
 | 18–22 | Reminder SMS variants | reminder |

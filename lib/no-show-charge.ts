@@ -22,7 +22,7 @@ export interface NoShowChargeFailure {
 }
 
 /**
- * Charge 50% of the service price off-session against the vaulted card.
+ * Charge the full service price off-session against the vaulted card.
  */
 export async function chargeNoShowPenalty(params: {
   stripeCustomerId: string;
@@ -80,7 +80,10 @@ export async function chargeNoShowPenalty(params: {
       payment_method: paymentMethod.id,
       off_session: true,
       confirm: true,
-      description: `No-show fee (50%) — ${params.serviceLabel}`.slice(0, 500),
+      description: `No-show fee (${Math.round(NO_SHOW_PENALTY_FRACTION * 100)}%) — ${params.serviceLabel}`.slice(
+        0,
+        500
+      ),
       metadata: {
         appointment_id: String(params.appointmentId),
         ...(params.calBookingUid

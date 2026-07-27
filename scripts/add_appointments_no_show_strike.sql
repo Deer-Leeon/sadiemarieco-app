@@ -5,4 +5,4 @@ ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS no_show_strike BOOLEAN NOT NULL DEFAULT FALSE;
 
 COMMENT ON COLUMN appointments.no_show_strike IS
-  'True when marked no-show without charging the 50% fee (admin chose No charge).';
+  'True when marked no-show without charging the full-service fee (admin chose No charge).';

@@ -6,7 +6,7 @@
  *
  * Behaviours per target status:
  *   • 'no-show'
- *       → optionally charge 50% of the matched service price off-session
+ *       → optionally charge 100% of the matched service price off-session
  *         when `charge_no_show: true`, then flip local status. If Stripe
  *         declines, the row stays unchanged. When `charge_no_show` is false
  *         or omitted, only the status is updated.
@@ -53,6 +53,10 @@ import {
   isAppointmentStatus,
   type AppointmentStatus,
 } from '@/app/admin/types';
+import {
+  backfillAppointmentStripeCustomerId,
+  resolveAppointmentStripeCustomerId,
+} from '@/lib/appointment-stripe';
 import { chargeNoShowPenalty } from '@/lib/no-show-charge';
 import { notifyAdminAppointmentStatusSms } from '@/lib/booking-notifications';
 
@@ -78,7 +82,7 @@ interface Context {
 
 interface PatchBody {
   status?: unknown;
-  /** When status is `no-show`, charge 50% off-session only if true. */
+  /** When status is `no-show`, charge 100% off-session only if true. */
   charge_no_show?: unknown;
 }
 
@@ -93,6 +97,7 @@ interface AppointmentForNoShow {
   cal_event_id: string | null;
   status: string | null;
   stripe_customer_id: string | null;
+  client_id: string | null;
   service_name: string | null;
   service_price: string | null;
   client_phone: string | null;
@@ -242,6 +247,7 @@ async function findAppointmentForNoShow(
         a.cal_event_id,
         a.status,
         a.stripe_customer_id,
+        a.client_id::text AS client_id,
         a.service_name,
         a.client_phone,
         a.booking_time,
@@ -285,6 +291,7 @@ async function findAppointmentForNoShow(
         a.cal_event_id,
         a.status,
         a.stripe_customer_id,
+        a.client_id::text AS client_id,
         a.service_name,
         a.client_phone,
         a.booking_time,
@@ -471,7 +478,16 @@ export async function PATCH(
         'appointment';
 
       if (chargeNoShow) {
-        if (!existing.stripe_customer_id) {
+        // Prefer this row's vault; fall back to any vaulted card for the
+        // same client (CRM "on file"). Admin-manual bookings often omit
+        // stripe_customer_id even when the client already checked out once.
+        const stripeCustomerId = await resolveAppointmentStripeCustomerId({
+          stripeCustomerId: existing.stripe_customer_id,
+          clientId: existing.client_id,
+          clientPhone: existing.client_phone,
+        });
+
+        if (!stripeCustomerId) {
           return NextResponse.json(
             {
               error: 'no_vaulted_card',
@@ -483,7 +499,7 @@ export async function PATCH(
         }
 
         const chargeResult = await chargeNoShowPenalty({
-          stripeCustomerId: existing.stripe_customer_id,
+          stripeCustomerId,
           servicePriceDollars: priceRaw,
           appointmentId: String(existing.id),
           calBookingUid: existing.cal_event_id,
@@ -498,6 +514,20 @@ export async function PATCH(
             },
             { status: chargeResult.status }
           );
+        }
+
+        if (!existing.stripe_customer_id) {
+          try {
+            await backfillAppointmentStripeCustomerId({
+              appointmentId: existing.id,
+              stripeCustomerId,
+            });
+          } catch (err) {
+            console.warn(
+              '[api/admin/appointments/[id]/status] vault backfill failed',
+              err
+            );
+          }
         }
 
         noShowCharge = {

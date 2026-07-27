@@ -132,12 +132,12 @@ Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July
 
 ---
 
-### Marks no-show — charges 50% fee
+### Marks no-show — charges 100% fee
 
-**SMS** (example: $65 = half of a $130 service)
+**SMS** (example: $130 = full price of a $130 service)
 
 ```
-Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July 25 at 10:00am. A no-show fee of $65 was charged to your card on file. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July 25 at 10:00am. A no-show fee of $130 was charged to your card on file. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 ---
@@ -165,7 +165,7 @@ Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July
 | Admin | Cancel | Cancel |
 | Admin | Reschedule | Reschedule |
 | Admin | No-show, no charge | No-show |
-| Admin | No-show + charge | No-show + fee |
+| Admin | No-show + charge | No-show + full fee |
 | Admin | Block time | none |
 
 For the full technical map, see `docs/appointment-lifecycle-sms.md`.

@@ -168,7 +168,7 @@ Sadie Marie: Your [service] on [date] at [time] has been canceled. Msg & data ra
 Sadie Marie: You were marked as a no-show for your [service] on [date] at [time]. Please reach out if you'd like to rebook. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
-**#6 – Admin no-show (charged 50%)**:
+**#6 – Admin no-show (charged 100%)**:
 
 ```text
 Sadie Marie: You were marked as a no-show for your [service] on [date] at [time]. A no-show fee of $[amount] was charged to your card on file. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
