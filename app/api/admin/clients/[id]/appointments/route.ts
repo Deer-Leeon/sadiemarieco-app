@@ -191,43 +191,7 @@ export async function GET(
         a.status,
         a.client_phone,
         a.client_email,
-        COALESCE(
-          NULLIF(TRIM(a.stripe_customer_id), ''),
-          (
-            SELECT NULLIF(TRIM(vault.stripe_customer_id), '')
-            FROM appointments vault
-            WHERE NULLIF(TRIM(vault.stripe_customer_id), '') IS NOT NULL
-              AND LOWER(COALESCE(vault.status, '')) NOT IN (
-                'pending',
-                'canceled_by_system'
-              )
-              AND (
-                (
-                  a.client_id IS NOT NULL
-                  AND vault.client_id = a.client_id
-                )
-                OR (
-                  a.client_phone IS NOT NULL
-                  AND vault.client_phone IS NOT NULL
-                  AND LENGTH(
-                    RIGHT(
-                      regexp_replace(a.client_phone, '\D', '', 'g'),
-                      10
-                    )
-                  ) = 10
-                  AND RIGHT(
-                    regexp_replace(a.client_phone, '\D', '', 'g'),
-                    10
-                  ) = RIGHT(
-                    regexp_replace(vault.client_phone, '\D', '', 'g'),
-                    10
-                  )
-                )
-              )
-            ORDER BY vault.booking_time DESC NULLS LAST
-            LIMIT 1
-          )
-        ) AS stripe_customer_id,
+        a.stripe_customer_id,
         a.booking_notes,
         s.price       AS service_price,
         s.description AS service_description,

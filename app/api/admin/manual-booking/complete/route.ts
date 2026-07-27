@@ -28,7 +28,6 @@ import {
   errorMessage,
   gateAdmin,
 } from '@/lib/cal-proxy';
-import { findClientVaultedStripeCustomerId } from '@/lib/appointment-stripe';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -367,24 +366,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    // Copy the client's existing vault onto admin-created rows so no-show /
-    // late-cancel fees can charge without requiring a new checkout.
-    const vaultedStripeCustomerId = await findClientVaultedStripeCustomerId({
-      clientId,
-      clientPhone: parsed.clientPhone,
-    });
-
     await sql`
       INSERT INTO appointments (
         client_id, service_name, booking_time, end_time, cal_event_id,
         client_first_name, client_last_name, client_email, client_phone,
-        status, sms_opt_in, stripe_customer_id
+        status, sms_opt_in
       )
       VALUES (
         ${clientId}, ${appointmentServiceName}, ${bookingTime},
         ${endTime}, ${parsed.calBookingUid},
         ${first}, ${last}, ${parsed.clientEmail}, ${parsed.clientPhone},
-        'confirmed', TRUE, ${vaultedStripeCustomerId}
+        'confirmed', TRUE
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,
@@ -405,11 +397,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ),
         client_phone = EXCLUDED.client_phone,
         status = 'confirmed',
-        sms_opt_in = TRUE,
-        stripe_customer_id = COALESCE(
-          appointments.stripe_customer_id,
-          EXCLUDED.stripe_customer_id
-        )
+        sms_opt_in = TRUE
     `;
 
     const notifications = await notifyBookingConfirmed({
