@@ -4,6 +4,8 @@ What a **client** or **admin** can do, and the studio SMS that goes with it (whe
 
 Example texts below use a **2 Week Fill** on **Saturday, July 25 at 10:00am**. Real sends use the real service, time, link, and fee amount.
 
+**Edit live copy:** Admin → **SMS Messages** (`/admin/sms-messages`). Bodies are stored in `studio_settings.sms_templates`. The brand prefix (`Sadie Marie: `) and STOP/HELP footer are locked; placeholders like `{{service}}`, `{{date}}`, `{{time}}`, `{{manageUrl}}`, `{{amount}}`, and `{{arrivalHint}}` are filled at send time. Saves apply to the next message sent.
+
 ---
 
 ## Client

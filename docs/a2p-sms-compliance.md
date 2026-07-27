@@ -120,7 +120,9 @@ End users opt in on the Sadie Marie website at https://sadiemarie.co when bookin
 
 Sample messages should identify **Sadie Marie** by name and include opt-out language in at least one sample (e.g. Reply STOP to opt out).
 
-### Sample messages (canonical — keep code in sync)
+### Sample messages (canonical defaults — editable in admin)
+
+Default bodies live in `lib/sms-templates.js` and can be overridden in Admin → **SMS Messages** (`/admin/sms-messages`). Outbound texts always keep the locked brand prefix and STOP/HELP footer. Keep Twilio campaign samples aligned with the defaults below unless the studio intentionally changes them in admin.
 
 **Opt-in reply** (START / YES / UNSTOP — configure in Twilio Console):
 
@@ -192,7 +194,8 @@ Sadie Marie: Your [service] on [date] at [time] was canceled. A late-cancel fee 
 | Footer legal links | `public/index.html` |
 | Gate SMS on opt-in | `lib/booking-notifications.js`, `app/api/booking/confirm/route.ts`, `appointments.sms_opt_in` |
 | Reminder SMS | `lib/legacy-handlers/remind.js` (24h + 1h; only if QStash scheduled after confirm + opt-in) |
-| SMS copy | `lib/sms-appointment-copy.js` |
+| SMS copy defaults + send-time resolve | `lib/sms-appointment-copy.js`, `lib/sms-templates.js` |
+| Admin SMS editor | `/admin/sms-messages`, `app/api/admin/sms-messages` |
 | Apply studio fields on new services | `app/api/admin/services/route.ts` |
 
 ---
