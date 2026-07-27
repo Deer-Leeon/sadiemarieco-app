@@ -314,6 +314,32 @@ function DayColumnView({
   );
 }
 
+/** Vertical room for a second line of type inside a time-grid pill. */
+function canStackPillLines(
+  durationMinutes: number | null,
+  heightPct: number
+): boolean {
+  if (durationMinutes != null && durationMinutes < 40) return false;
+  if (heightPct < 5) return false;
+  return true;
+}
+
+/** Whether the secondary copy should include the service name. */
+function includeServiceOnPill(
+  durationMinutes: number | null,
+  heightPct: number,
+  stacked: boolean
+): boolean {
+  if (!stacked) {
+    // Single-line pills (esp. 3-day) have horizontal room — show service
+    // and let truncate clip if the column is narrow.
+    return true;
+  }
+  return (
+    (durationMinutes != null && durationMinutes >= 90) || heightPct >= 9
+  );
+}
+
 function AppointmentBlock({
   positioned,
   onClick,
@@ -335,9 +361,25 @@ function AppointmentBlock({
       ? `${format(start, 'h:mm a')} – ${format(end, 'h:mm a')}`
       : format(start, 'h:mm a')
     : '';
+  const durationMinutes =
+    start && end
+      ? Math.max(0, (end.getTime() - start.getTime()) / 60_000)
+      : null;
 
   const name = clientDisplayName(apt.client_first_name, apt.client_last_name);
   const service = appointmentServiceLabel(apt);
+  const stacked = canStackPillLines(durationMinutes, heightPct);
+  const showService = includeServiceOnPill(
+    durationMinutes,
+    heightPct,
+    stacked
+  );
+  const detailBits = [
+    timeLabel,
+    showService ? service : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const widthPct = 100 / totalCols;
   const leftPct = col * widthPct;
@@ -353,17 +395,17 @@ function AppointmentBlock({
   const clickable = !!onClick;
 
   // Service-type colour coding: the whole pill is painted in the
-  // assigned hex. Foreground text auto-flips to white or stone based
-  // on luminance (see makeColor in serviceColors.ts). No-show pills
-  // keep the neutral grey treatment so the wasted slot reads as
-  // "this didn't happen" regardless of what was booked. Unmapped
-  // services fall back to the original stone palette.
+  // assigned hex. Foreground text auto-flips to white or black based
+  // on YIQ luminance (see serviceColors.ts). No-show pills keep the
+  // neutral grey treatment so the wasted slot reads as "this didn't
+  // happen" regardless of what was booked. Unmapped services fall
+  // back to the original stone palette.
   const color = isNoShow ? null : getServiceColor(apt);
   // Match SingleDayModal pills: solid fill, no black outline. Gap between
   // back-to-back same-colour bookings comes from layout packing / height,
   // not a stroke. No-show and unmapped services keep a left accent stripe.
   const baseClasses =
-    'absolute z-20 overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left';
+    'absolute z-20 overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left leading-tight';
   const variantClasses = isNoShow
     ? 'border-l-[3px] border-l-stone-400 bg-stone-50 opacity-60'
     : color
@@ -372,6 +414,23 @@ function AppointmentBlock({
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : 'pointer-events-none';
+
+  const nameClass = `truncate text-xs font-semibold ${
+    isNoShow
+      ? 'text-gray-400 line-through'
+      : color
+        ? ''
+        : 'text-stone-900'
+  }`;
+  const mutedClass = `text-[10px] ${
+    isNoShow
+      ? 'text-gray-400 line-through'
+      : color
+        ? ''
+        : 'text-stone-600'
+  }`;
+  const nameStyle = color ? { color: color.text } : undefined;
+  const mutedStyle = color ? { color: color.textMuted } : undefined;
 
   return (
     <button
@@ -393,32 +452,38 @@ function AppointmentBlock({
         }),
       }}
     >
-      <div
-        className={`truncate text-xs font-medium ${
-          isNoShow
-            ? 'text-gray-400 line-through'
-            : color
-              ? ''
-              : 'text-stone-900'
-        }`}
-        style={color ? { color: color.text } : undefined}
-      >
-        {name}
-      </div>
-      <div
-        className={`truncate text-[10px] ${
-          isNoShow
-            ? 'text-gray-400 line-through'
-            : color
-              ? ''
-              : 'text-stone-500'
-        }`}
-        style={color ? { color: color.textMuted } : undefined}
-      >
-        {timeLabel}
-        {timeLabel && service ? ' · ' : ''}
-        {service}
-      </div>
+      {stacked ? (
+        <>
+          <div className={nameClass} style={nameStyle}>
+            {name}
+          </div>
+          {detailBits ? (
+            <div className={`truncate ${mutedClass}`} style={mutedStyle}>
+              {detailBits}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div className={`truncate text-xs ${isNoShow ? 'line-through' : ''}`}>
+          <span
+            className={
+              isNoShow
+                ? 'font-semibold text-gray-400'
+                : color
+                  ? 'font-semibold'
+                  : 'font-semibold text-stone-900'
+            }
+            style={nameStyle}
+          >
+            {name}
+          </span>
+          {detailBits ? (
+            <span className={mutedClass} style={mutedStyle}>
+              {` · ${detailBits}`}
+            </span>
+          ) : null}
+        </div>
+      )}
     </button>
   );
 }

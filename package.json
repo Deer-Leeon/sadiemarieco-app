@@ -7,7 +7,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "dev": "vercel dev",
+    "dev": "next dev",
     "next-dev": "next dev",
     "build": "next build",
     "start": "next start",
