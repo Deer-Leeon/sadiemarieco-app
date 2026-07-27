@@ -148,8 +148,38 @@ Sadie Marie: Reminder — your [service] is tomorrow at [time]. Please arrive wi
 Sadie Marie: Your [service] is in one hour. Please arrive with clean lashes and no eye makeup. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
-**Code:** `lib/sms-appointment-copy.js`, `lib/booking-notifications.js`, `lib/legacy-handlers/remind.js`  
-**Send timing:** confirmation + QStash schedules run after checkout confirm (not on Cal `BOOKING_CREATED`).
+**#4 – Admin cancel** (`PATCH …/status` → `canceled_by_admin`):
+
+```text
+Sadie Marie: Your [service] on [date] at [time] has been canceled. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+**#5 – Admin no-show (no charge)**:
+
+```text
+Sadie Marie: You were marked as a no-show for your [service] on [date] at [time]. Please reach out if you'd like to rebook. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+**#6 – Admin no-show (charged 50%)**:
+
+```text
+Sadie Marie: You were marked as a no-show for your [service] on [date] at [time]. A no-show fee of $[amount] was charged to your card on file. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+**#7 – Reschedule** (admin dashboard or client via Cal/manage):
+
+```text
+Sadie Marie: Your [service] has been rescheduled to [date] at [time]. Manage, reschedule, or cancel: [link]. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+**#8 – Late-cancel fee ($20 charged)**:
+
+```text
+Sadie Marie: Your [service] on [date] at [time] was canceled. A late-cancel fee of $20 was charged to your card on file. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+**Code:** `lib/sms-appointment-copy.js`, `lib/booking-notifications.js`, `lib/legacy-handlers/remind.js`, `lib/legacy-handlers/webhook.js`, admin status/reschedule routes  
+**Send timing:** confirmation + QStash schedules run after checkout confirm (not on Cal `BOOKING_CREATED`). Lifecycle SMS only when `appointments.sms_opt_in === true`.
 
 ## File map
 

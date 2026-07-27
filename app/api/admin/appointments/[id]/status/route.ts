@@ -54,6 +54,7 @@ import {
   type AppointmentStatus,
 } from '@/app/admin/types';
 import { chargeNoShowPenalty } from '@/lib/no-show-charge';
+import { notifyAdminAppointmentStatusSms } from '@/lib/booking-notifications';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -94,6 +95,9 @@ interface AppointmentForNoShow {
   stripe_customer_id: string | null;
   service_name: string | null;
   service_price: string | null;
+  client_phone: string | null;
+  booking_time: Date | string | null;
+  sms_opt_in: boolean | null;
 }
 
 function errorMessage(err: unknown): string {
@@ -239,6 +243,9 @@ async function findAppointmentForNoShow(
         a.status,
         a.stripe_customer_id,
         a.service_name,
+        a.client_phone,
+        a.booking_time,
+        a.sms_opt_in,
         s.price AS service_price
       FROM appointments a
       LEFT JOIN LATERAL (
@@ -279,6 +286,9 @@ async function findAppointmentForNoShow(
         a.status,
         a.stripe_customer_id,
         a.service_name,
+        a.client_phone,
+        a.booking_time,
+        a.sms_opt_in,
         s.price AS service_price
       FROM appointments a
       LEFT JOIN LATERAL (
@@ -306,6 +316,49 @@ async function findAppointmentForNoShow(
         LIMIT 1
       ) s ON TRUE
       WHERE a.id = ${intId}
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+  return null;
+}
+
+async function findAppointmentForLifecycleSms(
+  idParam: string
+): Promise<{
+  cal_event_id: string | null;
+  client_phone: string | null;
+  service_name: string | null;
+  booking_time: Date | string | null;
+  sms_opt_in: boolean | null;
+} | null> {
+  if (UUID_RE.test(idParam)) {
+    const { rows } = await sql<{
+      cal_event_id: string | null;
+      client_phone: string | null;
+      service_name: string | null;
+      booking_time: Date | string | null;
+      sms_opt_in: boolean | null;
+    }>`
+      SELECT cal_event_id, client_phone, service_name, booking_time, sms_opt_in
+      FROM appointments
+      WHERE id = ${idParam}::uuid
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+  const intId = parseIntegerId(idParam);
+  if (intId !== null) {
+    const { rows } = await sql<{
+      cal_event_id: string | null;
+      client_phone: string | null;
+      service_name: string | null;
+      booking_time: Date | string | null;
+      sms_opt_in: boolean | null;
+    }>`
+      SELECT cal_event_id, client_phone, service_name, booking_time, sms_opt_in
+      FROM appointments
+      WHERE id = ${intId}
       LIMIT 1
     `;
     return rows[0] ?? null;
@@ -390,12 +443,14 @@ export async function PATCH(
           currency: string;
         }
       | null = null;
+    let noShowRow: AppointmentForNoShow | null = null;
 
     if (targetStatus === 'no-show') {
       const existing = await findAppointmentForNoShow(idParam);
       if (existing === null) {
         return NextResponse.json({ error: 'not_found' }, { status: 404 });
       }
+      noShowRow = existing;
 
       if ((existing.status || '').toLowerCase() === 'no-show') {
         return NextResponse.json(
@@ -488,6 +543,54 @@ export async function PATCH(
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
 
+    // Lifecycle SMS (non-blocking) — only when client opted in.
+    let lifecycleSms: Record<string, unknown> | null = null;
+    try {
+      if (targetStatus === 'no-show' && noShowRow) {
+        const bookingTime =
+          noShowRow.booking_time instanceof Date
+            ? noShowRow.booking_time.toISOString()
+            : noShowRow.booking_time
+              ? String(noShowRow.booking_time)
+              : null;
+        lifecycleSms = await notifyAdminAppointmentStatusSms({
+          kind: chargeNoShow && noShowCharge ? 'no_show_charged' : 'no_show',
+          clientPhone: noShowRow.client_phone,
+          smsOptIn: noShowRow.sms_opt_in,
+          serviceName: noShowRow.service_name,
+          bookingTime,
+          bookingUid: noShowRow.cal_event_id,
+          amountCents: noShowCharge?.amount_cents ?? null,
+        });
+      } else if (targetStatus === 'canceled_by_admin') {
+        const row = await findAppointmentForLifecycleSms(idParam);
+        if (row) {
+          const bookingTime =
+            row.booking_time instanceof Date
+              ? row.booking_time.toISOString()
+              : row.booking_time
+                ? String(row.booking_time)
+                : null;
+          lifecycleSms = await notifyAdminAppointmentStatusSms({
+            kind: 'admin_cancel',
+            clientPhone: row.client_phone,
+            smsOptIn: row.sms_opt_in,
+            serviceName: row.service_name,
+            bookingTime,
+            bookingUid: row.cal_event_id,
+          });
+        }
+      }
+    } catch (smsErr) {
+      console.warn(
+        '[api/admin/appointments/[id]/status] lifecycle SMS failed (non-blocking)',
+        {
+          id: idParam,
+          error: errorMessage(smsErr),
+        }
+      );
+    }
+
     return NextResponse.json({
       appointment: {
         id: updated.id,
@@ -500,6 +603,7 @@ export async function PATCH(
       // still show the booking.
       cal_cancel_error: calCancelError,
       no_show_charge: noShowCharge,
+      lifecycle_sms: lifecycleSms,
     });
   } catch (err) {
     const msg = errorMessage(err);

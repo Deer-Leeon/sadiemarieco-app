@@ -28,7 +28,10 @@ import {
   isSameAppointmentSlot,
   RESCHEDULE_SAME_SLOT_MESSAGE,
 } from '@/lib/appointment-slot';
-import { rescheduleAppointmentReminderEmails } from '@/lib/booking-notifications';
+import {
+  notifyAppointmentRescheduled,
+  rescheduleAppointmentReminderEmails,
+} from '@/lib/booking-notifications';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -81,6 +84,9 @@ interface UpdatedRow {
   booking_time: Date | string | null;
   end_time: Date | string | null;
   status: string | null;
+  client_phone: string | null;
+  service_name: string | null;
+  sms_opt_in: boolean | null;
 }
 
 interface ExistingRow {
@@ -211,7 +217,8 @@ export async function POST(
             end_time     = ${newEndTime},
             status       = 'confirmed'
         WHERE id = ${idParam}::uuid
-        RETURNING id, cal_event_id, booking_time, end_time, status
+        RETURNING id, cal_event_id, booking_time, end_time, status,
+                  client_phone, service_name, sms_opt_in
       `);
     } else if (intId !== null) {
       ({ rows } = await sql<UpdatedRow>`
@@ -221,7 +228,8 @@ export async function POST(
             end_time     = ${newEndTime},
             status       = 'confirmed'
         WHERE id = ${intId}
-        RETURNING id, cal_event_id, booking_time, end_time, status
+        RETURNING id, cal_event_id, booking_time, end_time, status,
+                  client_phone, service_name, sms_opt_in
       `);
     }
 
@@ -236,7 +244,8 @@ export async function POST(
             end_time     = ${newEndTime},
             status       = 'confirmed'
         WHERE cal_event_id = ${oldCalUid}
-        RETURNING id, cal_event_id, booking_time, end_time, status
+        RETURNING id, cal_event_id, booking_time, end_time, status,
+                  client_phone, service_name, sms_opt_in
       `);
     }
 
@@ -249,15 +258,34 @@ export async function POST(
       row.cal_event_id || newCalUid,
     );
 
+    const bookingTimeIso = serialiseDate(row.booking_time);
+    let rescheduleSms: Record<string, unknown> | null = null;
+    try {
+      rescheduleSms = await notifyAppointmentRescheduled({
+        bookingUid: row.cal_event_id || newCalUid,
+        bookingTime: bookingTimeIso,
+        clientPhone: row.client_phone,
+        serviceName: row.service_name,
+        smsOptIn: row.sms_opt_in,
+        scheduleSmsReminders: true,
+      });
+    } catch (smsErr) {
+      console.warn(
+        '[api/admin/appointments/[id]/reschedule] SMS failed (non-blocking)',
+        { error: errorMessage(smsErr) }
+      );
+    }
+
     return NextResponse.json({
       appointment: {
         id: row.id,
         cal_uid: row.cal_event_id,
-        booking_time: serialiseDate(row.booking_time),
+        booking_time: bookingTimeIso,
         end_time: serialiseDate(row.end_time),
         status: row.status,
       },
       reminderEmails,
+      rescheduleSms,
     });
   } catch (err) {
     const msg = errorMessage(err);
