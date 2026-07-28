@@ -1380,8 +1380,12 @@ function StatusActionConfirmDialog({
                   <span className="font-medium text-stone-800">
                     {clientName}
                   </span>{' '}
-                  did not arrive for this booking. Choose whether to charge
-                  the no-show fee to the card on file.
+                  did not arrive for this booking. This always adds 1 to
+                  their no-show count.{' '}
+                  <span className="font-medium text-stone-800">
+                    No charge
+                  </span>{' '}
+                  also flags them on the calendar and client profile.
                 </>
               ) : (
                 <>
@@ -1394,9 +1398,10 @@ function StatusActionConfirmDialog({
               )}
             </p>
             {isNoShow && !canChargeNoShow && (
-              <p className="mt-3 rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs leading-relaxed text-stone-500">
-                No vaulted card or service price on file — you can mark this
-                as a no-show, but a fee cannot be charged automatically.
+              <p className="mt-3 rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2 text-xs leading-relaxed text-amber-950">
+                No vaulted card or service price on file — you can still mark
+                the no-show. They will be flagged, and their no-show count
+                will increase. A fee cannot be charged automatically.
               </p>
             )}
             {isNoShow && canChargeNoShow && (
@@ -1406,6 +1411,7 @@ function StatusActionConfirmDialog({
                   {Math.round(NO_SHOW_PENALTY_FRACTION * 100)}% ({feeLabel})
                 </strong>{' '}
                 of the service price, charged to the card saved at checkout.
+                Charging does not flag them; choose No charge to flag.
               </p>
             )}
           </div>
@@ -1435,7 +1441,7 @@ function StatusActionConfirmDialog({
                     Saving
                   </span>
                 ) : (
-                  'No charge'
+                  'No charge · flag'
                 )}
               </button>
               <button
