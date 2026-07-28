@@ -32,7 +32,7 @@ import {
   extractBookingDataFromEvent,
 } from '@/lib/cal-embed-shared';
 
-import type { Appointment, AppointmentStatus } from './types';
+import type { Appointment, AppointmentStatus, Client } from './types';
 import { appointmentServiceLabel, clientDisplayName, isAppointmentReadOnly } from './helpers';
 import {
   NO_SHOW_PENALTY_FRACTION,
@@ -85,6 +85,12 @@ interface Props {
    * already on that client's profile.
    */
   allowClientProfileLink?: boolean;
+  /**
+   * Fired when the nested ClientProfileModal patches the CRM client
+   * (e.g. clearing the no-show attention flag) so calendar parents can
+   * update pill markers immediately.
+   */
+  onClientUpdated?: (client: Client) => void;
 }
 
 /**
@@ -153,6 +159,7 @@ export default function AppointmentModal({
   stacked = false,
   onMutated,
   allowClientProfileLink = true,
+  onClientUpdated,
 }: Props) {
   const router = useRouter();
 
@@ -391,6 +398,7 @@ export default function AppointmentModal({
             backLabel="Appointment"
             onBack={() => setView('appointment')}
             onClose={onClose}
+            onClientUpdated={onClientUpdated}
           />
         ) : (
           <>

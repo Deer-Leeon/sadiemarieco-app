@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   addDays,
@@ -25,7 +25,11 @@ import type {
   ManualBookingServiceGroupHeader,
   ManualBookingServiceOption,
 } from './components/manual-booking-utils';
-import type { Appointment, TimeBlock, ViewMode } from './types';
+import type { Appointment, Client, TimeBlock, ViewMode } from './types';
+import {
+  appointmentBelongsToClient,
+  withClientNoShowFlag,
+} from './clientNoShowFlagSync';
 import AdminHeader from './AdminHeader';
 import AdminSectionTabs from './AdminSectionTabs';
 import ListView from './ListView';
@@ -74,7 +78,7 @@ interface Props {
  *     navigation state.
  */
 export default function DashboardUI({
-  appointments,
+  appointments: appointmentsProp,
   timeBlocks,
   dbError,
   displayName,
@@ -89,6 +93,12 @@ export default function DashboardUI({
   // homepage feeling.
   const [view, setView] = useState<ViewMode>('month');
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
+  // Live appointment list so clearing a no-show flag updates calendar
+  // pills immediately without waiting on router.refresh().
+  const [appointments, setAppointments] = useState(appointmentsProp);
+  useEffect(() => {
+    setAppointments(appointmentsProp);
+  }, [appointmentsProp]);
   // `modalDate` doubles as both the "is the modal open?" boolean and
   // the initialDate passed in. Null = closed. Stored as Date (not ISO
   // string) because consumers (TimeGrid → SingleDayModal) speak Date.
@@ -182,6 +192,18 @@ export default function DashboardUI({
       );
     }
 
+    router.refresh();
+  }
+
+  /** Clear (or re-set) calendar pill flags as soon as the CRM client changes. */
+  function handleClientNoShowFlagChanged(client: Client) {
+    const flag = Boolean(client.no_show_flag);
+    setAppointments((prev) => withClientNoShowFlag(prev, client, flag));
+    setSelectedAppointment((prev) =>
+      prev && appointmentBelongsToClient(prev, client)
+        ? { ...prev, client_no_show_flag: flag }
+        : prev
+    );
     router.refresh();
   }
 
@@ -348,6 +370,7 @@ export default function DashboardUI({
         <AppointmentModal
           appointment={selectedAppointment}
           onClose={() => setSelectedAppointment(null)}
+          onClientUpdated={handleClientNoShowFlagChanged}
         />
       )}
 
