@@ -445,10 +445,13 @@ function DossierSection({
     last_booked_at: client.last_booked_at,
   });
   const [dismissError, setDismissError] = useState<string | null>(null);
+  const [confirmClearFlag, setConfirmClearFlag] = useState(false);
+  const [clearingFlag, setClearingFlag] = useState(false);
   const mutatedRef = useRef(false);
 
   const dismissNoShowFlag = useCallback(async () => {
     setDismissError(null);
+    setClearingFlag(true);
     try {
       const res = await fetch(`/api/admin/clients/${client.id}`, {
         method: 'PATCH',
@@ -470,11 +473,14 @@ function DossierSection({
           no_show_flag: false,
           no_show_count: data.client.no_show_count ?? prev.no_show_count,
         }));
+        setConfirmClearFlag(false);
       }
     } catch (err) {
       setDismissError(
         err instanceof Error ? err.message : 'Could not clear no-show flag.'
       );
+    } finally {
+      setClearingFlag(false);
     }
   }, [client.id, onClientUpdated]);
 
@@ -552,33 +558,77 @@ function DossierSection({
       {(crmStats.no_show_flag || client.no_show_flag) && (
         <div
           role="status"
-          className="flex items-start gap-3 rounded-lg border border-amber-200/80 bg-amber-50/80 px-3.5 py-3"
+          className="rounded-lg border border-amber-200/80 bg-amber-50/80 px-3.5 py-3"
         >
-          <Flag
-            className="mt-0.5 h-4 w-4 shrink-0 text-amber-700"
-            aria-hidden="true"
-          />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-amber-950">
-              No-show flag active
-            </p>
-            <p className="mt-0.5 text-xs leading-relaxed text-amber-900/80">
-              Set when a no-show was marked without charging. Clear it when
-              you&apos;ve reviewed — the lifetime no-show count stays.
-            </p>
-            {dismissError && (
-              <p className="mt-1.5 text-xs text-rose-700" role="alert">
-                {dismissError}
+          <div className="flex items-start gap-3">
+            <Flag
+              className="mt-0.5 h-4 w-4 shrink-0 text-amber-700"
+              aria-hidden="true"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-amber-950">
+                No-show flag active
               </p>
+              <p className="mt-0.5 text-xs leading-relaxed text-amber-900/80">
+                Set when a no-show was marked without charging. Clear it when
+                you&apos;ve reviewed — the lifetime no-show count stays.
+              </p>
+              {dismissError && (
+                <p className="mt-1.5 text-xs text-rose-700" role="alert">
+                  {dismissError}
+                </p>
+              )}
+            </div>
+            {!confirmClearFlag && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDismissError(null);
+                  setConfirmClearFlag(true);
+                }}
+                className="shrink-0 rounded-md border border-amber-300/80 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-amber-900 transition-colors hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+              >
+                Clear flag
+              </button>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => void dismissNoShowFlag()}
-            className="shrink-0 rounded-md border border-amber-300/80 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-amber-900 transition-colors hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-          >
-            Clear flag
-          </button>
+
+          {confirmClearFlag && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-white/90 px-3 py-3">
+              <p className="text-sm font-medium text-stone-900">
+                Clear this flag?
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-stone-600">
+                They&apos;ll no longer show as flagged on the calendar or
+                profile. Their no-show count will not change. A future
+                uncharged no-show will flag them again.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmClearFlag(false);
+                    setDismissError(null);
+                  }}
+                  disabled={clearingFlag}
+                  className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50"
+                >
+                  Keep flag
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void dismissNoShowFlag()}
+                  disabled={clearingFlag}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-amber-800 bg-amber-800 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-white transition-colors hover:bg-amber-900 disabled:opacity-50"
+                >
+                  {clearingFlag && (
+                    <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                  )}
+                  {clearingFlag ? 'Clearing' : 'Yes, clear flag'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
