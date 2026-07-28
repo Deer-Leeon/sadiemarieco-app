@@ -41,7 +41,8 @@ interface ClientRow {
   lifetime_value: number | string | null;
   has_vaulted_card: boolean | null;
   risk_flag: boolean | null;
-  strike_count: number | string | null;
+  no_show_count: number | string | null;
+  no_show_flag: boolean | null;
   last_booked_at: Date | string | null;
 }
 
@@ -73,7 +74,8 @@ function rowToClient(row: ClientRow): Client {
     lifetime_value: toNumber(row.lifetime_value),
     has_vaulted_card: Boolean(row.has_vaulted_card),
     risk_flag: Boolean(row.risk_flag),
-    strike_count: toNumber(row.strike_count),
+    no_show_count: toNumber(row.no_show_count),
+    no_show_flag: Boolean(row.no_show_flag),
     last_booked_at: serializeDate(row.last_booked_at),
   };
 }
@@ -106,7 +108,8 @@ export async function GET(): Promise<NextResponse> {
         COALESCE(stats.lifetime_value, 0)::float AS lifetime_value,
         COALESCE(stats.has_vaulted_card, FALSE) AS has_vaulted_card,
         COALESCE(stats.risk_flag, FALSE) AS risk_flag,
-        COALESCE(stats.strike_count, 0)::int AS strike_count,
+        COALESCE(c.no_show_count, 0)::int AS no_show_count,
+        COALESCE(c.no_show_flag, FALSE) AS no_show_flag,
         stats.last_booked_at
       FROM clients c
       LEFT JOIN LATERAL (
@@ -149,8 +152,7 @@ export async function GET(): Promise<NextResponse> {
               'no-show',
               'canceled_by_client_late'
             )
-          ) AS risk_flag,
-          COUNT(*) FILTER (WHERE COALESCE(a.no_show_strike, FALSE))::int AS strike_count
+          ) AS risk_flag
         FROM appointments a
         LEFT JOIN LATERAL (
           SELECT s.price

@@ -7,6 +7,7 @@ import {
   startOfDay,
   startOfWeek,
 } from 'date-fns';
+import { Flag } from 'lucide-react';
 
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
@@ -353,6 +354,7 @@ function AppointmentBlock({
   // rows DO render — with a struck-through, greyed-out treatment so
   // the wasted slot stays visible without pretending it's bookable.
   const isNoShow = (apt.status || '').toLowerCase() === 'no-show';
+  const hasNoShowFlag = Boolean(apt.client_no_show_flag);
 
   const start = safeParseISO(apt.booking_time);
   const end = safeParseISO(apt.end_time);
@@ -411,6 +413,9 @@ function AppointmentBlock({
     : color
       ? ''
       : 'border-l-[3px] border-l-stone-800 bg-stone-100';
+  const flaggedClasses = hasNoShowFlag && !isNoShow
+    ? 'ring-1 ring-inset ring-amber-400/70'
+    : '';
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : 'pointer-events-none';
@@ -431,15 +436,16 @@ function AppointmentBlock({
   }`;
   const nameStyle = color ? { color: color.text } : undefined;
   const mutedStyle = color ? { color: color.textMuted } : undefined;
+  const flagSuffix = hasNoShowFlag ? ', no-show flag' : '';
 
   return (
     <button
       type="button"
       onClick={clickable ? handleClick : undefined}
       disabled={!clickable}
-      className={`${baseClasses} ${variantClasses} ${interactiveClasses}`}
-      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}`}
-      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}`}
+      className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${interactiveClasses}`}
+      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${flagSuffix}`}
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,
@@ -452,6 +458,15 @@ function AppointmentBlock({
         }),
       }}
     >
+      {hasNoShowFlag ? (
+        <span
+          className="pointer-events-none absolute right-0.5 top-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm bg-amber-50/95 text-amber-800 shadow-sm"
+          aria-hidden="true"
+          title="Client has an active no-show flag"
+        >
+          <Flag className="h-2.5 w-2.5" strokeWidth={2.4} />
+        </span>
+      ) : null}
       {stacked ? (
         <>
           <div className={nameClass} style={nameStyle}>

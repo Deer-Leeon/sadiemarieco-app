@@ -4,6 +4,9 @@
  * (`/api/admin/clients/[id]/appointments`).
  *
  * Mirrors the LEFT JOIN LATERAL logic on `appointments` + `site_services`.
+ * Lifetime no-show count + attention flag live on `clients` (never
+ * derived solely from appointment rows, so dismissing the flag / changing
+ * status later cannot erase history).
  */
 import { sql } from '@vercel/postgres';
 
@@ -75,15 +78,18 @@ export function computeCrmStatsFromAppointments(
     service_price: number | null;
     stripe_customer_id: string | null;
     created_at?: string | null;
-    no_show_strike?: boolean | null;
-  }>
+  }>,
+  opts?: {
+    no_show_count?: number;
+    no_show_flag?: boolean;
+  }
 ): ClientCrmStats {
   const now = Date.now();
   let total_bookings = 0;
   let lifetime_value = 0;
   let has_vaulted_card = false;
   let risk_flag = false;
-  let strike_count = 0;
+  let derivedNoShows = 0;
   let lastBookedMs = Number.NEGATIVE_INFINITY;
 
   for (const a of appointments) {
@@ -92,8 +98,8 @@ export function computeCrmStatsFromAppointments(
       if (Number.isFinite(ms) && ms > lastBookedMs) lastBookedMs = ms;
     }
 
-    if (a.no_show_strike) {
-      strike_count += 1;
+    if (normalizeAppointmentStatus(a.status) === 'no-show') {
+      derivedNoShows += 1;
     }
 
     if (countsForRisk(a.status)) {
@@ -124,7 +130,9 @@ export function computeCrmStatsFromAppointments(
     lifetime_value,
     has_vaulted_card,
     risk_flag,
-    strike_count,
+    no_show_count:
+      opts?.no_show_count != null ? opts.no_show_count : derivedNoShows,
+    no_show_flag: Boolean(opts?.no_show_flag),
     last_booked_at:
       Number.isFinite(lastBookedMs) && lastBookedMs > Number.NEGATIVE_INFINITY
         ? new Date(lastBookedMs).toISOString()
@@ -137,8 +145,12 @@ interface CrmStatsRow {
   lifetime_value: number | string | null;
   has_vaulted_card: boolean | null;
   risk_flag: boolean | null;
-  strike_count: number | string | null;
   last_booked_at: Date | string | null;
+}
+
+interface ClientNoShowRow {
+  no_show_count: number | string | null;
+  no_show_flag: boolean | null;
 }
 
 function toNumber(value: number | string | null): number {
@@ -157,92 +169,107 @@ export async function fetchClientCrmStats(
   const [phoneV0, phoneV1] = client.phone
     ? sqlPhoneVariants(client.phone)
     : ['', ''];
-  const { rows } = await sql<CrmStatsRow>`
-    SELECT
-      MAX(a.created_at) AS last_booked_at,
-      COUNT(*) FILTER (
-        WHERE COALESCE(LOWER(TRIM(a.status)), '') NOT IN (
-          'pending',
-          'canceled_by_admin',
-          'canceled_by_client',
-          'canceled_by_client_late',
-          'canceled_by_system'
-        )
-      )::int AS total_bookings,
-      COALESCE(
-        SUM(
-          CASE
-            WHEN a.booking_time IS NOT NULL
-              AND a.booking_time < NOW()
-              AND COALESCE(LOWER(TRIM(a.status)), '') IN (
-                'confirmed',
-                'no-show'
-              )
-            THEN COALESCE(s.price::numeric, 0)
-            ELSE 0
-          END
-        ),
-        0
-      )::float AS lifetime_value,
-      BOOL_OR(
-        a.stripe_customer_id IS NOT NULL
-        AND TRIM(a.stripe_customer_id) <> ''
-        AND COALESCE(LOWER(TRIM(a.status)), '') NOT IN (
-          'pending',
-          'canceled_by_system'
-        )
-      ) AS has_vaulted_card,
-      BOOL_OR(
-        COALESCE(LOWER(TRIM(a.status)), '') IN (
-          'no-show',
-          'canceled_by_client_late'
-        )
-      ) AS risk_flag,
-      COUNT(*) FILTER (WHERE COALESCE(a.no_show_strike, FALSE))::int AS strike_count
-    FROM appointments a
-    LEFT JOIN LATERAL (
-      SELECT s.price
-      FROM site_services s
-      WHERE s.title = split_part(a.service_name, ' between ', 1)
-        AND s.is_active = TRUE
-        AND (
-          lower(trim(split_part(a.service_name, ' between ', 1))) NOT IN (
-            'classic', 'hybrid', 'volume'
+
+  const [{ rows }, { rows: flagRows }] = await Promise.all([
+    sql<CrmStatsRow>`
+      SELECT
+        MAX(a.created_at) AS last_booked_at,
+        COUNT(*) FILTER (
+          WHERE COALESCE(LOWER(TRIM(a.status)), '') NOT IN (
+            'pending',
+            'canceled_by_admin',
+            'canceled_by_client',
+            'canceled_by_client_late',
+            'canceled_by_system'
           )
-          OR (
-            a.booking_time IS NOT NULL
-            AND a.end_time IS NOT NULL
-            AND s.duration_mins IS NOT NULL
-            AND s.duration_mins = GREATEST(
-              1,
-              ROUND(
-                EXTRACT(EPOCH FROM (a.end_time - a.booking_time)) / 60.0
-              )
-            )::integer
+        )::int AS total_bookings,
+        COALESCE(
+          SUM(
+            CASE
+              WHEN a.booking_time IS NOT NULL
+                AND a.booking_time < NOW()
+                AND COALESCE(LOWER(TRIM(a.status)), '') IN (
+                  'confirmed',
+                  'no-show'
+                )
+              THEN COALESCE(s.price::numeric, 0)
+              ELSE 0
+            END
+          ),
+          0
+        )::float AS lifetime_value,
+        BOOL_OR(
+          a.stripe_customer_id IS NOT NULL
+          AND TRIM(a.stripe_customer_id) <> ''
+          AND COALESCE(LOWER(TRIM(a.status)), '') NOT IN (
+            'pending',
+            'canceled_by_system'
+          )
+        ) AS has_vaulted_card,
+        BOOL_OR(
+          COALESCE(LOWER(TRIM(a.status)), '') IN (
+            'no-show',
+            'canceled_by_client_late'
+          )
+        ) AS risk_flag
+      FROM appointments a
+      LEFT JOIN LATERAL (
+        SELECT s.price
+        FROM site_services s
+        WHERE s.title = split_part(a.service_name, ' between ', 1)
+          AND s.is_active = TRUE
+          AND (
+            lower(trim(split_part(a.service_name, ' between ', 1))) NOT IN (
+              'classic', 'hybrid', 'volume'
+            )
+            OR (
+              a.booking_time IS NOT NULL
+              AND a.end_time IS NOT NULL
+              AND s.duration_mins IS NOT NULL
+              AND s.duration_mins = GREATEST(
+                1,
+                ROUND(
+                  EXTRACT(EPOCH FROM (a.end_time - a.booking_time)) / 60.0
+                )
+              )::integer
+            )
+          )
+        ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
+        LIMIT 1
+      ) s ON TRUE
+      WHERE
+        a.client_id = ${clientId}::uuid
+        OR (
+          ${client.email}::text IS NOT NULL
+          AND a.client_email IS NOT NULL
+          AND LOWER(TRIM(a.client_email)) = LOWER(TRIM(${client.email}))
+        )
+        OR (
+          ${client.phone}::text IS NOT NULL
+          AND a.client_phone IS NOT NULL
+          AND (
+            regexp_replace(a.client_phone, '\D', '', 'g') = ${phoneV0}
+            OR regexp_replace(a.client_phone, '\D', '', 'g') = ${phoneV1}
           )
         )
-      ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
+    `,
+    sql<ClientNoShowRow>`
+      SELECT no_show_count, no_show_flag
+      FROM clients
+      WHERE id = ${clientId}::uuid
       LIMIT 1
-    ) s ON TRUE
-    WHERE
-      a.client_id = ${clientId}::uuid
-      OR (
-        ${client.email}::text IS NOT NULL
-        AND a.client_email IS NOT NULL
-        AND LOWER(TRIM(a.client_email)) = LOWER(TRIM(${client.email}))
-      )
-      OR (
-        ${client.phone}::text IS NOT NULL
-        AND a.client_phone IS NOT NULL
-        AND (
-          regexp_replace(a.client_phone, '\D', '', 'g') = ${phoneV0}
-          OR regexp_replace(a.client_phone, '\D', '', 'g') = ${phoneV1}
-        )
-      )
-  `;
+    `,
+  ]);
 
   const row = rows[0];
-  if (!row) return { ...EMPTY_CLIENT_CRM_STATS };
+  const flagRow = flagRows[0];
+  if (!row) {
+    return {
+      ...EMPTY_CLIENT_CRM_STATS,
+      no_show_count: toNumber(flagRow?.no_show_count ?? null),
+      no_show_flag: Boolean(flagRow?.no_show_flag),
+    };
+  }
 
   const lastBookedAt = row.last_booked_at;
   let last_booked_at: string | null = null;
@@ -257,7 +284,8 @@ export async function fetchClientCrmStats(
     lifetime_value: toNumber(row.lifetime_value),
     has_vaulted_card: Boolean(row.has_vaulted_card),
     risk_flag: Boolean(row.risk_flag),
-    strike_count: toNumber(row.strike_count),
+    no_show_count: toNumber(flagRow?.no_show_count ?? null),
+    no_show_flag: Boolean(flagRow?.no_show_flag),
     last_booked_at,
   };
 }

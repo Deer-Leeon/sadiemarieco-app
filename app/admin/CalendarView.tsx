@@ -16,6 +16,7 @@ import {
 import type { Appointment } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import { getServiceColor } from './serviceColors';
+import { Flag } from 'lucide-react';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Constants
@@ -270,6 +271,7 @@ function AppointmentPill({
   // wasted slot is still visible at a glance.
   const status = (appointment.status || '').toLowerCase();
   const isNoShow = status === 'no-show';
+  const hasNoShowFlag = Boolean(appointment.client_no_show_flag);
   const time = appointment.booking_time
     ? format(parseISO(appointment.booking_time), 'h:mm a')
     : '';
@@ -297,17 +299,24 @@ function AppointmentPill({
     <button
       type="button"
       onClick={onClick ? handleClick : undefined}
-      title={`${time ? time + ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}`}
-      aria-label={`Open booking: ${name}, ${service}${time ? `, ${time}` : ''}${isNoShow ? ', no-show' : ''}`}
-      className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] transition-colors ${
+      title={`${time ? time + ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${time ? `, ${time}` : ''}${isNoShow ? ', no-show' : ''}${hasNoShowFlag ? ', no-show flag' : ''}`}
+      className={`relative block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] transition-colors ${
         isNoShow
           ? 'bg-stone-50 text-gray-400 line-through opacity-60 hover:bg-stone-100'
           : color
             ? 'hover:brightness-95'
             : 'bg-stone-100 text-stone-800 hover:bg-stone-200'
-      } ${onClick ? 'cursor-pointer' : ''}`}
+      } ${hasNoShowFlag && !isNoShow ? 'ring-1 ring-inset ring-amber-400/70' : ''} ${onClick ? 'cursor-pointer' : ''}`}
       style={colorStyle}
     >
+      {hasNoShowFlag ? (
+        <Flag
+          className="pointer-events-none absolute right-0.5 top-0.5 h-2 w-2 text-amber-800"
+          strokeWidth={2.6}
+          aria-hidden="true"
+        />
+      ) : null}
       <span className="font-medium">{time}</span>{' '}
       <span
         className={isNoShow ? 'text-gray-400' : color ? '' : 'text-stone-600'}

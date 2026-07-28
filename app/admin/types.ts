@@ -212,6 +212,14 @@ export interface Appointment {
    * union here and the CHECK constraint there aligned.
    */
   stripe_customer_id: string | null;
+  /**
+   * True when the linked CRM client currently has an active no-show
+   * attention flag (`clients.no_show_flag`). Joined onto calendar /
+   * list payloads so 3-day / week / month pills can show a subtle
+   * marker on *any* of that client's bookings — not only the no-show
+   * row itself. False when unknown or cleared.
+   */
+  client_no_show_flag: boolean;
 }
 
 /**
@@ -263,8 +271,16 @@ export interface ClientCrmStats {
   lifetime_value: number;
   has_vaulted_card: boolean;
   risk_flag: boolean;
-  /** No-shows marked without charging the vaulted card. */
-  strike_count: number;
+  /**
+   * Lifetime no-shows (charged or not). Stored on `clients.no_show_count`
+   * and never decremented.
+   */
+  no_show_count: number;
+  /**
+   * Dismissible attention flag (`clients.no_show_flag`). Reactivates when
+   * an admin marks a no-show without charging; clearable on the profile.
+   */
+  no_show_flag: boolean;
   /** ISO 8601 — most recent appointment row created for this client. */
   last_booked_at: string | null;
 }
@@ -292,7 +308,8 @@ export const EMPTY_CLIENT_CRM_STATS: ClientCrmStats = {
   lifetime_value: 0,
   has_vaulted_card: false,
   risk_flag: false,
-  strike_count: 0,
+  no_show_count: 0,
+  no_show_flag: false,
   last_booked_at: null,
 };
 

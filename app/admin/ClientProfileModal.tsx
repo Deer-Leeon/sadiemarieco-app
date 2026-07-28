@@ -41,6 +41,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   CreditCard,
+  Flag,
   Loader2,
   Mail,
   Pencil,
@@ -98,6 +99,8 @@ interface BaseProps {
   backLabel: string;
   /** Closes the entire modal (parent's X handler). */
   onClose: () => void;
+  /** Fired whenever the in-modal client record is patched (flag clear, edit, etc.). */
+  onClientUpdated?: (client: Client) => void;
 }
 
 /**
@@ -130,7 +133,7 @@ type ProfileView = 'overview' | 'appointments' | 'pictures' | 'edit_info';
 // ─── ROOT ───────────────────────────────────────────────────────────────────
 
 export default function ClientProfileModal(props: Props) {
-  const { onBack, backLabel, onClose } = props;
+  const { onBack, backLabel, onClose, onClientUpdated } = props;
   const appointment = props.appointment;
   const initialClient = props.initialClient;
 
@@ -145,6 +148,14 @@ export default function ClientProfileModal(props: Props) {
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [bootstrapping, setBootstrapping] = useState(
     initialClient ? false : true
+  );
+
+  const handleClientPatched = useCallback(
+    (next: Client) => {
+      setClient(next);
+      onClientUpdated?.(next);
+    },
+    [onClientUpdated]
   );
 
   // First-touch upsert — appointment-entry only. We POST the
@@ -178,7 +189,10 @@ export default function ClientProfileModal(props: Props) {
           throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
         }
         const data = (await res.json()) as { client: Client };
-        if (!cancelled) setClient(data.client);
+        if (!cancelled) {
+          setClient(data.client);
+          onClientUpdated?.(data.client);
+        }
       } catch (err) {
         if (!cancelled) {
           setClientErr(err instanceof Error ? err.message : String(err));
@@ -256,7 +270,7 @@ export default function ClientProfileModal(props: Props) {
             view={view}
             client={client}
             onChangeView={setView}
-            onClientPatched={setClient}
+            onClientPatched={handleClientPatched}
           />
         ) : null}
       </div>
@@ -426,13 +440,45 @@ function DossierSection({
     lifetime_value: client.lifetime_value,
     has_vaulted_card: client.has_vaulted_card,
     risk_flag: client.risk_flag,
-    strike_count: client.strike_count,
+    no_show_count: client.no_show_count,
+    no_show_flag: client.no_show_flag,
     last_booked_at: client.last_booked_at,
   });
+  const [dismissError, setDismissError] = useState<string | null>(null);
   const mutatedRef = useRef(false);
 
-  const refreshClientConsent = useCallback(() => {
-    if (client.has_consented) return;
+  const dismissNoShowFlag = useCallback(async () => {
+    setDismissError(null);
+    try {
+      const res = await fetch(`/api/admin/clients/${client.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ no_show_flag: false }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        setDismissError(
+          `Could not clear flag (HTTP ${res.status})${text ? `: ${text.slice(0, 120)}` : ''}`
+        );
+        return;
+      }
+      const data = (await res.json()) as { client: Client };
+      if (data.client) {
+        onClientUpdated(data.client);
+        setCrmStats((prev) => ({
+          ...prev,
+          no_show_flag: false,
+          no_show_count: data.client.no_show_count ?? prev.no_show_count,
+        }));
+      }
+    } catch (err) {
+      setDismissError(
+        err instanceof Error ? err.message : 'Could not clear no-show flag.'
+      );
+    }
+  }, [client.id, onClientUpdated]);
+
+  const refreshClientRecord = useCallback(() => {
     fetch(`/api/admin/clients/${client.id}`)
       .then(async (res) => {
         if (!res.ok) return;
@@ -440,9 +486,14 @@ function DossierSection({
         if (data.client) onClientUpdated(data.client);
       })
       .catch(() => {
-        /* best-effort — admin can close/reopen the profile */
+        /* best-effort */
       });
-  }, [client.id, client.has_consented, onClientUpdated]);
+  }, [client.id, onClientUpdated]);
+
+  const refreshClientConsent = useCallback(() => {
+    if (client.has_consented) return;
+    refreshClientRecord();
+  }, [client.has_consented, refreshClientRecord]);
 
   useEffect(() => {
     if (client.has_consented) return;
@@ -489,6 +540,7 @@ function DossierSection({
     setOpenAppointment(null);
     if (mutatedRef.current) {
       setRefreshKey((k) => k + 1);
+      refreshClientRecord();
       mutatedRef.current = false;
     }
   };
@@ -496,6 +548,39 @@ function DossierSection({
   return (
     <>
       <CrmStatsBar stats={crmStats} />
+
+      {(crmStats.no_show_flag || client.no_show_flag) && (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-lg border border-amber-200/80 bg-amber-50/80 px-3.5 py-3"
+        >
+          <Flag
+            className="mt-0.5 h-4 w-4 shrink-0 text-amber-700"
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-amber-950">
+              No-show flag active
+            </p>
+            <p className="mt-0.5 text-xs leading-relaxed text-amber-900/80">
+              Set when a no-show was marked without charging. Clear it when
+              you&apos;ve reviewed — the lifetime no-show count stays.
+            </p>
+            {dismissError && (
+              <p className="mt-1.5 text-xs text-rose-700" role="alert">
+                {dismissError}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => void dismissNoShowFlag()}
+            className="shrink-0 rounded-md border border-amber-300/80 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-amber-900 transition-colors hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+          >
+            Clear flag
+          </button>
+        </div>
+      )}
 
       <button
         type="button"
@@ -585,7 +670,7 @@ function DossierSection({
 }
 
 function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
-  const strikes = stats.strike_count ?? 0;
+  const noShows = stats.no_show_count ?? 0;
   return (
     <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-stone-200 bg-stone-200 sm:grid-cols-4">
       <div className="bg-white p-3 text-center">
@@ -606,18 +691,18 @@ function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
       </div>
       <div className="bg-white p-3 text-center">
         <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
-          Strikes
+          No-shows
         </p>
         <p
           className={`mt-1 flex items-center justify-center gap-1 font-serif text-lg tabular-nums ${
-            strikes > 0 ? 'text-amber-800' : 'text-stone-900'
+            noShows > 0 ? 'text-amber-800' : 'text-stone-900'
           }`}
-          title="No-shows marked without charging the fee"
+          title="Lifetime no-shows (charged or not). Never decreases."
         >
-          {strikes > 0 && (
+          {noShows > 0 && (
             <AlertCircle className="h-4 w-4 text-amber-600" aria-hidden />
           )}
-          <span>{strikes}</span>
+          <span>{noShows}</span>
         </p>
       </div>
       <div className="bg-white p-3 text-center">

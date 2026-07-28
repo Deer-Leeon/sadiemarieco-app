@@ -99,6 +99,7 @@ export async function DELETE(
             service_slug: null,
             service_color: null,
             stripe_customer_id: null,
+            client_no_show_flag: false,
           },
           new Set<string>()
         )

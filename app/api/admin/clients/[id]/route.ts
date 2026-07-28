@@ -27,6 +27,8 @@ import { sql } from '@vercel/postgres';
 import { requireAdminUser } from '@/app/admin/auth';
 import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
 import { parseOptionalClientEmail } from '@/lib/client-identity';
+import { clearClientNoShowFlag } from '@/lib/client-no-show';
+import { fetchClientCrmStats } from '@/lib/client-crm-stats';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -40,10 +42,18 @@ interface ClientRow {
   created_at: string | null;
   has_consented: boolean;
   consent_form_url: string | null;
+  no_show_count?: number | string | null;
+  no_show_flag?: boolean | null;
 }
 
-function rowToClient(row: ClientRow): Client {
-  return {
+function toNumber(value: number | string | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function rowToClient(row: ClientRow): Promise<Client> {
+  const base: Client = {
     ...EMPTY_CLIENT_CRM_STATS,
     id: row.id,
     phone: row.phone,
@@ -54,7 +64,19 @@ function rowToClient(row: ClientRow): Client {
     created_at: row.created_at,
     has_consented: Boolean(row.has_consented),
     consent_form_url: row.consent_form_url,
+    no_show_count: toNumber(row.no_show_count),
+    no_show_flag: Boolean(row.no_show_flag),
   };
+
+  try {
+    const stats = await fetchClientCrmStats(row.id, {
+      email: row.email,
+      phone: row.phone,
+    });
+    return { ...base, ...stats };
+  } catch {
+    return base;
+  }
 }
 
 function errorMessage(err: unknown): string {
@@ -119,7 +141,9 @@ export async function GET(
         email,
         created_at,
         has_consented,
-        consent_form_url
+        consent_form_url,
+        no_show_count,
+        no_show_flag
       FROM clients
       WHERE id = ${id}::uuid
       LIMIT 1
@@ -127,7 +151,7 @@ export async function GET(
     if (rows.length === 0) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
-    return NextResponse.json({ client: rowToClient(rows[0]) });
+    return NextResponse.json({ client: await rowToClient(rows[0]) });
   } catch (err) {
     console.error('[api/admin/clients/[id]] GET failed:', errorMessage(err));
     return NextResponse.json(
@@ -180,14 +204,18 @@ export async function PATCH(
   const nextFirst = sanitiseName(payload.first_name);
   const nextLast = sanitiseName(payload.last_name);
   const nextEmail = sanitiseEmail(payload.email);
+  const clearNoShowFlag = payload.no_show_flag === false;
 
   const changedFirst = nextFirst !== undefined;
   const changedLast = nextLast !== undefined;
   const changedEmail = nextEmail !== undefined;
 
-  if (!changedFirst && !changedLast && !changedEmail) {
+  if (!changedFirst && !changedLast && !changedEmail && !clearNoShowFlag) {
     return NextResponse.json(
-      { error: 'no_fields', hint: 'pass at least one of first_name, last_name, email' },
+      {
+        error: 'no_fields',
+        hint: 'pass at least one of first_name, last_name, email, or no_show_flag: false',
+      },
       { status: 400 }
     );
   }
@@ -204,6 +232,45 @@ export async function PATCH(
       { error: 'invalid_email', message: 'Enter a valid email address.' },
       { status: 400 }
     );
+  }
+
+  // Dismiss-only: clear the attention flag without touching profile fields.
+  if (clearNoShowFlag && !changedFirst && !changedLast && !changedEmail) {
+    try {
+      const ok = await clearClientNoShowFlag(id);
+      if (!ok) {
+        return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      }
+      const { rows } = await sql<ClientRow>`
+        SELECT
+          id,
+          phone,
+          first_name,
+          last_name,
+          email,
+          created_at,
+          has_consented,
+          consent_form_url,
+          no_show_count,
+          no_show_flag
+        FROM clients
+        WHERE id = ${id}::uuid
+        LIMIT 1
+      `;
+      if (rows.length === 0) {
+        return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      }
+      return NextResponse.json({ client: await rowToClient(rows[0]) });
+    } catch (err) {
+      console.error(
+        '[api/admin/clients/[id]] clear no_show_flag failed:',
+        errorMessage(err)
+      );
+      return NextResponse.json(
+        { error: 'db_update_failed', message: errorMessage(err) },
+        { status: 500 }
+      );
+    }
   }
 
   // We resolve the SQL with three independent CASE-style coalesces
@@ -335,7 +402,30 @@ export async function PATCH(
     if (updated.length === 0) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
-    return NextResponse.json({ client: rowToClient(updated[0]) });
+
+    if (clearNoShowFlag) {
+      await clearClientNoShowFlag(id);
+    }
+
+    const { rows: refreshed } = await sql<ClientRow>`
+      SELECT
+        id,
+        phone,
+        first_name,
+        last_name,
+        email,
+        created_at,
+        has_consented,
+        consent_form_url,
+        no_show_count,
+        no_show_flag
+      FROM clients
+      WHERE id = ${id}::uuid
+      LIMIT 1
+    `;
+    return NextResponse.json({
+      client: await rowToClient(refreshed[0] ?? updated[0]),
+    });
   } catch (err) {
     const msg = errorMessage(err);
     if (msg.includes('clients_email_key')) {

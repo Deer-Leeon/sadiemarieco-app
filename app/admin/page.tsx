@@ -61,6 +61,7 @@ interface DbRow {
   // by /api/booking/confirm after a successful SetupIntent on /checkout.
   // Null for legacy / admin-created bookings — see types.ts.
   stripe_customer_id: string | null;
+  client_no_show_flag: boolean | null;
 }
 
 function serializeDate(value: Date | string | null): string | null {
@@ -167,6 +168,37 @@ export default async function AdminPage() {
         a.client_email,
         a.stripe_customer_id,
         a.booking_notes,
+        COALESCE(
+          (
+            SELECT c.no_show_flag
+            FROM clients c
+            WHERE a.client_id IS NOT NULL
+              AND c.id = a.client_id
+            LIMIT 1
+          ),
+          (
+            SELECT c.no_show_flag
+            FROM clients c
+            WHERE a.client_id IS NULL
+              AND a.client_phone IS NOT NULL
+              AND c.phone IS NOT NULL
+              AND (
+                regexp_replace(a.client_phone, '\D', '', 'g') = c.phone
+                OR (
+                  length(c.phone) = 11
+                  AND left(c.phone, 1) = '1'
+                  AND regexp_replace(a.client_phone, '\D', '', 'g') = substr(c.phone, 2)
+                )
+                OR (
+                  length(c.phone) = 10
+                  AND regexp_replace(a.client_phone, '\D', '', 'g') = '1' || c.phone
+                )
+              )
+            ORDER BY c.created_at DESC NULLS LAST
+            LIMIT 1
+          ),
+          FALSE
+        ) AS client_no_show_flag,
         s.price       AS service_price,
         s.description AS service_description,
         s.slug        AS service_slug,
@@ -227,6 +259,7 @@ export default async function AdminPage() {
       service_slug: r.service_slug,
       service_color: r.service_color,
       stripe_customer_id: r.stripe_customer_id,
+      client_no_show_flag: Boolean(r.client_no_show_flag),
     }));
   } catch (err) {
     console.error('[admin] appointments query failed:', err);

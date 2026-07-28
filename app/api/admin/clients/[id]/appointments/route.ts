@@ -79,6 +79,7 @@ interface AppointmentRow {
   // by /api/booking/confirm after a successful SetupIntent on /checkout.
   stripe_customer_id: string | null;
   booking_notes: string | null;
+  client_no_show_flag: boolean | null;
 }
 
 function serializeDate(value: Date | string | null): string | null {
@@ -112,6 +113,7 @@ function rowToAppointment(row: AppointmentRow): Appointment {
     service_slug: row.service_slug,
     service_color: row.service_color,
     stripe_customer_id: row.stripe_customer_id,
+    client_no_show_flag: Boolean(row.client_no_show_flag),
   };
 }
 
@@ -193,6 +195,7 @@ export async function GET(
         a.client_email,
         a.stripe_customer_id,
         a.booking_notes,
+        FALSE AS client_no_show_flag,
         s.price       AS service_price,
         s.description AS service_description,
         s.slug        AS service_slug,
@@ -249,7 +252,12 @@ export async function GET(
     });
 
     return NextResponse.json({
-      appointments: rows.map(rowToAppointment),
+      appointments: rows.map((row) =>
+        rowToAppointment({
+          ...row,
+          client_no_show_flag: crm_stats.no_show_flag,
+        })
+      ),
       crm_stats,
     });
   } catch (err) {

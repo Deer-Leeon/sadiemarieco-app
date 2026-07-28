@@ -33,6 +33,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
+import { fetchClientCrmStats } from '@/lib/client-crm-stats';
 import {
   findClientRowByPhone,
   clientPhoneExistsInDb,
@@ -74,8 +75,8 @@ interface ClientRow {
   consent_form_url: string | null;
 }
 
-function rowToClient(row: ClientRow): Client {
-  return {
+async function rowToClient(row: ClientRow): Promise<Client> {
+  const base: Client = {
     ...EMPTY_CLIENT_CRM_STATS,
     id: row.id,
     phone: row.phone,
@@ -86,6 +87,19 @@ function rowToClient(row: ClientRow): Client {
     has_consented: Boolean(row.has_consented),
     consent_form_url: row.consent_form_url,
   };
+  try {
+    const stats = await fetchClientCrmStats(row.id, {
+      email: row.email,
+      phone: row.phone,
+    });
+    return { ...base, ...stats };
+  } catch (err) {
+    console.warn(
+      '[api/admin/clients] fetchClientCrmStats failed; returning base row',
+      errorMessage(err)
+    );
+    return base;
+  }
 }
 
 async function selectClientByEmail(email: string): Promise<ClientRow | null> {
@@ -168,7 +182,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (!row) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
-    return NextResponse.json({ client: rowToClient(row as ClientRow) });
+    return NextResponse.json({ client: await rowToClient(row as ClientRow) });
   } catch (err) {
     console.error('[api/admin/clients] GET failed:', errorMessage(err));
     return NextResponse.json(
@@ -262,7 +276,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         UPDATE clients SET phone = ${phone} WHERE id = ${existingByPhone.id}
       `;
       return NextResponse.json({
-        client: rowToClient({ ...existingByPhone, phone } as ClientRow),
+        client: await rowToClient({ ...existingByPhone, phone } as ClientRow),
       });
     }
 
@@ -273,7 +287,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           id: adopted.id,
         });
         return NextResponse.json({
-          client: rowToClient(adopted),
+          client: await rowToClient(adopted),
           adopted: true,
         });
       }
@@ -300,7 +314,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 500 }
       );
     }
-    return NextResponse.json({ client: rowToClient(rows[0]) });
+    return NextResponse.json({ client: await rowToClient(rows[0]) });
   } catch (err) {
     // UNIQUE on email when the same inbox exists on a legacy row.
     const msg = errorMessage(err);
@@ -316,14 +330,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       try {
         const byPhone = await findClientRowByPhone(phone);
         if (byPhone) {
-          return NextResponse.json({ client: rowToClient(byPhone as ClientRow) });
+          return NextResponse.json({ client: await rowToClient(byPhone as ClientRow) });
         }
 
         if (email) {
           const adopted = await adoptLegacyEmailRow(phone, email);
           if (adopted) {
             return NextResponse.json({
-              client: rowToClient(adopted),
+              client: await rowToClient(adopted),
               adopted: true,
               email_collision: true,
             });
@@ -331,7 +345,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
           const byEmail = await selectClientByEmail(email);
           if (byEmail?.phone) {
-            return NextResponse.json({ client: rowToClient(byEmail) });
+            return NextResponse.json({ client: await rowToClient(byEmail) });
           }
 
           const { rows: phoneOnly } = await sql<ClientRow>`
@@ -351,7 +365,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           `;
           if (phoneOnly[0]) {
             return NextResponse.json({
-              client: rowToClient(phoneOnly[0]),
+              client: await rowToClient(phoneOnly[0]),
               email_collision: true,
             });
           }

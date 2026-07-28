@@ -160,7 +160,7 @@ Sadie Marie: Your 2 Week Fill on Saturday, July 25 at 10:00am has been canceled.
 | **Who** | Admin |
 | **Status** | `no-show` |
 | **SMS** | Yes — no-show without fee (below) |
-| **Notes** | Sets `no_show_strike = true`. No Stripe charge. Cal booking unchanged. |
+| **Notes** | Sets `no_show_strike = true` (audit). Increments `clients.no_show_count` and activates `clients.no_show_flag`. No Stripe charge. Cal booking unchanged. |
 
 ```
 Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July 25 at 10:00am. Please reach out if you'd like to rebook. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
@@ -173,7 +173,7 @@ Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July
 | **Who** | Admin |
 | **Where** | Appointment modal → mark no-show + charge |
 | **SMS** | Yes — no-show with fee (below) |
-| **Notes** | Amount = 100% of matched `site_services` price. Example `$130` = full `$130` service. Status is **not** updated if Stripe fails. `no_show_strike = false`. |
+| **Notes** | Amount = 100% of matched `site_services` price. Example `$130` = full `$130` service. Status is **not** updated if Stripe fails. Increments `clients.no_show_count` but does **not** reactivate `no_show_flag`. `no_show_strike = false`. |
 
 ```
 Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July 25 at 10:00am. A no-show fee of $130 was charged to your card on file. Msg & data rates may apply. Reply STOP to opt out, HELP for help.

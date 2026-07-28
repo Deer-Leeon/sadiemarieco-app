@@ -104,7 +104,14 @@ function sortClients(list: Client[], sortBy: ClientSortKey): Client[] {
   return sorted;
 }
 
-export default function ClientDirectory({ clients }: Props) {
+export default function ClientDirectory({ clients: initialClients }: Props) {
+  // Local roster so profile edits (clear no-show flag, rename, etc.)
+  // update directory badges without a full page reload.
+  const [clients, setClients] = useState(initialClients);
+  useEffect(() => {
+    setClients(initialClients);
+  }, [initialClients]);
+
   // The client whose profile is currently open in the modal
   // overlay. Null = no modal. We keep this here (rather than
   // inside each card) so a single backdrop + scroll-lock contract
@@ -118,6 +125,15 @@ export default function ClientDirectory({ clients }: Props) {
   // feel the spec asks for.
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<ClientSortKey>('name');
+
+  const handleClientUpdated = useCallback((updated: Client) => {
+    setClients((prev) =>
+      prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c))
+    );
+    setOpenClient((prev) =>
+      prev && prev.id === updated.id ? { ...prev, ...updated } : prev
+    );
+  }, []);
 
   // Pre-compute a lowercased searchable haystack per client so the
   // filter loop doesn't repeatedly lowercase the same strings on
@@ -207,6 +223,7 @@ export default function ClientDirectory({ clients }: Props) {
         <ClientProfileOverlay
           client={openClient}
           onClose={() => setOpenClient(null)}
+          onClientUpdated={handleClientUpdated}
         />
       )}
     </div>
@@ -230,9 +247,11 @@ export default function ClientDirectory({ clients }: Props) {
 function ClientProfileOverlay({
   client,
   onClose,
+  onClientUpdated,
 }: {
   client: Client;
   onClose: () => void;
+  onClientUpdated?: (client: Client) => void;
 }) {
   // ESC closes the modal. Bound at window so it works regardless
   // of which inner element has focus.
@@ -280,6 +299,7 @@ function ClientProfileOverlay({
           backLabel="Clients"
           onBack={onClose}
           onClose={onClose}
+          onClientUpdated={onClientUpdated}
         />
       </div>
     </div>
@@ -474,13 +494,13 @@ function ClientCard({
         aria-label={`Open profile for ${fullName}`}
         className="group relative grid w-full grid-cols-[auto_1fr_auto] items-center gap-4 rounded-lg border border-stone-200 bg-white px-4 py-3 text-left transition-shadow hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FAF9F6]"
       >
-        {client.risk_flag && (
+        {client.no_show_flag && (
           <span
             className="absolute right-3 top-3 inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-amber-700 ring-1 ring-amber-200/80"
-            title="Past no-show or late cancellation"
+            title="No-show flag active (uncharged no-show)"
           >
             <Flag className="h-3 w-3" aria-hidden="true" />
-            <span className="sr-only">Risk flag</span>
+            <span className="sr-only">No-show flag</span>
           </span>
         )}
         {/* Leading avatar token — neutral stone disk with the

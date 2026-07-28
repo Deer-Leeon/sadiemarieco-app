@@ -53,6 +53,7 @@ import {
   isAppointmentStatus,
   type AppointmentStatus,
 } from '@/app/admin/types';
+import { recordClientNoShow } from '@/lib/client-no-show';
 import { chargeNoShowPenalty } from '@/lib/no-show-charge';
 import { notifyAdminAppointmentStatusSms } from '@/lib/booking-notifications';
 
@@ -93,6 +94,7 @@ interface AppointmentForNoShow {
   cal_event_id: string | null;
   status: string | null;
   stripe_customer_id: string | null;
+  client_id: string | null;
   service_name: string | null;
   service_price: string | null;
   client_phone: string | null;
@@ -242,6 +244,7 @@ async function findAppointmentForNoShow(
         a.cal_event_id,
         a.status,
         a.stripe_customer_id,
+        a.client_id::text AS client_id,
         a.service_name,
         a.client_phone,
         a.booking_time,
@@ -285,6 +288,7 @@ async function findAppointmentForNoShow(
         a.cal_event_id,
         a.status,
         a.stripe_customer_id,
+        a.client_id::text AS client_id,
         a.service_name,
         a.client_phone,
         a.booking_time,
@@ -532,6 +536,8 @@ export async function PATCH(
     }
 
     // ── Local status write ────────────────────────────────────────
+    // Keep writing no_show_strike for audit (uncharged = true). The
+    // lifetime counter + dismissible attention flag live on `clients`.
     const updated = await updateAppointmentStatus(
       idParam,
       targetStatus,
@@ -541,6 +547,43 @@ export async function PATCH(
     );
     if (updated === null) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    }
+
+    let clientNoShowRecord:
+      | { ok: true; clientId: string }
+      | { ok: false; reason: 'no_client' | 'update_failed'; message: string }
+      | null = null;
+
+    if (targetStatus === 'no-show' && noShowRow) {
+      try {
+        const recorded = await recordClientNoShow({
+          clientId: noShowRow.client_id,
+          clientPhone: noShowRow.client_phone,
+          // Flag reactivates only when the fee was waived.
+          activateFlag: !chargeNoShow,
+        });
+        if ('skipped' in recorded) {
+          clientNoShowRecord = {
+            ok: false,
+            reason: 'no_client',
+            message:
+              'Appointment marked no-show, but no CRM client was found to update the no-show count/flag.',
+          };
+        } else {
+          clientNoShowRecord = { ok: true, clientId: recorded.clientId };
+        }
+      } catch (err) {
+        const msg = errorMessage(err);
+        console.warn(
+          '[api/admin/appointments/[id]/status] client no-show record failed',
+          err
+        );
+        clientNoShowRecord = {
+          ok: false,
+          reason: 'update_failed',
+          message: msg,
+        };
+      }
     }
 
     // Lifecycle SMS (non-blocking) — only when client opted in.
@@ -603,6 +646,7 @@ export async function PATCH(
       // still show the booking.
       cal_cancel_error: calCancelError,
       no_show_charge: noShowCharge,
+      client_no_show_record: clientNoShowRecord,
       lifecycle_sms: lifecycleSms,
     });
   } catch (err) {
