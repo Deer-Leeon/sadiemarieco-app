@@ -12,6 +12,7 @@ import {
   Clock,
   DollarSign,
   ExternalLink,
+  Flag,
   Loader2,
   Mail,
   MessageSquare,
@@ -1348,123 +1349,165 @@ function StatusActionConfirmDialog({
         className="w-full max-w-md overflow-hidden rounded-2xl border border-stone-200/80 bg-[#FAF9F6] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start gap-3 px-6 pt-6">
-          <span
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
-              isNoShow
-                ? 'bg-amber-100 text-amber-700'
-                : 'bg-rose-100 text-rose-600'
-            }`}
-          >
-            {isNoShow ? (
-              <AlertCircle className="h-5 w-5" strokeWidth={1.6} />
-            ) : (
-              <X className="h-5 w-5" strokeWidth={1.6} />
-            )}
-          </span>
-          <div className="flex-1">
-            <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
-              {isNoShow ? 'No-show' : 'Cancel booking'}
-            </p>
-            <h3
-              id="status-confirm-title"
-              className="font-serif text-xl leading-tight text-stone-900"
+        <div className="px-6 pt-6">
+          <div className="flex items-start gap-3.5">
+            <span
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
+                isNoShow
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-rose-100 text-rose-600'
+              }`}
             >
-              {isNoShow
-                ? 'Mark as no-show?'
-                : 'Cancel this appointment?'}
-            </h3>
-            <p className="mt-2 text-sm leading-relaxed text-stone-600">
               {isNoShow ? (
-                <>
-                  <span className="font-medium text-stone-800">
-                    {clientName}
-                  </span>{' '}
-                  did not arrive for this booking. This always adds 1 to
-                  their no-show count.{' '}
-                  <span className="font-medium text-stone-800">
-                    No charge
-                  </span>{' '}
-                  also flags them on the calendar and client profile.
-                </>
+                <Flag className="h-5 w-5" strokeWidth={1.7} />
               ) : (
-                <>
-                  This will cancel the booking for{' '}
-                  <span className="font-medium text-stone-800">
-                    {clientName}
-                  </span>
-                  . Cal.com will send them a cancellation notification.
-                </>
+                <X className="h-5 w-5" strokeWidth={1.6} />
               )}
-            </p>
-            {isNoShow && !canChargeNoShow && (
-              <p className="mt-3 rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2 text-xs leading-relaxed text-amber-950">
-                No vaulted card or service price on file — you can still mark
-                the no-show. They will be flagged, and their no-show count
-                will increase. A fee cannot be charged automatically.
+            </span>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
+                {isNoShow ? 'No-show' : 'Cancel booking'}
               </p>
-            )}
-            {isNoShow && canChargeNoShow && (
-              <p className="mt-3 rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2 text-xs leading-relaxed text-amber-900">
-                No-show fee:{' '}
-                <strong>
-                  {Math.round(NO_SHOW_PENALTY_FRACTION * 100)}% ({feeLabel})
-                </strong>{' '}
-                of the service price, charged to the card saved at checkout.
-                Charging does not flag them; choose No charge to flag.
-              </p>
-            )}
+              <h3
+                id="status-confirm-title"
+                className="mt-1 font-serif text-2xl leading-tight text-stone-900"
+              >
+                {isNoShow
+                  ? 'Mark as no-show?'
+                  : 'Cancel this appointment?'}
+              </h3>
+            </div>
           </div>
+
+          {isNoShow ? (
+            <div className="mt-5 space-y-3">
+              <p className="text-sm leading-relaxed text-stone-600">
+                <span className="font-medium text-stone-900">{clientName}</span>{' '}
+                did not arrive for this booking.
+              </p>
+
+              <ul className="space-y-2 rounded-xl border border-stone-200 bg-white px-3.5 py-3">
+                <li className="flex gap-2.5 text-sm leading-snug text-stone-700">
+                  <span
+                    className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-stone-100 text-[11px] font-semibold text-stone-600"
+                    aria-hidden
+                  >
+                    +1
+                  </span>
+                  <span>
+                    Adds 1 to their lifetime no-show count
+                    {canChargeNoShow ? ' (either choice)' : ''}.
+                  </span>
+                </li>
+                <li className="flex gap-2.5 text-sm leading-snug text-stone-700">
+                  <span
+                    className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-800"
+                    aria-hidden
+                  >
+                    <Flag className="h-3 w-3" strokeWidth={2.2} />
+                  </span>
+                  <span>
+                    {canChargeNoShow ? (
+                      <>
+                        <span className="font-medium text-stone-900">
+                          Flag &amp; mark
+                        </span>{' '}
+                        also puts an attention flag on their calendar and
+                        profile. Charging the fee does not.
+                      </>
+                    ) : (
+                      <>
+                        Puts an attention flag on their calendar and client
+                        profile.
+                      </>
+                    )}
+                  </span>
+                </li>
+              </ul>
+
+              {!canChargeNoShow && (
+                <p className="text-xs leading-relaxed text-stone-500">
+                  No vaulted card or service price on file — a fee can&apos;t
+                  be charged automatically for this booking.
+                </p>
+              )}
+
+              {canChargeNoShow && (
+                <p className="rounded-xl border border-stone-200 bg-white px-3.5 py-2.5 text-xs leading-relaxed text-stone-600">
+                  Fee if charged:{' '}
+                  <span className="font-medium text-stone-900">
+                    {Math.round(NO_SHOW_PENALTY_FRACTION * 100)}% ({feeLabel})
+                  </span>{' '}
+                  on the card saved at checkout.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="mt-4 text-sm leading-relaxed text-stone-600">
+              This will cancel the booking for{' '}
+              <span className="font-medium text-stone-900">{clientName}</span>.
+              Cal.com will send them a cancellation notification.
+            </p>
+          )}
         </div>
 
-        <div className="mt-6 flex flex-col gap-2 border-t border-stone-200/70 bg-white/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
+        <div className="mt-6 flex flex-col-reverse gap-2 border-t border-stone-200/70 bg-white/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
           <button
             type="button"
             onClick={onDismiss}
             disabled={busy}
-            className="order-last rounded-full border border-stone-200 bg-white px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50 sm:order-first"
+            className="rounded-full border border-stone-200 bg-white px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50"
           >
             Go back
           </button>
 
           {isNoShow ? (
-            <>
+            canChargeNoShow ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onConfirmNoShow(false)}
+                  disabled={busy}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.14em] text-amber-950 transition-colors hover:bg-amber-100 disabled:opacity-50"
+                >
+                  {busy ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Flag className="h-3 w-3" strokeWidth={2.2} />
+                  )}
+                  {busy ? 'Saving' : 'Flag & mark'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onConfirmNoShow(true)}
+                  disabled={busy}
+                  className="rounded-full border border-amber-800 bg-amber-800 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.14em] text-white transition-colors hover:bg-amber-900 disabled:opacity-50"
+                >
+                  {busy ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Charging
+                    </span>
+                  ) : (
+                    `Charge ${feeLabel}`
+                  )}
+                </button>
+              </>
+            ) : (
               <button
                 type="button"
                 onClick={() => onConfirmNoShow(false)}
                 disabled={busy}
-                className="rounded-full border border-stone-300 bg-white px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-stone-700 transition-colors hover:border-stone-400 hover:bg-stone-50 disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-1.5 rounded-full border border-amber-800 bg-amber-800 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.14em] text-white transition-colors hover:bg-amber-900 disabled:opacity-50"
               >
                 {busy ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Saving
-                  </span>
+                  <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (
-                  'No charge · flag'
+                  <Flag className="h-3 w-3" strokeWidth={2.2} />
                 )}
+                {busy ? 'Saving' : 'Flag & mark no-show'}
               </button>
-              <button
-                type="button"
-                onClick={() => onConfirmNoShow(true)}
-                disabled={busy || !canChargeNoShow}
-                title={
-                  canChargeNoShow
-                    ? undefined
-                    : 'Requires a vaulted card and service price'
-                }
-                className="rounded-full border border-amber-700 bg-amber-700 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {busy ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Charging
-                  </span>
-                ) : (
-                  `Charge ${feeLabel}`
-                )}
-              </button>
-            </>
+            )
           ) : (
             <button
               type="button"
