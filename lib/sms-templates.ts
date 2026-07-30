@@ -51,9 +51,7 @@ export type SmsTemplateKey =
   | 'late_change_free_pass_granted'
   | 'client_cancel_early'
   | 'client_cancel_late_no_fee'
-  | 'client_cancel_after_start'
   | 'checkout_abandoned'
-  | 'booking_pending'
   | 'phone_cancel'
   | 'feedback_day_after';
 
