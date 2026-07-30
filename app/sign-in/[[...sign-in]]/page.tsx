@@ -14,12 +14,14 @@ import { SignIn } from '@clerk/nextjs';
  * in the Clerk Dashboard (Settings → Restrictions → Sign-up mode).
  */
 export default function SignInPage() {
+  const isStaging = process.env.APP_ENV === 'staging';
+
   return (
     <div className="flex min-h-screen w-full flex-col items-center justify-center gap-8 bg-[#FAF9F6] px-4 font-sans">
       {/* ── Editorial brand header ───────────────────────────────── */}
       <div className="text-center">
         <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
-          Studio · Admin
+          {isStaging ? 'Studio · Admin · Staging' : 'Studio · Admin'}
         </p>
         <h1 className="font-serif text-3xl text-stone-900">
           Sadie Marie

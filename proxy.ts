@@ -60,11 +60,13 @@ export default clerkMiddleware(async (auth, req) => {
 
     const session = await auth();
 
-    // Same UX as production admin: protect → local /sign-in, not a bounce
-    // to www (which looked like "I'm logged in but staging redirects me").
+    // Same UX as production admin, but keep the user on this host. Prefer an
+    // explicit local redirect over auth.protect() so a mis-set absolute
+    // NEXT_PUBLIC_CLERK_SIGN_IN_URL cannot bounce staging → www/apex.
     if (!session.userId && isAdminRoute(req)) {
-      await auth.protect();
-      return;
+      const signIn = new URL('/sign-in', req.nextUrl.origin);
+      signIn.searchParams.set('redirect_url', req.nextUrl.href);
+      return NextResponse.redirect(signIn);
     }
 
     if (!session.userId) {
