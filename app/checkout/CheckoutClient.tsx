@@ -125,6 +125,72 @@ function readThreeDsSetupIntentId(
   return id.startsWith('seti_') ? id : null;
 }
 
+/**
+ * Map Stripe's raw decline / setup errors to client-facing copy.
+ * Stripe still may show its own line under the card field; our banner
+ * should never expose "live mode" / "test card" developer jargon.
+ */
+function friendlyStripeSetupError(error: {
+  message?: string | null;
+  code?: string | null;
+  decline_code?: string | null;
+} | null | undefined): string {
+  const message = (error?.message ?? '').toLowerCase();
+  const code = (error?.code ?? '').toLowerCase();
+  const decline = (error?.decline_code ?? '').toLowerCase();
+
+  if (
+    message.includes('test card') ||
+    message.includes('live mode') ||
+    message.includes('in test mode')
+  ) {
+    return 'This card could not be verified. Please enter a valid debit or credit card.';
+  }
+
+  if (
+    decline === 'insufficient_funds' ||
+    message.includes('insufficient funds')
+  ) {
+    return 'This card was declined due to insufficient funds. Please try a different card.';
+  }
+
+  if (
+    decline === 'expired_card' ||
+    code === 'expired_card' ||
+    message.includes('expired')
+  ) {
+    return 'This card appears to be expired. Please check the date or try a different card.';
+  }
+
+  if (
+    decline === 'incorrect_cvc' ||
+    code === 'incorrect_cvc' ||
+    message.includes('security code') ||
+    message.includes('cvc')
+  ) {
+    return 'The security code looks incorrect. Please check it and try again.';
+  }
+
+  if (
+    decline === 'incorrect_number' ||
+    code === 'incorrect_number' ||
+    message.includes('card number')
+  ) {
+    return 'That card number does not look right. Please check it and try again.';
+  }
+
+  if (code === 'card_declined' || decline || message.includes('declined')) {
+    return 'Your card was declined. Please try a different card or contact your bank.';
+  }
+
+  if (error?.message && !message.includes('mode') && error.message.length < 160) {
+    // Stripe’s shorter, already-polished messages (e.g. incomplete fields).
+    return error.message;
+  }
+
+  return 'We could not save your card. Please check the details and try again.';
+}
+
 const STRIPE_APPEARANCE: StripeElementsOptions['appearance'] = {
   theme: 'flat',
   variables: {
@@ -693,9 +759,7 @@ function CheckoutForm({
     });
 
     if (error) {
-      setSubmitError(
-        error.message ?? 'Could not save your card. Please try again.'
-      );
+      setSubmitError(friendlyStripeSetupError(error));
       setSubmitting(false);
       return;
     }
