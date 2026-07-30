@@ -293,9 +293,12 @@
     nsApi('inline', {
       elementOrSelector: '#portal-reschedule-mount',
       calLink,
-      config: { layout: 'month_view' }
+      config: { theme: 'light', layout: 'month_view' }
     });
-    nsApi('ui', window.calUiConfig || { layout: 'month_view' });
+    nsApi('ui', Object.assign({}, window.calUiConfig || {}, {
+      theme: 'light',
+      layout: 'month_view'
+    }));
     const handleRescheduleSuccess = (event) => {
       const { start, end } = parseBookingTimesFromEvent(event);
       if (

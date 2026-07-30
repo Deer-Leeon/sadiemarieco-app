@@ -34,6 +34,8 @@ html {
      scrolling stays native — faster and more consistent across browsers. */
   scroll-behavior: auto;
   font-size: 16px;
+  /* Never follow OS dark mode — Cal embeds + form controls stay light. */
+  color-scheme: light;
   /*
     Paint the html element with the navy nav color so when the user
     pulls the page down past the top edge on macOS (Chrome / Safari

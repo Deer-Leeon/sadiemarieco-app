@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Manage your appointment with Sadie Marie — reschedule or cancel using your private booking link.">
   <meta name="theme-color" content="#0D1B2A">
+  <meta name="color-scheme" content="light">
   <meta name="robots" content="noindex, nofollow">
   <title>Manage Your Appointment — Sadie Marie</title>
 
@@ -178,35 +179,37 @@
 <script type="text/javascript">
   (function (C, A, L) { let p = function (a, ar) { a.q.push(ar); }; let d = C.document; C.Cal = C.Cal || function () { let cal = C.Cal; let ar = arguments; if (!cal.loaded) { cal.ns = {}; cal.q = cal.q || []; d.head.appendChild(d.createElement("script")).src = A; cal.loaded = true; } if (ar[0] === L) { const api = function () { p(api, arguments); }; const namespace = ar[1]; api.q = api.q || []; if(typeof namespace === "string"){cal.ns[namespace] = cal.ns[namespace] || api;p(cal.ns[namespace], ar);p(cal, ["initNamespace", namespace]);} else p(cal, ar); return;} p(cal, ar); }; })(window, "https://app.cal.com/embed/embed.js", "init");
 
-  window.calUiConfig = {
-    theme: "light",
-    styles: { branding: { brandColor: "#0D1B2A" } },
-    hideEventTypeDetails: false,
-    layout: "month_view",
-    cssVarsPerTheme: {
-      light: {
-        "cal-brand": "#0D1B2A",
-        "cal-brand-emphasis": "#2A4460",
-        "cal-brand-text": "#F5F3F0",
-        "cal-brand-subtle": "rgba(13, 27, 42, 0.08)",
-        "cal-brand-accent": "#1C2E42",
-        "cal-bg": "transparent",
-        "cal-bg-emphasis": "rgba(13, 27, 42, 0.08)",
-        "cal-bg-muted": "rgba(13, 27, 42, 0.04)",
-        "cal-bg-subtle": "rgba(13, 27, 42, 0.03)",
-        "cal-bg-inverted": "#0D1B2A",
-        "cal-border": "rgba(13, 27, 42, 0.18)",
-        "cal-border-emphasis": "rgba(13, 27, 42, 0.45)",
-        "cal-border-subtle": "rgba(13, 27, 42, 0.08)",
-        "cal-text": "#1a1a24",
-        "cal-text-emphasis": "#0D1B2A",
-        "cal-text-subtle": "#4a5468",
-        "cal-text-muted": "#8A93A0",
-        "cal-text-inverted": "#F5F3F0",
-        "cal-text-error": "#8a3232"
-      }
-    }
-  };
+  window.calUiConfig = (function () {
+    // Mirror light → dark so OS dark mode cannot flip Cal to its black default.
+    const light = {
+      "cal-brand": "#0D1B2A",
+      "cal-brand-emphasis": "#2A4460",
+      "cal-brand-text": "#F5F3F0",
+      "cal-brand-subtle": "rgba(13, 27, 42, 0.08)",
+      "cal-brand-accent": "#1C2E42",
+      "cal-bg": "#F5F3F0",
+      "cal-bg-emphasis": "rgba(13, 27, 42, 0.08)",
+      "cal-bg-muted": "rgba(13, 27, 42, 0.04)",
+      "cal-bg-subtle": "rgba(13, 27, 42, 0.03)",
+      "cal-bg-inverted": "#0D1B2A",
+      "cal-border": "rgba(13, 27, 42, 0.18)",
+      "cal-border-emphasis": "rgba(13, 27, 42, 0.45)",
+      "cal-border-subtle": "rgba(13, 27, 42, 0.08)",
+      "cal-text": "#1a1a24",
+      "cal-text-emphasis": "#0D1B2A",
+      "cal-text-subtle": "#4a5468",
+      "cal-text-muted": "#8A93A0",
+      "cal-text-inverted": "#F5F3F0",
+      "cal-text-error": "#8a3232"
+    };
+    return {
+      theme: "light",
+      styles: { branding: { brandColor: "#0D1B2A" } },
+      hideEventTypeDetails: false,
+      layout: "month_view",
+      cssVarsPerTheme: { light: light, dark: light }
+    };
+  })();
 
   Cal("init", { origin: "https://cal.com" });
   Cal("ui", window.calUiConfig);

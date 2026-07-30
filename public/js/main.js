@@ -277,6 +277,7 @@
   const registerDrawerEmbedUi = (nsApi) => {
     const base = window.calUiConfig || {};
     nsApi('ui', Object.assign({}, base, {
+      theme: 'light',
       layout: 'month_view',
       disableAutoScroll: true,
       'ui.autoscroll': 'false'
@@ -434,6 +435,7 @@
           elementOrSelector: `#${mount.id}`,
           calLink: link,
           config: {
+            theme: 'light',
             layout: 'month_view',
             'ui.autoscroll': 'false'
           }
