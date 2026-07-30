@@ -14,6 +14,10 @@ import {
   parseAdminOverrideEventId,
 } from '@/lib/cal-config';
 import { CAL_V2_BASE } from '@/lib/cal-proxy';
+import {
+  getStripeEnvModes,
+  stripeModeMismatchMessage,
+} from '@/lib/stripe-mode';
 import { stripe } from '@/lib/stripe';
 
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'skipped';
@@ -46,12 +50,6 @@ function envPresent(name: string): boolean {
   return typeof v === 'string' && v.trim().length > 0;
 }
 
-function stripeKeyMode(key: string | undefined): 'live' | 'test' | 'unknown' {
-  if (!key) return 'unknown';
-  if (key.startsWith('sk_live_') || key.startsWith('pk_live_')) return 'live';
-  if (key.startsWith('sk_test_') || key.startsWith('pk_test_')) return 'test';
-  return 'unknown';
-}
 
 async function timed<T>(fn: () => Promise<T>): Promise<{ value: T; latencyMs: number }> {
   const start = Date.now();
@@ -144,27 +142,24 @@ async function checkEnvironment(): Promise<HealthCheckResult[]> {
     })
   );
 
-  const secretMode = stripeKeyMode(process.env.STRIPE_SECRET_KEY);
-  const publishableMode = stripeKeyMode(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
-  const stripeAligned =
-    secretMode !== 'unknown' &&
-    publishableMode !== 'unknown' &&
-    secretMode === publishableMode;
-
+  const stripeModes = getStripeEnvModes();
+  const stripeMismatch = stripeModeMismatchMessage(stripeModes);
   checks.push(
     result({
       id: 'env-stripe-mode',
-      name: 'Stripe key mode alignment',
+      name: 'Stripe key mode (live vs test)',
       category: 'Environment',
       status:
-        secretMode === 'unknown' || publishableMode === 'unknown'
+        stripeModes.secret === 'unknown' || stripeModes.publishable === 'unknown'
           ? 'degraded'
-          : stripeAligned
+          : stripeModes.matchesExpected
             ? 'healthy'
             : 'unhealthy',
-      message: stripeAligned
-        ? `Stripe keys aligned (${secretMode} mode)`
-        : `Stripe secret is ${secretMode}, publishable is ${publishableMode}`,
+      message: stripeModes.matchesExpected
+        ? `Stripe ${stripeModes.secret} keys (expected ${stripeModes.expected} for this deployment)`
+        : stripeMismatch ||
+          `Stripe secret is ${stripeModes.secret}, publishable is ${stripeModes.publishable}`,
+      detail: `secret=${stripeModes.secret}, publishable=${stripeModes.publishable}, expected=${stripeModes.expected}`,
     })
   );
 

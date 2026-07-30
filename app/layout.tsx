@@ -32,8 +32,9 @@ export default function RootLayout({
       signInUrl="/sign-in"
       signInFallbackRedirectUrl="/admin"
     >
-      <html lang="en">
+      <html lang="en" style={{ colorScheme: 'light' }}>
         <head>
+          <meta name="color-scheme" content="light" />
           {/*
             Loads the same Bodoni Moda + DM Sans family the public site
             (public/index.html) uses, so the admin dashboard renders with

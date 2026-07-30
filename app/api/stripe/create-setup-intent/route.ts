@@ -17,6 +17,11 @@ import {
   STRIPE_SETUP_INTENT_ID_RE,
 } from '@/lib/appointment-stripe';
 import { isValidEmail } from '@/lib/client-identity';
+import {
+  getStripeEnvModes,
+  shouldEnforceStripeMode,
+  stripeModeMismatchMessage,
+} from '@/lib/stripe-mode';
 import { stripe } from '@/lib/stripe';
 
 export const runtime = 'nodejs';
@@ -66,6 +71,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         message:
           'STRIPE_SECRET_KEY is not set on the server. Card vaulting is unavailable.',
       },
+      { status: 503 }
+    );
+  }
+
+  // Production must be live (real cards only); staging must stay test so
+  // checkout can be exercised without charging. Refuse mismatched keys.
+  const stripeModes = getStripeEnvModes();
+  if (shouldEnforceStripeMode() && !stripeModes.matchesExpected) {
+    const message = stripeModeMismatchMessage(stripeModes);
+    console.error('[api/stripe/create-setup-intent] stripe mode mismatch', {
+      secret: stripeModes.secret,
+      publishable: stripeModes.publishable,
+      expected: stripeModes.expected,
+    });
+    return NextResponse.json(
+      { error: 'stripe_mode_mismatch', message },
       { status: 503 }
     );
   }

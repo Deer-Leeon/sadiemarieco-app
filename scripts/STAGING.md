@@ -66,9 +66,18 @@ node --env-file=.env.local scripts/reset-staging-neon.mjs
 | `POSTGRES_URL` | Neon **staging** branch URL only |
 | `PUBLIC_BASE_URL` | `https://staging.sadiemarie.co` |
 | `NEXT_PUBLIC_PUBLIC_BASE_URL` | `https://staging.sadiemarie.co` |
-| Stripe keys | **test** (`sk_test_` / `pk_test_`) |
+| Stripe keys | **test** (`sk_test_` / `pk_test_`) — never live keys on staging |
 | Clerk keys | **same** app as production |
 | `CRON_SECRET` | distinct from production |
+
+**Stripe split (important):**
+
+| Host | Stripe mode | Keys |
+| --- | --- | --- |
+| `www.sadiemarie.co` (Production) | **Live** | `sk_live_` + `pk_live_` |
+| `staging.sadiemarie.co` | **Test** | `sk_test_` + `pk_test_` |
+
+Live mode rejects Stripe test card numbers and only accepts real cards. Test mode never charges real cards. After changing keys, redeploy that environment (`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` is baked at build time). Confirm on each host via `/admin/health` → “Stripe key mode (live vs test)”.
 
 Redeploy the `staging` branch after env changes.
 

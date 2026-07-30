@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Sadie Marie — Luxury beauty studio in Lehi, Utah offering lash extensions, brow artistry, and signature skincare.">
   <meta name="theme-color" content="#0D1B2A">
+  <meta name="color-scheme" content="light">
   <title>Sadie Marie — Luxury Beauty Studio</title>
 
   <!-- INJECT_LCP_HINTS -->
@@ -379,6 +380,39 @@
 
   // Shared UI/branding config — re-applied per-namespace by main.js
   // so every embed (contact + each service) blends with the design system.
+  // `dark` mirrors `light` so OS dark mode never flips Cal to its default
+  // black booker (theme:"light" alone is not enough in the embed iframe).
+  const calLightCssVars = {
+    "cal-brand": "#0D1B2A",
+    "cal-brand-emphasis": "#2A4460",
+    "cal-brand-text": "#F5F3F0",
+    "cal-brand-subtle": "rgba(13, 27, 42, 0.08)",
+    "cal-brand-accent": "#1C2E42",
+
+    "cal-bg": "#F5F3F0",
+    "cal-bg-emphasis": "rgba(13, 27, 42, 0.08)",
+    "cal-bg-muted": "rgba(13, 27, 42, 0.04)",
+    "cal-bg-subtle": "rgba(13, 27, 42, 0.03)",
+    "cal-bg-inverted": "#0D1B2A",
+    "cal-bg-info": "rgba(13, 27, 42, 0.06)",
+    "cal-bg-success": "rgba(13, 27, 42, 0.06)",
+    "cal-bg-attention": "rgba(13, 27, 42, 0.06)",
+    "cal-bg-error": "rgba(138, 50, 50, 0.08)",
+    "cal-bg-dark-error": "rgba(138, 50, 50, 0.18)",
+
+    "cal-border": "rgba(13, 27, 42, 0.18)",
+    "cal-border-emphasis": "rgba(13, 27, 42, 0.45)",
+    "cal-border-subtle": "rgba(13, 27, 42, 0.08)",
+    "cal-border-booker": "transparent",
+    "cal-border-error": "rgba(138, 50, 50, 0.35)",
+
+    "cal-text": "#1a1a24",
+    "cal-text-emphasis": "#0D1B2A",
+    "cal-text-subtle": "#4a5468",
+    "cal-text-muted": "#8A93A0",
+    "cal-text-inverted": "#F5F3F0",
+    "cal-text-error": "#8a3232"
+  };
   window.calUiConfig = {
     theme: "light",
     styles: { branding: { brandColor: "#0D1B2A" } },
@@ -387,37 +421,8 @@
     disableAutoScroll: true,
     "ui.autoscroll": "false",
     cssVarsPerTheme: {
-      light: {
-        "cal-brand": "#0D1B2A",
-        "cal-brand-emphasis": "#2A4460",
-        "cal-brand-text": "#F5F3F0",
-        "cal-brand-subtle": "rgba(13, 27, 42, 0.08)",
-        "cal-brand-accent": "#1C2E42",
-
-        "cal-bg": "transparent",
-        "cal-bg-emphasis": "rgba(13, 27, 42, 0.08)",
-        "cal-bg-muted": "rgba(13, 27, 42, 0.04)",
-        "cal-bg-subtle": "rgba(13, 27, 42, 0.03)",
-        "cal-bg-inverted": "#0D1B2A",
-        "cal-bg-info": "rgba(13, 27, 42, 0.06)",
-        "cal-bg-success": "rgba(13, 27, 42, 0.06)",
-        "cal-bg-attention": "rgba(13, 27, 42, 0.06)",
-        "cal-bg-error": "rgba(138, 50, 50, 0.08)",
-        "cal-bg-dark-error": "rgba(138, 50, 50, 0.18)",
-
-        "cal-border": "rgba(13, 27, 42, 0.18)",
-        "cal-border-emphasis": "rgba(13, 27, 42, 0.45)",
-        "cal-border-subtle": "rgba(13, 27, 42, 0.08)",
-        "cal-border-booker": "transparent",
-        "cal-border-error": "rgba(138, 50, 50, 0.35)",
-
-        "cal-text": "#1a1a24",
-        "cal-text-emphasis": "#0D1B2A",
-        "cal-text-subtle": "#4a5468",
-        "cal-text-muted": "#8A93A0",
-        "cal-text-inverted": "#F5F3F0",
-        "cal-text-error": "#8a3232"
-      }
+      light: calLightCssVars,
+      dark: calLightCssVars
     }
   };
 
