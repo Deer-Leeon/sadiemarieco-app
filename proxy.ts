@@ -13,6 +13,14 @@ const isAdminRoute = createRouteMatcher([
   '/api/upload',
 ]);
 
+/**
+ * Staging must allow the in-app sign-in flow. Clerk scopes `__session` to the
+ * app host and does not share it across subdomains, so a live `/admin`
+ * session on www/apex does not unlock `staging.sadiemarie.co` — admins sign
+ * in again on staging (same Clerk Production users / keys).
+ */
+const isStagingSignInRoute = createRouteMatcher(['/sign-in(.*)']);
+
 /** Production paths that must not run Clerk session parsing (Bearer cron / webhooks). */
 const isClerkExcludedApi = createRouteMatcher([
   '/api/webhook(.*)',
@@ -23,7 +31,6 @@ const isClerkExcludedApi = createRouteMatcher([
   '/api/qstash(.*)',
   '/api/reviews(.*)',
 ]);
-
 async function userHasAdminAccess(userId: string): Promise<boolean> {
   const client = await clerkClient();
   const user = await client.users.getUser(userId);
@@ -36,19 +43,34 @@ async function userHasAdminAccess(userId: string): Promise<boolean> {
  * Auth proxy (Next.js 16: `middleware.ts` → `proxy.ts`).
  *
  * Production: Clerk session only for admin surfaces.
- * Staging (`staging.sadiemarie.co` or APP_ENV=staging): entire site requires
- * an allowlisted admin session; everyone else is redirected to production.
+ * Staging (`staging.sadiemarie.co` or APP_ENV=staging): public marketing is
+ * hidden (redirect to production). `/admin` behaves like live — unsigned
+ * visitors are sent to staging `/sign-in`, then allowlisted admins proceed.
  */
 export default clerkMiddleware(async (auth, req) => {
   const host = req.headers.get('host');
   const staging = shouldGateAsStaging(host);
 
   if (staging) {
-    // Staging has no public webhooks/crons by design — gate everything.
+    // Let the in-app Clerk widget run on this host (session cookies are
+    // host-scoped; live www login does not unlock staging).
+    if (isStagingSignInRoute(req)) {
+      return;
+    }
+
     const session = await auth();
+
+    // Same UX as production admin: protect → local /sign-in, not a bounce
+    // to www (which looked like "I'm logged in but staging redirects me").
+    if (!session.userId && isAdminRoute(req)) {
+      await auth.protect();
+      return;
+    }
+
     if (!session.userId) {
       return NextResponse.redirect(PRODUCTION_SITE_URL);
     }
+
     const allowed = await userHasAdminAccess(session.userId);
     if (!allowed) {
       return NextResponse.redirect(PRODUCTION_SITE_URL);

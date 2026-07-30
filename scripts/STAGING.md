@@ -4,10 +4,10 @@ Stay on **one Vercel project** + **one Neon project**. Production = `main` → `
 
 ## Access model
 
-- On `staging.sadiemarie.co`, **every** page requires a Clerk session for an allowlisted admin (`lib/admin-allowlist.ts`).
-- Anyone else is **redirected to** `https://www.sadiemarie.co`.
-- Use the **same Clerk application** as production. Add `https://staging.sadiemarie.co` to allowed origins / redirect URLs.
-- Set the Clerk session cookie domain to **`.sadiemarie.co`** so signing into `/admin` on the live site also unlocks staging in the same browser.
+- On `staging.sadiemarie.co`, marketing pages require an allowlisted admin session; everyone else is **redirected to** `https://www.sadiemarie.co`.
+- `/admin` works like live: unsigned → staging `/sign-in` → allowlisted admins reach the dashboard (`lib/admin-allowlist.ts`).
+- Use the **same Clerk Production application** (same `pk_live_` / `sk_live_`) as live.
+- Clerk does **not** share `__session` across subdomains — sign in again on staging (same users/passwords).
 
 Outbound Twilio SMS is **disabled** on staging / preview (`lib/outbound-sms-allowed.js`). Do not point Cal.com production webhooks at staging.
 
@@ -74,14 +74,14 @@ Redeploy the `staging` branch after env changes.
 
 ### 4. Clerk
 
-1. Add `https://staging.sadiemarie.co` to allowed origins / redirect URLs.
-2. Session cookie domain: `.sadiemarie.co` (shared across www + staging).
+1. Add `https://staging.sadiemarie.co` to allowed origins / redirect URLs (Configure → Domains / Paths as shown in the Clerk UI).
+2. Confirm Preview/`staging` Vercel env uses the **same** Production `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY`.
 
 ## Day-to-day workflow
 
 1. Build on a feature branch (optional Preview).
 2. Merge into `staging` → auto-deploys to `https://staging.sadiemarie.co`.
-3. Sign into live `/admin`, then open staging (or sign in on staging).
+3. Open `https://staging.sadiemarie.co/admin`, sign in with an allowlisted admin (same Clerk users as live; live session does not carry over).
 4. When happy, merge `staging` → `main` → production.
 
 ## Migrations
