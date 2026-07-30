@@ -744,18 +744,21 @@ function DossierSection({
 function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
   const noShows = stats.no_show_count ?? 0;
   const lateChanges = stats.late_change_count ?? 0;
-  const noShowTitle = [
-    `Admin-marked: ${stats.no_show_admin_count ?? 0}`,
-    `Under-2h cancels: ${stats.no_show_auto_cancel_count ?? 0}`,
-    `Under-2h reschedules: ${stats.no_show_auto_reschedule_count ?? 0}`,
-  ].join('\n');
-  const lateChangeTitle = [
-    `Late cancel: ${stats.late_change_cancel_count ?? 0}`,
-    `Late reschedule: ${stats.late_change_reschedule_count ?? 0}`,
-  ].join('\n');
+  const noShowBreakdown = [
+    { label: 'Admin-marked', value: stats.no_show_admin_count ?? 0 },
+    { label: 'Under-2h cancels', value: stats.no_show_auto_cancel_count ?? 0 },
+    {
+      label: 'Under-2h reschedules',
+      value: stats.no_show_auto_reschedule_count ?? 0,
+    },
+  ];
+  const lateChangeBreakdown = [
+    { label: 'Late cancel', value: stats.late_change_cancel_count ?? 0 },
+    { label: 'Late reschedule', value: stats.late_change_reschedule_count ?? 0 },
+  ];
 
   return (
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-stone-200 bg-stone-200 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-px overflow-visible rounded-lg border border-stone-200 bg-stone-200 sm:grid-cols-3 lg:grid-cols-5">
       <div className="bg-white p-3 text-center">
         <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
           Lifetime spend
@@ -772,37 +775,19 @@ function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
           {stats.total_bookings}
         </p>
       </div>
-      <div className="bg-white p-3 text-center">
-        <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
-          No-shows
-        </p>
-        <p
-          className={`mt-1 flex items-center justify-center gap-1 font-serif text-lg tabular-nums ${
-            noShows > 0 ? 'text-amber-800' : 'text-stone-900'
-          }`}
-          title={noShowTitle}
-          aria-label={`No-shows ${noShows}. ${noShowTitle.replace(/\n/g, '. ')}`}
-        >
-          {noShows > 0 && (
-            <AlertCircle className="h-4 w-4 text-amber-600" aria-hidden />
-          )}
-          <span>{noShows}</span>
-        </p>
-      </div>
-      <div className="bg-white p-3 text-center">
-        <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
-          Late-Change
-        </p>
-        <p
-          className={`mt-1 font-serif text-lg tabular-nums ${
-            lateChanges > 0 ? 'text-amber-800' : 'text-stone-900'
-          }`}
-          title={lateChangeTitle}
-          aria-label={`Late-Change ${lateChanges}. ${lateChangeTitle.replace(/\n/g, '. ')}`}
-        >
-          {lateChanges}
-        </p>
-      </div>
+      <CrmStatBreakdownTile
+        label="No-shows"
+        total={noShows}
+        emphasize={noShows > 0}
+        showAlert={noShows > 0}
+        rows={noShowBreakdown}
+      />
+      <CrmStatBreakdownTile
+        label="Late-Change"
+        total={lateChanges}
+        emphasize={lateChanges > 0}
+        rows={lateChangeBreakdown}
+      />
       <div className="bg-white p-3 text-center">
         <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
           Card vault
@@ -817,6 +802,63 @@ function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
             <span className="text-stone-400">None</span>
           )}
         </p>
+      </div>
+    </div>
+  );
+}
+
+function CrmStatBreakdownTile({
+  label,
+  total,
+  emphasize,
+  showAlert = false,
+  rows,
+}: {
+  label: string;
+  total: number;
+  emphasize: boolean;
+  showAlert?: boolean;
+  rows: Array<{ label: string; value: number }>;
+}) {
+  const summary = rows.map((r) => `${r.label}: ${r.value}`).join('. ');
+
+  return (
+    <div className="group relative bg-white p-3 text-center">
+      <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
+        {label}
+      </p>
+      <p
+        className={`mt-1 flex cursor-help items-center justify-center gap-1 font-serif text-lg tabular-nums ${
+          emphasize ? 'text-amber-800' : 'text-stone-900'
+        }`}
+        tabIndex={0}
+        aria-label={`${label} ${total}. ${summary}`}
+      >
+        {showAlert && (
+          <AlertCircle className="h-4 w-4 text-amber-600" aria-hidden />
+        )}
+        <span>{total}</span>
+      </p>
+      <div
+        role="tooltip"
+        className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 w-max min-w-[11rem] -translate-x-1/2 rounded-md border border-stone-200 bg-white px-3 py-2 text-left opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-500">
+          Breakdown
+        </p>
+        <ul className="space-y-1">
+          {rows.map((row) => (
+            <li
+              key={row.label}
+              className="flex items-baseline justify-between gap-4 text-xs text-stone-700"
+            >
+              <span>{row.label}</span>
+              <span className="font-medium tabular-nums text-stone-900">
+                {row.value}
+              </span>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );
