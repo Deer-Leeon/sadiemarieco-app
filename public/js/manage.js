@@ -201,31 +201,38 @@
 
     // Status pill + action availability. Cal returns lowercase status strings
     // ("accepted", "pending", "cancelled", "rejected", ...). Reschedule/cancel
-    // are only meaningful for a live, future booking.
+    // are only allowed before the appointment start time.
     const status = (b.status || '').toLowerCase();
     const isCancelled = status === 'cancelled' || status === 'rejected';
-    const isPast = b.end ? new Date(b.end).getTime() < Date.now() : false;
+    const startMs = b.start ? new Date(b.start).getTime() : NaN;
+    const hasStarted =
+      Number.isFinite(startMs) && startMs <= Date.now();
+    const locked =
+      typeof b.can_modify === 'boolean' ? !b.can_modify : hasStarted;
 
     detail.status.textContent = isCancelled
       ? 'Cancelled'
-      : isPast
-        ? 'Past appointment'
+      : locked
+        ? 'In progress or past'
         : status === 'pending'
           ? 'Pending confirmation'
           : 'Confirmed';
     detail.status.dataset.variant = isCancelled
       ? 'cancelled'
-      : isPast
+      : locked
         ? 'past'
         : status === 'pending'
           ? 'pending'
           : 'confirmed';
 
-    const actionable = !isCancelled && !isPast;
+    const actionable = !isCancelled && !locked;
     rescheduleBtn.disabled = !actionable;
     cancelBtn.disabled = !actionable;
-    rescheduleBtn.title = actionable ? '' : 'This appointment is no longer active.';
-    cancelBtn.title = actionable ? '' : 'This appointment is no longer active.';
+    const lockedTitle = locked
+      ? 'This appointment has started and can no longer be changed.'
+      : 'This appointment is no longer active.';
+    rescheduleBtn.title = actionable ? '' : lockedTitle;
+    cancelBtn.title = actionable ? '' : lockedTitle;
 
     setState('loaded');
   };
@@ -313,8 +320,22 @@
     rescheduleMounted = true;
   };
 
+  const appointmentHasStarted = (b) => {
+    if (!b) return true;
+    if (typeof b.can_modify === 'boolean') return !b.can_modify;
+    const startMs = b.start ? new Date(b.start).getTime() : NaN;
+    return Number.isFinite(startMs) && startMs <= Date.now();
+  };
+
   const openReschedule = () => {
     if (!booking) return;
+    if (appointmentHasStarted(booking)) {
+      showError(
+        'This appointment has started and can no longer be rescheduled. Please contact the studio if you need help.'
+      );
+      setState('loaded');
+      return;
+    }
     if (rescheduleTitle) {
       rescheduleTitle.innerHTML = `Pick a new time for <em>${deriveServiceName(booking)}</em>`;
     }
@@ -328,6 +349,12 @@
 
   // ── CANCEL ──
   const openCancelModal = () => {
+    if (appointmentHasStarted(booking)) {
+      showError(
+        'This appointment has started and can no longer be canceled. Please contact the studio if you need help.'
+      );
+      return;
+    }
     modal.hidden = false;
     modalBackdrop.hidden = false;
     modalError.hidden = true;
@@ -345,6 +372,13 @@
 
   const confirmCancel = async () => {
     if (!booking) return;
+    if (appointmentHasStarted(booking)) {
+      closeCancelModal();
+      showError(
+        'This appointment has started and can no longer be canceled. Please contact the studio if you need help.'
+      );
+      return;
+    }
     modalConfirm.disabled = true;
     modalDismiss.disabled = true;
     modalError.hidden = true;
@@ -359,7 +393,9 @@
       const payload = await res.json().catch(() => null);
 
       if (!res.ok || !(payload && payload.ok)) {
-        const msg = (payload && payload.upstreamMessage) || 'We couldn\'t cancel right now. Please try again or contact the studio.';
+        const msg =
+          (payload && (payload.message || payload.upstreamMessage)) ||
+          "We couldn't cancel right now. Please try again or contact the studio.";
         modalError.textContent = msg;
         modalError.hidden = false;
         modalConfirm.disabled = false;
