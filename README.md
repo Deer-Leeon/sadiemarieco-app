@@ -297,6 +297,16 @@ Make sure all environment variables in the table above are set in Vercel
 **before** deploying (otherwise the admin dashboard build will succeed but the
 runtime will fail on first request).
 
+## Staging vs production
+
+Production deploys from `main` to `www.sadiemarie.co`. Staging deploys from
+the `staging` git branch to `staging.sadiemarie.co` with a separate Neon
+database branch. Staging is admin-only (Clerk allowlist); everyone else is
+redirected to the live site. A GitHub Action resets the staging DB from
+production every Sunday.
+
+Full setup checklist: [`scripts/STAGING.md`](scripts/STAGING.md).
+
 ## Browser Support
 
 Tested in the latest versions of Chrome, Safari, Firefox, and Edge. Uses modern CSS (custom properties, Grid, `clamp()`) and a graceful fallback in `js/main.js` for browsers without `IntersectionObserver`.

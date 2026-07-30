@@ -79,14 +79,15 @@ and calls `auth.protect()` only for `/admin`, `/admin/:path*`,
 webhooks, and `/api/reviews` are deliberately excluded so their
 Bearer/`X-Cron-Secret` headers are never parsed as Clerk JWTs.
 
-The proxy only enforces "signed in." The actual allowlist
-(`ALLOWED_ADMIN_EMAILS` — currently `lj.buchmiller@gmail.com` and
-`mckenna@sadiemarie.co`) lives in `app/admin/auth.ts` (`getAdminAccess` /
+The proxy only enforces "signed in" on production admin routes. The actual allowlist
+(`ALLOWED_ADMIN_EMAILS` in `lib/admin-allowlist.ts` — currently `lj.buchmiller@gmail.com` and
+`mckenna@sadiemarie.co`) lives behind `app/admin/auth.ts` (`getAdminAccess` /
 `requireAdminUser`), and **every** privileged surface — Server Components and
 `/api/admin/**` route handlers alike — must call it itself; the proxy matcher
-is defence-in-depth, not the source of truth. `app/admin/page.tsx` keeps a
-duplicate `ALLOWED_EMAILS` set as a second defence-in-depth check; keep both
-in sync when adding/removing admins.
+is defence-in-depth, not the source of truth. `app/admin/page.tsx` reuses the
+same allowlist set. On **staging** (`staging.sadiemarie.co` / `APP_ENV=staging`),
+`proxy.ts` gates the **entire** site to that allowlist and redirects everyone
+else to `https://www.sadiemarie.co`.
 
 ### Legacy Vercel Functions bridged into the App Router
 
@@ -230,6 +231,12 @@ messages that describe the "why" (matches the existing log style — see
 boundaries", "Sync intake form and PDF stamper to redesigned consent
 layout"). Avoid bundling unrelated changes into one commit, and avoid vague
 messages like "wip" or "updates".
+
+### Staging promote flow
+
+1. Merge work into `staging` → review on `https://staging.sadiemarie.co` (admin Clerk session required; others redirect to production).
+2. Merge `staging` → `main` → live production.
+3. Staging DB refreshes from production every Sunday (Neon reset-from-parent). See [`scripts/STAGING.md`](scripts/STAGING.md).
 
 ## Required environment variables
 

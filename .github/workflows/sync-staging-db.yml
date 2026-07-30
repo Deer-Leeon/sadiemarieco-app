@@ -1,0 +1,28 @@
+name: Sync staging database
+
+# Every Sunday 08:00 America/Denver (14:00 UTC): reset Neon staging
+# branch from production so staging data is a fresh weekly copy.
+on:
+  schedule:
+    - cron: '0 14 * * 0'
+  workflow_dispatch:
+
+jobs:
+  reset-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Reset Neon staging from production
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          NEON_STAGING_BRANCH_ID: ${{ secrets.NEON_STAGING_BRANCH_ID }}
+          NEON_PRODUCTION_BRANCH_ID: ${{ secrets.NEON_PRODUCTION_BRANCH_ID }}
+        run: node scripts/reset-staging-neon.mjs

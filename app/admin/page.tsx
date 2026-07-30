@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 
 import { loadCalEventTypeMaps } from '@/lib/cal-config';
 import { normalizeStoredBookingNotes } from '@/lib/cal-booking-notes';
+import { ALLOWED_ADMIN_EMAILS } from '@/lib/admin-allowlist';
 
 import DashboardUI from './DashboardUI';
 import type { Appointment, TimeBlock } from './types';
@@ -14,13 +15,8 @@ import type { Appointment, TimeBlock } from './types';
 // available at build time.
 export const dynamic = 'force-dynamic';
 
-// Hardcoded allowlist. See helpers/comments in the prior implementation
-// (page.server.tsx) for rationale on iterating all linked emails rather
-// than checking `[0]` only.
-const ALLOWED_EMAILS = new Set([
-  'lj.buchmiller@gmail.com',
-  'mckenna@sadiemarie.co',
-]);
+// Defence-in-depth allowlist (same set as lib/admin-allowlist.ts).
+const ALLOWED_EMAILS = ALLOWED_ADMIN_EMAILS;
 
 interface DbRow {
   id: string;

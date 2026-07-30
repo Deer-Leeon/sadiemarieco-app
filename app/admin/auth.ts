@@ -6,23 +6,16 @@
  * one surface drifts from the other we end up with a soft side door —
  * keep both reading from this single source of truth.
  *
- * Defence-in-depth note: middleware.ts already enforces "signed in" for
- * /admin/**. This file enforces "signed in AND on the allowlist" for the
- * specific operations that need it. API routes under /api/** are NOT
- * middleware-protected by default, so they MUST call `requireAdminUser`
- * themselves before doing any privileged work.
+ * Defence-in-depth note: proxy.ts already enforces "signed in" for
+ * /admin/** (and the full staging host). This file enforces "signed in
+ * AND on the allowlist" for privileged work. Production API routes under
+ * /api/admin/** must still call `requireAdminUser` themselves.
  */
 import { auth, currentUser } from '@clerk/nextjs/server';
 
-/**
- * Hardcoded for now — there are exactly two humans who should see admin
- * surfaces. Roll forward to a `clerk_org` / Clerk role lookup when the
- * studio scales past these two seats.
- */
-export const ALLOWED_ADMIN_EMAILS: ReadonlySet<string> = new Set([
-  'lj.buchmiller@gmail.com',
-  'mckenna@sadiemarie.co',
-]);
+import { ALLOWED_ADMIN_EMAILS } from '@/lib/admin-allowlist';
+
+export { ALLOWED_ADMIN_EMAILS };
 
 export interface AdminAccessResult {
   /** Clerk user id, or null if unauthenticated. */
