@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Check, FileText, Loader2 } from 'lucide-react';
 
@@ -271,13 +271,23 @@ function EditableForm({
   initial: ConsentApiResponse;
   onSubmitted: (data: ConsentApiResponse) => void;
 }) {
-  const [form, setForm] = useState<ConsentFormData>(() => buildInitialForm(initial.client));
+  const [form, setForm] = useState<ConsentFormData>(() =>
+    buildInitialForm(
+      initial.client,
+      initial.intake && !initial.submitted ? initial.intake.form_data : null
+    )
+  );
   const [step, setStep] = useState<'filling' | 'preview'>('filling');
   const [previewPdf, setPreviewPdf] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [draftStatus, setDraftStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>(
+    'idle'
+  );
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipNextDraftRef = useRef(true);
 
   const checklist = asMedicalChecklist(form.medical_conditions_checklist);
   const statements = asConsentStatements(form.consent_statements);
@@ -317,6 +327,48 @@ function EditableForm({
     ...form,
     agreement_date: form.agreement_date || new Date().toISOString().slice(0, 10),
   });
+
+  const saveDraft = useCallback(
+    async (nextForm: ConsentFormData) => {
+      setDraftStatus('saving');
+      try {
+        const res = await fetch(`/api/consent/${clientId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ form_data: nextForm }),
+        });
+        if (res.status === 409) {
+          setDraftStatus('idle');
+          return;
+        }
+        if (!res.ok) {
+          setDraftStatus('error');
+          return;
+        }
+        setDraftStatus('saved');
+      } catch {
+        setDraftStatus('error');
+      }
+    },
+    [clientId]
+  );
+
+  useEffect(() => {
+    if (skipNextDraftRef.current) {
+      skipNextDraftRef.current = false;
+      return;
+    }
+    if (step !== 'filling' || submitting) return;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      void saveDraft(payloadForm());
+    }, 900);
+    return () => {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    };
+    // payloadForm identity changes every render — depend on form + step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, step, submitting, saveDraft]);
 
   const handleReviewDocument = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -427,6 +479,15 @@ function EditableForm({
         </h1>
         <p className="mt-2 text-xs text-stone-500">
           Fields marked with <span className="text-red-600">*</span> are required.
+        </p>
+        <p className="mt-2 text-[11px] text-stone-400" aria-live="polite">
+          {draftStatus === 'saving'
+            ? 'Saving progress…'
+            : draftStatus === 'saved'
+              ? 'Progress saved — you can leave and return to this link anytime until you sign.'
+              : draftStatus === 'error'
+                ? 'Could not save progress. Check your connection and keep editing.'
+                : 'Your answers save automatically as you go.'}
         </p>
       </header>
 

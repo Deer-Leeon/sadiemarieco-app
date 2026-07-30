@@ -1,6 +1,7 @@
 /**
- * GET  /api/consent/[clientId] — intake status + saved answers
- * POST /api/consent/[clientId] — submit intake (once per client)
+ * GET   /api/consent/[clientId] — intake status + saved draft/submitted answers
+ * PATCH /api/consent/[clientId] — autosave draft (until signed)
+ * POST  /api/consent/[clientId] — final submit + stamp (once per client)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -223,6 +224,82 @@ export async function GET(
   }
 }
 
+export async function PATCH(
+  req: NextRequest,
+  { params }: RouteContext
+): Promise<NextResponse> {
+  const { clientId: raw } = await params;
+  const clientId = parseClientId(raw);
+  if (!clientId) {
+    return NextResponse.json({ error: 'invalid_id' }, { status: 400 });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
+  }
+
+  const formData = parseFormData(body);
+  if (formData === null) {
+    return NextResponse.json({ error: 'invalid_form_data' }, { status: 400 });
+  }
+
+  try {
+    const client = await loadClient(clientId);
+    if (!client) {
+      return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    }
+
+    if (client.has_consented) {
+      return NextResponse.json(
+        { error: 'already_submitted', message: 'This intake form has already been submitted.' },
+        { status: 409 }
+      );
+    }
+
+    const existing = await loadIntake(clientId);
+    if (existing?.submitted_at) {
+      return NextResponse.json(
+        { error: 'already_submitted', message: 'This intake form has already been submitted.' },
+        { status: 409 }
+      );
+    }
+
+    const formDataJson = JSON.stringify(formData);
+    await sql`
+      INSERT INTO client_intake_forms (client_id, form_data, signature_image, submitted_at)
+      VALUES (
+        ${clientId}::uuid,
+        ${formDataJson}::jsonb,
+        NULL,
+        NULL
+      )
+      ON CONFLICT (client_id) DO UPDATE
+      SET form_data = EXCLUDED.form_data
+      WHERE client_intake_forms.submitted_at IS NULL
+    `;
+
+    const intake = await loadIntake(clientId);
+    return NextResponse.json({
+      ok: true,
+      saved: 'draft',
+      ...buildResponse(client, intake),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('client_intake_forms')) {
+      return NextResponse.json(
+        { error: 'schema_not_ready', message: 'Intake table not migrated' },
+        { status: 503 }
+      );
+    }
+    console.error('[api/consent] PATCH draft failed:', err);
+    return NextResponse.json({ error: 'server_error' }, { status: 500 });
+  }
+}
+
 export async function POST(
   req: NextRequest,
   { params }: RouteContext
@@ -249,6 +326,12 @@ export async function POST(
   if (signature === undefined) {
     return NextResponse.json({ error: 'invalid_signature' }, { status: 400 });
   }
+  if (!signature) {
+    return NextResponse.json(
+      { error: 'missing_signature', message: 'A signature is required.' },
+      { status: 400 }
+    );
+  }
 
   try {
     const client = await loadClient(clientId);
@@ -257,10 +340,7 @@ export async function POST(
     }
 
     const existing = await loadIntake(clientId);
-    if (
-      existing?.submitted_at ||
-      client.has_consented
-    ) {
+    if (existing?.submitted_at || client.has_consented) {
       return NextResponse.json(
         { error: 'already_submitted', message: 'This intake form has already been submitted.' },
         { status: 409 }
@@ -269,7 +349,7 @@ export async function POST(
 
     const formDataJson = JSON.stringify(formData);
 
-    await sql`
+    const { rows: upserted } = await sql`
       INSERT INTO client_intake_forms (client_id, form_data, signature_image, submitted_at)
       VALUES (
         ${clientId}::uuid,
@@ -277,12 +357,20 @@ export async function POST(
         ${signature},
         NOW()
       )
+      ON CONFLICT (client_id) DO UPDATE
+      SET
+        form_data = EXCLUDED.form_data,
+        signature_image = EXCLUDED.signature_image,
+        submitted_at = NOW(),
+        stamped_pdf_url = NULL
+      WHERE client_intake_forms.submitted_at IS NULL
+      RETURNING id
     `;
 
-    if (!signature) {
+    if (upserted.length === 0) {
       return NextResponse.json(
-        { error: 'missing_signature', message: 'A signature is required.' },
-        { status: 400 }
+        { error: 'already_submitted', message: 'This intake form has already been submitted.' },
+        { status: 409 }
       );
     }
 
