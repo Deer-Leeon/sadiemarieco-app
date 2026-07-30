@@ -352,22 +352,47 @@ export function validateConsentForm(form: ConsentFormData): string | null {
   return null;
 }
 
-export function buildInitialForm(client: {
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-  email: string | null;
-}): ConsentFormData {
+export function buildInitialForm(
+  client: {
+    first_name: string | null;
+    last_name: string | null;
+    phone: string | null;
+    email: string | null;
+  },
+  draft?: ConsentFormData | null
+): ConsentFormData {
   const today = new Date().toISOString().slice(0, 10);
-  return {
+  const base: ConsentFormData = {
     ...INITIAL_FORM,
     full_name: [client.first_name, client.last_name].filter(Boolean).join(' '),
     phone: client.phone ?? '',
     email: client.email ?? '',
-    agreement_print_name: [client.first_name, client.last_name].filter(Boolean).join(' '),
+    agreement_print_name: [client.first_name, client.last_name]
+      .filter(Boolean)
+      .join(' '),
     agreement_date: today,
     medical_conditions_checklist: { ...EMPTY_MEDICAL_CHECKLIST },
     consent_statements: { ...EMPTY_CONSENT_STATEMENTS },
+  };
+
+  if (!draft) return base;
+  const d = asConsentFormData(draft);
+  return {
+    ...d,
+    full_name: d.full_name.trim() || base.full_name,
+    phone: d.phone.trim() || base.phone,
+    email: d.email.trim() || base.email,
+    agreement_print_name:
+      d.agreement_print_name.trim() || base.agreement_print_name,
+    agreement_date: d.agreement_date || base.agreement_date,
+    medical_conditions_checklist: {
+      ...EMPTY_MEDICAL_CHECKLIST,
+      ...asMedicalChecklist(d.medical_conditions_checklist),
+    },
+    consent_statements: {
+      ...EMPTY_CONSENT_STATEMENTS,
+      ...asConsentStatements(d.consent_statements),
+    },
   };
 }
 

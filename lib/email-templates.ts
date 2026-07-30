@@ -403,3 +403,100 @@ export function generateReminderHtml({
 </body>
 </html>`;
 }
+
+export interface ConsentRequestEmailContent {
+  clientName: string;
+  consentUrl: string;
+}
+
+/**
+ * Post-booking consent / intake request — CTA to the client's permanent form link.
+ */
+export function generateConsentRequestHtml({
+  clientName,
+  consentUrl,
+}: ConsentRequestEmailContent): string {
+  const safeName = clientName.trim();
+  const greeting = safeName ? `Hi ${safeName},` : 'Hi,';
+
+  return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="color-scheme" content="light only" />
+  <meta name="supported-color-schemes" content="light" />
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
+  <link href="https://fonts.googleapis.com/css2?family=Pinyon+Script&amp;display=swap" rel="stylesheet" />
+  <title>Complete your consent form — Sadie Marie</title>
+  <style>
+    body, table, td { margin: 0; padding: 0; }
+    img { border: 0; outline: none; text-decoration: none; display: block; }
+    a { color: inherit; }
+    ${DARK_MODE_STYLES}
+    @media (max-width: 720px) {
+      .email-card { width: 100% !important; max-width: 100% !important; }
+      .email-pad { padding-left: 20px !important; padding-right: 20px !important; }
+      .banner-title { font-size: 52px !important; line-height: 1 !important; }
+      .body-copy { font-size: 16px !important; }
+    }
+  </style>
+</head>
+<body class="body dm-cream-bg" bgcolor="${PAGE_BG}" style="margin:0;padding:0;${creamBg}">
+  <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" class="dm-cream-bg" bgcolor="${PAGE_BG}" style="${creamBg}">
+    <tr>
+      <td align="center" style="padding:28px 16px;">
+        <table role="presentation" class="email-card" width="${CARD_WIDTH}" border="0" cellpadding="0" cellspacing="0" style="width:${CARD_WIDTH}px;max-width:100%;border-collapse:collapse;">
+          <tr>
+            <td class="dm-navy-bg" bgcolor="${NAVY}" style="${navyBg}padding:36px 36px 28px;text-align:center;">
+              <div class="banner-title dm-text-white" style="font-family:${SCRIPT};font-size:64px;line-height:1;color:#ffffff;">Sadie Marie</div>
+              <div class="banner-sub dm-text-light" style="margin-top:10px;font-family:${SERIF};font-size:16px;color:#f5f3f0;letter-spacing:0.04em;">Beauty Studio</div>
+            </td>
+          </tr>
+          <tr>
+            <td class="dm-cream-bg email-pad" bgcolor="${PAGE_BG}" style="${creamBg}padding:40px 36px 36px;">
+              <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" class="dm-text-navy" style="padding-bottom:18px;font-family:${SERIF};font-size:28px;color:${NAVY};line-height:1.25;text-align:center;">
+                    Please complete your consent form
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" class="body-copy dm-text-navy" style="padding-bottom:28px;font-family:${SERIF};font-size:17px;color:${NAVY};line-height:1.55;text-align:center;">
+                    ${greeting}<br /><br />
+                    Before your visit, please fill out and sign your intake &amp; consent form. You can save progress and return to the same link until you sign.
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center">
+                    <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+                      <tr>
+                        <td align="center" class="dm-btn-bg" bgcolor="${NAVY_BTN}" style="${btnBg}border-radius:26px;">
+                          <a href="${consentUrl}" target="_blank" rel="noopener noreferrer" class="dm-btn-text" style="display:inline-block;padding:20px 36px;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:-0.02em;line-height:1;">
+                            Open consent form
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td class="dm-navy-bg" bgcolor="${NAVY}" style="${navyBg}padding:20px 36px;text-align:center;">
+              <div class="dm-text-light" style="font-family:${SERIF};font-size:12px;color:#f5f3f0;line-height:1.6;">
+                61 W 3200 N, Suite #10, Lehi, UT 84043<br />
+                © <span style="white-space:nowrap;">Sadie&nbsp;Marie</span> Co.
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}

@@ -49,10 +49,12 @@ Do not reintroduce those failure modes.
 Public Cal bookings must only trigger Twilio SMS when `sms-consent` is **explicitly true**.
 
 - Webhook parses `sms-consent` and passes `smsOptIn: true` only when checked.
-- If unchecked / missing on a website booking → **no** confirmation SMS and **no** QStash remind/feedback SMS jobs.
+- If unchecked / missing on a website booking → **no** confirmation SMS, **no** consent-request SMS, and **no** QStash remind/feedback SMS jobs.
+- Consent **email** may still send when a real email is on file and the client has not signed intake yet (email is not A2P SMS).
 - Admin manual bookings may pass `smsOptIn: true` (staff-initiated outreach).
 
-**Code:** `lib/legacy-handlers/webhook.js`, `lib/booking-notifications.js`
+**Code:** `lib/legacy-handlers/webhook.js`, `lib/booking-notifications.js`  
+**Consent SMS template:** `consent_request` in Admin → SMS Messages (`lib/sms-templates.js`)
 
 ### 3. Privacy Policy must include these disclosures
 
