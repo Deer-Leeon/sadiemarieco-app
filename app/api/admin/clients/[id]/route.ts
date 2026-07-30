@@ -27,8 +27,13 @@ import { sql } from '@vercel/postgres';
 import { requireAdminUser } from '@/app/admin/auth';
 import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
 import { parseOptionalClientEmail } from '@/lib/client-identity';
-import { clearClientNoShowFlag } from '@/lib/client-no-show';
+import {
+  clearClientNoShowFlag,
+  grantFeeWaiveNext,
+  type FeeWaiveKind,
+} from '@/lib/client-no-show';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
+import { notifyFeeFreePassSms } from '@/lib/booking-notifications';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -50,6 +55,8 @@ interface ClientRow {
   late_change_count?: number | string | null;
   late_change_cancel_count?: number | string | null;
   late_change_reschedule_count?: number | string | null;
+  no_show_waive_next?: boolean | null;
+  late_change_waive_next?: boolean | null;
 }
 
 function toNumber(value: number | string | null | undefined): number {
@@ -78,6 +85,15 @@ async function rowToClient(row: ClientRow): Promise<Client> {
     late_change_count: toNumber(row.late_change_count),
     late_change_cancel_count: toNumber(row.late_change_cancel_count),
     late_change_reschedule_count: toNumber(row.late_change_reschedule_count),
+    no_show_waive_next:
+      row.no_show_waive_next === null || row.no_show_waive_next === undefined
+        ? true
+        : Boolean(row.no_show_waive_next),
+    late_change_waive_next:
+      row.late_change_waive_next === null ||
+      row.late_change_waive_next === undefined
+        ? true
+        : Boolean(row.late_change_waive_next),
   };
 
   try {
@@ -161,7 +177,9 @@ export async function GET(
         no_show_auto_reschedule_count,
         late_change_count,
         late_change_cancel_count,
-        late_change_reschedule_count
+        late_change_reschedule_count,
+        no_show_waive_next,
+        late_change_waive_next
       FROM clients
       WHERE id = ${id}::uuid
       LIMIT 1
@@ -223,16 +241,98 @@ export async function PATCH(
   const nextLast = sanitiseName(payload.last_name);
   const nextEmail = sanitiseEmail(payload.email);
   const clearNoShowFlag = payload.no_show_flag === false;
+  const grantNoShowWaive = payload.no_show_waive_next === true;
+  const grantLateChangeWaive = payload.late_change_waive_next === true;
 
   const changedFirst = nextFirst !== undefined;
   const changedLast = nextLast !== undefined;
   const changedEmail = nextEmail !== undefined;
 
+  // Grant free-pass only (may also clear attention flag in same request — handled below).
+  if (
+    (grantNoShowWaive || grantLateChangeWaive) &&
+    !changedFirst &&
+    !changedLast &&
+    !changedEmail
+  ) {
+    try {
+      const kinds: FeeWaiveKind[] = [];
+      if (grantNoShowWaive) kinds.push('no_show');
+      if (grantLateChangeWaive) kinds.push('late_change');
+
+      for (const kind of kinds) {
+        const result = await grantFeeWaiveNext(kind, id);
+        if (!result) {
+          return NextResponse.json({ error: 'not_found' }, { status: 404 });
+        }
+        // Always SMS on grant (including re-grant while already true) so the
+        // client is told they are actively not charged next time.
+        try {
+          await notifyFeeFreePassSms({
+            kind:
+              kind === 'late_change'
+                ? 'late_change_free_pass_granted'
+                : 'no_show_free_pass_granted',
+            clientPhone: result.phone,
+            smsOptIn: result.smsOptIn,
+          });
+        } catch (smsErr) {
+          console.warn(
+            '[api/admin/clients/[id]] free-pass granted SMS failed (non-fatal)',
+            { kind, error: errorMessage(smsErr) }
+          );
+        }
+      }
+
+      if (clearNoShowFlag) {
+        await clearClientNoShowFlag(id);
+      }
+
+      const { rows } = await sql<ClientRow>`
+        SELECT
+          id,
+          phone,
+          first_name,
+          last_name,
+          email,
+          created_at,
+          has_consented,
+          consent_form_url,
+          no_show_count,
+          no_show_flag,
+          no_show_admin_count,
+          no_show_auto_cancel_count,
+          no_show_auto_reschedule_count,
+          late_change_count,
+          late_change_cancel_count,
+          late_change_reschedule_count,
+          no_show_waive_next,
+          late_change_waive_next
+        FROM clients
+        WHERE id = ${id}::uuid
+        LIMIT 1
+      `;
+      if (rows.length === 0) {
+        return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      }
+      return NextResponse.json({ client: await rowToClient(rows[0]) });
+    } catch (err) {
+      console.error(
+        '[api/admin/clients/[id]] grant fee waive failed:',
+        errorMessage(err)
+      );
+      return NextResponse.json(
+        { error: 'db_update_failed', message: errorMessage(err) },
+        { status: 500 }
+      );
+    }
+  }
+
   if (!changedFirst && !changedLast && !changedEmail && !clearNoShowFlag) {
     return NextResponse.json(
       {
         error: 'no_fields',
-        hint: 'pass at least one of first_name, last_name, email, or no_show_flag: false',
+        hint: 'pass at least one of first_name, last_name, email, no_show_flag: false, or no_show_waive_next / late_change_waive_next: true',
       },
       { status: 400 }
     );
@@ -276,7 +376,9 @@ export async function PATCH(
           no_show_auto_reschedule_count,
           late_change_count,
           late_change_cancel_count,
-          late_change_reschedule_count
+          late_change_reschedule_count,
+          no_show_waive_next,
+          late_change_waive_next
         FROM clients
         WHERE id = ${id}::uuid
         LIMIT 1
@@ -448,7 +550,9 @@ export async function PATCH(
         no_show_auto_reschedule_count,
         late_change_count,
         late_change_cancel_count,
-        late_change_reschedule_count
+        late_change_reschedule_count,
+        no_show_waive_next,
+        late_change_waive_next
       FROM clients
       WHERE id = ${id}::uuid
       LIMIT 1

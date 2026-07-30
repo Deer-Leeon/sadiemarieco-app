@@ -298,6 +298,15 @@ export interface ClientCrmStats {
    * an admin marks a no-show without charging; clearable on the profile.
    */
   no_show_flag: boolean;
+  /**
+   * When TRUE, the next no-show fee is waived (one-time free pass).
+   * FALSE means the client will be charged next time.
+   */
+  no_show_waive_next: boolean;
+  /**
+   * When TRUE, the next late-change fee is waived (one-time free pass).
+   */
+  late_change_waive_next: boolean;
   /** ISO 8601 — most recent appointment row created for this client. */
   last_booked_at: string | null;
 }
@@ -333,6 +342,8 @@ export const EMPTY_CLIENT_CRM_STATS: ClientCrmStats = {
   late_change_cancel_count: 0,
   late_change_reschedule_count: 0,
   no_show_flag: false,
+  no_show_waive_next: true,
+  late_change_waive_next: true,
   last_booked_at: null,
 };
 

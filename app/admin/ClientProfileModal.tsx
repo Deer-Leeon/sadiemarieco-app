@@ -448,12 +448,40 @@ function DossierSection({
     late_change_cancel_count: client.late_change_cancel_count,
     late_change_reschedule_count: client.late_change_reschedule_count,
     no_show_flag: client.no_show_flag,
+    no_show_waive_next: client.no_show_waive_next ?? true,
+    late_change_waive_next: client.late_change_waive_next ?? true,
     last_booked_at: client.last_booked_at,
   });
   const [dismissError, setDismissError] = useState<string | null>(null);
   const [confirmClearFlag, setConfirmClearFlag] = useState(false);
   const [clearingFlag, setClearingFlag] = useState(false);
+  const [waiveError, setWaiveError] = useState<string | null>(null);
+  const [confirmGrantKind, setConfirmGrantKind] = useState<
+    'no_show' | 'late_change' | null
+  >(null);
+  const [grantingWaive, setGrantingWaive] = useState(false);
   const mutatedRef = useRef(false);
+
+  const applyClientToCrmStats = useCallback((c: Client) => {
+    setCrmStats((prev) => ({
+      ...prev,
+      no_show_flag: c.no_show_flag ?? prev.no_show_flag,
+      no_show_count: c.no_show_count ?? prev.no_show_count,
+      no_show_admin_count: c.no_show_admin_count ?? prev.no_show_admin_count,
+      no_show_auto_cancel_count:
+        c.no_show_auto_cancel_count ?? prev.no_show_auto_cancel_count,
+      no_show_auto_reschedule_count:
+        c.no_show_auto_reschedule_count ?? prev.no_show_auto_reschedule_count,
+      late_change_count: c.late_change_count ?? prev.late_change_count,
+      late_change_cancel_count:
+        c.late_change_cancel_count ?? prev.late_change_cancel_count,
+      late_change_reschedule_count:
+        c.late_change_reschedule_count ?? prev.late_change_reschedule_count,
+      no_show_waive_next: c.no_show_waive_next ?? prev.no_show_waive_next,
+      late_change_waive_next:
+        c.late_change_waive_next ?? prev.late_change_waive_next,
+    }));
+  }, []);
 
   const dismissNoShowFlag = useCallback(async () => {
     setDismissError(null);
@@ -474,27 +502,7 @@ function DossierSection({
       const data = (await res.json()) as { client: Client };
       if (data.client) {
         onClientUpdated(data.client);
-        setCrmStats((prev) => ({
-          ...prev,
-          no_show_flag: false,
-          no_show_count: data.client.no_show_count ?? prev.no_show_count,
-          no_show_admin_count:
-            data.client.no_show_admin_count ?? prev.no_show_admin_count,
-          no_show_auto_cancel_count:
-            data.client.no_show_auto_cancel_count ??
-            prev.no_show_auto_cancel_count,
-          no_show_auto_reschedule_count:
-            data.client.no_show_auto_reschedule_count ??
-            prev.no_show_auto_reschedule_count,
-          late_change_count:
-            data.client.late_change_count ?? prev.late_change_count,
-          late_change_cancel_count:
-            data.client.late_change_cancel_count ??
-            prev.late_change_cancel_count,
-          late_change_reschedule_count:
-            data.client.late_change_reschedule_count ??
-            prev.late_change_reschedule_count,
-        }));
+        applyClientToCrmStats(data.client);
         setConfirmClearFlag(false);
       }
     } catch (err) {
@@ -504,7 +512,45 @@ function DossierSection({
     } finally {
       setClearingFlag(false);
     }
-  }, [client.id, onClientUpdated]);
+  }, [client.id, onClientUpdated, applyClientToCrmStats]);
+
+  const grantFeeWaive = useCallback(
+    async (kind: 'no_show' | 'late_change') => {
+      setWaiveError(null);
+      setGrantingWaive(true);
+      try {
+        const body =
+          kind === 'late_change'
+            ? { late_change_waive_next: true }
+            : { no_show_waive_next: true };
+        const res = await fetch(`/api/admin/clients/${client.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          setWaiveError(
+            `Could not grant free pass (HTTP ${res.status})${text ? `: ${text.slice(0, 120)}` : ''}`
+          );
+          return;
+        }
+        const data = (await res.json()) as { client: Client };
+        if (data.client) {
+          onClientUpdated(data.client);
+          applyClientToCrmStats(data.client);
+          setConfirmGrantKind(null);
+        }
+      } catch (err) {
+        setWaiveError(
+          err instanceof Error ? err.message : 'Could not grant free pass.'
+        );
+      } finally {
+        setGrantingWaive(false);
+      }
+    },
+    [client.id, onClientUpdated, applyClientToCrmStats]
+  );
 
   const refreshClientRecord = useCallback(() => {
     fetch(`/api/admin/clients/${client.id}`)
@@ -576,6 +622,21 @@ function DossierSection({
   return (
     <>
       <CrmStatsBar stats={crmStats} />
+      <FeeWaivePassesBar
+        stats={crmStats}
+        waiveError={waiveError}
+        confirmGrantKind={confirmGrantKind}
+        grantingWaive={grantingWaive}
+        onRequestGrant={(kind) => {
+          setWaiveError(null);
+          setConfirmGrantKind(kind);
+        }}
+        onCancelGrant={() => {
+          setConfirmGrantKind(null);
+          setWaiveError(null);
+        }}
+        onConfirmGrant={(kind) => void grantFeeWaive(kind)}
+      />
 
       {(crmStats.no_show_flag || client.no_show_flag) && (
         <div
@@ -738,6 +799,142 @@ function DossierSection({
         </div>
       )}
     </>
+  );
+}
+
+function FeeWaivePassesBar({
+  stats,
+  waiveError,
+  confirmGrantKind,
+  grantingWaive,
+  onRequestGrant,
+  onCancelGrant,
+  onConfirmGrant,
+}: {
+  stats: ClientCrmStats;
+  waiveError: string | null;
+  confirmGrantKind: 'no_show' | 'late_change' | null;
+  grantingWaive: boolean;
+  onRequestGrant: (kind: 'no_show' | 'late_change') => void;
+  onCancelGrant: () => void;
+  onConfirmGrant: (kind: 'no_show' | 'late_change') => void;
+}) {
+  const noShowFree = stats.no_show_waive_next ?? true;
+  const lateFree = stats.late_change_waive_next ?? true;
+
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <FeeWaivePassCard
+          title="No-show fee"
+          freeNext={noShowFree}
+          onGrant={() => onRequestGrant('no_show')}
+          grantDisabled={grantingWaive || confirmGrantKind !== null}
+        />
+        <FeeWaivePassCard
+          title="Late-Change fee"
+          freeNext={lateFree}
+          onGrant={() => onRequestGrant('late_change')}
+          grantDisabled={grantingWaive || confirmGrantKind !== null}
+        />
+      </div>
+      {waiveError && (
+        <p className="text-xs text-rose-700" role="alert">
+          {waiveError}
+        </p>
+      )}
+      {confirmGrantKind && (
+        <div className="rounded-lg border border-stone-200 bg-white px-3 py-3">
+          <p className="text-sm font-medium text-stone-900">
+            Grant a one-time{' '}
+            {confirmGrantKind === 'late_change' ? 'Late-Change' : 'no-show'} free
+            pass?
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-stone-600">
+            Their next{' '}
+            {confirmGrantKind === 'late_change'
+              ? 'late cancel or reschedule'
+              : 'no-show'}{' '}
+            will not be charged. An SMS will tell them the fee was waived for
+            the next time. After that event, they will be charged again unless
+            you grant another pass.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onCancelGrant}
+              disabled={grantingWaive}
+              className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => onConfirmGrant(confirmGrantKind)}
+              disabled={grantingWaive}
+              className="inline-flex items-center gap-1.5 rounded-full border border-stone-900 bg-stone-900 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
+            >
+              {grantingWaive && (
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+              )}
+              {grantingWaive ? 'Granting' : 'Yes, grant free pass'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeeWaivePassCard({
+  title,
+  freeNext,
+  onGrant,
+  grantDisabled,
+}: {
+  title: string;
+  freeNext: boolean;
+  onGrant: () => void;
+  grantDisabled: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-lg border px-3.5 py-3 ${
+        freeNext
+          ? 'border-emerald-200/80 bg-emerald-50/70'
+          : 'border-amber-200/80 bg-amber-50/80'
+      }`}
+    >
+      <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
+        {title}
+      </p>
+      <p
+        className={`mt-1 text-sm font-medium ${
+          freeNext ? 'text-emerald-950' : 'text-amber-950'
+        }`}
+      >
+        {freeNext ? 'Next free' : 'Will be charged next'}
+      </p>
+      <p
+        className={`mt-0.5 text-xs leading-relaxed ${
+          freeNext ? 'text-emerald-900/75' : 'text-amber-900/80'
+        }`}
+      >
+        {freeNext
+          ? 'One-time free pass is active. The next event skips the fee, then they are charged.'
+          : 'No free pass. The next event will charge the fee unless you grant another pass.'}
+      </p>
+      {!freeNext && (
+        <button
+          type="button"
+          onClick={onGrant}
+          disabled={grantDisabled}
+          className="mt-2 rounded-md border border-amber-300/80 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-amber-900 transition-colors hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:opacity-50"
+        >
+          Grant free pass
+        </button>
+      )}
+    </div>
   );
 }
 

@@ -51,6 +51,8 @@ interface ClientRow {
   late_change_count: number | string | null;
   late_change_cancel_count: number | string | null;
   late_change_reschedule_count: number | string | null;
+  no_show_waive_next: boolean | null;
+  late_change_waive_next: boolean | null;
   last_booked_at: Date | string | null;
 }
 
@@ -100,6 +102,8 @@ export default async function ClientsPage() {
         COALESCE(c.late_change_count, 0)::int AS late_change_count,
         COALESCE(c.late_change_cancel_count, 0)::int AS late_change_cancel_count,
         COALESCE(c.late_change_reschedule_count, 0)::int AS late_change_reschedule_count,
+        COALESCE(c.no_show_waive_next, TRUE) AS no_show_waive_next,
+        COALESCE(c.late_change_waive_next, TRUE) AS late_change_waive_next,
         stats.last_booked_at
       FROM clients c
       LEFT JOIN LATERAL (
@@ -215,6 +219,15 @@ export default async function ClientsPage() {
       late_change_count: toNumber(r.late_change_count),
       late_change_cancel_count: toNumber(r.late_change_cancel_count),
       late_change_reschedule_count: toNumber(r.late_change_reschedule_count),
+      no_show_waive_next:
+        r.no_show_waive_next === null || r.no_show_waive_next === undefined
+          ? true
+          : Boolean(r.no_show_waive_next),
+      late_change_waive_next:
+        r.late_change_waive_next === null ||
+        r.late_change_waive_next === undefined
+          ? true
+          : Boolean(r.late_change_waive_next),
       last_booked_at: serializeDate(r.last_booked_at),
     }));
   } catch (err) {

@@ -44,6 +44,18 @@ const impl = require('./booking-notifications.js') as {
     bookingUid?: string | null;
     amountCents?: number;
   }) => Promise<Record<string, unknown>>;
+  notifyFeeFreePassSms: (args: {
+    kind:
+      | 'no_show_free_pass_used'
+      | 'late_change_free_pass_used'
+      | 'no_show_free_pass_granted'
+      | 'late_change_free_pass_granted';
+    clientPhone: string | null;
+    smsOptIn: boolean | null | undefined;
+    serviceName?: string | null;
+    bookingTime?: string | null;
+    bookingUid?: string | null;
+  }) => Promise<Record<string, unknown>>;
 };
 
 export const notifyBookingConfirmed = impl.notifyBookingConfirmed;
@@ -53,3 +65,4 @@ export const notifyAdminAppointmentStatusSms =
   impl.notifyAdminAppointmentStatusSms;
 export const notifyAppointmentRescheduled = impl.notifyAppointmentRescheduled;
 export const notifyLateCancelFeeSms = impl.notifyLateCancelFeeSms;
+export const notifyFeeFreePassSms = impl.notifyFeeFreePassSms;

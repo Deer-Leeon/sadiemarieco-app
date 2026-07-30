@@ -53,9 +53,12 @@ import {
   isAppointmentStatus,
   type AppointmentStatus,
 } from '@/app/admin/types';
-import { recordClientNoShow } from '@/lib/client-no-show';
+import { recordClientNoShow, consumeFeeWaiveNext, clearFeeWaiveNext } from '@/lib/client-no-show';
 import { chargeNoShowPenalty } from '@/lib/no-show-charge';
-import { notifyAdminAppointmentStatusSms } from '@/lib/booking-notifications';
+import {
+  notifyAdminAppointmentStatusSms,
+  notifyFeeFreePassSms,
+} from '@/lib/booking-notifications';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -586,6 +589,31 @@ export async function PATCH(
       }
     }
 
+    let noShowFreePassConsumed = false;
+    if (targetStatus === 'no-show' && noShowRow) {
+      try {
+        if (chargeNoShow) {
+          await clearFeeWaiveNext(
+            'no_show',
+            noShowRow.client_id,
+            noShowRow.client_phone
+          );
+        } else {
+          const waive = await consumeFeeWaiveNext(
+            'no_show',
+            noShowRow.client_id,
+            noShowRow.client_phone
+          );
+          noShowFreePassConsumed = waive.consumed;
+        }
+      } catch (waiveErr) {
+        console.warn(
+          '[api/admin/appointments/[id]/status] free-pass update failed (non-fatal)',
+          { error: errorMessage(waiveErr) }
+        );
+      }
+    }
+
     // Lifecycle SMS (non-blocking) — only when client opted in.
     let lifecycleSms: Record<string, unknown> | null = null;
     try {
@@ -596,15 +624,35 @@ export async function PATCH(
             : noShowRow.booking_time
               ? String(noShowRow.booking_time)
               : null;
-        lifecycleSms = await notifyAdminAppointmentStatusSms({
-          kind: chargeNoShow && noShowCharge ? 'no_show_charged' : 'no_show',
-          clientPhone: noShowRow.client_phone,
-          smsOptIn: noShowRow.sms_opt_in,
-          serviceName: noShowRow.service_name,
-          bookingTime,
-          bookingUid: noShowRow.cal_event_id,
-          amountCents: noShowCharge?.amount_cents ?? null,
-        });
+        if (chargeNoShow && noShowCharge) {
+          lifecycleSms = await notifyAdminAppointmentStatusSms({
+            kind: 'no_show_charged',
+            clientPhone: noShowRow.client_phone,
+            smsOptIn: noShowRow.sms_opt_in,
+            serviceName: noShowRow.service_name,
+            bookingTime,
+            bookingUid: noShowRow.cal_event_id,
+            amountCents: noShowCharge.amount_cents,
+          });
+        } else if (noShowFreePassConsumed) {
+          lifecycleSms = await notifyFeeFreePassSms({
+            kind: 'no_show_free_pass_used',
+            clientPhone: noShowRow.client_phone,
+            smsOptIn: noShowRow.sms_opt_in,
+            serviceName: noShowRow.service_name,
+            bookingTime,
+            bookingUid: noShowRow.cal_event_id,
+          });
+        } else {
+          lifecycleSms = await notifyAdminAppointmentStatusSms({
+            kind: 'no_show',
+            clientPhone: noShowRow.client_phone,
+            smsOptIn: noShowRow.sms_opt_in,
+            serviceName: noShowRow.service_name,
+            bookingTime,
+            bookingUid: noShowRow.cal_event_id,
+          });
+        }
       } else if (targetStatus === 'canceled_by_admin') {
         const row = await findAppointmentForLifecycleSms(idParam);
         if (row) {

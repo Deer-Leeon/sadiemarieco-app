@@ -88,6 +88,8 @@ export function computeCrmStatsFromAppointments(
     late_change_count?: number;
     late_change_cancel_count?: number;
     late_change_reschedule_count?: number;
+    no_show_waive_next?: boolean;
+    late_change_waive_next?: boolean;
   }
 ): ClientCrmStats {
   const now = Date.now();
@@ -145,6 +147,8 @@ export function computeCrmStatsFromAppointments(
     late_change_cancel_count: opts?.late_change_cancel_count ?? 0,
     late_change_reschedule_count: opts?.late_change_reschedule_count ?? 0,
     no_show_flag: Boolean(opts?.no_show_flag),
+    no_show_waive_next: opts?.no_show_waive_next ?? true,
+    late_change_waive_next: opts?.late_change_waive_next ?? true,
     last_booked_at:
       Number.isFinite(lastBookedMs) && lastBookedMs > Number.NEGATIVE_INFINITY
         ? new Date(lastBookedMs).toISOString()
@@ -169,6 +173,8 @@ interface ClientNoShowRow {
   late_change_count: number | string | null;
   late_change_cancel_count: number | string | null;
   late_change_reschedule_count: number | string | null;
+  no_show_waive_next: boolean | null;
+  late_change_waive_next: boolean | null;
 }
 
 function changeCountersFromRow(
@@ -183,6 +189,8 @@ function changeCountersFromRow(
   | 'late_change_count'
   | 'late_change_cancel_count'
   | 'late_change_reschedule_count'
+  | 'no_show_waive_next'
+  | 'late_change_waive_next'
 > {
   return {
     no_show_count: toNumber(flagRow?.no_show_count ?? null),
@@ -201,6 +209,17 @@ function changeCountersFromRow(
     late_change_reschedule_count: toNumber(
       flagRow?.late_change_reschedule_count ?? null
     ),
+    // Default TRUE when column missing (matches DB default / new clients).
+    no_show_waive_next:
+      flagRow?.no_show_waive_next === null ||
+      flagRow?.no_show_waive_next === undefined
+        ? true
+        : Boolean(flagRow.no_show_waive_next),
+    late_change_waive_next:
+      flagRow?.late_change_waive_next === null ||
+      flagRow?.late_change_waive_next === undefined
+        ? true
+        : Boolean(flagRow.late_change_waive_next),
   };
 }
 
@@ -313,7 +332,9 @@ export async function fetchClientCrmStats(
         no_show_auto_reschedule_count,
         late_change_count,
         late_change_cancel_count,
-        late_change_reschedule_count
+        late_change_reschedule_count,
+        no_show_waive_next,
+        late_change_waive_next
       FROM clients
       WHERE id = ${clientId}::uuid
       LIMIT 1
