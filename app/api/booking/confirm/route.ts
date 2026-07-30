@@ -56,6 +56,11 @@ import {
 } from '@/lib/cal-proxy';
 import { isValidEmail } from '@/lib/client-identity';
 import { stripe } from '@/lib/stripe';
+import {
+  getStripeEnvModes,
+  shouldEnforceStripeMode,
+  stripeModeMismatchMessage,
+} from '@/lib/stripe-mode';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -257,6 +262,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         message:
           'STRIPE_SECRET_KEY is not set on the server. Card vaulting is unavailable.',
       },
+      { status: 503 }
+    );
+  }
+
+  const stripeModes = getStripeEnvModes();
+  if (shouldEnforceStripeMode() && !stripeModes.matchesExpected) {
+    const message = stripeModeMismatchMessage(stripeModes);
+    console.error('[api/booking/confirm] stripe mode mismatch', {
+      secret: stripeModes.secret,
+      publishable: stripeModes.publishable,
+      expected: stripeModes.expected,
+    });
+    return NextResponse.json(
+      { error: 'stripe_mode_mismatch', message },
       { status: 503 }
     );
   }
