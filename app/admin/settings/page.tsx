@@ -1,10 +1,12 @@
 import { redirect } from 'next/navigation';
 import { currentUser } from '@clerk/nextjs/server';
 
+import { isStagingDeployment } from '@/lib/staging';
 import { getAdminAccess } from '../auth';
 import AdminHeader from '../AdminHeader';
 import AdminSectionTabs from '../AdminSectionTabs';
 import ConsentTemplateCard from './ConsentTemplateCard';
+import StagingSmsToggleCard from './StagingSmsToggleCard';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +18,7 @@ export default async function AdminSettingsPage() {
   const user = await currentUser();
   const displayName =
     user?.firstName || access.emails[0] || 'Admin';
+  const showStagingSmsToggle = isStagingDeployment();
 
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-stone-900">
@@ -26,6 +29,7 @@ export default async function AdminSettingsPage() {
           Studio-wide configuration. Upload the consent PDF your clients
           should receive or reference.
         </p>
+        {showStagingSmsToggle ? <StagingSmsToggleCard /> : null}
         <ConsentTemplateCard />
       </main>
     </div>

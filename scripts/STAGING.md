@@ -62,13 +62,15 @@ node --env-file=.env.local scripts/reset-staging-neon.mjs
 | Variable | Staging value |
 | --- | --- |
 | `APP_ENV` | `staging` |
-| `DISABLE_OUTBOUND_SMS` | `true` |
+| `DISABLE_OUTBOUND_SMS` | optional hard-kill; staging uses the **Settings → Outbound SMS** toggle instead |
 | `POSTGRES_URL` | Neon **staging** branch URL only |
 | `PUBLIC_BASE_URL` | `https://staging.sadiemarie.co` |
 | `NEXT_PUBLIC_PUBLIC_BASE_URL` | `https://staging.sadiemarie.co` |
 | Stripe keys | **test** (`sk_test_` / `pk_test_`) — never live keys on staging |
 | Clerk keys | **same** app as production |
 | `CRON_SECRET` | distinct from production |
+
+**Staging SMS:** Off by default. Enable from `/admin/settings` → **Outbound SMS** (staging only). Uses the real Twilio number; ~1¢/message. Sunday Neon reset clears the toggle back to off.
 
 **Stripe split (important):**
 
