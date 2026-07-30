@@ -12,7 +12,7 @@ export function isStagingHost(hostHeader: string | null): boolean {
 }
 
 /**
- * True when this deployment should behave as staging (gate + no SMS).
+ * True when this deployment should behave as staging (gate + SMS toggle).
  * Prefer APP_ENV=staging on the Vercel staging branch env.
  */
 export function isStagingDeployment(): boolean {

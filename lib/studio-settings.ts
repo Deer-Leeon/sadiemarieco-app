@@ -17,6 +17,11 @@ export interface StudioSettings {
   consent_pdf_url: string | null;
   /** Map of SmsTemplateKey → editable body (placeholders allowed). */
   sms_templates?: Record<string, string> | null;
+  /**
+   * Staging-only: when true, Twilio outbound SMS is allowed on the
+   * staging deployment. Ignored in production.
+   */
+  staging_outbound_sms_enabled?: boolean;
   /** ISO 8601 timestamp string from Postgres. */
   updated_at: string;
 }
