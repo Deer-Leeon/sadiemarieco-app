@@ -82,6 +82,12 @@ export function computeCrmStatsFromAppointments(
   opts?: {
     no_show_count?: number;
     no_show_flag?: boolean;
+    no_show_admin_count?: number;
+    no_show_auto_cancel_count?: number;
+    no_show_auto_reschedule_count?: number;
+    late_change_count?: number;
+    late_change_cancel_count?: number;
+    late_change_reschedule_count?: number;
   }
 ): ClientCrmStats {
   const now = Date.now();
@@ -132,6 +138,12 @@ export function computeCrmStatsFromAppointments(
     risk_flag,
     no_show_count:
       opts?.no_show_count != null ? opts.no_show_count : derivedNoShows,
+    no_show_admin_count: opts?.no_show_admin_count ?? 0,
+    no_show_auto_cancel_count: opts?.no_show_auto_cancel_count ?? 0,
+    no_show_auto_reschedule_count: opts?.no_show_auto_reschedule_count ?? 0,
+    late_change_count: opts?.late_change_count ?? 0,
+    late_change_cancel_count: opts?.late_change_cancel_count ?? 0,
+    late_change_reschedule_count: opts?.late_change_reschedule_count ?? 0,
     no_show_flag: Boolean(opts?.no_show_flag),
     last_booked_at:
       Number.isFinite(lastBookedMs) && lastBookedMs > Number.NEGATIVE_INFINITY
@@ -151,6 +163,45 @@ interface CrmStatsRow {
 interface ClientNoShowRow {
   no_show_count: number | string | null;
   no_show_flag: boolean | null;
+  no_show_admin_count: number | string | null;
+  no_show_auto_cancel_count: number | string | null;
+  no_show_auto_reschedule_count: number | string | null;
+  late_change_count: number | string | null;
+  late_change_cancel_count: number | string | null;
+  late_change_reschedule_count: number | string | null;
+}
+
+function changeCountersFromRow(
+  flagRow: ClientNoShowRow | undefined
+): Pick<
+  ClientCrmStats,
+  | 'no_show_count'
+  | 'no_show_flag'
+  | 'no_show_admin_count'
+  | 'no_show_auto_cancel_count'
+  | 'no_show_auto_reschedule_count'
+  | 'late_change_count'
+  | 'late_change_cancel_count'
+  | 'late_change_reschedule_count'
+> {
+  return {
+    no_show_count: toNumber(flagRow?.no_show_count ?? null),
+    no_show_flag: Boolean(flagRow?.no_show_flag),
+    no_show_admin_count: toNumber(flagRow?.no_show_admin_count ?? null),
+    no_show_auto_cancel_count: toNumber(
+      flagRow?.no_show_auto_cancel_count ?? null
+    ),
+    no_show_auto_reschedule_count: toNumber(
+      flagRow?.no_show_auto_reschedule_count ?? null
+    ),
+    late_change_count: toNumber(flagRow?.late_change_count ?? null),
+    late_change_cancel_count: toNumber(
+      flagRow?.late_change_cancel_count ?? null
+    ),
+    late_change_reschedule_count: toNumber(
+      flagRow?.late_change_reschedule_count ?? null
+    ),
+  };
 }
 
 function toNumber(value: number | string | null): number {
@@ -254,7 +305,15 @@ export async function fetchClientCrmStats(
         )
     `,
     sql<ClientNoShowRow>`
-      SELECT no_show_count, no_show_flag
+      SELECT
+        no_show_count,
+        no_show_flag,
+        no_show_admin_count,
+        no_show_auto_cancel_count,
+        no_show_auto_reschedule_count,
+        late_change_count,
+        late_change_cancel_count,
+        late_change_reschedule_count
       FROM clients
       WHERE id = ${clientId}::uuid
       LIMIT 1
@@ -263,11 +322,11 @@ export async function fetchClientCrmStats(
 
   const row = rows[0];
   const flagRow = flagRows[0];
+  const counters = changeCountersFromRow(flagRow);
   if (!row) {
     return {
       ...EMPTY_CLIENT_CRM_STATS,
-      no_show_count: toNumber(flagRow?.no_show_count ?? null),
-      no_show_flag: Boolean(flagRow?.no_show_flag),
+      ...counters,
     };
   }
 
@@ -284,8 +343,7 @@ export async function fetchClientCrmStats(
     lifetime_value: toNumber(row.lifetime_value),
     has_vaulted_card: Boolean(row.has_vaulted_card),
     risk_flag: Boolean(row.risk_flag),
-    no_show_count: toNumber(flagRow?.no_show_count ?? null),
-    no_show_flag: Boolean(flagRow?.no_show_flag),
+    ...counters,
     last_booked_at,
   };
 }

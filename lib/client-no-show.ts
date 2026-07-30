@@ -1,13 +1,15 @@
 /**
- * Lifetime no-show counter + dismissible attention flag on `clients`.
+ * Lifetime no-show + late-change counters on `clients`.
  *
- * - Count increments on every admin no-show mark (charged or not).
- * - Flag activates only when the no-show is marked without charging.
- * - Flag can be cleared from the client profile; count never decreases.
+ * Totals never decrease. Breakdown columns must stay in sync:
+ *   no_show_count = admin + auto_cancel + auto_reschedule
+ *   late_change_count = late_cancel + late_reschedule
  */
 import { sql } from '@vercel/postgres';
 
 import { sqlPhoneVariants } from '@/lib/client-identity';
+
+export type ChangeFeeAction = 'cancel' | 'reschedule';
 
 export async function recordClientNoShow(opts: {
   clientId: string | null;
@@ -30,13 +32,94 @@ export async function recordClientNoShow(opts: {
       UPDATE clients
       SET
         no_show_count = no_show_count + 1,
+        no_show_admin_count = no_show_admin_count + 1,
         no_show_flag = TRUE
       WHERE id = ${clientId}::uuid
     `;
   } else {
     await sql`
       UPDATE clients
-      SET no_show_count = no_show_count + 1
+      SET
+        no_show_count = no_show_count + 1,
+        no_show_admin_count = no_show_admin_count + 1
+      WHERE id = ${clientId}::uuid
+    `;
+  }
+
+  return { clientId };
+}
+
+/**
+ * Under-2h client cancel/reschedule that charged 100% (counts as no-show).
+ */
+export async function recordClientAutoNoShow(opts: {
+  clientId: string | null;
+  clientPhone: string | null;
+  action: ChangeFeeAction;
+}): Promise<{ clientId: string } | { skipped: 'no_client' }> {
+  const clientId = await resolveClientId(opts.clientId, opts.clientPhone);
+  if (!clientId) {
+    console.warn('[client-no-show] no client resolved for auto no-show', {
+      clientId: opts.clientId,
+      hasPhone: Boolean(opts.clientPhone),
+      action: opts.action,
+    });
+    return { skipped: 'no_client' };
+  }
+
+  if (opts.action === 'reschedule') {
+    await sql`
+      UPDATE clients
+      SET
+        no_show_count = no_show_count + 1,
+        no_show_auto_reschedule_count = no_show_auto_reschedule_count + 1
+      WHERE id = ${clientId}::uuid
+    `;
+  } else {
+    await sql`
+      UPDATE clients
+      SET
+        no_show_count = no_show_count + 1,
+        no_show_auto_cancel_count = no_show_auto_cancel_count + 1
+      WHERE id = ${clientId}::uuid
+    `;
+  }
+
+  return { clientId };
+}
+
+/**
+ * 2h–24h client cancel/reschedule that charged 50% (Late-Change).
+ */
+export async function recordClientLateChange(opts: {
+  clientId: string | null;
+  clientPhone: string | null;
+  action: ChangeFeeAction;
+}): Promise<{ clientId: string } | { skipped: 'no_client' }> {
+  const clientId = await resolveClientId(opts.clientId, opts.clientPhone);
+  if (!clientId) {
+    console.warn('[client-no-show] no client resolved for late change', {
+      clientId: opts.clientId,
+      hasPhone: Boolean(opts.clientPhone),
+      action: opts.action,
+    });
+    return { skipped: 'no_client' };
+  }
+
+  if (opts.action === 'reschedule') {
+    await sql`
+      UPDATE clients
+      SET
+        late_change_count = late_change_count + 1,
+        late_change_reschedule_count = late_change_reschedule_count + 1
+      WHERE id = ${clientId}::uuid
+    `;
+  } else {
+    await sql`
+      UPDATE clients
+      SET
+        late_change_count = late_change_count + 1,
+        late_change_cancel_count = late_change_cancel_count + 1
       WHERE id = ${clientId}::uuid
     `;
   }
@@ -53,7 +136,7 @@ export async function clearClientNoShowFlag(clientId: string): Promise<boolean> 
   return (rowCount ?? 0) > 0;
 }
 
-async function resolveClientId(
+export async function resolveClientId(
   clientId: string | null,
   clientPhone: string | null
 ): Promise<string | null> {

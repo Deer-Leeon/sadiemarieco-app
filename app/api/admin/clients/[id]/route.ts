@@ -44,6 +44,12 @@ interface ClientRow {
   consent_form_url: string | null;
   no_show_count?: number | string | null;
   no_show_flag?: boolean | null;
+  no_show_admin_count?: number | string | null;
+  no_show_auto_cancel_count?: number | string | null;
+  no_show_auto_reschedule_count?: number | string | null;
+  late_change_count?: number | string | null;
+  late_change_cancel_count?: number | string | null;
+  late_change_reschedule_count?: number | string | null;
 }
 
 function toNumber(value: number | string | null | undefined): number {
@@ -66,6 +72,12 @@ async function rowToClient(row: ClientRow): Promise<Client> {
     consent_form_url: row.consent_form_url,
     no_show_count: toNumber(row.no_show_count),
     no_show_flag: Boolean(row.no_show_flag),
+    no_show_admin_count: toNumber(row.no_show_admin_count),
+    no_show_auto_cancel_count: toNumber(row.no_show_auto_cancel_count),
+    no_show_auto_reschedule_count: toNumber(row.no_show_auto_reschedule_count),
+    late_change_count: toNumber(row.late_change_count),
+    late_change_cancel_count: toNumber(row.late_change_cancel_count),
+    late_change_reschedule_count: toNumber(row.late_change_reschedule_count),
   };
 
   try {
@@ -143,7 +155,13 @@ export async function GET(
         has_consented,
         consent_form_url,
         no_show_count,
-        no_show_flag
+        no_show_flag,
+        no_show_admin_count,
+        no_show_auto_cancel_count,
+        no_show_auto_reschedule_count,
+        late_change_count,
+        late_change_cancel_count,
+        late_change_reschedule_count
       FROM clients
       WHERE id = ${id}::uuid
       LIMIT 1
@@ -252,7 +270,13 @@ export async function PATCH(
           has_consented,
           consent_form_url,
           no_show_count,
-          no_show_flag
+          no_show_flag,
+          no_show_admin_count,
+          no_show_auto_cancel_count,
+          no_show_auto_reschedule_count,
+          late_change_count,
+          late_change_cancel_count,
+          late_change_reschedule_count
         FROM clients
         WHERE id = ${id}::uuid
         LIMIT 1
@@ -418,7 +442,13 @@ export async function PATCH(
         has_consented,
         consent_form_url,
         no_show_count,
-        no_show_flag
+        no_show_flag,
+        no_show_admin_count,
+        no_show_auto_cancel_count,
+        no_show_auto_reschedule_count,
+        late_change_count,
+        late_change_cancel_count,
+        late_change_reschedule_count
       FROM clients
       WHERE id = ${id}::uuid
       LIMIT 1

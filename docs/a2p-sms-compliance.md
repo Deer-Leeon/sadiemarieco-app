@@ -180,11 +180,13 @@ Sadie Marie: You were marked as a no-show for your [service] on [date] at [time]
 Sadie Marie: Your [service] has been rescheduled to [date] at [time]. Manage, reschedule, or cancel: [link]. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
-**#8 – Late-cancel fee ($20 charged)**:
+**#8 – Late-change fee (50% of service, 2–24h before start; cancel or reschedule)**:
 
 ```text
-Sadie Marie: Your [service] on [date] at [time] was canceled. A late-cancel fee of $20 was charged to your card on file. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: Your [service] on [date] at [time] was canceled or rescheduled. A late-change fee of $[amount] was charged to your card on file. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
+
+(Under 2 hours uses the no-show charged template at 100% of service cost, for cancel or reschedule.)
 
 **Code:** `lib/sms-appointment-copy.js`, `lib/booking-notifications.js`, `lib/legacy-handlers/remind.js`, `lib/legacy-handlers/webhook.js`, admin status/reschedule routes  
 **Send timing:** confirmation + QStash schedules run after checkout confirm (not on Cal `BOOKING_CREATED`). Lifecycle SMS only when `appointments.sms_opt_in === true`.

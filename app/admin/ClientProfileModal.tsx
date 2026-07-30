@@ -441,6 +441,12 @@ function DossierSection({
     has_vaulted_card: client.has_vaulted_card,
     risk_flag: client.risk_flag,
     no_show_count: client.no_show_count,
+    no_show_admin_count: client.no_show_admin_count,
+    no_show_auto_cancel_count: client.no_show_auto_cancel_count,
+    no_show_auto_reschedule_count: client.no_show_auto_reschedule_count,
+    late_change_count: client.late_change_count,
+    late_change_cancel_count: client.late_change_cancel_count,
+    late_change_reschedule_count: client.late_change_reschedule_count,
     no_show_flag: client.no_show_flag,
     last_booked_at: client.last_booked_at,
   });
@@ -472,6 +478,22 @@ function DossierSection({
           ...prev,
           no_show_flag: false,
           no_show_count: data.client.no_show_count ?? prev.no_show_count,
+          no_show_admin_count:
+            data.client.no_show_admin_count ?? prev.no_show_admin_count,
+          no_show_auto_cancel_count:
+            data.client.no_show_auto_cancel_count ??
+            prev.no_show_auto_cancel_count,
+          no_show_auto_reschedule_count:
+            data.client.no_show_auto_reschedule_count ??
+            prev.no_show_auto_reschedule_count,
+          late_change_count:
+            data.client.late_change_count ?? prev.late_change_count,
+          late_change_cancel_count:
+            data.client.late_change_cancel_count ??
+            prev.late_change_cancel_count,
+          late_change_reschedule_count:
+            data.client.late_change_reschedule_count ??
+            prev.late_change_reschedule_count,
         }));
         setConfirmClearFlag(false);
       }
@@ -721,8 +743,19 @@ function DossierSection({
 
 function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
   const noShows = stats.no_show_count ?? 0;
+  const lateChanges = stats.late_change_count ?? 0;
+  const noShowTitle = [
+    `Admin-marked: ${stats.no_show_admin_count ?? 0}`,
+    `Under-2h cancels: ${stats.no_show_auto_cancel_count ?? 0}`,
+    `Under-2h reschedules: ${stats.no_show_auto_reschedule_count ?? 0}`,
+  ].join('\n');
+  const lateChangeTitle = [
+    `Late cancel: ${stats.late_change_cancel_count ?? 0}`,
+    `Late reschedule: ${stats.late_change_reschedule_count ?? 0}`,
+  ].join('\n');
+
   return (
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-stone-200 bg-stone-200 sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-stone-200 bg-stone-200 sm:grid-cols-3 lg:grid-cols-5">
       <div className="bg-white p-3 text-center">
         <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
           Lifetime spend
@@ -747,12 +780,27 @@ function CrmStatsBar({ stats }: { stats: ClientCrmStats }) {
           className={`mt-1 flex items-center justify-center gap-1 font-serif text-lg tabular-nums ${
             noShows > 0 ? 'text-amber-800' : 'text-stone-900'
           }`}
-          title="Lifetime no-shows (charged or not). Never decreases."
+          title={noShowTitle}
+          aria-label={`No-shows ${noShows}. ${noShowTitle.replace(/\n/g, '. ')}`}
         >
           {noShows > 0 && (
             <AlertCircle className="h-4 w-4 text-amber-600" aria-hidden />
           )}
           <span>{noShows}</span>
+        </p>
+      </div>
+      <div className="bg-white p-3 text-center">
+        <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
+          Late-Change
+        </p>
+        <p
+          className={`mt-1 font-serif text-lg tabular-nums ${
+            lateChanges > 0 ? 'text-amber-800' : 'text-stone-900'
+          }`}
+          title={lateChangeTitle}
+          aria-label={`Late-Change ${lateChanges}. ${lateChangeTitle.replace(/\n/g, '. ')}`}
+        >
+          {lateChanges}
         </p>
       </div>
       <div className="bg-white p-3 text-center">

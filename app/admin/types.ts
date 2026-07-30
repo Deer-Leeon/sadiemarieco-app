@@ -32,8 +32,10 @@
  *                             or directly through Cal's confirmation
  *                             email. The webhook flips the row here.
  *                             Also disappears from calendar views.
- *   • 'canceled_by_client_late' — client cancelled within 24h of start
- *                             and the automated $20 late fee succeeded.
+ *   • 'canceled_by_client_late' — client cancelled 2–24h before start
+ *                             and the automated 50% late fee succeeded.
+ *                             (Under 2h cancels that charge successfully
+ *                             land as 'no-show' instead.)
  *   • 'canceled_by_system'  — abandoned-checkout sweep released the
  *                             hold automatically. Written by the
  *                             `/api/qstash/release-hold` (delayed from
@@ -273,9 +275,24 @@ export interface ClientCrmStats {
   risk_flag: boolean;
   /**
    * Lifetime no-shows (charged or not). Stored on `clients.no_show_count`
-   * and never decremented.
+   * and never decremented. Equals admin + under-2h cancel + under-2h reschedule.
    */
   no_show_count: number;
+  /** Admin-marked no-shows (charged or waived). */
+  no_show_admin_count: number;
+  /** Under-2h client cancels charged as no-show. */
+  no_show_auto_cancel_count: number;
+  /** Under-2h client reschedules charged as no-show. */
+  no_show_auto_reschedule_count: number;
+  /**
+   * Lifetime Late-Change events (2h–24h cancel/reschedule). Equals
+   * late cancel + late reschedule.
+   */
+  late_change_count: number;
+  /** 2h–24h cancels. */
+  late_change_cancel_count: number;
+  /** 2h–24h reschedules. */
+  late_change_reschedule_count: number;
   /**
    * Dismissible attention flag (`clients.no_show_flag`). Reactivates when
    * an admin marks a no-show without charging; clearable on the profile.
@@ -309,6 +326,12 @@ export const EMPTY_CLIENT_CRM_STATS: ClientCrmStats = {
   has_vaulted_card: false,
   risk_flag: false,
   no_show_count: 0,
+  no_show_admin_count: 0,
+  no_show_auto_cancel_count: 0,
+  no_show_auto_reschedule_count: 0,
+  late_change_count: 0,
+  late_change_cancel_count: 0,
+  late_change_reschedule_count: 0,
   no_show_flag: false,
   last_booked_at: null,
 };

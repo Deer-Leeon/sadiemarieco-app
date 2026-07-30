@@ -43,6 +43,12 @@ interface ClientRow {
   risk_flag: boolean | null;
   no_show_count: number | string | null;
   no_show_flag: boolean | null;
+  no_show_admin_count: number | string | null;
+  no_show_auto_cancel_count: number | string | null;
+  no_show_auto_reschedule_count: number | string | null;
+  late_change_count: number | string | null;
+  late_change_cancel_count: number | string | null;
+  late_change_reschedule_count: number | string | null;
   last_booked_at: Date | string | null;
 }
 
@@ -76,6 +82,12 @@ function rowToClient(row: ClientRow): Client {
     risk_flag: Boolean(row.risk_flag),
     no_show_count: toNumber(row.no_show_count),
     no_show_flag: Boolean(row.no_show_flag),
+    no_show_admin_count: toNumber(row.no_show_admin_count),
+    no_show_auto_cancel_count: toNumber(row.no_show_auto_cancel_count),
+    no_show_auto_reschedule_count: toNumber(row.no_show_auto_reschedule_count),
+    late_change_count: toNumber(row.late_change_count),
+    late_change_cancel_count: toNumber(row.late_change_cancel_count),
+    late_change_reschedule_count: toNumber(row.late_change_reschedule_count),
     last_booked_at: serializeDate(row.last_booked_at),
   };
 }
@@ -110,6 +122,12 @@ export async function GET(): Promise<NextResponse> {
         COALESCE(stats.risk_flag, FALSE) AS risk_flag,
         COALESCE(c.no_show_count, 0)::int AS no_show_count,
         COALESCE(c.no_show_flag, FALSE) AS no_show_flag,
+        COALESCE(c.no_show_admin_count, 0)::int AS no_show_admin_count,
+        COALESCE(c.no_show_auto_cancel_count, 0)::int AS no_show_auto_cancel_count,
+        COALESCE(c.no_show_auto_reschedule_count, 0)::int AS no_show_auto_reschedule_count,
+        COALESCE(c.late_change_count, 0)::int AS late_change_count,
+        COALESCE(c.late_change_cancel_count, 0)::int AS late_change_cancel_count,
+        COALESCE(c.late_change_reschedule_count, 0)::int AS late_change_reschedule_count,
         stats.last_booked_at
       FROM clients c
       LEFT JOIN LATERAL (
