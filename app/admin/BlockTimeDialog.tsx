@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { format } from 'date-fns';
 import { Loader2, X } from 'lucide-react';
 
+import { formatStudioDateShort } from '@/lib/studio-calendar';
 import { END_HOUR, START_HOUR } from './timeline';
 
 interface Props {
@@ -21,7 +21,9 @@ function dateAtHour(base: Date, hour: number, minute = 0): Date {
 }
 
 function toTimeInputValue(d: Date): string {
-  return format(d, 'HH:mm');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
 }
 
 function applyTimeInput(base: Date, value: string): Date | null {
@@ -152,7 +154,7 @@ export default function BlockTimeDialog({
               Block time
             </p>
             <h3 className="font-serif text-xl text-stone-900">
-              {format(activeDate, 'EEEE, MMMM d')}
+              {formatStudioDateShort(activeDate)}
             </h3>
             <p className="mt-1 text-sm text-stone-600">
               Clients won&apos;t be able to book into this interval on the website.

@@ -1,22 +1,26 @@
 'use client';
 
 import { useEffect, useMemo, useRef } from 'react';
+import { parseISO } from 'date-fns';
+import { Flag } from 'lucide-react';
+
 import {
-  addMonths,
-  eachDayOfInterval,
-  endOfMonth,
-  format,
-  getDay,
-  isSameDay,
-  isToday,
-  parseISO,
-  startOfMonth,
-} from 'date-fns';
+  addStudioCalendarDays,
+  calendarDayUtcNoon,
+  daysInStudioMonth,
+  formatStudioClock,
+  formatStudioDayOfMonth,
+  formatStudioMonthYear,
+  startOfStudioMonthKey,
+  studioDateKey,
+  studioMonthKey,
+  studioWeekdaySun0,
+  todayStudioDateKey,
+} from '@/lib/studio-calendar';
 
 import type { Appointment } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import { getServiceColor } from './serviceColors';
-import { Flag } from 'lucide-react';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Constants
@@ -42,14 +46,17 @@ const TOTAL_MONTHS = MONTHS_BEFORE + 1 + MONTHS_AFTER; // 19
 // Types
 // ──────────────────────────────────────────────────────────────────────────
 interface DayCell {
+  /** YYYY-MM-DD in America/Denver. */
+  dateKey: string;
   date: Date;
   isToday: boolean;
   appointments: Appointment[];
 }
 
 interface MonthBlock {
-  /** First day of the month (used as a stable React key & for formatting). */
+  /** First day of the month (UTC-noon Date used as React key). */
   monthDate: Date;
+  monthKey: string;
   /** 0–6 — number of empty cells before the 1st (Sun = 0, Sat = 6). */
   leadingBlanks: number;
   /** Just the days that actually belong to this month; no spill-over. */
@@ -71,40 +78,66 @@ interface MonthBlock {
  * We deliberately do NOT pad with neighbouring-month days — that would
  * double-render the same date in two adjacent month grids and looks
  * confusing once the grids butt up to each other vertically.
+ *
+ * Day membership and "today" are America/Denver — never the runtime TZ
+ * (Vercel SSR is UTC and would highlight tomorrow after ~6pm Mountain).
  */
-function buildMonths(now: Date, appointments: Appointment[]): MonthBlock[] {
-  const nowMonthKey = format(now, 'yyyy-MM');
-  const start = addMonths(startOfMonth(now), -MONTHS_BEFORE);
+function buildMonths(
+  todayKey: string,
+  appointments: Appointment[]
+): MonthBlock[] {
+  const nowMonthKey = studioMonthKey(todayKey);
+  const startMonthKey = (() => {
+    const [y, m] = startOfStudioMonthKey(todayKey).split('-').map(Number);
+    const start = new Date(Date.UTC(y, m - 1 - MONTHS_BEFORE, 1, 12));
+    const yy = start.getUTCFullYear();
+    const mm = String(start.getUTCMonth() + 1).padStart(2, '0');
+    return `${yy}-${mm}-01`;
+  })();
+
+  // Pre-bucket appointments by studio date once (O(appts) not O(days×appts)).
+  const byDay = new Map<string, Appointment[]>();
+  for (const a of appointments) {
+    if (!a.booking_time) continue;
+    const key = studioDateKey(a.booking_time);
+    if (!key) continue;
+    const list = byDay.get(key);
+    if (list) list.push(a);
+    else byDay.set(key, [a]);
+  }
+  for (const list of byDay.values()) {
+    list.sort(
+      (a, b) =>
+        parseISO(a.booking_time as string).getTime() -
+        parseISO(b.booking_time as string).getTime()
+    );
+  }
 
   return Array.from({ length: TOTAL_MONTHS }, (_, i) => {
-    const monthDate = addMonths(start, i);
-    const lastDay = endOfMonth(monthDate);
-    const days = eachDayOfInterval({ start: monthDate, end: lastDay });
+    const [sy, sm] = startMonthKey.split('-').map(Number);
+    const monthStart = new Date(Date.UTC(sy, sm - 1 + i, 1, 12));
+    const yy = monthStart.getUTCFullYear();
+    const mm = String(monthStart.getUTCMonth() + 1).padStart(2, '0');
+    const monthFirstKey = `${yy}-${mm}-01`;
+    const monthKey = `${yy}-${mm}`;
+    const dayCount = daysInStudioMonth(monthFirstKey);
 
-    const cells: DayCell[] = days.map((d) => {
-      const buckets: Appointment[] = [];
-      for (const a of appointments) {
-        if (!a.booking_time) continue;
-        const at = parseISO(a.booking_time);
-        // Local-time comparison: TIMESTAMPTZ rows come out of Postgres in
-        // UTC, parseISO returns Date in the JS runtime's local TZ, and
-        // the studio's clock is the only meaningful "which day was this".
-        if (Number.isNaN(at.getTime())) continue;
-        if (isSameDay(at, d)) buckets.push(a);
-      }
-      buckets.sort(
-        (a, b) =>
-          parseISO(a.booking_time as string).getTime() -
-          parseISO(b.booking_time as string).getTime()
-      );
-      return { date: d, isToday: isToday(d), appointments: buckets };
+    const cells: DayCell[] = Array.from({ length: dayCount }, (_, dayIdx) => {
+      const dateKey = addStudioCalendarDays(monthFirstKey, dayIdx);
+      return {
+        dateKey,
+        date: calendarDayUtcNoon(dateKey),
+        isToday: dateKey === todayKey,
+        appointments: byDay.get(dateKey) ?? [],
+      };
     });
 
     return {
-      monthDate,
-      leadingBlanks: getDay(monthDate),
+      monthDate: calendarDayUtcNoon(monthFirstKey),
+      monthKey,
+      leadingBlanks: studioWeekdaySun0(monthFirstKey),
       cells,
-      isCurrentMonth: format(monthDate, 'yyyy-MM') === nowMonthKey,
+      isCurrentMonth: monthKey === nowMonthKey,
     };
   });
 }
@@ -140,15 +173,13 @@ export default function CalendarView({
    */
   onAppointmentClick?: (appointment: Appointment) => void;
 }) {
-  // Compute `now` once on mount. If the dashboard stays open past
-  // midnight the highlight may drift by a day until the user reloads —
-  // acceptable trade-off vs. wiring a setInterval just for the "today"
-  // ring. The same pattern is used in CalendarView's old single-month
-  // implementation and ListView.
-  const now = useMemo(() => new Date(), []);
+  // Studio "today" once per mount. If the dashboard stays open past
+  // midnight Mountain the highlight may drift by a day until reload —
+  // acceptable vs. wiring a setInterval just for the ring.
+  const todayKey = useMemo(() => todayStudioDateKey(), []);
   const months = useMemo(
-    () => buildMonths(now, appointments),
-    [now, appointments]
+    () => buildMonths(todayKey, appointments),
+    [todayKey, appointments]
   );
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -191,11 +222,11 @@ export default function CalendarView({
       >
         {months.map((m) => (
           <section
-            key={m.monthDate.toISOString()}
+            key={m.monthKey}
             ref={m.isCurrentMonth ? currentMonthRef : null}
           >
             <h2 className="mt-8 mb-4 font-serif text-2xl text-stone-900">
-              {format(m.monthDate, 'MMMM yyyy')}
+              {formatStudioMonthYear(`${m.monthKey}-01`)}
             </h2>
             <div className="grid grid-cols-7 gap-1">
               {/* Leading blanks push the 1st into its correct weekday column. */}
@@ -204,7 +235,7 @@ export default function CalendarView({
               ))}
               {m.cells.map((cell) => (
                 <DayCellView
-                  key={cell.date.toISOString()}
+                  key={cell.dateKey}
                   cell={cell}
                   onAppointmentClick={onAppointmentClick}
                 />
@@ -238,7 +269,9 @@ function DayCellView({
       className={`min-h-[100px] rounded-md border border-stone-200 bg-white p-1.5 text-left ${todayRing}`}
     >
       <div className="mb-1 flex items-center justify-between">
-        <span className={dayNumClass}>{format(cell.date, 'd')}</span>
+        <span className={dayNumClass}>
+          {formatStudioDayOfMonth(cell.dateKey)}
+        </span>
         {cell.appointments.length > 0 && (
           <span className="text-[9px] text-stone-400">
             {cell.appointments.length}
@@ -273,7 +306,7 @@ function AppointmentPill({
   const isNoShow = status === 'no-show';
   const hasNoShowFlag = Boolean(appointment.client_no_show_flag);
   const time = appointment.booking_time
-    ? format(parseISO(appointment.booking_time), 'h:mm a')
+    ? formatStudioClock(appointment.booking_time)
     : '';
   const name = clientDisplayName(
     appointment.client_first_name,

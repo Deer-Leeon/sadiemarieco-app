@@ -2,14 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  addDays,
-  addWeeks,
-  format,
-  startOfWeek,
-  subDays,
-  subWeeks,
-} from 'date-fns';
+import { addDays, addWeeks, subDays, subWeeks } from 'date-fns';
 import {
   Calendar,
   CalendarDays,
@@ -19,6 +12,15 @@ import {
   List,
   Plus,
 } from 'lucide-react';
+
+import {
+  addStudioCalendarDays,
+  calendarDayUtcNoon,
+  formatStudioNavDay,
+  studioDateKey,
+  studioWeekdaySun0,
+  todayStudioDateKey,
+} from '@/lib/studio-calendar';
 
 import ManualBookingModal from './components/ManualBookingModal';
 import type {
@@ -92,7 +94,9 @@ export default function DashboardUI({
   // CalendarView — the closest single-view equivalent of the old
   // homepage feeling.
   const [view, setView] = useState<ViewMode>('month');
-  const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
+  const [currentDate, setCurrentDate] = useState<Date>(() =>
+    calendarDayUtcNoon(todayStudioDateKey())
+  );
   // Live appointment list so clearing a no-show flag updates calendar
   // pills immediately without waiting on router.refresh().
   const [appointments, setAppointments] = useState(appointmentsProp);
@@ -502,18 +506,19 @@ function DateNav({
     onChange(isWeek ? subWeeks(currentDate, 1) : subDays(currentDate, 3));
   const next = () =>
     onChange(isWeek ? addWeeks(currentDate, 1) : addDays(currentDate, 3));
-  const today = () => onChange(new Date());
+  const today = () => onChange(calendarDayUtcNoon(todayStudioDateKey()));
 
   // Compute the visible range for the label, matching TimeGrid's
-  // anchoring rules so the label always says exactly what's on screen.
-  const rangeStart = isWeek
-    ? startOfWeek(currentDate, { weekStartsOn: 0 })
-    : currentDate;
-  const rangeEnd = addDays(rangeStart, daysInView - 1);
-  const sameMonth = format(rangeStart, 'yyyy-MM') === format(rangeEnd, 'yyyy-MM');
+  // America/Denver anchoring so the label always says what's on screen.
+  const anchorKey = studioDateKey(currentDate) || todayStudioDateKey();
+  const rangeStartKey = isWeek
+    ? addStudioCalendarDays(anchorKey, -studioWeekdaySun0(anchorKey))
+    : anchorKey;
+  const rangeEndKey = addStudioCalendarDays(rangeStartKey, daysInView - 1);
+  const sameMonth = rangeStartKey.slice(0, 7) === rangeEndKey.slice(0, 7);
   const rangeLabel = sameMonth
-    ? `${format(rangeStart, 'MMM d')} – ${format(rangeEnd, 'd, yyyy')}`
-    : `${format(rangeStart, 'MMM d')} – ${format(rangeEnd, 'MMM d, yyyy')}`;
+    ? `${formatStudioNavDay(rangeStartKey)} – ${Number(rangeEndKey.slice(8, 10))}, ${rangeEndKey.slice(0, 4)}`
+    : `${formatStudioNavDay(rangeStartKey)} – ${formatStudioNavDay(rangeEndKey, { includeYear: true })}`;
 
   return (
     <div className="flex items-center justify-between border-b border-stone-200 bg-[#FAF9F6]/95 px-6 py-3 backdrop-blur-sm">

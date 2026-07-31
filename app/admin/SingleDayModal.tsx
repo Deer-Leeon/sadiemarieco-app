@@ -1,8 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { addDays, format, subDays } from 'date-fns';
+import { addDays, subDays } from 'date-fns';
 import { ChevronLeft, ChevronRight, Flag, X } from 'lucide-react';
+
+import {
+  calendarDayUtcNoon,
+  formatStudioClockRange,
+  studioDateKey,
+} from '@/lib/studio-calendar';
 
 import BlockTimeDialog from './BlockTimeDialog';
 import TimeBlockPill from './components/TimeBlockPill';
@@ -20,6 +26,38 @@ import {
   type PositionedAppointment,
   type PositionedTimeBlock,
 } from './timeline';
+
+const HOUR_LABELS = [
+  '9 AM',
+  '10 AM',
+  '11 AM',
+  '12 PM',
+  '1 PM',
+  '2 PM',
+  '3 PM',
+  '4 PM',
+  '5 PM',
+  '6 PM',
+  '7 PM',
+  '8 PM',
+] as const;
+
+function studioHeaderParts(date: Date): { weekday: string; monthDay: string } {
+  const key = studioDateKey(date);
+  const d = key ? calendarDayUtcNoon(key) : date;
+  const timeZone = key ? 'UTC' : undefined;
+  return {
+    weekday: new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'long',
+    }).format(d),
+    monthDay: new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      month: 'long',
+      day: 'numeric',
+    }).format(d),
+  };
+}
 
 interface Props {
   appointments: Appointment[];
@@ -90,6 +128,8 @@ export default function SingleDayModal({
     [activeDate, timeBlocks]
   );
 
+  const header = studioHeaderParts(activeDate);
+
   return (
     <>
       <div
@@ -102,10 +142,11 @@ export default function SingleDayModal({
           onClick={(e) => e.stopPropagation()}
           role="dialog"
           aria-modal="true"
-          aria-label={`Schedule on ${format(activeDate, 'EEEE, MMMM d')}`}
+          aria-label={`Schedule on ${header.weekday}, ${header.monthDay}`}
         >
           <ModalHeader
-            activeDate={activeDate}
+            weekday={header.weekday}
+            monthDay={header.monthDay}
             onPrev={() => setActiveDate((d) => subDays(d, 1))}
             onNext={() => setActiveDate((d) => addDays(d, 1))}
             onClose={onClose}
@@ -141,12 +182,14 @@ export default function SingleDayModal({
 }
 
 function ModalHeader({
-  activeDate,
+  weekday,
+  monthDay,
   onPrev,
   onNext,
   onClose,
 }: {
-  activeDate: Date;
+  weekday: string;
+  monthDay: string;
   onPrev: () => void;
   onNext: () => void;
   onClose: () => void;
@@ -164,11 +207,9 @@ function ModalHeader({
 
       <div className="text-center">
         <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
-          {format(activeDate, 'EEEE')}
+          {weekday}
         </p>
-        <h2 className="font-serif text-2xl text-stone-900">
-          {format(activeDate, 'MMMM d')}
-        </h2>
+        <h2 className="font-serif text-2xl text-stone-900">{monthDay}</h2>
       </div>
 
       <div className="absolute right-4 flex items-center gap-2">
@@ -237,14 +278,12 @@ function TimeLabelColumn() {
     >
       {Array.from({ length: HOURS }, (_, i) => {
         const hour = START_HOUR + i;
-        const labelDate = new Date();
-        labelDate.setHours(hour, 0, 0, 0);
         return (
           <div
             key={hour}
             className="flex items-start justify-end border-t border-stone-200 pr-3 pt-2 text-[11px] font-medium uppercase tracking-widest text-stone-400"
           >
-            {format(labelDate, 'h a')}
+            {HOUR_LABELS[i]}
           </div>
         );
       })}
@@ -287,13 +326,11 @@ function DayBody({
       >
         {Array.from({ length: HOURS }, (_, i) => {
           const hour = START_HOUR + i;
-          const labelDate = new Date();
-          labelDate.setHours(hour, 0, 0, 0);
           return (
             <button
               key={hour}
               type="button"
-              aria-label={`Block time starting at ${format(labelDate, 'h a')}`}
+              aria-label={`Block time starting at ${HOUR_LABELS[i]}`}
               className="w-full border-t border-transparent transition-colors hover:bg-stone-900/[0.04] focus:outline-none focus-visible:bg-stone-900/[0.06] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-400/60"
               onClick={(e) => {
                 e.stopPropagation();
@@ -349,11 +386,7 @@ function ModalAppointment({
 
   const start = safeParseISO(apt.booking_time);
   const end = safeParseISO(apt.end_time);
-  const timeLabel = start
-    ? end
-      ? `${format(start, 'h:mm a')} – ${format(end, 'h:mm a')}`
-      : format(start, 'h:mm a')
-    : '';
+  const timeLabel = start ? formatStudioClockRange(start, end) : '';
 
   const name = clientDisplayName(apt.client_first_name, apt.client_last_name);
   const service = appointmentServiceLabel(apt);

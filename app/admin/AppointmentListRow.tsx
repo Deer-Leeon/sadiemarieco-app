@@ -1,12 +1,9 @@
 'use client';
 
-import { format, parseISO } from 'date-fns';
-
 import type { Appointment } from './types';
 import { appointmentServiceLabel, clientDisplayName, isAppointmentCanceled } from './helpers';
 import { getServiceColor } from './serviceColors';
-
-const TIME_FORMAT = 'h:mm a';
+import { formatStudioClock } from '@/lib/studio-calendar';
 
 export function AppointmentStatusPill({ status }: { status: string | null }) {
   const s = (status || '').toLowerCase();
@@ -86,7 +83,7 @@ export function AppointmentListRow({
   variant?: 'bookings' | 'client';
 }) {
   const time = appointment.booking_time
-    ? format(parseISO(appointment.booking_time), TIME_FORMAT)
+    ? formatStudioClock(appointment.booking_time)
     : '—';
 
   const statusLower = (appointment.status || '').toLowerCase();
