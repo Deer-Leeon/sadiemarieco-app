@@ -40,7 +40,7 @@ export const TECHNICIAN_REVIEW_CHECKBOX_PT = {
   /** Label drawn to the right of the checkbox. */
   label: 'Reviewed by Technician',
   labelSize: 10.5,
-  labelGap: 6,
+  labelGap: 3,
 } as const;
 
 export type Box = { x: number; y: number; width: number; height: number };
