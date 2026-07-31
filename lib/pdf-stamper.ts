@@ -697,18 +697,18 @@ async function drawTechnicianReviewCheck(
     borderWidth: 1,
   });
 
-  const thickness = 1.35;
-  // Check fills most of the square with even inset padding.
+  const thickness = 1.05;
+  // Smaller inset check — stays clearly inside the square.
   page.drawLine({
-    start: { x: x + size * 0.18, y: y + size * 0.48 },
-    end: { x: x + size * 0.40, y: y + size * 0.26 },
+    start: { x: x + size * 0.26, y: y + size * 0.50 },
+    end: { x: x + size * 0.44, y: y + size * 0.34 },
     thickness,
     color: STAMP_TEXT_COLOR,
     lineCap: LineCapStyle.Round,
   });
   page.drawLine({
-    start: { x: x + size * 0.40, y: y + size * 0.26 },
-    end: { x: x + size * 0.82, y: y + size * 0.76 },
+    start: { x: x + size * 0.44, y: y + size * 0.34 },
+    end: { x: x + size * 0.74, y: y + size * 0.68 },
     thickness,
     color: STAMP_TEXT_COLOR,
     lineCap: LineCapStyle.Round,
