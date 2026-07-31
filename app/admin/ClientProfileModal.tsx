@@ -1370,6 +1370,7 @@ function ConsentFormActionBox({
     : null;
   const permanentLink =
     consentDocumentAbsoluteUrl(client.id) ?? consentDocumentPath(client.id);
+  // Always cache-bust Blob URLs — overwrites keep the same pathname.
   const href = stampedPdfUrl
     ? `${stampedPdfUrl}${stampedPdfUrl.includes('?') ? '&' : '?'}v=${
         client.consent_technician_reviewed_at
@@ -1377,6 +1378,12 @@ function ConsentFormActionBox({
           : 'signed'
       }`
     : consentFormPath(client.id);
+
+  const openSignedPdf = () => {
+    if (!stampedPdfUrl) return;
+    const url = `${stampedPdfUrl}${stampedPdfUrl.includes('?') ? '&' : '?'}v=${Date.now()}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
 
   const [confirmReview, setConfirmReview] = useState(false);
   const [reviewing, setReviewing] = useState(false);
@@ -1421,7 +1428,8 @@ function ConsentFormActionBox({
               ? 'Open the official stamped PDF.'
               : 'Signed intake on file (read-only summary).'
           }
-          href={href}
+          onClick={stampedPdfUrl ? openSignedPdf : undefined}
+          href={stampedPdfUrl ? undefined : href}
           ariaLabel={
             stampedPdfUrl ? 'View official signed consent PDF' : 'View signed consent form'
           }
