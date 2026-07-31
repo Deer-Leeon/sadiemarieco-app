@@ -52,6 +52,8 @@ export default function StagingSmsToggleCard() {
     const next = !enabled;
     setSaving(true);
     setSaveError(null);
+    // Optimistic UI so the switch matches the label immediately.
+    setEnabled(next);
     try {
       const res = await fetch('/api/admin/settings/staging-sms', {
         method: 'PATCH',
@@ -65,6 +67,7 @@ export default function StagingSmsToggleCard() {
         hint?: string;
       };
       if (!res.ok) {
+        setEnabled(!next);
         setSaveError(
           data.hint || data.message || data.error || 'Could not save.'
         );
@@ -72,6 +75,7 @@ export default function StagingSmsToggleCard() {
       }
       setEnabled(data.enabled === true);
     } catch {
+      setEnabled(!next);
       setSaveError('Could not save.');
     } finally {
       setSaving(false);
@@ -87,9 +91,16 @@ export default function StagingSmsToggleCard() {
           </p>
           <h2 className="font-serif text-xl text-stone-900">Outbound SMS</h2>
           <p className="text-sm leading-relaxed text-stone-600">
-            When on, confirmation / reminder / feedback texts send through the
-            real Twilio number (~1¢ each). Off by default. Sunday DB resets
-            turn this back off.
+            When on, confirmation / reminder / consent / feedback texts send
+            through the real Twilio number (~1¢ each). Off by default. Sunday DB
+            resets turn this back off.
+          </p>
+          <p className="text-xs leading-relaxed text-amber-900/80">
+            Staging also needs Twilio env vars on the Vercel Preview (staging)
+            environment (<code className="font-mono">TWILIO_ACCOUNT_SID</code>,{' '}
+            <code className="font-mono">TWILIO_AUTH_TOKEN</code>,{' '}
+            <code className="font-mono">TWILIO_PHONE_NUMBER</code>) — copy them
+            from Production, then redeploy staging.
           </p>
         </div>
 
@@ -100,20 +111,22 @@ export default function StagingSmsToggleCard() {
             type="button"
             role="switch"
             aria-checked={enabled}
-            aria-label="Outbound SMS on staging"
+            aria-label={enabled ? 'Outbound SMS on' : 'Outbound SMS off'}
             disabled={saving}
             onClick={() => void toggle()}
             className={[
-              'relative mt-1 h-7 w-12 shrink-0 rounded-full transition-colors',
+              'relative mt-1 h-8 w-14 shrink-0 rounded-full transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/20',
               'disabled:opacity-60',
-              enabled ? 'bg-stone-900' : 'bg-stone-300',
+              enabled ? 'bg-emerald-700' : 'bg-stone-300',
             ].join(' ')}
           >
             <span
+              aria-hidden
               className={[
-                'absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform',
-                enabled ? 'translate-x-5' : 'translate-x-0',
+                'pointer-events-none absolute top-1 h-6 w-6 rounded-full bg-white shadow',
+                'transition-[left] duration-200',
+                enabled ? 'left-7' : 'left-1',
               ].join(' ')}
             />
           </button>
