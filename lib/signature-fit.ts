@@ -20,6 +20,29 @@ export const SIGNATURE_BOX_PT = {
   height: 40,
 } as const;
 
+/**
+ * Placement for the technician-review stamp on the last consent page.
+ * Erases the printed ☐ + label and redraws a clean checked row so the
+ * mark fits the box reliably across PDF viewers.
+ */
+export const TECHNICIAN_REVIEW_CHECKBOX_PT = {
+  /** Left edge of the redrawn checkbox. */
+  x: 60.5,
+  /** Bottom edge of the redrawn checkbox. */
+  y: 408,
+  /** Outer size of the redrawn checkbox square. */
+  size: 9,
+  /** White erase covering the printed ☐ + label up to the signature line. */
+  eraseX: 54,
+  eraseY: 400,
+  eraseWidth: 175,
+  eraseHeight: 32,
+  /** Label drawn to the right of the checkbox. */
+  label: 'Reviewed by Technician',
+  labelSize: 11,
+  labelGap: 3,
+} as const;
+
 export type Box = { x: number; y: number; width: number; height: number };
 
 /** Fit image inside a box without stretching; avoid upscaling past native resolution. */

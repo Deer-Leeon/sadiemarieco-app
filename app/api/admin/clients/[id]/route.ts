@@ -47,6 +47,7 @@ interface ClientRow {
   created_at: string | null;
   has_consented: boolean;
   consent_form_url: string | null;
+  consent_technician_reviewed_at?: Date | string | null;
   no_show_count?: number | string | null;
   no_show_flag?: boolean | null;
   no_show_admin_count?: number | string | null;
@@ -65,6 +66,15 @@ function toNumber(value: number | string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function serializeReviewedAt(
+  value: Date | string | null | undefined
+): string | null {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
 async function rowToClient(row: ClientRow): Promise<Client> {
   const base: Client = {
     ...EMPTY_CLIENT_CRM_STATS,
@@ -77,6 +87,9 @@ async function rowToClient(row: ClientRow): Promise<Client> {
     created_at: row.created_at,
     has_consented: Boolean(row.has_consented),
     consent_form_url: row.consent_form_url,
+    consent_technician_reviewed_at: serializeReviewedAt(
+      row.consent_technician_reviewed_at
+    ),
     no_show_count: toNumber(row.no_show_count),
     no_show_flag: Boolean(row.no_show_flag),
     no_show_admin_count: toNumber(row.no_show_admin_count),
@@ -170,6 +183,7 @@ export async function GET(
         created_at,
         has_consented,
         consent_form_url,
+        consent_technician_reviewed_at,
         no_show_count,
         no_show_flag,
         no_show_admin_count,
@@ -298,6 +312,7 @@ export async function PATCH(
           created_at,
           has_consented,
           consent_form_url,
+          consent_technician_reviewed_at,
           no_show_count,
           no_show_flag,
           no_show_admin_count,
@@ -369,6 +384,7 @@ export async function PATCH(
           created_at,
           has_consented,
           consent_form_url,
+          consent_technician_reviewed_at,
           no_show_count,
           no_show_flag,
           no_show_admin_count,
@@ -431,7 +447,8 @@ export async function PATCH(
           email,
           created_at,
           has_consented,
-          consent_form_url
+          consent_form_url,
+          consent_technician_reviewed_at
       `);
     } else if (changedFirst && changedLast) {
       ({ rows: updated } = await sql<ClientRow>`
@@ -446,7 +463,8 @@ export async function PATCH(
           email,
           created_at,
           has_consented,
-          consent_form_url
+          consent_form_url,
+          consent_technician_reviewed_at
       `);
     } else if (changedFirst && changedEmail) {
       ({ rows: updated } = await sql<ClientRow>`
@@ -461,7 +479,8 @@ export async function PATCH(
           email,
           created_at,
           has_consented,
-          consent_form_url
+          consent_form_url,
+          consent_technician_reviewed_at
       `);
     } else if (changedLast && changedEmail) {
       ({ rows: updated } = await sql<ClientRow>`
@@ -476,7 +495,8 @@ export async function PATCH(
           email,
           created_at,
           has_consented,
-          consent_form_url
+          consent_form_url,
+          consent_technician_reviewed_at
       `);
     } else if (changedFirst) {
       ({ rows: updated } = await sql<ClientRow>`
@@ -491,7 +511,8 @@ export async function PATCH(
           email,
           created_at,
           has_consented,
-          consent_form_url
+          consent_form_url,
+          consent_technician_reviewed_at
       `);
     } else if (changedLast) {
       ({ rows: updated } = await sql<ClientRow>`
@@ -506,7 +527,8 @@ export async function PATCH(
           email,
           created_at,
           has_consented,
-          consent_form_url
+          consent_form_url,
+          consent_technician_reviewed_at
       `);
     } else if (changedEmail) {
       ({ rows: updated } = await sql<ClientRow>`
@@ -521,7 +543,8 @@ export async function PATCH(
           email,
           created_at,
           has_consented,
-          consent_form_url
+          consent_form_url,
+          consent_technician_reviewed_at
       `);
     }
 
@@ -543,6 +566,7 @@ export async function PATCH(
         created_at,
         has_consented,
         consent_form_url,
+        consent_technician_reviewed_at,
         no_show_count,
         no_show_flag,
         no_show_admin_count,

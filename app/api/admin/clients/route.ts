@@ -73,6 +73,16 @@ interface ClientRow {
   created_at: string | null;
   has_consented: boolean;
   consent_form_url: string | null;
+  consent_technician_reviewed_at?: Date | string | null;
+}
+
+function serializeReviewedAt(
+  value: Date | string | null | undefined
+): string | null {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
 }
 
 async function rowToClient(row: ClientRow): Promise<Client> {
@@ -86,6 +96,9 @@ async function rowToClient(row: ClientRow): Promise<Client> {
     created_at: row.created_at,
     has_consented: Boolean(row.has_consented),
     consent_form_url: row.consent_form_url,
+    consent_technician_reviewed_at: serializeReviewedAt(
+      row.consent_technician_reviewed_at
+    ),
   };
   try {
     const stats = await fetchClientCrmStats(row.id, {
@@ -112,7 +125,8 @@ async function selectClientByEmail(email: string): Promise<ClientRow | null> {
       email,
       created_at,
       has_consented,
-      consent_form_url
+      consent_form_url,
+      consent_technician_reviewed_at
     FROM clients
     WHERE email IS NOT NULL
       AND LOWER(TRIM(email)) = LOWER(TRIM(${email}))
@@ -144,7 +158,8 @@ async function adoptLegacyEmailRow(
       email,
       created_at,
       has_consented,
-      consent_form_url
+      consent_form_url,
+      consent_technician_reviewed_at
   `;
   return rows[0] ?? null;
 }
@@ -306,7 +321,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         email,
         created_at,
         has_consented,
-        consent_form_url
+        consent_form_url,
+        consent_technician_reviewed_at
     `;
     if (rows.length === 0) {
       return NextResponse.json(
@@ -361,7 +377,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               email,
               created_at,
               has_consented,
-              consent_form_url
+              consent_form_url,
+              consent_technician_reviewed_at
           `;
           if (phoneOnly[0]) {
             return NextResponse.json({

@@ -323,6 +323,11 @@ export interface Client extends ClientCrmStats {
   has_consented: boolean;
   /** Path or URL to the submitted form (e.g. `/consent/<uuid>`); null until submitted. */
   consent_form_url: string | null;
+  /**
+   * ISO 8601 — when an admin stamped “Reviewed by Technician” onto the
+   * signed consent PDF. Null until reviewed.
+   */
+  consent_technician_reviewed_at: string | null;
 }
 
 export type { ClientIntakeForm } from '@/lib/consent';

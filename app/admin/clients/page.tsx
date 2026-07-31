@@ -39,6 +39,7 @@ interface ClientRow {
   created_at: Date | string | null;
   has_consented: boolean;
   consent_form_url: string | null;
+  consent_technician_reviewed_at: Date | string | null;
   total_bookings: number | string | null;
   lifetime_value: number | string | null;
   has_vaulted_card: boolean | null;
@@ -90,6 +91,7 @@ export default async function ClientsPage() {
         c.created_at,
         c.has_consented,
         c.consent_form_url,
+        c.consent_technician_reviewed_at,
         COALESCE(stats.total_bookings, 0)::int AS total_bookings,
         COALESCE(stats.lifetime_value, 0)::float AS lifetime_value,
         COALESCE(stats.has_vaulted_card, FALSE) AS has_vaulted_card,
@@ -207,6 +209,9 @@ export default async function ClientsPage() {
       created_at: serializeDate(r.created_at),
       has_consented: Boolean(r.has_consented),
       consent_form_url: r.consent_form_url,
+      consent_technician_reviewed_at: serializeDate(
+        r.consent_technician_reviewed_at
+      ),
       total_bookings: toNumber(r.total_bookings),
       lifetime_value: toNumber(r.lifetime_value),
       has_vaulted_card: Boolean(r.has_vaulted_card),

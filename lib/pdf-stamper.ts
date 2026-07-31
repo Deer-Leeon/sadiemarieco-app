@@ -10,6 +10,7 @@ import { put } from '@vercel/blob';
 import {
   adjustDimsForRotation,
   drawCheckMark,
+  LineCapStyle,
   PDFCheckBox,
   PDFDocument,
   PDFTextField,
@@ -31,6 +32,7 @@ import {
   fitImageDimensions,
   placeImageInBox,
   signaturePlacementBox,
+  TECHNICIAN_REVIEW_CHECKBOX_PT,
 } from '@/lib/signature-fit';
 import { STUDIO_SETTINGS_ROW_ID } from '@/lib/studio-settings';
 
@@ -631,34 +633,11 @@ export async function generateUnsignedPreviewPDF(
   return Buffer.from(pdfBytes).toString('base64');
 }
 
-/**
- * Load the studio template, stamp fields + signature, upload to Blob.
- */
-export async function stampConsentPDF(
+async function uploadSignedConsentPdf(
   clientId: string,
-  formData: ConsentFormData,
-  signatureBase64: string
+  pdfBytes: Uint8Array
 ): Promise<string> {
-  const pdfDoc = await loadFilledConsentPdf(formData);
-  const form = pdfDoc.getForm();
-
-  const signatureBytes = parseSignaturePngBytes(signatureBase64);
-  const signatureImage = await pdfDoc.embedPng(signatureBytes);
-  const placement = resolveSignaturePlacement(pdfDoc, form);
-  const fitted = fitImageDimensions(
-    signatureImage.width,
-    signatureImage.height,
-    placement.width,
-    placement.height
-  );
-  const dest = placeImageInBox(placement, fitted, { origin: 'bottom-left' });
-  placement.page.drawImage(signatureImage, dest);
-
-  await finalizeFormAppearance(pdfDoc, form);
-
-  const pdfBytes = await pdfDoc.save();
   const token = getBlobToken();
-
   const pathname = `client-consents/${clientId}-signed.pdf`;
   try {
     const blob = await put(pathname, Buffer.from(pdfBytes), {
@@ -678,4 +657,128 @@ export async function stampConsentPDF(
     }
     throw new Error(`Failed to upload stamped consent PDF: ${message}`);
   }
+}
+
+/**
+ * Replace the printed ☐ Reviewed by Technician row with a clean checked
+ * checkbox + label so the mark fits the box in every PDF viewer.
+ */
+async function drawTechnicianReviewCheck(
+  pdfDoc: PDFDocument,
+  page: PDFPage
+): Promise<void> {
+  const {
+    x,
+    y,
+    size,
+    eraseX,
+    eraseY,
+    eraseWidth,
+    eraseHeight,
+    label,
+    labelSize,
+    labelGap,
+  } = TECHNICIAN_REVIEW_CHECKBOX_PT;
+
+  page.drawRectangle({
+    x: eraseX,
+    y: eraseY,
+    width: eraseWidth,
+    height: eraseHeight,
+    color: rgb(1, 1, 1),
+  });
+
+  page.drawRectangle({
+    x,
+    y,
+    width: size,
+    height: size,
+    borderColor: STAMP_TEXT_COLOR,
+    borderWidth: 1,
+  });
+
+  const thickness = 1.05;
+  // Smaller inset check — stays clearly inside the square.
+  page.drawLine({
+    start: { x: x + size * 0.26, y: y + size * 0.50 },
+    end: { x: x + size * 0.44, y: y + size * 0.34 },
+    thickness,
+    color: STAMP_TEXT_COLOR,
+    lineCap: LineCapStyle.Round,
+  });
+  page.drawLine({
+    start: { x: x + size * 0.44, y: y + size * 0.34 },
+    end: { x: x + size * 0.74, y: y + size * 0.68 },
+    thickness,
+    color: STAMP_TEXT_COLOR,
+    lineCap: LineCapStyle.Round,
+  });
+
+  const font = await embedStampFont(pdfDoc);
+  page.drawText(label, {
+    x: x + size + labelGap,
+    y: y + (size - labelSize) / 2 + 0.75,
+    size: labelSize,
+    font,
+    color: STAMP_TEXT_COLOR,
+  });
+}
+
+export type StampConsentOptions = {
+  /** When true, check the printed ☐ Reviewed by Technician box. */
+  technicianReviewed?: boolean;
+};
+
+/**
+ * Load the studio template, stamp fields + signature, upload to Blob.
+ */
+export async function stampConsentPDF(
+  clientId: string,
+  formData: ConsentFormData,
+  signatureBase64: string,
+  options?: StampConsentOptions
+): Promise<string> {
+  const pdfDoc = await loadFilledConsentPdf(formData);
+  const form = pdfDoc.getForm();
+
+  const signatureBytes = parseSignaturePngBytes(signatureBase64);
+  const signatureImage = await pdfDoc.embedPng(signatureBytes);
+  const placement = resolveSignaturePlacement(pdfDoc, form);
+  const fitted = fitImageDimensions(
+    signatureImage.width,
+    signatureImage.height,
+    placement.width,
+    placement.height
+  );
+  const dest = placeImageInBox(placement, fitted, { origin: 'bottom-left' });
+  placement.page.drawImage(signatureImage, dest);
+
+  await finalizeFormAppearance(pdfDoc, form);
+
+  if (options?.technicianReviewed) {
+    const pages = pdfDoc.getPages();
+    if (pages.length === 0) {
+      throw new Error('Consent PDF has no pages.');
+    }
+    await drawTechnicianReviewCheck(pdfDoc, pages[pages.length - 1]!);
+  }
+
+  const pdfBytes = await pdfDoc.save();
+  return uploadSignedConsentPdf(clientId, pdfBytes);
+}
+
+/**
+ * Rebuild the signed consent PDF from intake + signature with the
+ * technician-review check applied. Regenerating from the template avoids
+ * corrupting an already-flattened Blob PDF (which made the check invisible
+ * in Chrome).
+ */
+export async function stampTechnicianReviewOnConsentPdf(
+  clientId: string,
+  formData: ConsentFormData,
+  signatureBase64: string
+): Promise<string> {
+  return stampConsentPDF(clientId, formData, signatureBase64, {
+    technicianReviewed: true,
+  });
 }
