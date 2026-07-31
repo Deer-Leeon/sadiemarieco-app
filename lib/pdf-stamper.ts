@@ -659,18 +659,35 @@ async function uploadSignedConsentPdf(
   }
 }
 
-/** Draw a navy check over the printed ☐ Reviewed by Technician box. */
-function drawTechnicianReviewCheck(page: PDFPage): void {
-  const { x, y, size } = TECHNICIAN_REVIEW_CHECKBOX_PT;
-  // Cover the empty ☐ glyph so the check reads cleanly.
+/**
+ * Replace the printed ☐ Reviewed by Technician row with a clean checked
+ * checkbox + label so the mark fits the box in every PDF viewer.
+ */
+async function drawTechnicianReviewCheck(
+  pdfDoc: PDFDocument,
+  page: PDFPage
+): Promise<void> {
+  const {
+    x,
+    y,
+    size,
+    eraseX,
+    eraseY,
+    eraseWidth,
+    eraseHeight,
+    label,
+    labelSize,
+    labelGap,
+  } = TECHNICIAN_REVIEW_CHECKBOX_PT;
+
   page.drawRectangle({
-    x: x - 0.5,
-    y: y - 0.5,
-    width: size + 1,
-    height: size + 1,
+    x: eraseX,
+    y: eraseY,
+    width: eraseWidth,
+    height: eraseHeight,
     color: rgb(1, 1, 1),
   });
-  // Draw a thin square border matching the printed checkbox.
+
   page.drawRectangle({
     x,
     y,
@@ -679,20 +696,31 @@ function drawTechnicianReviewCheck(page: PDFPage): void {
     borderColor: STAMP_TEXT_COLOR,
     borderWidth: 1,
   });
-  const thickness = Math.max(1.5, size * 0.14);
+
+  const thickness = 1.35;
+  // Check fills most of the square with even inset padding.
   page.drawLine({
-    start: { x: x + size * 0.2, y: y + size * 0.48 },
-    end: { x: x + size * 0.42, y: y + size * 0.28 },
+    start: { x: x + size * 0.18, y: y + size * 0.48 },
+    end: { x: x + size * 0.40, y: y + size * 0.26 },
     thickness,
     color: STAMP_TEXT_COLOR,
     lineCap: LineCapStyle.Round,
   });
   page.drawLine({
-    start: { x: x + size * 0.42, y: y + size * 0.28 },
-    end: { x: x + size * 0.8, y: y + size * 0.72 },
+    start: { x: x + size * 0.40, y: y + size * 0.26 },
+    end: { x: x + size * 0.82, y: y + size * 0.76 },
     thickness,
     color: STAMP_TEXT_COLOR,
     lineCap: LineCapStyle.Round,
+  });
+
+  const font = await embedStampFont(pdfDoc);
+  page.drawText(label, {
+    x: x + size + labelGap,
+    y: y + (size - labelSize) / 2 + 0.75,
+    size: labelSize,
+    font,
+    color: STAMP_TEXT_COLOR,
   });
 }
 
@@ -732,7 +760,7 @@ export async function stampConsentPDF(
     if (pages.length === 0) {
       throw new Error('Consent PDF has no pages.');
     }
-    drawTechnicianReviewCheck(pages[pages.length - 1]!);
+    await drawTechnicianReviewCheck(pdfDoc, pages[pages.length - 1]!);
   }
 
   const pdfBytes = await pdfDoc.save();

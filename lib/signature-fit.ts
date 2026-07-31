@@ -21,14 +21,26 @@ export const SIGNATURE_BOX_PT = {
 } as const;
 
 /**
- * Printed ☐ on the last page of the Canva consent template
- * ("☐ Reviewed by Technician"). Poppler bbox → PDF bottom-left;
- * nudges tuned against pdftoppm renders of the Canva template.
+ * Placement for the technician-review stamp on the last consent page.
+ * Erases the printed ☐ + label and redraws a clean checked row so the
+ * mark fits the box reliably across PDF viewers.
  */
 export const TECHNICIAN_REVIEW_CHECKBOX_PT = {
-  x: 58.5,
-  y: 411.5,
-  size: 11,
+  /** Left edge of the redrawn checkbox. */
+  x: 60.5,
+  /** Bottom edge of the redrawn checkbox. */
+  y: 408,
+  /** Outer size of the redrawn checkbox square. */
+  size: 9,
+  /** White erase covering the printed ☐ + label up to the signature line. */
+  eraseX: 54,
+  eraseY: 400,
+  eraseWidth: 175,
+  eraseHeight: 32,
+  /** Label drawn to the right of the checkbox. */
+  label: 'Reviewed by Technician',
+  labelSize: 10.5,
+  labelGap: 6,
 } as const;
 
 export type Box = { x: number; y: number; width: number; height: number };
