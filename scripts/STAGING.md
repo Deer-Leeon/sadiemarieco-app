@@ -68,9 +68,11 @@ node --env-file=.env.local scripts/reset-staging-neon.mjs
 | `NEXT_PUBLIC_PUBLIC_BASE_URL` | `https://staging.sadiemarie.co` |
 | Stripe keys | **test** (`sk_test_` / `pk_test_`) — never live keys on staging |
 | Clerk keys | **same** app as production |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_PHONE_NUMBER` | **same as production** (otherwise Settings toggle cannot send) |
+| `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | **same as production** (consent + reminder emails) |
 | `CRON_SECRET` | distinct from production |
 
-**Staging SMS:** Off by default. Enable from `/admin/settings` → **Outbound SMS** (staging only). Uses the real Twilio number; ~1¢/message. Sunday Neon reset clears the toggle back to off.
+**Staging SMS:** Off by default. Enable from `/admin/settings` → **Outbound SMS** (staging only). Uses the real Twilio number; ~1¢/message. Sunday Neon reset clears the toggle back to off. Twilio/Resend must exist on the Vercel **Preview (staging)** env — Production-only secrets are not inherited.
 
 **Stripe split (important):**
 
