@@ -10,6 +10,7 @@ import { put } from '@vercel/blob';
 import {
   adjustDimsForRotation,
   drawCheckMark,
+  LineCapStyle,
   PDFCheckBox,
   PDFDocument,
   PDFTextField,
@@ -31,6 +32,7 @@ import {
   fitImageDimensions,
   placeImageInBox,
   signaturePlacementBox,
+  TECHNICIAN_REVIEW_CHECKBOX_PT,
 } from '@/lib/signature-fit';
 import { STUDIO_SETTINGS_ROW_ID } from '@/lib/studio-settings';
 
@@ -631,6 +633,52 @@ export async function generateUnsignedPreviewPDF(
   return Buffer.from(pdfBytes).toString('base64');
 }
 
+async function uploadSignedConsentPdf(
+  clientId: string,
+  pdfBytes: Uint8Array
+): Promise<string> {
+  const token = getBlobToken();
+  const pathname = `client-consents/${clientId}-signed.pdf`;
+  try {
+    const blob = await put(pathname, Buffer.from(pdfBytes), {
+      access: 'public',
+      contentType: 'application/pdf',
+      allowOverwrite: true,
+      token,
+    });
+    return blob.url;
+  } catch (err) {
+    const message = errorMessage(err);
+    console.error('[pdf-stamper] blob put failed:', message);
+    if (/access denied|unauthorized|invalid token/i.test(message)) {
+      throw new Error(
+        'Vercel Blob rejected the upload (invalid BLOB_READ_WRITE_TOKEN). Regenerate the token in Vercel → Storage → your store → .env.local, then restart npm run dev.'
+      );
+    }
+    throw new Error(`Failed to upload stamped consent PDF: ${message}`);
+  }
+}
+
+/** Draw a navy check over the printed ☐ Reviewed by Technician box. */
+function drawTechnicianReviewCheck(page: PDFPage): void {
+  const { x, y, size } = TECHNICIAN_REVIEW_CHECKBOX_PT;
+  const thickness = Math.max(1.35, size * 0.12);
+  page.drawLine({
+    start: { x: x + size * 0.18, y: y + size * 0.48 },
+    end: { x: x + size * 0.42, y: y + size * 0.22 },
+    thickness,
+    color: STAMP_TEXT_COLOR,
+    lineCap: LineCapStyle.Round,
+  });
+  page.drawLine({
+    start: { x: x + size * 0.42, y: y + size * 0.22 },
+    end: { x: x + size * 0.84, y: y + size * 0.78 },
+    thickness,
+    color: STAMP_TEXT_COLOR,
+    lineCap: LineCapStyle.Round,
+  });
+}
+
 /**
  * Load the studio template, stamp fields + signature, upload to Blob.
  */
@@ -657,25 +705,24 @@ export async function stampConsentPDF(
   await finalizeFormAppearance(pdfDoc, form);
 
   const pdfBytes = await pdfDoc.save();
-  const token = getBlobToken();
+  return uploadSignedConsentPdf(clientId, pdfBytes);
+}
 
-  const pathname = `client-consents/${clientId}-signed.pdf`;
-  try {
-    const blob = await put(pathname, Buffer.from(pdfBytes), {
-      access: 'public',
-      contentType: 'application/pdf',
-      allowOverwrite: true,
-      token,
-    });
-    return blob.url;
-  } catch (err) {
-    const message = errorMessage(err);
-    console.error('[pdf-stamper] blob put failed:', message);
-    if (/access denied|unauthorized|invalid token/i.test(message)) {
-      throw new Error(
-        'Vercel Blob rejected the upload (invalid BLOB_READ_WRITE_TOKEN). Regenerate the token in Vercel → Storage → your store → .env.local, then restart npm run dev.'
-      );
-    }
-    throw new Error(`Failed to upload stamped consent PDF: ${message}`);
+/**
+ * Check the printed "☐ Reviewed by Technician" box on an already-signed
+ * consent PDF, overwrite the Blob object, and return the public URL.
+ */
+export async function stampTechnicianReviewOnConsentPdf(
+  clientId: string,
+  signedPdfUrl: string
+): Promise<string> {
+  const buffer = await fetchTemplatePdfBuffer(signedPdfUrl);
+  const pdfDoc = await PDFDocument.load(buffer);
+  const pages = pdfDoc.getPages();
+  if (pages.length === 0) {
+    throw new Error('Signed consent PDF has no pages.');
   }
+  drawTechnicianReviewCheck(pages[pages.length - 1]!);
+  const pdfBytes = await pdfDoc.save();
+  return uploadSignedConsentPdf(clientId, pdfBytes);
 }

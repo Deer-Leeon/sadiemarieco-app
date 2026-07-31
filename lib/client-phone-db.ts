@@ -15,6 +15,7 @@ export interface ClientPhoneRow {
   created_at?: string | null;
   has_consented?: boolean;
   consent_form_url?: string | null;
+  consent_technician_reviewed_at?: string | Date | null;
 }
 
 /** Canonical 11-digit US when parseable; used for new writes. */
@@ -35,7 +36,8 @@ export async function findClientRowByPhone(
         email,
         created_at,
         has_consented,
-        consent_form_url
+        consent_form_url,
+        consent_technician_reviewed_at
       FROM clients
       WHERE phone = ${variant}
       LIMIT 1

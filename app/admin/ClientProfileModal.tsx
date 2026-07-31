@@ -741,7 +741,10 @@ function DossierSection({
           helper="Lash, brow, and colour reference shots."
           onClick={() => onChangeView('pictures')}
         />
-        <ConsentFormActionBox client={client} />
+        <ConsentFormActionBox
+          client={client}
+          onClientUpdated={onClientUpdated}
+        />
       </div>
 
       <PrivateNotesSection clientId={client.id} />
@@ -1355,15 +1358,59 @@ const actionBoxClass = (interactive: boolean) =>
       : 'cursor-not-allowed opacity-70'
   }`;
 
-function ConsentFormActionBox({ client }: { client: Client }) {
+function ConsentFormActionBox({
+  client,
+  onClientUpdated,
+}: {
+  client: Client;
+  onClientUpdated: (c: Client) => void;
+}) {
   const stampedPdfUrl = isStampedConsentPdfUrl(client.consent_form_url)
     ? client.consent_form_url!.trim()
     : null;
   const permanentLink =
     consentDocumentAbsoluteUrl(client.id) ?? consentDocumentPath(client.id);
-  const href = stampedPdfUrl ?? consentFormPath(client.id);
+  const href = stampedPdfUrl
+    ? `${stampedPdfUrl}${stampedPdfUrl.includes('?') ? '&' : '?'}v=${
+        client.consent_technician_reviewed_at
+          ? Date.parse(client.consent_technician_reviewed_at)
+          : 'signed'
+      }`
+    : consentFormPath(client.id);
+
+  const [confirmReview, setConfirmReview] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+
+  const markReviewed = async () => {
+    setReviewing(true);
+    setReviewError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/clients/${client.id}/consent-review`,
+        { method: 'POST' }
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        client?: Client;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok || !data.client) {
+        throw new Error(
+          data.message || data.error || `Request failed (${res.status})`
+        );
+      }
+      onClientUpdated(data.client);
+      setConfirmReview(false);
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReviewing(false);
+    }
+  };
 
   if (client.has_consented) {
+    const reviewedAt = client.consent_technician_reviewed_at;
     return (
       <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
         <ActionBox
@@ -1387,6 +1434,76 @@ function ConsentFormActionBox({ client }: { client: Client }) {
             </>
           }
         />
+        {stampedPdfUrl && (
+          <div className="border-t border-stone-100 px-4 py-3">
+            {reviewedAt ? (
+              <p className="flex items-center gap-2 text-xs text-stone-600">
+                <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
+                <span>
+                  Reviewed by technician
+                  {Number.isFinite(Date.parse(reviewedAt))
+                    ? ` · ${format(parseISO(reviewedAt), 'MMM d, yyyy')}`
+                    : ''}
+                </span>
+              </p>
+            ) : confirmReview ? (
+              <div className="space-y-3">
+                <p className="text-sm leading-relaxed text-stone-700">
+                  Mark this consent PDF as reviewed by the technician? This
+                  checks the box on the PDF and saves a new copy to the client
+                  profile.
+                </p>
+                {reviewError && (
+                  <p className="text-xs text-rose-700" role="alert">
+                    {reviewError}
+                  </p>
+                )}
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmReview(false);
+                      setReviewError(null);
+                    }}
+                    disabled={reviewing}
+                    className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void markReviewed()}
+                    disabled={reviewing}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-stone-900 bg-stone-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+                  >
+                    {reviewing && (
+                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                    )}
+                    {reviewing ? 'Saving…' : 'Confirm review'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmReview(true);
+                    setReviewError(null);
+                  }}
+                  className="w-full rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-left text-xs font-medium text-stone-800 transition-colors hover:border-stone-300 hover:bg-stone-100"
+                >
+                  Mark reviewed by technician
+                </button>
+                {reviewError && (
+                  <p className="text-xs text-rose-700" role="alert">
+                    {reviewError}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         <div className="border-t border-stone-100 px-4 py-3">
           <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
             Permanent client link

@@ -20,6 +20,17 @@ export const SIGNATURE_BOX_PT = {
   height: 40,
 } as const;
 
+/**
+ * Printed ☐ on the last page of the Canva consent template
+ * ("☐ Reviewed by Technician"). Poppler bbox → PDF bottom-left.
+ * Tuned so the drawn check sits inside the printed square.
+ */
+export const TECHNICIAN_REVIEW_CHECKBOX_PT = {
+  x: 59.5,
+  y: 412.5,
+  size: 12,
+} as const;
+
 export type Box = { x: number; y: number; width: number; height: number };
 
 /** Fit image inside a box without stretching; avoid upscaling past native resolution. */
