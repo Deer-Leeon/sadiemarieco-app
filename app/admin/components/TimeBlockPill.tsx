@@ -1,8 +1,8 @@
 'use client';
 
-import { format } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 
+import { formatStudioClockRange } from '@/lib/studio-calendar';
 import { MIN_PILL_HEIGHT_PX, safeParseISO } from '../timeline';
 import type { TimeBlock } from '../types';
 
@@ -26,7 +26,7 @@ export function timeBlockTimeLabel(block: TimeBlock): string {
   const start = safeParseISO(block.start_time);
   const end = safeParseISO(block.end_time);
   if (start && end) {
-    return `${format(start, 'h:mm a')} – ${format(end, 'h:mm a')}`;
+    return formatStudioClockRange(start, end);
   }
   return 'Blocked';
 }

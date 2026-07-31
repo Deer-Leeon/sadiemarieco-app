@@ -5,7 +5,12 @@
  * identical positioning so a click in TimeGrid opens the modal at the
  * same visual coordinates — never duplicate this math; import it.
  */
-import { isSameDay, parseISO, startOfDay } from 'date-fns';
+import { parseISO } from 'date-fns';
+
+import {
+  isSameStudioDay,
+  studioMinutesFromMidnight,
+} from '@/lib/studio-calendar';
 
 import type { Appointment } from './types';
 
@@ -124,21 +129,29 @@ export function positionInterval(
   start: Date,
   end: Date
 ): { topPct: number; heightPct: number } | null {
-  const dayStart = startOfDay(start);
-  const visibleStartMs = dayStart.getTime() + START_HOUR * 60 * 60 * 1000;
-  const visibleEndMs = dayStart.getTime() + END_HOUR * 60 * 60 * 1000;
+  // Position against America/Denver wall clock — not the runtime's
+  // local midnight (UTC on Vercel SSR would shove evening MT bookings
+  // down the grid by six hours).
+  const startMins = studioMinutesFromMidnight(start);
+  const endMins = studioMinutesFromMidnight(end);
+  // Multi-day / past-midnight end: treat as END_HOUR so the pill clips
+  // at the bottom of the visible window instead of wrapping negative.
+  const endMinsClamped =
+    endMins < startMins ? END_HOUR * 60 : endMins;
 
-  const startMs = Math.max(start.getTime(), visibleStartMs);
-  const endMs = Math.min(end.getTime(), visibleEndMs);
+  const visibleStart = START_HOUR * 60;
+  const visibleEnd = END_HOUR * 60;
 
-  if (endMs <= startMs) return null;
+  const clippedStart = Math.max(startMins, visibleStart);
+  const clippedEnd = Math.min(endMinsClamped, visibleEnd);
+
+  if (clippedEnd <= clippedStart) return null;
 
   const totalVisibleMinutes = HOURS * 60;
-  const minutesFromVisibleStart = (startMs - visibleStartMs) / 60000;
-  const durationMinutes = (endMs - startMs) / 60000;
-
-  const topPct = (minutesFromVisibleStart / totalVisibleMinutes) * 100;
-  const heightPct = (durationMinutes / totalVisibleMinutes) * 100;
+  const topPct =
+    ((clippedStart - visibleStart) / totalVisibleMinutes) * 100;
+  const heightPct =
+    ((clippedEnd - clippedStart) / totalVisibleMinutes) * 100;
   return { topPct, heightPct };
 }
 
@@ -262,10 +275,9 @@ function packLanes(raw: RawPositioned[]): PositionedAppointment[] {
 }
 
 /**
- * Filter appointments to a single local-calendar day and return them
- * with their positioning + overlap-lane assignments. Timezone-safe:
- * `isSameDay` works against the JS runtime's local time, which is the
- * studio's frame of reference (DB stores UTC; the user sees local).
+ * Filter appointments to a single America/Denver calendar day and return
+ * them with positioning + overlap-lane assignments. DB stores UTC; day
+ * membership is always studio-local.
  */
 export function layoutForDay(
   date: Date,
@@ -274,7 +286,7 @@ export function layoutForDay(
   const positioned: RawPositioned[] = [];
   for (const apt of appointments) {
     const start = safeParseISO(apt.booking_time);
-    if (!start || !isSameDay(start, date)) continue;
+    if (!start || !isSameStudioDay(start, date)) continue;
     const pos = positionFor(apt);
     if (!pos) continue;
     const end =
@@ -291,7 +303,7 @@ export function layoutForDay(
   return packLanes(positioned);
 }
 
-/** Filter time blocks to a single local day with timeline positioning. */
+/** Filter time blocks to a single studio day with timeline positioning. */
 export function layoutBlocksForDay(
   date: Date,
   blocks: TimeBlock[]
@@ -300,7 +312,7 @@ export function layoutBlocksForDay(
   for (const block of blocks) {
     const start = safeParseISO(block.start_time);
     const end = safeParseISO(block.end_time);
-    if (!start || !end || !isSameDay(start, date)) continue;
+    if (!start || !end || !isSameStudioDay(start, date)) continue;
     const pos = positionInterval(start, end);
     if (!pos) continue;
     positioned.push({ block, topPct: pos.topPct, heightPct: pos.heightPct });

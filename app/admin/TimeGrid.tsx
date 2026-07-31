@@ -1,13 +1,17 @@
 'use client';
 
-import {
-  addDays,
-  format,
-  isToday,
-  startOfDay,
-  startOfWeek,
-} from 'date-fns';
 import { Flag } from 'lucide-react';
+
+import {
+  addStudioCalendarDays,
+  calendarDayUtcNoon,
+  formatStudioClockRange,
+  formatStudioDayOfMonth,
+  formatStudioWeekdayShort,
+  isStudioToday,
+  studioDateKey,
+  studioWeekdaySun0,
+} from '@/lib/studio-calendar';
 
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
@@ -70,11 +74,17 @@ interface DayColumn {
 // ──────────────────────────────────────────────────────────────────────────
 
 function buildDays(currentDate: Date, daysToShow: 3 | 7): Date[] {
-  const anchor =
-    daysToShow === 7
-      ? startOfWeek(currentDate, { weekStartsOn: 0 })
-      : startOfDay(currentDate);
-  return Array.from({ length: daysToShow }, (_, i) => addDays(anchor, i));
+  let startKey = studioDateKey(currentDate);
+  if (!startKey) {
+    // Fallback — shouldn't happen with a real Date.
+    startKey = studioDateKey(new Date());
+  }
+  if (daysToShow === 7) {
+    startKey = addStudioCalendarDays(startKey, -studioWeekdaySun0(startKey));
+  }
+  return Array.from({ length: daysToShow }, (_, i) =>
+    calendarDayUtcNoon(addStudioCalendarDays(startKey, i))
+  );
 }
 
 function buildColumns(
@@ -189,8 +199,11 @@ function DayHeader({
   date: Date;
   onClick?: (date: Date) => void;
 }) {
-  const today = isToday(date);
+  const today = isStudioToday(date);
   const clickable = !!onClick;
+  const dateKey = studioDateKey(date);
+  const weekday = formatStudioWeekdayShort(dateKey || date);
+  const dayNum = formatStudioDayOfMonth(dateKey || date);
 
   const handleClick = () => onClick?.(date);
   const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -208,9 +221,7 @@ function DayHeader({
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
       aria-label={
-        clickable
-          ? `Open day view for ${format(date, 'EEEE, MMMM d')}`
-          : undefined
+        clickable ? `Open day view for ${weekday} ${dayNum}` : undefined
       }
       className={`px-2 py-3 text-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/30 ${
         clickable
@@ -219,7 +230,7 @@ function DayHeader({
       }`}
     >
       <div className="font-serif text-sm tracking-wide text-stone-900">
-        {format(date, 'EEE')}
+        {weekday}
       </div>
       <div className="mt-1 flex items-center justify-center">
         <span
@@ -229,12 +240,27 @@ function DayHeader({
               : 'font-serif text-xl text-stone-900'
           }
         >
-          {format(date, 'd')}
+          {dayNum}
         </span>
       </div>
     </div>
   );
 }
+
+const HOUR_LABELS = [
+  '9 AM',
+  '10 AM',
+  '11 AM',
+  '12 PM',
+  '1 PM',
+  '2 PM',
+  '3 PM',
+  '4 PM',
+  '5 PM',
+  '6 PM',
+  '7 PM',
+  '8 PM',
+] as const;
 
 function TimeLabelColumn() {
   return (
@@ -244,14 +270,12 @@ function TimeLabelColumn() {
     >
       {Array.from({ length: HOURS }, (_, i) => {
         const hour = START_HOUR + i;
-        const labelDate = new Date();
-        labelDate.setHours(hour, 0, 0, 0);
         return (
           <div
             key={hour}
             className="border-t border-stone-200 pr-2 pt-1 text-right text-[10px] uppercase tracking-widest text-stone-400"
           >
-            {format(labelDate, 'h a')}
+            {HOUR_LABELS[i]}
           </div>
         );
       })}
@@ -359,9 +383,7 @@ function AppointmentBlock({
   const start = safeParseISO(apt.booking_time);
   const end = safeParseISO(apt.end_time);
   const timeLabel = start
-    ? end
-      ? `${format(start, 'h:mm a')} – ${format(end, 'h:mm a')}`
-      : format(start, 'h:mm a')
+    ? formatStudioClockRange(start, end)
     : '';
   const durationMinutes =
     start && end

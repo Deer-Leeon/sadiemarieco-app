@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { format, parseISO } from 'date-fns';
+import { parseISO } from 'date-fns';
+import {
+  formatStudioClockRange,
+  formatStudioDateLong,
+  formatStudioDateShort,
+} from '@/lib/studio-calendar';
 import Cal, { getCalApi, type EmbedEvent } from '@calcom/embed-react';
 import {
   AlertCircle,
@@ -640,13 +645,11 @@ function DateTimeBox({ appointment }: { appointment: Appointment }) {
       {hasStart ? (
         <>
           <p className="font-serif text-lg leading-tight text-stone-900">
-            {format(start!, 'EEEE, MMMM d, yyyy')}
+            {formatStudioDateLong(start!)}
           </p>
           <p className="mt-2 flex items-center gap-2 text-sm text-stone-700">
             <Clock className="h-3.5 w-3.5 text-stone-400" />
-            {hasEnd
-              ? `${format(start!, 'h:mm a')} – ${format(end!, 'h:mm a')}`
-              : format(start!, 'h:mm a')}
+            {formatStudioClockRange(start!, hasEnd ? end : null)}
           </p>
         </>
       ) : (
@@ -1133,7 +1136,7 @@ function RescheduleView({
   const currentSlotLabel = (() => {
     if (!appointment.booking_time) return 'this time';
     try {
-      return format(parseISO(appointment.booking_time), 'EEEE, MMMM d · h:mm a');
+      return `${formatStudioDateShort(appointment.booking_time)} · ${formatStudioClockRange(appointment.booking_time)}`;
     } catch {
       return 'this time';
     }

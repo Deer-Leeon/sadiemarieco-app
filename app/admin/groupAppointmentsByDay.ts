@@ -1,8 +1,8 @@
-import { format, parseISO, startOfDay } from 'date-fns';
-
 import type { Appointment } from './types';
-
-const DAY_HEADER_FORMAT = 'EEEE, MMMM d';
+import {
+  formatStudioDateShort,
+  studioDateKey,
+} from '@/lib/studio-calendar';
 
 export interface AppointmentDayGroup {
   /** YYYY-MM-DD for valid dates, or `unscheduled` as a sentinel. */
@@ -13,8 +13,8 @@ export interface AppointmentDayGroup {
 }
 
 /**
- * Bucket appointments by local calendar day. Appointments within each
- * day sort ascending by start time. Day groups sort by `dayOrder`
+ * Bucket appointments by America/Denver calendar day. Appointments within
+ * each day sort ascending by start time. Day groups sort by `dayOrder`
  * (newest-first for past/history, soonest-first for upcoming).
  */
 export function groupAppointmentsByDay(
@@ -33,13 +33,12 @@ export function groupAppointmentsByDay(
       groups.get(k)!.appointments.push(a);
       continue;
     }
-    const d = parseISO(a.booking_time);
-    if (Number.isNaN(d.getTime())) continue;
-    const key = format(startOfDay(d), 'yyyy-MM-dd');
+    const key = studioDateKey(a.booking_time);
+    if (!key) continue;
     if (!groups.has(key)) {
       groups.set(key, {
         key,
-        label: format(d, DAY_HEADER_FORMAT),
+        label: formatStudioDateShort(a.booking_time),
         appointments: [],
       });
     }
@@ -51,8 +50,7 @@ export function groupAppointmentsByDay(
       if (!a.booking_time) return 1;
       if (!b.booking_time) return -1;
       return (
-        parseISO(a.booking_time).getTime() -
-        parseISO(b.booking_time).getTime()
+        new Date(a.booking_time).getTime() - new Date(b.booking_time).getTime()
       );
     });
   }
