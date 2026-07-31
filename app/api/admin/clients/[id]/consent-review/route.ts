@@ -1,22 +1,21 @@
 /**
  * POST /api/admin/clients/[id]/consent-review
  *
- * Stamps the printed "☐ Reviewed by Technician" checkbox onto the
- * client's signed consent PDF, overwrites the Blob, and records
- * `consent_technician_reviewed_at` on the clients row.
+ * Rebuilds the signed consent PDF from intake + signature with the
+ * printed "☐ Reviewed by Technician" box checked, overwrites the Blob,
+ * and records `consent_technician_reviewed_at` on the clients row.
+ *
+ * Idempotent: safe to re-run when already reviewed (repairs a missing
+ * checkmark by regenerating from the template).
  */
 import { NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
+import { asConsentFormData } from '@/app/consent/[clientId]/consent-form-config';
 import { parseOptionalClientEmail } from '@/lib/client-identity';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
-import {
-  isStampedConsentPdfUrl,
-  resolveConsentPdfUrl,
-  type ClientIntakeForm,
-} from '@/lib/consent';
 import { stampTechnicianReviewOnConsentPdf } from '@/lib/pdf-stamper';
 
 export const runtime = 'nodejs';
@@ -53,7 +52,10 @@ interface ClientRow {
 }
 
 interface IntakeRow {
+  form_data: unknown;
+  signature_image: string | null;
   stamped_pdf_url: string | null;
+  submitted_at: Date | string | null;
 }
 
 let columnEnsured = false;
@@ -197,36 +199,34 @@ export async function POST(
       );
     }
 
-    if (client.consent_technician_reviewed_at) {
-      return NextResponse.json({
-        client: await rowToClient(client),
-        already_reviewed: true,
-      });
-    }
+    const alreadyReviewed = Boolean(client.consent_technician_reviewed_at);
 
     const { rows: intakeRows } = await sql<IntakeRow>`
-      SELECT stamped_pdf_url
+      SELECT form_data, signature_image, stamped_pdf_url, submitted_at
       FROM client_intake_forms
       WHERE client_id = ${id}::uuid
       LIMIT 1
     `;
-    const pdfUrl = resolveConsentPdfUrl(
-      intakeRows[0]
-        ? ({ stamped_pdf_url: intakeRows[0].stamped_pdf_url } as ClientIntakeForm)
-        : null,
-      client.consent_form_url
-    );
-    if (!pdfUrl || !isStampedConsentPdfUrl(pdfUrl)) {
+    const intake = intakeRows[0];
+    const signature = intake?.signature_image?.trim() ?? '';
+    if (!intake?.submitted_at || !signature) {
       return NextResponse.json(
         {
           error: 'consent_pdf_missing',
-          message: 'No signed consent PDF is on file for this client yet.',
+          message:
+            'No signed consent intake is on file for this client yet (missing signature).',
         },
         { status: 409 }
       );
     }
 
-    const stampedPdfUrl = await stampTechnicianReviewOnConsentPdf(id, pdfUrl);
+    const formData = asConsentFormData(intake.form_data);
+    const stampedPdfUrl = await stampTechnicianReviewOnConsentPdf(
+      id,
+      formData,
+      signature
+    );
+    // Always refresh the timestamp so PDF links cache-bust after re-stamp.
     const reviewedAt = new Date().toISOString();
 
     await sql`
@@ -250,7 +250,7 @@ export async function POST(
 
     return NextResponse.json({
       client: await rowToClient(refreshed),
-      already_reviewed: false,
+      already_reviewed: alreadyReviewed,
     });
   } catch (err) {
     console.error(

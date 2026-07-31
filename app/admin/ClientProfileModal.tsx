@@ -1437,15 +1437,33 @@ function ConsentFormActionBox({
         {stampedPdfUrl && (
           <div className="border-t border-stone-100 px-4 py-3">
             {reviewedAt ? (
-              <p className="flex items-center gap-2 text-xs text-stone-600">
-                <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
-                <span>
-                  Reviewed by technician
-                  {Number.isFinite(Date.parse(reviewedAt))
-                    ? ` · ${format(parseISO(reviewedAt), 'MMM d, yyyy')}`
-                    : ''}
-                </span>
-              </p>
+              <div className="space-y-2">
+                <p className="flex items-center gap-2 text-xs text-stone-600">
+                  <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
+                  <span>
+                    Reviewed by technician
+                    {Number.isFinite(Date.parse(reviewedAt))
+                      ? ` · ${format(new Date(reviewedAt), 'MMM d, yyyy')}`
+                      : ''}
+                  </span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void markReviewed()}
+                  disabled={reviewing}
+                  className="inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-stone-500 underline-offset-2 hover:text-stone-800 hover:underline disabled:opacity-50"
+                >
+                  {reviewing && (
+                    <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                  )}
+                  {reviewing ? 'Updating PDF…' : 'Re-apply check on PDF'}
+                </button>
+                {reviewError && (
+                  <p className="text-xs text-rose-700" role="alert">
+                    {reviewError}
+                  </p>
+                )}
+              </div>
             ) : confirmReview ? (
               <div className="space-y-3">
                 <p className="text-sm leading-relaxed text-stone-700">

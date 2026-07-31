@@ -662,22 +662,44 @@ async function uploadSignedConsentPdf(
 /** Draw a navy check over the printed ☐ Reviewed by Technician box. */
 function drawTechnicianReviewCheck(page: PDFPage): void {
   const { x, y, size } = TECHNICIAN_REVIEW_CHECKBOX_PT;
-  const thickness = Math.max(1.35, size * 0.12);
+  // Cover the empty ☐ glyph so the check reads cleanly.
+  page.drawRectangle({
+    x: x - 0.5,
+    y: y - 0.5,
+    width: size + 1,
+    height: size + 1,
+    color: rgb(1, 1, 1),
+  });
+  // Draw a thin square border matching the printed checkbox.
+  page.drawRectangle({
+    x,
+    y,
+    width: size,
+    height: size,
+    borderColor: STAMP_TEXT_COLOR,
+    borderWidth: 1,
+  });
+  const thickness = Math.max(1.5, size * 0.14);
   page.drawLine({
-    start: { x: x + size * 0.18, y: y + size * 0.48 },
-    end: { x: x + size * 0.42, y: y + size * 0.22 },
+    start: { x: x + size * 0.2, y: y + size * 0.48 },
+    end: { x: x + size * 0.42, y: y + size * 0.28 },
     thickness,
     color: STAMP_TEXT_COLOR,
     lineCap: LineCapStyle.Round,
   });
   page.drawLine({
-    start: { x: x + size * 0.42, y: y + size * 0.22 },
-    end: { x: x + size * 0.84, y: y + size * 0.78 },
+    start: { x: x + size * 0.42, y: y + size * 0.28 },
+    end: { x: x + size * 0.8, y: y + size * 0.72 },
     thickness,
     color: STAMP_TEXT_COLOR,
     lineCap: LineCapStyle.Round,
   });
 }
+
+export type StampConsentOptions = {
+  /** When true, check the printed ☐ Reviewed by Technician box. */
+  technicianReviewed?: boolean;
+};
 
 /**
  * Load the studio template, stamp fields + signature, upload to Blob.
@@ -685,7 +707,8 @@ function drawTechnicianReviewCheck(page: PDFPage): void {
 export async function stampConsentPDF(
   clientId: string,
   formData: ConsentFormData,
-  signatureBase64: string
+  signatureBase64: string,
+  options?: StampConsentOptions
 ): Promise<string> {
   const pdfDoc = await loadFilledConsentPdf(formData);
   const form = pdfDoc.getForm();
@@ -704,25 +727,30 @@ export async function stampConsentPDF(
 
   await finalizeFormAppearance(pdfDoc, form);
 
+  if (options?.technicianReviewed) {
+    const pages = pdfDoc.getPages();
+    if (pages.length === 0) {
+      throw new Error('Consent PDF has no pages.');
+    }
+    drawTechnicianReviewCheck(pages[pages.length - 1]!);
+  }
+
   const pdfBytes = await pdfDoc.save();
   return uploadSignedConsentPdf(clientId, pdfBytes);
 }
 
 /**
- * Check the printed "☐ Reviewed by Technician" box on an already-signed
- * consent PDF, overwrite the Blob object, and return the public URL.
+ * Rebuild the signed consent PDF from intake + signature with the
+ * technician-review check applied. Regenerating from the template avoids
+ * corrupting an already-flattened Blob PDF (which made the check invisible
+ * in Chrome).
  */
 export async function stampTechnicianReviewOnConsentPdf(
   clientId: string,
-  signedPdfUrl: string
+  formData: ConsentFormData,
+  signatureBase64: string
 ): Promise<string> {
-  const buffer = await fetchTemplatePdfBuffer(signedPdfUrl);
-  const pdfDoc = await PDFDocument.load(buffer);
-  const pages = pdfDoc.getPages();
-  if (pages.length === 0) {
-    throw new Error('Signed consent PDF has no pages.');
-  }
-  drawTechnicianReviewCheck(pages[pages.length - 1]!);
-  const pdfBytes = await pdfDoc.save();
-  return uploadSignedConsentPdf(clientId, pdfBytes);
+  return stampConsentPDF(clientId, formData, signatureBase64, {
+    technicianReviewed: true,
+  });
 }
