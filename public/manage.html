@@ -62,6 +62,7 @@
 
   <!-- LOADED / DEFAULT STATE -->
   <section id="portal-loaded" class="portal-state" hidden>
+    <p class="portal-inline-notice" id="portal-inline-notice" hidden role="status"></p>
     <div class="portal-grid">
 
       <article class="portal-card portal-card--details">
@@ -155,34 +156,41 @@
 
   <!-- RESCHEDULED SUCCESS STATE -->
   <section id="portal-rescheduled" class="portal-state" hidden aria-live="polite">
-    <div class="portal-card portal-card--center">
+    <div class="portal-card portal-card--center portal-card--rescheduled">
       <div class="portal-success-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M5 12.5 10 17.5 19 8"/>
         </svg>
       </div>
-      <h2 class="portal-card-title">Your appointment has been<br><em>successfully rescheduled</em>.</h2>
+      <span class="portal-eyebrow">Confirmed</span>
+      <h2 class="portal-card-title">You&rsquo;re all set —<br><em>new time booked</em>.</h2>
       <p class="portal-card-body" id="portal-rescheduled-summary">
-        Your new time is confirmed below. Save this page or use the manage link anytime you need to make another change.
+        Your appointment has been moved. Details are below — save the manage link for any future changes.
       </p>
-      <dl class="portal-rescheduled-details">
-        <div class="portal-detail-row">
-          <dt>Service</dt>
-          <dd id="portal-rescheduled-service">—</dd>
-        </div>
-        <div class="portal-detail-row">
-          <dt>Date</dt>
-          <dd id="portal-rescheduled-date">—</dd>
-        </div>
-        <div class="portal-detail-row">
-          <dt>Time</dt>
-          <dd id="portal-rescheduled-time">—</dd>
-        </div>
-      </dl>
+      <div class="portal-rescheduled-panel">
+        <dl class="portal-rescheduled-details">
+          <div class="portal-detail-row">
+            <dt>Service</dt>
+            <dd id="portal-rescheduled-service">—</dd>
+          </div>
+          <div class="portal-detail-row">
+            <dt>Date</dt>
+            <dd id="portal-rescheduled-date">—</dd>
+          </div>
+          <div class="portal-detail-row">
+            <dt>Time</dt>
+            <dd id="portal-rescheduled-time">—</dd>
+          </div>
+          <div class="portal-detail-row">
+            <dt>Where</dt>
+            <dd>61 W 3200 N, Suite #10, Lehi, UT 84043</dd>
+          </div>
+        </dl>
+      </div>
       <p class="portal-fineprint portal-rescheduled-sms">
-        You should also receive a text confirming the new appointment time (if you opted in to appointment messages).
+        You should also get a text confirming this new time (if you opted in to appointment messages).
       </p>
-      <div class="portal-actions">
+      <div class="portal-actions portal-actions--stack portal-rescheduled-actions">
         <a class="btn-navy" id="portal-rescheduled-manage" href="/manage">Manage this appointment</a>
         <a class="btn-outline-navy" href="/">Return to site</a>
       </div>

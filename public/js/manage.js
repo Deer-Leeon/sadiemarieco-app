@@ -72,6 +72,7 @@
   const rescheduledTime = el('portal-rescheduled-time');
   const rescheduledManage = el('portal-rescheduled-manage');
   const rescheduledSummary = el('portal-rescheduled-summary');
+  const inlineNotice = el('portal-inline-notice');
 
   // ── HELPERS ──
   const setState = (name) => {
@@ -139,6 +140,17 @@
       show: true,
       html: `${verb} ${windowLabel} may charge <strong>${pct}%</strong> of the service cost to the card on file. See our <a href="/#policies">studio policy</a>.`,
     };
+  };
+
+  const setInlineNotice = (message) => {
+    if (!inlineNotice) return;
+    if (!message) {
+      inlineNotice.hidden = true;
+      inlineNotice.textContent = '';
+      return;
+    }
+    inlineNotice.textContent = message;
+    inlineNotice.hidden = false;
   };
 
   const setFeeCallout = (node, fee, action) => {
@@ -209,25 +221,55 @@
   };
 
   const parseBookingFromEvent = (event) => {
+    const detail = (event && event.detail) || {};
     const payload =
-      (event && event.detail && event.detail.data) ||
+      detail.data ||
       (event && event.data) ||
+      detail ||
       {};
-    const b = payload.booking || payload;
-    const uid = typeof b.uid === 'string' ? b.uid.trim() : '';
+    const b =
+      (payload && payload.booking && typeof payload.booking === 'object'
+        ? payload.booking
+        : null) || payload;
+    const uidRaw =
+      (typeof b.uid === 'string' && b.uid) ||
+      (typeof payload.uid === 'string' && payload.uid) ||
+      '';
+    const uid = uidRaw.trim();
     const start =
       (typeof b.startTime === 'string' && b.startTime) ||
       (typeof b.start === 'string' && b.start) ||
+      (typeof payload.startTime === 'string' && payload.startTime) ||
+      (typeof payload.start === 'string' && payload.start) ||
       null;
     const end =
       (typeof b.endTime === 'string' && b.endTime) ||
       (typeof b.end === 'string' && b.end) ||
+      (typeof payload.endTime === 'string' && payload.endTime) ||
+      (typeof payload.end === 'string' && payload.end) ||
       null;
     const title =
       (typeof b.title === 'string' && b.title) ||
       (typeof b.eventTitle === 'string' && b.eventTitle) ||
+      (typeof payload.title === 'string' && payload.title) ||
       null;
-    return { uid, start, end, title };
+    const eventType =
+      detail.type ||
+      detail.action ||
+      (typeof event === 'object' && event && event.type) ||
+      '';
+    return { uid, start, end, title, eventType: String(eventType) };
+  };
+
+  const isCalRescheduleSuccessType = (type) => {
+    const t = String(type || '').toLowerCase();
+    return (
+      t.includes('reschedulebookingsuccessful') ||
+      t === 'bookingsuccessful' ||
+      t === 'bookingsuccessfulv2' ||
+      t.endsWith('bookingsuccessful') ||
+      t.endsWith('bookingsuccessfulv2')
+    );
   };
 
   /** Cal sometimes returns type tokens (`inPerson`) instead of the address. */
@@ -288,19 +330,35 @@
       can_modify: true,
     };
     replaceManageUidInUrl(uid);
+
+    // Tear down Cal's confirmation UI so the dark embed never stays visible.
+    if (rescheduleMount) rescheduleMount.innerHTML = '';
+    rescheduleMounted = false;
+
     setState('rescheduled');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const isSameAppointmentSlot = (existingStart, existingEnd, newStart, newEnd) => {
     if (!existingStart || !newStart) return false;
-    const oldStartMs = new Date(existingStart).getTime();
-    const newStartMs = new Date(newStart).getTime();
-    if (!Number.isFinite(oldStartMs) || !Number.isFinite(newStartMs)) return false;
-    if (oldStartMs !== newStartMs) return false;
+    const toMinute = (iso) => {
+      const ms = new Date(iso).getTime();
+      if (!Number.isFinite(ms)) return null;
+      return Math.floor(ms / 60000);
+    };
+    const oldStartMin = toMinute(existingStart);
+    const newStartMin = toMinute(newStart);
+    if (oldStartMin == null || newStartMin == null) return false;
+    // Same start minute = same appointment slot (ignore end-ms/format noise).
+    if (oldStartMin !== newStartMin) return false;
     if (existingEnd && newEnd) {
-      const oldEndMs = new Date(existingEnd).getTime();
-      const newEndMs = new Date(newEnd).getTime();
-      if (Number.isFinite(oldEndMs) && Number.isFinite(newEndMs) && oldEndMs !== newEndMs) {
+      const oldEndMin = toMinute(existingEnd);
+      const newEndMin = toMinute(newEnd);
+      if (
+        oldEndMin != null &&
+        newEndMin != null &&
+        oldEndMin !== newEndMin
+      ) {
         return false;
       }
     }
@@ -412,15 +470,92 @@
   };
 
   // ── RESCHEDULE ──
-  // Mounts Cal.com's inline embed with `rescheduleUid` once. Cal handles the
-  // slot picker, payment if any, and emits `bookingSuccessful` on completion.
+  // Mounts Cal.com's inline embed with `rescheduleUid` once per attempt.
+  // On success we immediately swap to our branded confirmation (Cal's own
+  // success screen is dark / cluttered and must not stay on screen).
+  const RESCHEDULE_NS = 'portal-reschedule';
+  const handledRescheduleUids = new Set();
+  let rescheduleHandlersBound = false;
+
+  const handleRescheduleSuccess = (event) => {
+    if (!booking) return;
+    const parsed = parseBookingFromEvent(event);
+    const { uid: newUid, start, end, title, eventType } = parsed;
+
+    // Ignore unrelated Cal events when listening via wildcard.
+    if (eventType && !isCalRescheduleSuccessType(eventType)) return;
+
+    if (
+      start &&
+      isSameAppointmentSlot(booking.start, booking.end, start, end)
+    ) {
+      if (rescheduleMount) rescheduleMount.innerHTML = '';
+      rescheduleMounted = false;
+      const uidToLoad = newUid || booking.uid;
+      if (newUid) {
+        if (handledRescheduleUids.has(newUid)) return;
+        handledRescheduleUids.add(newUid);
+        replaceManageUidInUrl(newUid);
+      }
+      setInlineNotice(
+        "You're already booked for this time. Pick a different date or time if you want to move your appointment."
+      );
+      loadBooking(uidToLoad);
+      return;
+    }
+
+    if (!newUid) {
+      console.warn('[manage] reschedule success without uid', event);
+      showError(
+        'Your appointment was rescheduled, but we could not open the new manage link here. Please use the link in your confirmation text or email.'
+      );
+      if (rescheduleMount) rescheduleMount.innerHTML = '';
+      rescheduleMounted = false;
+      return;
+    }
+
+    if (handledRescheduleUids.has(newUid)) return;
+    handledRescheduleUids.add(newUid);
+    showRescheduledSuccess({ uid: newUid, start, end, title });
+  };
+
+  const bindRescheduleSuccessHandlers = (nsApi) => {
+    const actions = [
+      'bookingSuccessful',
+      'bookingSuccessfulV2',
+      'rescheduleBookingSuccessful',
+      'rescheduleBookingSuccessfulV2',
+    ];
+    actions.forEach((action) => {
+      nsApi('on', { action, callback: handleRescheduleSuccess });
+    });
+
+    // Also listen on the root Cal API — some embed builds emit namespaced
+    // success events there instead of (or in addition to) Cal.ns[...].
+    if (!rescheduleHandlersBound && typeof window.Cal === 'function') {
+      rescheduleHandlersBound = true;
+      window.Cal('on', {
+        action: '*',
+        callback: (event) => {
+          const ns =
+            (event && event.detail && event.detail.namespace) || '';
+          if (ns && ns !== RESCHEDULE_NS) return;
+          handleRescheduleSuccess(event);
+        },
+      });
+    }
+  };
+
   const mountReschedule = () => {
     if (rescheduleMounted || !booking) return;
     if (!booking.host || !booking.host.username || !booking.eventType || !booking.eventType.slug) {
       showError('This appointment is missing the information needed to reschedule. Please contact the studio.');
       return;
     }
-    const calLink = `${booking.host.username}/${booking.eventType.slug}?rescheduleUid=${encodeURIComponent(booking.uid)}`;
+    const calLink =
+      `${booking.host.username}/${booking.eventType.slug}` +
+      `?rescheduleUid=${encodeURIComponent(booking.uid)}` +
+      (booking.sms_opt_in === true ? '&sms-consent=true' : '');
 
     if (typeof window.Cal !== 'function') {
       console.warn('[manage] Cal embed script not yet loaded; retrying shortly');
@@ -428,50 +563,39 @@
       return;
     }
 
-    const namespace = 'portal-reschedule';
-    window.Cal('init', namespace, { origin: 'https://cal.com' });
-    const nsApi = window.Cal.ns && window.Cal.ns[namespace];
+    window.Cal('init', RESCHEDULE_NS, { origin: 'https://cal.com' });
+    const nsApi = window.Cal.ns && window.Cal.ns[RESCHEDULE_NS];
     if (!nsApi) {
       showError("We couldn't launch the reschedule view. Please refresh and try again.");
       return;
     }
 
+    // Bind listeners before the iframe mounts so we catch V2 success
+    // events that fire before Cal paints its confirmation UI.
+    bindRescheduleSuccessHandlers(nsApi);
+
+    if (rescheduleMount) rescheduleMount.innerHTML = '';
+
+    const embedConfig = {
+      theme: 'light',
+      layout: 'month_view',
+    };
+    // Already opted in for this appointment — prefill consent so Cal doesn't
+    // require a second checkbox (and so an unchecked box can't look "new").
+    if (booking.sms_opt_in === true) {
+      embedConfig['sms-consent'] = 'true';
+    }
+
     nsApi('inline', {
       elementOrSelector: '#portal-reschedule-mount',
       calLink,
-      config: { theme: 'light', layout: 'month_view' }
+      config: embedConfig,
     });
     nsApi('ui', Object.assign({}, window.calUiConfig || {}, {
       theme: 'light',
-      layout: 'month_view'
+      layout: 'month_view',
+      colorScheme: 'light'
     }));
-    const handleRescheduleSuccess = (event) => {
-      const parsed = parseBookingFromEvent(event);
-      const { uid: newUid, start, end, title } = parsed;
-      if (
-        start &&
-        isSameAppointmentSlot(booking.start, booking.end, start, end)
-      ) {
-        showError(
-          "You're already booked for this time. Choose a different date or time to move your appointment."
-        );
-        setState('reschedule');
-        return;
-      }
-      if (!newUid) {
-        showError(
-          'Your appointment was rescheduled, but we could not open the new manage link here. Please use the link in your confirmation text or email.'
-        );
-        return;
-      }
-      showRescheduledSuccess({ uid: newUid, start, end, title });
-    };
-
-    ['bookingSuccessful', 'bookingSuccessfulV2', 'rescheduleBookingSuccessful', 'rescheduleBookingSuccessfulV2'].forEach(
-      (action) => {
-        nsApi('on', { action, callback: handleRescheduleSuccess });
-      }
-    );
 
     rescheduleMounted = true;
   };
@@ -492,6 +616,7 @@
       setState('loaded');
       return;
     }
+    setInlineNotice('');
     setFeeCallout(rescheduleModalFee, booking.change_fee, 'reschedule');
     if (rescheduleModalBody) {
       rescheduleModalBody.textContent =
@@ -535,6 +660,8 @@
   };
 
   const closeReschedule = () => {
+    if (rescheduleMount) rescheduleMount.innerHTML = '';
+    rescheduleMounted = false;
     setState('loaded');
   };
 
