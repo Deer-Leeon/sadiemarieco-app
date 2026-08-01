@@ -383,7 +383,11 @@
     );
 
   const contactWarningEl = document.getElementById('booking-contact-warning');
+  const contactEmailWrap = document.getElementById('booking-contact-email-wrap');
   const contactEmailInput = document.getElementById('booking-contact-email');
+  const contactEmailToggle = document.getElementById(
+    'booking-contact-email-toggle'
+  );
   const contactSmsInput = document.getElementById('booking-contact-sms');
   const contactErrorEl = document.getElementById('booking-contact-error');
   const contactContinueBtn = document.getElementById('booking-contact-continue');
@@ -396,6 +400,8 @@
 
   const hideContactWarning = () => {
     if (contactWarningEl) contactWarningEl.hidden = true;
+    if (contactEmailWrap) contactEmailWrap.hidden = true;
+    if (contactEmailToggle) contactEmailToggle.hidden = false;
     if (contactErrorEl) {
       contactErrorEl.hidden = true;
       contactErrorEl.textContent = '';
@@ -414,11 +420,22 @@
     contactErrorEl.textContent = message;
   };
 
+  const revealContactEmail = () => {
+    if (contactEmailWrap) contactEmailWrap.hidden = false;
+    if (contactEmailToggle) contactEmailToggle.hidden = true;
+    setContactError('');
+    window.setTimeout(() => {
+      if (contactEmailInput) contactEmailInput.focus();
+    }, 30);
+  };
+
   const showContactCapture = (booking) => {
     pendingContactBooking = booking;
     hideCheckoutHandoff();
     if (contactEmailInput) contactEmailInput.value = '';
     if (contactSmsInput) contactSmsInput.checked = false;
+    if (contactEmailWrap) contactEmailWrap.hidden = true;
+    if (contactEmailToggle) contactEmailToggle.hidden = false;
     setContactError('');
     if (contactWarningEl) contactWarningEl.hidden = false;
     if (drawer && !drawer.classList.contains('drawer-open')) {
@@ -428,7 +445,7 @@
       backdrop.classList.add('drawer-open');
     }
     window.setTimeout(() => {
-      if (contactEmailInput) contactEmailInput.focus();
+      if (contactSmsInput) contactSmsInput.focus();
     }, 30);
   };
 
@@ -460,6 +477,23 @@
     return { res, data };
   };
 
+  const isPhoneLookupError = (error) =>
+    error === 'phone_invalid' ||
+    error === 'phone_not_sms_capable' ||
+    error === 'no_phone';
+
+  const showPhoneLookupIssue = (booking, data) => {
+    showContactCapture(booking);
+    if (data && data.error === 'phone_not_sms_capable') {
+      if (contactSmsInput) contactSmsInput.checked = false;
+      revealContactEmail();
+    }
+    setContactError(
+      (data && data.message) ||
+        'That phone number could not be verified. Please go back and check it, or continue with an email.'
+    );
+  };
+
   if (contactContinueBtn) {
     contactContinueBtn.addEventListener('click', () => {
       void (async () => {
@@ -472,9 +506,15 @@
 
         if (!hasEmail && !smsOptIn) {
           setContactError(
-            'Add an email address or check the box for appointment texts.'
+            'Check the text opt-in, or add an email below.'
           );
-          if (contactEmailInput) contactEmailInput.focus();
+          if (contactEmailWrap && contactEmailWrap.hidden) {
+            if (contactEmailToggle) contactEmailToggle.focus();
+          } else if (contactEmailInput) {
+            contactEmailInput.focus();
+          } else if (contactSmsInput) {
+            contactSmsInput.focus();
+          }
           return;
         }
 
@@ -486,11 +526,22 @@
             hasEmail ? email : '',
             smsOptIn
           );
-          if (!res.ok || data.error === 'contact_required') {
-            setContactError(
-              (data && data.message) ||
-                'Add an email address or check the box for appointment texts.'
-            );
+          if (!res.ok) {
+            if (isPhoneLookupError(data && data.error)) {
+              if (data.error === 'phone_not_sms_capable') {
+                if (contactSmsInput) contactSmsInput.checked = false;
+                revealContactEmail();
+              }
+              setContactError(
+                (data && data.message) ||
+                  'That phone number could not be verified.'
+              );
+            } else {
+              setContactError(
+                (data && data.message) ||
+                  'Check the text opt-in, or add an email below.'
+              );
+            }
             contactContinueBtn.disabled = false;
             return;
           }
@@ -504,6 +555,12 @@
           contactContinueBtn.disabled = false;
         }
       })();
+    });
+  }
+
+  if (contactEmailToggle) {
+    contactEmailToggle.addEventListener('click', () => {
+      revealContactEmail();
     });
   }
 
@@ -551,13 +608,17 @@
         if (!hasEmail && !hasSms) {
           showContactCapture(booking);
           try {
-            const { res } = await initBookingHold(booking, '', smsOptIn);
+            const { res, data } = await initBookingHold(booking, '', smsOptIn);
             if (res.ok) {
               // Cal had SMS opt-in even though the embed payload omitted it.
               hideContactWarning();
               pendingContactBooking = null;
               showCheckoutHandoff();
               goToCheckout(booking, '');
+              return;
+            }
+            if (isPhoneLookupError(data && data.error)) {
+              showPhoneLookupIssue(booking, data);
             }
           } catch (initErr) {
             console.warn('[booking] contact hydrate check failed', initErr);
@@ -566,31 +627,38 @@
         }
 
         showCheckoutHandoff();
-
-        fetch('/api/booking/init', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          redirect: 'manual',
-          body: JSON.stringify({
-            calBookingUid: uid,
-            name: booking.name,
-            email: hasEmail ? email : '',
-            serviceName: booking.serviceName,
-            bookingTime: booking.bookingTime,
-            endTime: booking.endTime,
-            phone: booking.phone,
-            smsOptIn: hasSms
-          }),
-          keepalive: true
-        }).catch((initErr) => {
-          console.warn(
-            '[booking] /api/booking/init failed (checkout will still run)',
-            initErr
+        try {
+          const { res, data } = await initBookingHold(
+            booking,
+            hasEmail ? email : '',
+            hasSms
           );
-        });
-
-        goToCheckout(booking, hasEmail ? email : '');
+          if (!res.ok) {
+            hideCheckoutHandoff();
+            checkoutRedirectedUids.delete(uid);
+            if (isPhoneLookupError(data && data.error)) {
+              showPhoneLookupIssue(booking, data);
+              return;
+            }
+            if (data && data.error === 'contact_required') {
+              showContactCapture(booking);
+              return;
+            }
+            showContactCapture(booking);
+            setContactError(
+              (data && data.message) ||
+                'We could not start checkout. Please try again.'
+            );
+            return;
+          }
+          goToCheckout(booking, hasEmail ? email : '');
+        } catch (initErr) {
+          console.warn('[booking] /api/booking/init failed', initErr);
+          hideCheckoutHandoff();
+          checkoutRedirectedUids.delete(uid);
+          showContactCapture(booking);
+          setContactError('Something went wrong. Please try again.');
+        }
       } catch (err) {
         console.error(
           '[booking] failed to redirect to /checkout after booking success',

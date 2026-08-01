@@ -376,26 +376,35 @@
       <p class="booking-contact-warning-eyebrow">Almost there</p>
       <p id="booking-contact-warning-title" class="booking-contact-warning-title">We need a way to reach you</p>
       <p class="booking-contact-warning-body">
-        Add an email <em>or</em> opt in to appointment texts. Your time is still held —
-        you can update this and continue.
+        Check the box so we can text appointment updates.
+        Your time is still held.
       </p>
-      <label class="booking-contact-field">
-        <span>Email</span>
-        <input
-          id="booking-contact-email"
-          type="email"
-          autocomplete="email"
-          inputmode="email"
-          placeholder="you@example.com"
-        />
-      </label>
       <label class="booking-contact-sms">
         <input id="booking-contact-sms" type="checkbox" />
         <span>Yes, text me appointment updates from Sadie Marie</span>
       </label>
+      <div id="booking-contact-email-wrap" class="booking-contact-email-wrap" hidden>
+        <label class="booking-contact-field">
+          <span>Email for appointment updates</span>
+          <input
+            id="booking-contact-email"
+            type="email"
+            autocomplete="email"
+            inputmode="email"
+            placeholder="you@example.com"
+          />
+        </label>
+      </div>
       <p id="booking-contact-error" class="booking-contact-error" hidden></p>
       <button type="button" id="booking-contact-continue" class="booking-contact-warning-btn">
         Continue to payment
+      </button>
+      <button
+        type="button"
+        id="booking-contact-email-toggle"
+        class="booking-contact-email-toggle"
+      >
+        Prefer email instead?
       </button>
     </div>
   </div>

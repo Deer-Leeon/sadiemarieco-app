@@ -24,6 +24,7 @@ import {
 } from '@/lib/client-identity';
 import { extractCalBookingNotes } from '@/lib/cal-booking-notes';
 import { upsertClientByPhonePrimary } from '@/lib/client-upsert';
+import { lookupBookingPhone } from '@/lib/phone-lookup';
 import { scheduleAbandonedHoldRelease } from '@/lib/schedule-abandoned-hold-release';
 import {
   clientIpFromRequest,
@@ -288,6 +289,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const phoneLookup = await lookupBookingPhone(data.phone, {
+    requireSmsCapable: smsOptIn,
+  });
+  if (!phoneLookup.ok) {
+    return NextResponse.json(
+      {
+        error:
+          phoneLookup.error === 'not_sms_capable'
+            ? 'phone_not_sms_capable'
+            : 'phone_invalid',
+        message: phoneLookup.message,
+      },
+      { status: 400 }
+    );
+  }
+
   let clientId: string;
   try {
     const upserted = await upsertClientByPhonePrimary({
@@ -305,7 +322,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const appointmentPhone = normPhone;
+  const appointmentPhone = phoneLookup.digits;
 
   try {
     const { rowCount } = await sql`
