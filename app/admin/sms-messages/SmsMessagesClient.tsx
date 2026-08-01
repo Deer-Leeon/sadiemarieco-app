@@ -334,6 +334,9 @@ export default function SmsMessagesClient() {
     );
   }
 
+  const live = templates.filter((card) => card.sendingLive);
+  const drafts = templates.filter((card) => !card.sendingLive);
+
   return (
     <div className="space-y-8">
       <section className="space-y-5">
@@ -345,32 +348,29 @@ export default function SmsMessagesClient() {
             These messages are wired to Twilio. Edits apply to the next send.
           </p>
         </div>
-        {templates
-          .filter((card) => card.sendingLive)
-          .map((card) => (
-            <ScenarioCard
-              key={card.key}
-              card={card}
-              prefix={prefix}
-              footer={footer}
-              onSaved={onSaved}
-            />
-          ))}
+        {live.map((card) => (
+          <ScenarioCard
+            key={card.key}
+            card={card}
+            prefix={prefix}
+            footer={footer}
+            onSaved={onSaved}
+          />
+        ))}
       </section>
 
-      <section className="space-y-5">
-        <div>
-          <h2 className="text-[10px] font-medium uppercase tracking-[0.22em] text-amber-700/80">
-            Placeholders — not connected yet
-          </h2>
-          <p className="mt-1 text-sm text-stone-600">
-            Draft copy only. Nothing is sent for these scenarios until you ask
-            to wire them up.
-          </p>
-        </div>
-        {templates
-          .filter((card) => !card.sendingLive)
-          .map((card) => (
+      {drafts.length > 0 ? (
+        <section className="space-y-5">
+          <div>
+            <h2 className="text-[10px] font-medium uppercase tracking-[0.22em] text-amber-700/80">
+              Placeholders — not connected yet
+            </h2>
+            <p className="mt-1 text-sm text-stone-600">
+              Draft copy only. Nothing is sent for these scenarios until you ask
+              to wire them up.
+            </p>
+          </div>
+          {drafts.map((card) => (
             <ScenarioCard
               key={card.key}
               card={card}
@@ -379,7 +379,8 @@ export default function SmsMessagesClient() {
               onSaved={onSaved}
             />
           ))}
-      </section>
+        </section>
+      ) : null}
     </div>
   );
 }

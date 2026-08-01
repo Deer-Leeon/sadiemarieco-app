@@ -22,10 +22,9 @@ export default async function AdminSmsMessagesPage() {
       <AdminSectionTabs />
       <main className="mx-auto max-w-4xl px-6 py-8">
         <p className="mb-6 max-w-2xl text-sm leading-relaxed text-stone-600">
-          Every text the studio sends — or may send — for appointments. Edit
-          the middle of each message; the brand prefix and STOP/HELP footer
-          stay locked. Live scenarios apply on the next send. Placeholder
-          scenarios are drafts only until send logic is connected.
+          Every text the studio sends for appointments. Edit the middle of each
+          message; the brand prefix and STOP/HELP footer stay locked. Edits
+          apply on the next send.
         </p>
         <SmsMessagesClient />
       </main>

@@ -46,12 +46,12 @@ export const EMAIL_TEMPLATE_META: Record<EmailTemplateKey, EmailTemplateMeta> =
       title: 'Booking confirmation',
       triggers: [
         'After checkout confirms the appointment (card vaulted).',
-        'Only the warm middle paragraph is editable — greeting and 24-hour notice stay locked.',
+        'Mirrors the warm lines from the SMS confirmation (reminders + “can’t wait to see you”), without service/date/time/manage link — those are already in the email layout. Greeting and 24-hour notice stay locked.',
       ],
       allowedPlaceholders: [],
       requiredPlaceholders: [],
       defaultBody:
-        "You'll get a reminder with pre-arrival notes before your visit — I can't wait to see you.",
+        "You'll receive reminder messages with pre-arrival instructions before your appointment. I can't wait to see you!",
       sendingLive: true,
     },
     consent_request: {

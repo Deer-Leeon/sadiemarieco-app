@@ -44,6 +44,34 @@ const impl = require('./booking-notifications.js') as {
     bookingUid?: string | null;
     amountCents?: number;
   }) => Promise<Record<string, unknown>>;
+  notifyClientCancelEarlySms: (args: {
+    clientPhone: string | null;
+    smsOptIn: boolean | null | undefined;
+    serviceName: string | null;
+    bookingTime: string | null;
+    bookingUid?: string | null;
+  }) => Promise<Record<string, unknown>>;
+  notifyClientCancelLateNoFeeSms: (args: {
+    clientPhone: string | null;
+    smsOptIn: boolean | null | undefined;
+    serviceName: string | null;
+    bookingTime: string | null;
+    bookingUid?: string | null;
+  }) => Promise<Record<string, unknown>>;
+  notifyCheckoutAbandonedSms: (args: {
+    clientPhone: string | null;
+    smsOptIn: boolean | null | undefined;
+    serviceName: string | null;
+    bookingTime: string | null;
+    bookingUid?: string | null;
+  }) => Promise<Record<string, unknown>>;
+  notifyFeedbackDayAfterSms: (args: {
+    clientPhone: string | null;
+    smsOptIn: boolean | null | undefined;
+    firstName?: string | null;
+    serviceName?: string | null;
+    bookingUid?: string | null;
+  }) => Promise<Record<string, unknown>>;
   notifyFeeFreePassSms: (args: {
     kind:
       | 'no_show_free_pass_used'
@@ -65,4 +93,9 @@ export const notifyAdminAppointmentStatusSms =
   impl.notifyAdminAppointmentStatusSms;
 export const notifyAppointmentRescheduled = impl.notifyAppointmentRescheduled;
 export const notifyLateCancelFeeSms = impl.notifyLateCancelFeeSms;
+export const notifyClientCancelEarlySms = impl.notifyClientCancelEarlySms;
+export const notifyClientCancelLateNoFeeSms =
+  impl.notifyClientCancelLateNoFeeSms;
+export const notifyCheckoutAbandonedSms = impl.notifyCheckoutAbandonedSms;
+export const notifyFeedbackDayAfterSms = impl.notifyFeedbackDayAfterSms;
 export const notifyFeeFreePassSms = impl.notifyFeeFreePassSms;
