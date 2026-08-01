@@ -302,7 +302,6 @@ export default function CheckoutClient({
     [params]
   );
 
-  const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [holdCreatedAt, setHoldCreatedAt] = useState<string | null>(
     initialHoldCreatedAt
@@ -322,23 +321,6 @@ export default function CheckoutClient({
   >('idle');
   /** Hide appointment/countdown once checkout succeeds (thank-you card). */
   const [checkoutComplete, setCheckoutComplete] = useState(false);
-  /**
-   * Bump to mint a new SetupIntent + remount Elements. Needed after we
-   * reject a succeeded SetupIntent (e.g. CVC fail) — that secret cannot
-   * be reused and Stripe returns a stuck "processing error".
-   */
-  const [setupIntentNonce, setSetupIntentNonce] = useState(0);
-  const [retryHint, setRetryHint] = useState<string | null>(null);
-
-  const remintSetupIntent = useCallback((hint?: string) => {
-    setRetryHint(
-      hint?.trim() ||
-        'Please re-enter your card details and try again.'
-    );
-    setClientSecret(null);
-    setBootstrapError(null);
-    setSetupIntentNonce((n) => n + 1);
-  }, []);
 
   const appointmentWhen = useMemo(
     () => (bookingTime ? formatAppointmentWhen(bookingTime, endTime) : null),
@@ -499,14 +481,10 @@ export default function CheckoutClient({
     };
   }, [holdExpired, uid]);
 
-  // Fetch a fresh SetupIntent client_secret on mount / remint. We don't
-  // share intents across retries: after confirmSetup succeeds Stripe
-  // locks that SetupIntent, even if our server later rejects the card
-  // (CVC/ZIP fail). Reusing the secret causes a stuck processing error.
+  // Deferred SetupIntent: mount Payment Element without a client secret so
+  // a failed CVC/ZIP reject can retry without remounting (and wiping) the form.
+  // Each submit mints a fresh SetupIntent and confirmSetup uses the same Elements.
   useEffect(() => {
-    // Returning from a 3DS challenge — the URL carries the succeeded
-    // SetupIntent id; CheckoutThreeDSResume finalises without minting
-    // a fresh intent (which would orphan the authenticated vault).
     if (holdExpired || threeDsSetupIntentId) return;
 
     if (!stripePromise) {
@@ -519,58 +497,17 @@ export default function CheckoutClient({
       setBootstrapError(
         'Missing booking reference in the URL. Please re-open this page from your booking confirmation email.'
       );
-      return;
     }
+  }, [uid, holdExpired, threeDsSetupIntentId]);
 
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/stripe/create-setup-intent', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            calBookingUid: uid,
-            ...(name ? { name } : {}),
-            ...(email ? { email } : {}),
-          }),
-        });
-        if (!res.ok) {
-          const payload = (await res.json().catch(() => null)) as
-            | { error?: string; message?: string }
-            | null;
-          throw new Error(
-            payload?.message ??
-              payload?.error ??
-              `Could not initialise checkout (HTTP ${res.status})`
-          );
-        }
-        const data = (await res.json()) as { clientSecret?: string };
-        if (cancelled) return;
-        if (!data.clientSecret) {
-          throw new Error('Server returned no client secret');
-        }
-        setClientSecret(data.clientSecret);
-      } catch (err) {
-        if (cancelled) return;
-        setBootstrapError(
-          err instanceof Error
-            ? err.message
-            : 'Could not initialise checkout. Please try again.'
-        );
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [uid, email, name, holdExpired, threeDsSetupIntentId, setupIntentNonce]);
-
-  const elementsOptions: StripeElementsOptions | null = useMemo(
-    () =>
-      clientSecret
-        ? { clientSecret, appearance: STRIPE_APPEARANCE }
-        : null,
-    [clientSecret]
+  const elementsOptions: StripeElementsOptions = useMemo(
+    () => ({
+      mode: 'setup',
+      currency: 'usd',
+      appearance: STRIPE_APPEARANCE,
+      paymentMethodTypes: ['card'],
+    }),
+    []
   );
 
   return (
@@ -589,6 +526,8 @@ export default function CheckoutClient({
           />
         ) : bootstrapError ? (
           <ErrorCard message={bootstrapError} />
+        ) : !stripePromise || !uid ? (
+          <LoadingCard />
         ) : (
           <>
             {!checkoutComplete && (
@@ -598,35 +537,15 @@ export default function CheckoutClient({
                 countdownLabel={countdownLabel}
               />
             )}
-            {retryHint && !checkoutComplete ? (
-              <div
-                role="alert"
-                className="mb-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800"
-              >
-                {retryHint}
-              </div>
-            ) : null}
-            {!elementsOptions || !stripePromise ? (
-              <LoadingCard />
-            ) : (
-              <Elements
-                key={clientSecret}
-                stripe={stripePromise}
-                options={elementsOptions}
-              >
-                <CheckoutForm
-                  uid={uid}
-                  name={name}
-                  email={email}
-                  holdExpired={holdExpired}
-                  onConfirmed={() => {
-                    setRetryHint(null);
-                    setCheckoutComplete(true);
-                  }}
-                  onNeedFreshSetupIntent={remintSetupIntent}
-                />
-              </Elements>
-            )}
+            <Elements stripe={stripePromise} options={elementsOptions}>
+              <CheckoutForm
+                uid={uid}
+                name={name}
+                email={email}
+                holdExpired={holdExpired}
+                onConfirmed={() => setCheckoutComplete(true)}
+              />
+            </Elements>
           </>
         )}
       </section>
@@ -732,8 +651,6 @@ interface FormProps {
   email: string;
   holdExpired: boolean;
   onConfirmed: () => void;
-  /** Mint a new SetupIntent after a succeeded-then-rejected vault attempt. */
-  onNeedFreshSetupIntent: (hint?: string) => void;
 }
 
 function CheckoutHoldSummary({
@@ -799,7 +716,6 @@ function CheckoutForm({
   email,
   holdExpired,
   onConfirmed,
-  onNeedFreshSetupIntent,
 }: FormProps) {
   const stripe = useStripe();
   const elements = useElements();
@@ -829,18 +745,15 @@ function CheckoutForm({
         onConfirmed();
         setConfirmed({ calWarning: result.calWarning });
       } catch (err) {
-        const message =
+        setSubmitError(
           err instanceof Error
             ? err.message
-            : 'Your card was saved but we could not finalise the appointment. Please contact the studio.';
-        setSubmitError(message);
+            : 'Your card was saved but we could not finalise the appointment. Please contact the studio.'
+        );
         setSubmitting(false);
-        // SetupIntent already succeeded on Stripe — must mint a new one
-        // before the client can try another card / corrected CVC.
-        onNeedFreshSetupIntent(message);
       }
     },
-    [uid, name, email, onConfirmed, onNeedFreshSetupIntent]
+    [uid, name, email, onConfirmed]
   );
 
   // In-page 3DS return (rare) or bookmarked return URL — same auto-finalise
@@ -871,13 +784,55 @@ function CheckoutForm({
     setSubmitting(true);
     setSubmitError(null);
 
+    const { error: elementsSubmitError } = await elements.submit();
+    if (elementsSubmitError) {
+      setSubmitError(friendlyStripeSetupError(elementsSubmitError));
+      setSubmitting(false);
+      return;
+    }
+
+    let clientSecret: string;
+    try {
+      const res = await fetch('/api/stripe/create-setup-intent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          calBookingUid: uid,
+          ...(name ? { name } : {}),
+          ...(email ? { email } : {}),
+        }),
+      });
+      const payload = (await res.json().catch(() => null)) as
+        | { clientSecret?: string; error?: string; message?: string }
+        | null;
+      if (!res.ok || !payload?.clientSecret) {
+        throw new Error(
+          payload?.message ??
+            payload?.error ??
+            `Could not initialise checkout (HTTP ${res.status})`
+        );
+      }
+      clientSecret = payload.clientSecret;
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error
+          ? err.message
+          : 'Could not initialise checkout. Please try again.'
+      );
+      setSubmitting(false);
+      return;
+    }
+
     const returnUrl = new URL('/checkout', window.location.origin);
     returnUrl.searchParams.set('uid', uid);
     if (name) returnUrl.searchParams.set('name', name);
     if (email) returnUrl.searchParams.set('email', email);
 
+    // Fresh SetupIntent each submit — Elements stay mounted so card fields
+    // are preserved when we reject a wrong CVC and the client retries.
     const { error, setupIntent } = await stripe.confirmSetup({
       elements,
+      clientSecret,
       confirmParams: {
         return_url: returnUrl.toString(),
       },
@@ -885,18 +840,8 @@ function CheckoutForm({
     });
 
     if (error) {
-      const friendly = friendlyStripeSetupError(error);
-      setSubmitError(friendly);
+      setSubmitError(friendlyStripeSetupError(error));
       setSubmitting(false);
-      const code = (error.code ?? '').toLowerCase();
-      const message = (error.message ?? '').toLowerCase();
-      if (
-        code === 'setup_intent_unexpected_state' ||
-        message.includes('processing error') ||
-        message.includes('already succeeded')
-      ) {
-        onNeedFreshSetupIntent(friendly);
-      }
       return;
     }
 
