@@ -2,6 +2,7 @@ import { sql } from '@vercel/postgres';
 import { Resend } from 'resend';
 
 import { generateConsentRequestHtml } from '@/lib/email-templates';
+import { resolveEmailCopy } from '@/lib/email-message-templates';
 import { isPlaceholderClientEmail, isValidEmail } from '@/lib/client-identity';
 
 const FROM_EMAIL =
@@ -70,9 +71,11 @@ export async function sendConsentRequestEmail(args: {
     return { ok: true, skipped: 'already_sent' };
   }
 
+  const bodyCopy = await resolveEmailCopy('consent_request');
   const html = generateConsentRequestHtml({
     clientName: args.clientName,
     consentUrl,
+    bodyCopy,
   });
 
   const resend = new Resend(apiKey);

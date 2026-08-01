@@ -2,6 +2,7 @@ import { sql } from '@vercel/postgres';
 import { Resend } from 'resend';
 
 import { generateConfirmationHtml } from '@/lib/email-templates';
+import { resolveEmailCopy } from '@/lib/email-message-templates';
 import { formatBookingStartParts } from '@/lib/format-booking-time';
 
 export { formatBookingStartParts } from '@/lib/format-booking-time';
@@ -66,12 +67,14 @@ export async function sendBookingConfirmationEmail(args: {
   }
 
   const { date, time } = formatBookingStartParts(args.startTime);
+  const bodyCopy = await resolveEmailCopy('confirmation');
   const html = generateConfirmationHtml({
     clientName: args.clientName,
     serviceName: args.serviceName,
     appointmentDate: date,
     appointmentTime: time,
     cancelUrl: args.cancelUrl,
+    bodyCopy,
   });
 
   const resend = new Resend(apiKey);

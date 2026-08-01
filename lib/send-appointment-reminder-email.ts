@@ -2,7 +2,6 @@ import { sql } from '@vercel/postgres';
 import { Resend } from 'resend';
 
 import {
-  buildReminderBodyCopy,
   reminderEmailSubject,
   type ReminderEmailTiming,
 } from '@/lib/appointment-reminder-copy';
@@ -11,10 +10,16 @@ import {
   resolveAppointmentService,
   type ReminderServiceKind,
 } from '@/lib/appointment-service-lookup';
-import { generateReminderHtml } from '@/lib/email-templates';
 import {
-  formatBookingStartParts,
-} from '@/lib/send-booking-confirmation-email';
+  reminderEmailTemplateKey,
+  reminderSoonTimePhrase,
+  resolveEmailCopy,
+} from '@/lib/email-message-templates';
+import {
+  cleanEmailServiceTitle,
+  generateReminderHtml,
+} from '@/lib/email-templates';
+import { formatBookingStartParts } from '@/lib/send-booking-confirmation-email';
 
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL || 'Sadie Marie <bookings@sadiemarie.co>';
@@ -107,15 +112,16 @@ export async function sendAppointmentReminderEmail(args: {
     args.bookingTime,
     args.endTime,
   );
-  const displayName = resolved.displayName || args.serviceName;
+  const displayName = cleanEmailServiceTitle(
+    resolved.displayName || args.serviceName
+  );
   const kind = args.reminderKind;
-
-  const bodyCopy = buildReminderBodyCopy({
-    serviceName: displayName,
-    kind,
-    timing: args.timing,
-    minutesUntil: args.minutesUntil,
-  });
+  const templateKey = reminderEmailTemplateKey(kind, args.timing);
+  const vars: Record<string, string> = { service: displayName };
+  if (args.timing === 'immediate') {
+    vars.timePhrase = reminderSoonTimePhrase(kind, args.minutesUntil);
+  }
+  const bodyCopy = await resolveEmailCopy(templateKey, vars);
 
   const { date, time } = formatBookingStartParts(args.bookingTime);
   const cancelUrl = `${MANAGE_LINK_BASE}?uid=${encodeURIComponent(args.bookingUid)}`;
