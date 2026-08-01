@@ -151,7 +151,7 @@ export const EMPTY_CONSENT_STATEMENTS: ConsentStatementsMap = {
 
 export const INITIAL_FORM: ConsentFormData = {
   full_name: '',
-  dob: '',
+  dob: '2000-01-01',
   phone: '',
   address: '',
   city: '',
