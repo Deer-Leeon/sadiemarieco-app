@@ -20,7 +20,11 @@ import {
   buildInitialForm,
   CLIENT_AGREEMENT_TEXT,
   CONSENT_STATEMENTS,
+  formatAgreementDateDisplay,
   MEDICAL_CONDITION_CHECKLIST,
+  normalizeUsStateCode,
+  todayDateString,
+  US_STATES,
   validateConsentForm,
   PERSONAL_INFO_QUESTIONS,
   SERVICE_HISTORY_QUESTIONS,
@@ -37,6 +41,7 @@ import {
   SectionBody,
   SectionHeader,
   sectionClass,
+  selectClass,
   YesNoQuestion,
 } from './ConsentFormFields';
 import ConsentPreviewStep from './ConsentPreviewStep';
@@ -325,7 +330,8 @@ function EditableForm({
 
   const payloadForm = (): ConsentFormData => ({
     ...form,
-    agreement_date: form.agreement_date || new Date().toISOString().slice(0, 10),
+    state: normalizeUsStateCode(form.state),
+    agreement_date: todayDateString(),
   });
 
   const saveDraft = useCallback(
@@ -369,6 +375,19 @@ function EditableForm({
     // payloadForm identity changes every render — depend on form + step.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form, step, submitting, saveDraft]);
+
+  // Keep agreement date locked to studio "today" if the tab stays open overnight.
+  useEffect(() => {
+    const tick = () => {
+      const today = todayDateString();
+      setForm((prev) =>
+        prev.agreement_date === today ? prev : { ...prev, agreement_date: today }
+      );
+    };
+    tick();
+    const id = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const handleReviewDocument = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -547,14 +566,19 @@ function EditableForm({
             </label>
             <label className="block">
               <FieldLabel required>State</FieldLabel>
-              <input
-                type="text"
+              <select
                 required
-                maxLength={2}
-                value={String(form.state ?? '')}
+                value={normalizeUsStateCode(String(form.state ?? ''))}
                 onChange={(e) => setField('state', e.target.value)}
-                className={inputClass}
-              />
+                className={selectClass}
+              >
+                <option value="">Select state</option>
+                {US_STATES.map((s) => (
+                  <option key={s.code} value={s.code}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="block">
               <FieldLabel required>Zip</FieldLabel>
@@ -836,16 +860,18 @@ function EditableForm({
                 className={inputClass}
               />
             </label>
-            <label className="block">
+            <div className="block">
               <FieldLabel required>Date</FieldLabel>
-              <input
-                type="date"
-                required
-                value={String(form.agreement_date ?? '')}
-                onChange={(e) => setField('agreement_date', e.target.value)}
-                className={inputClass}
-              />
-            </label>
+              <p
+                className={`${inputClass} cursor-default border-stone-200/80 bg-stone-100 text-stone-800`}
+                aria-readonly="true"
+              >
+                {formatAgreementDateDisplay(todayDateString())}
+              </p>
+              <p className="mt-1 text-[11px] text-stone-400">
+                Automatically set to today and cannot be changed.
+              </p>
+            </div>
           </div>
           <p className="text-sm text-stone-600">
             You will review a PDF of this form and sign on the next step before submitting.

@@ -7,10 +7,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
-  asConsentFormData,
+  prepareConsentFormForServer,
   validateConsentForm,
 } from '@/app/consent/[clientId]/consent-form-config';
 import { generateUnsignedPreviewPDF } from '@/lib/pdf-stamper';
+import {
+  clientIpFromRequest,
+  RATE_LIMITS,
+  rejectUnlessRateAllowed,
+} from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,6 +26,12 @@ function errorMessage(err: unknown): string {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const limited = await rejectUnlessRateAllowed({
+    key: `consent:preview:${clientIpFromRequest(req)}`,
+    ...RATE_LIMITS.consentPreview,
+  });
+  if (limited) return limited;
+
   let body: unknown;
   try {
     body = await req.json();
@@ -40,7 +51,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid_form_data' }, { status: 400 });
   }
 
-  const formData = asConsentFormData(raw);
+  const formData = prepareConsentFormForServer(raw);
   const validationError = validateConsentForm(formData);
   if (validationError) {
     return NextResponse.json(

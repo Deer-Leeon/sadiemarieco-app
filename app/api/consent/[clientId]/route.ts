@@ -13,8 +13,17 @@ import {
   type ConsentApiResponse,
   type ConsentFormData,
 } from '@/lib/consent';
-import { asConsentFormData } from '@/app/consent/[clientId]/consent-form-config';
+import {
+  asConsentFormData,
+  prepareConsentFormForServer,
+  validateConsentForm,
+} from '@/app/consent/[clientId]/consent-form-config';
 import { stampConsentPDF } from '@/lib/pdf-stamper';
+import {
+  clientIpFromRequest,
+  RATE_LIMITS,
+  rejectUnlessRateAllowed,
+} from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -234,6 +243,12 @@ export async function PATCH(
     return NextResponse.json({ error: 'invalid_id' }, { status: 400 });
   }
 
+  const limited = await rejectUnlessRateAllowed({
+    key: `consent:patch:${clientIpFromRequest(req)}`,
+    ...RATE_LIMITS.consentPatch,
+  });
+  if (limited) return limited;
+
   let body: unknown;
   try {
     body = await req.json();
@@ -241,10 +256,12 @@ export async function PATCH(
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
   }
 
-  const formData = parseFormData(body);
-  if (formData === null) {
+  const parsed = parseFormData(body);
+  if (parsed === null) {
     return NextResponse.json({ error: 'invalid_form_data' }, { status: 400 });
   }
+  // Drafts: normalize state/date only — full validation waits for final POST.
+  const formData = prepareConsentFormForServer(parsed);
 
   try {
     const client = await loadClient(clientId);
@@ -310,6 +327,12 @@ export async function POST(
     return NextResponse.json({ error: 'invalid_id' }, { status: 400 });
   }
 
+  const limited = await rejectUnlessRateAllowed({
+    key: `consent:post:${clientId}`,
+    ...RATE_LIMITS.consentPost,
+  });
+  if (limited) return limited;
+
   let body: unknown;
   try {
     body = await req.json();
@@ -317,9 +340,18 @@ export async function POST(
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
   }
 
-  const formData = parseFormData(body);
-  if (formData === null) {
+  const parsed = parseFormData(body);
+  if (parsed === null) {
     return NextResponse.json({ error: 'invalid_form_data' }, { status: 400 });
+  }
+
+  const formData = prepareConsentFormForServer(parsed);
+  const validationError = validateConsentForm(formData);
+  if (validationError) {
+    return NextResponse.json(
+      { error: 'validation_failed', message: validationError },
+      { status: 400 }
+    );
   }
 
   const signature = parseSignature(body);

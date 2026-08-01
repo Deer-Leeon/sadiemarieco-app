@@ -20,6 +20,11 @@ import {
 import { extractCalBookingNotes } from '@/lib/cal-booking-notes';
 import { upsertClientByPhonePrimary } from '@/lib/client-upsert';
 import { scheduleAbandonedHoldRelease } from '@/lib/schedule-abandoned-hold-release';
+import {
+  clientIpFromRequest,
+  RATE_LIMITS,
+  rejectUnlessRateAllowed,
+} from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -178,6 +183,12 @@ async function hydrateFromCal(
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const limited = await rejectUnlessRateAllowed({
+    key: `booking:init:${clientIpFromRequest(req)}`,
+    ...RATE_LIMITS.bookingInit,
+  });
+  if (limited) return limited;
+
   let raw: unknown;
   try {
     raw = await req.json();

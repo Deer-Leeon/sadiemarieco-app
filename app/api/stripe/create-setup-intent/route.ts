@@ -18,6 +18,11 @@ import {
 } from '@/lib/appointment-stripe';
 import { isValidEmail } from '@/lib/client-identity';
 import {
+  clientIpFromRequest,
+  RATE_LIMITS,
+  rejectUnlessRateAllowed,
+} from '@/lib/rate-limit';
+import {
   getStripeEnvModes,
   shouldEnforceStripeMode,
   stripeModeMismatchMessage,
@@ -64,6 +69,12 @@ function parseBody(input: unknown): {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const limited = await rejectUnlessRateAllowed({
+    key: `stripe:setup-intent:${clientIpFromRequest(req)}`,
+    ...RATE_LIMITS.stripeSetupIntent,
+  });
+  if (limited) return limited;
+
   if (!stripe) {
     return NextResponse.json(
       {

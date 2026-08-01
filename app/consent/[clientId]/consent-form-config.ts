@@ -269,6 +269,107 @@ export function isYesNoAnswered(value: YesNo): boolean {
   return value === 'yes' || value === 'no';
 }
 
+export function todayDateString(): string {
+  // Studio timezone — avoid UTC rolling the calendar date overnight.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Denver',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+/** US states + DC for the intake address select (value = 2-letter code). */
+export const US_STATES: readonly { code: string; name: string }[] = [
+  { code: 'AL', name: 'Alabama' },
+  { code: 'AK', name: 'Alaska' },
+  { code: 'AZ', name: 'Arizona' },
+  { code: 'AR', name: 'Arkansas' },
+  { code: 'CA', name: 'California' },
+  { code: 'CO', name: 'Colorado' },
+  { code: 'CT', name: 'Connecticut' },
+  { code: 'DE', name: 'Delaware' },
+  { code: 'DC', name: 'District of Columbia' },
+  { code: 'FL', name: 'Florida' },
+  { code: 'GA', name: 'Georgia' },
+  { code: 'HI', name: 'Hawaii' },
+  { code: 'ID', name: 'Idaho' },
+  { code: 'IL', name: 'Illinois' },
+  { code: 'IN', name: 'Indiana' },
+  { code: 'IA', name: 'Iowa' },
+  { code: 'KS', name: 'Kansas' },
+  { code: 'KY', name: 'Kentucky' },
+  { code: 'LA', name: 'Louisiana' },
+  { code: 'ME', name: 'Maine' },
+  { code: 'MD', name: 'Maryland' },
+  { code: 'MA', name: 'Massachusetts' },
+  { code: 'MI', name: 'Michigan' },
+  { code: 'MN', name: 'Minnesota' },
+  { code: 'MS', name: 'Mississippi' },
+  { code: 'MO', name: 'Missouri' },
+  { code: 'MT', name: 'Montana' },
+  { code: 'NE', name: 'Nebraska' },
+  { code: 'NV', name: 'Nevada' },
+  { code: 'NH', name: 'New Hampshire' },
+  { code: 'NJ', name: 'New Jersey' },
+  { code: 'NM', name: 'New Mexico' },
+  { code: 'NY', name: 'New York' },
+  { code: 'NC', name: 'North Carolina' },
+  { code: 'ND', name: 'North Dakota' },
+  { code: 'OH', name: 'Ohio' },
+  { code: 'OK', name: 'Oklahoma' },
+  { code: 'OR', name: 'Oregon' },
+  { code: 'PA', name: 'Pennsylvania' },
+  { code: 'RI', name: 'Rhode Island' },
+  { code: 'SC', name: 'South Carolina' },
+  { code: 'SD', name: 'South Dakota' },
+  { code: 'TN', name: 'Tennessee' },
+  { code: 'TX', name: 'Texas' },
+  { code: 'UT', name: 'Utah' },
+  { code: 'VT', name: 'Vermont' },
+  { code: 'VA', name: 'Virginia' },
+  { code: 'WA', name: 'Washington' },
+  { code: 'WV', name: 'West Virginia' },
+  { code: 'WI', name: 'Wisconsin' },
+  { code: 'WY', name: 'Wyoming' },
+] as const;
+
+const US_STATE_CODES = new Set(US_STATES.map((s) => s.code));
+
+export function normalizeUsStateCode(raw: string): string {
+  const trimmed = String(raw ?? '').trim().toUpperCase();
+  if (US_STATE_CODES.has(trimmed)) return trimmed;
+  const byName = US_STATES.find((s) => s.name.toUpperCase() === trimmed);
+  return byName?.code ?? '';
+}
+
+export function formatAgreementDateDisplay(isoDate: string): string {
+  const raw = String(isoDate ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const [y, m, d] = raw.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 18, 0, 0));
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Denver',
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(dt);
+}
+
+/**
+ * Server-authoritative normalize before validate/stamp.
+ * Forces agreement_date to studio "today" and whitelists US state codes.
+ */
+export function prepareConsentFormForServer(raw: unknown): ConsentFormData {
+  const form = asConsentFormData(raw);
+  return {
+    ...form,
+    state: normalizeUsStateCode(form.state),
+    agreement_date: todayDateString(),
+  };
+}
+
 export function validateConsentForm(form: ConsentFormData): string | null {
   const req = (label: string, value: unknown) => {
     if (typeof value !== 'string' || !value.trim()) return `${label} is required.`;
@@ -291,6 +392,10 @@ export function validateConsentForm(form: ConsentFormData): string | null {
     const err = req(field[0], field[1]);
     if (err) return err;
   }
+  if (!normalizeUsStateCode(form.state)) {
+    return 'Please select a state.';
+  }
+
   if (!isValidEmail(form.email)) {
     return 'Enter a valid email address.';
   }
@@ -348,6 +453,10 @@ export function validateConsentForm(form: ConsentFormData): string | null {
   if (!String(form.agreement_date ?? '').trim()) {
     return 'Date is required.';
   }
+  // Agreement date must always be today (studio timezone).
+  if (form.agreement_date !== todayDateString()) {
+    return 'Agreement date must be today.';
+  }
 
   return null;
 }
@@ -361,7 +470,7 @@ export function buildInitialForm(
   },
   draft?: ConsentFormData | null
 ): ConsentFormData {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayDateString();
   const base: ConsentFormData = {
     ...INITIAL_FORM,
     full_name: [client.first_name, client.last_name].filter(Boolean).join(' '),
@@ -382,9 +491,11 @@ export function buildInitialForm(
     full_name: d.full_name.trim() || base.full_name,
     phone: d.phone.trim() || base.phone,
     email: d.email.trim() || base.email,
+    state: normalizeUsStateCode(d.state) || base.state,
     agreement_print_name:
       d.agreement_print_name.trim() || base.agreement_print_name,
-    agreement_date: d.agreement_date || base.agreement_date,
+    // Always stamp today's date — drafts must not keep a stale agreement date.
+    agreement_date: today,
     medical_conditions_checklist: {
       ...EMPTY_MEDICAL_CHECKLIST,
       ...asMedicalChecklist(d.medical_conditions_checklist),

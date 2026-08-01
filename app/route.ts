@@ -44,9 +44,10 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { sql } from '@vercel/postgres';
 
-import { fetchDefaultSchedule } from './admin/availability/calSchedules';
+import { fetchDefaultScheduleCached } from './admin/availability/calSchedules';
 import { reconcileWithCal } from './admin/services/sync';
 import { renderWeeklyHoursHtml } from '@/lib/format-weekly-hours';
+import { getCalComApiKey } from '@/lib/cal-config';
 
 // Node.js runtime required for `node:fs` — the Edge runtime doesn't
 // expose the filesystem. Default runtime for route handlers is already
@@ -331,15 +332,14 @@ async function fetchImageMap(): Promise<Record<string, SiteImage>> {
  * source as /admin/availability). Date overrides are ignored.
  */
 async function fetchWeeklyHoursHtml(): Promise<string> {
-  const apiKey =
-    process.env.CALCOM_API_KEY?.trim() || process.env.CAL_API_KEY?.trim();
+  const apiKey = getCalComApiKey();
   if (!apiKey) {
     console.error('[/] weekly hours: CAL_API_KEY is not set');
     return HOURS_FALLBACK_HTML;
   }
 
   try {
-    const schedule = await fetchDefaultSchedule(apiKey);
+    const schedule = await fetchDefaultScheduleCached(apiKey);
     return renderWeeklyHoursHtml(schedule.availability);
   } catch (err) {
     console.error('[/] weekly hours Cal fetch failed:', err);
