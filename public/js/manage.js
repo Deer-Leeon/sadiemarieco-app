@@ -7,15 +7,18 @@
    1. Read `uid` from the query string.
    2. Fetch booking details through /api/booking (server-side proxy to Cal.com).
    3. Render the details + actions, or an error/expired state.
-   4. Reschedule → fee confirmation modal → Cal.com inline embed with `rescheduleUid`.
+   4. Reschedule → fee confirmation modal → Cal.com inline embed with `rescheduleUid`
+      → on success, show confirmed new time + manage link (not the old cancelled booking).
    5. Cancel → confirmation modal (with fee callout) → POST /api/cancel-booking → success state.
    ========================================================================== */
 
 (function () {
   'use strict';
 
+  const STUDIO_ADDRESS = '61 W 3200 N, Suite #10, Lehi, UT 84043';
+
   // ── STATE ──
-  const STATES = ['loading', 'error', 'loaded', 'reschedule', 'cancelled'];
+  const STATES = ['loading', 'error', 'loaded', 'reschedule', 'cancelled', 'rescheduled'];
   let booking = null;
   let rescheduleMounted = false;
 
@@ -27,7 +30,8 @@
     error: el('portal-error'),
     loaded: el('portal-loaded'),
     reschedule: el('portal-reschedule'),
-    cancelled: el('portal-cancelled')
+    cancelled: el('portal-cancelled'),
+    rescheduled: el('portal-rescheduled')
   };
 
   const detail = {
@@ -62,6 +66,12 @@
   const rescheduleModalFee = el('portal-reschedule-modal-fee');
   const rescheduleModalConfirm = el('portal-reschedule-modal-confirm');
   const rescheduleModalDismiss = el('portal-reschedule-modal-dismiss');
+
+  const rescheduledService = el('portal-rescheduled-service');
+  const rescheduledDate = el('portal-rescheduled-date');
+  const rescheduledTime = el('portal-rescheduled-time');
+  const rescheduledManage = el('portal-rescheduled-manage');
+  const rescheduledSummary = el('portal-rescheduled-summary');
 
   // ── HELPERS ──
   const setState = (name) => {
@@ -198,21 +208,87 @@
     } catch (e) { return '—'; }
   };
 
-  const parseBookingTimesFromEvent = (event) => {
+  const parseBookingFromEvent = (event) => {
     const payload =
       (event && event.detail && event.detail.data) ||
       (event && event.data) ||
       {};
-    const booking = payload.booking || payload;
+    const b = payload.booking || payload;
+    const uid = typeof b.uid === 'string' ? b.uid.trim() : '';
     const start =
-      (typeof booking.startTime === 'string' && booking.startTime) ||
-      (typeof booking.start === 'string' && booking.start) ||
+      (typeof b.startTime === 'string' && b.startTime) ||
+      (typeof b.start === 'string' && b.start) ||
       null;
     const end =
-      (typeof booking.endTime === 'string' && booking.endTime) ||
-      (typeof booking.end === 'string' && booking.end) ||
+      (typeof b.endTime === 'string' && b.endTime) ||
+      (typeof b.end === 'string' && b.end) ||
       null;
-    return { start, end };
+    const title =
+      (typeof b.title === 'string' && b.title) ||
+      (typeof b.eventTitle === 'string' && b.eventTitle) ||
+      null;
+    return { uid, start, end, title };
+  };
+
+  /** Cal sometimes returns type tokens (`inPerson`) instead of the address. */
+  const formatLocationLabel = (raw) => {
+    if (!raw || typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const lower = trimmed.toLowerCase();
+    if (
+      lower === 'inperson' ||
+      lower === 'in person' ||
+      lower === 'address' ||
+      lower === 'in_person'
+    ) {
+      return STUDIO_ADDRESS;
+    }
+    return trimmed;
+  };
+
+  const replaceManageUidInUrl = (newUid) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('uid', newUid);
+    const search = url.searchParams.toString();
+    window.history.replaceState(
+      {},
+      '',
+      search ? `${url.pathname}?${search}` : url.pathname
+    );
+  };
+
+  const showRescheduledSuccess = ({ uid, start, end, title }) => {
+    const tz = tzForDisplay(booking) || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const serviceName = deriveServiceName({
+      title: title || (booking && booking.title),
+      eventType: booking && booking.eventType,
+    });
+
+    if (rescheduledService) rescheduledService.textContent = serviceName;
+    if (rescheduledDate) rescheduledDate.textContent = formatDate(start, tz);
+    if (rescheduledTime) {
+      rescheduledTime.textContent = formatTimeRange(start, end, tz);
+    }
+    if (rescheduledSummary) {
+      rescheduledSummary.textContent =
+        'Your new time is confirmed. Keep this manage link for any future changes.';
+    }
+    if (rescheduledManage) {
+      rescheduledManage.href = `/manage?uid=${encodeURIComponent(uid)}`;
+    }
+
+    booking = {
+      ...(booking || {}),
+      uid,
+      start,
+      end,
+      title: title || (booking && booking.title) || null,
+      status: 'accepted',
+      can_modify: true,
+    };
+    replaceManageUidInUrl(uid);
+    setState('rescheduled');
   };
 
   const isSameAppointmentSlot = (existingStart, existingEnd, newStart, newEnd) => {
@@ -251,8 +327,13 @@
     detail.host.textContent = (b.host && b.host.name) || '—';
 
     if (b.location) {
-      detail.where.textContent = b.location;
-      detail.whereRow.hidden = false;
+      const whereLabel = formatLocationLabel(b.location);
+      if (whereLabel) {
+        detail.where.textContent = whereLabel;
+        detail.whereRow.hidden = false;
+      } else {
+        detail.whereRow.hidden = true;
+      }
     } else {
       detail.whereRow.hidden = true;
     }
@@ -365,7 +446,8 @@
       layout: 'month_view'
     }));
     const handleRescheduleSuccess = (event) => {
-      const { start, end } = parseBookingTimesFromEvent(event);
+      const parsed = parseBookingFromEvent(event);
+      const { uid: newUid, start, end, title } = parsed;
       if (
         start &&
         isSameAppointmentSlot(booking.start, booking.end, start, end)
@@ -376,7 +458,13 @@
         setState('reschedule');
         return;
       }
-      loadBooking(booking.uid);
+      if (!newUid) {
+        showError(
+          'Your appointment was rescheduled, but we could not open the new manage link here. Please use the link in your confirmation text or email.'
+        );
+        return;
+      }
+      showRescheduledSuccess({ uid: newUid, start, end, title });
     };
 
     ['bookingSuccessful', 'bookingSuccessfulV2', 'rescheduleBookingSuccessful', 'rescheduleBookingSuccessfulV2'].forEach(
