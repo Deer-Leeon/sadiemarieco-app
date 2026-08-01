@@ -132,6 +132,33 @@ function navyHeroRow(scriptTitle: string, subtitleHtml: string): string {
           </tr>`;
 }
 
+/** Strip Cal-style "Touch Up between A and B" down to the service title. */
+export function cleanEmailServiceTitle(raw: string): string {
+  if (!raw || typeof raw !== 'string') return 'appointment';
+  const cleaned = raw.replace(/\s+between\s+.+$/i, '').trim();
+  return cleaned || 'appointment';
+}
+
+/** Service on line 1; date · time on line 2 (always). */
+function heroServiceWhenSubtitle(
+  serviceName: string,
+  appointmentDate: string,
+  appointmentTime: string
+): string {
+  const service = cleanEmailServiceTitle(serviceName);
+  return `<strong class="dm-text-white" style="color:#ffffff;font-weight:700;">${service}</strong><br /><span class="dm-text-light" style="color:#f0f2f5;">${appointmentDate} at ${appointmentTime}</span>`;
+}
+
+/** Escape + turn newlines into <br /> for admin-edited body paragraphs. */
+export function formatEmailBodyHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\r\n|\r|\n/g, '<br />');
+}
+
 function primaryButton(href: string, label: string): string {
   return `
                 <tr>
@@ -209,6 +236,8 @@ export interface ConfirmationEmailContent {
   appointmentDate: string;
   appointmentTime: string;
   cancelUrl: string;
+  /** Editable middle paragraph (admin Email Messages → confirmation). */
+  bodyCopy: string;
 }
 
 export interface ReminderEmailContent {
@@ -222,6 +251,8 @@ export interface ReminderEmailContent {
 export interface ConsentRequestEmailContent {
   clientName: string;
   consentUrl: string;
+  /** Editable body after greeting (admin Email Messages → consent_request). */
+  bodyCopy: string;
 }
 
 /**
@@ -233,20 +264,27 @@ export function generateConfirmationHtml({
   appointmentDate,
   appointmentTime,
   cancelUrl,
+  bodyCopy,
 }: ConfirmationEmailContent): string {
+  const displayService = cleanEmailServiceTitle(serviceName);
   const appointmentWhen = `${appointmentDate} at ${appointmentTime}`;
   const firstName = firstNameFrom(clientName);
   const greeting = firstName
     ? `You&rsquo;re all set, ${firstName}.`
     : `You&rsquo;re all set.`;
-  const heroSub = `<strong class="dm-text-white" style="color:#ffffff;font-weight:700;">${serviceName}</strong> · ${appointmentWhen}`;
+  const heroSub = heroServiceWhenSubtitle(
+    displayService,
+    appointmentDate,
+    appointmentTime
+  );
+  const bodyHtml = formatEmailBodyHtml(bodyCopy);
 
   return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
-${emailDocumentHead(`${serviceName} — Sadie Marie`)}
+${emailDocumentHead(`${displayService} — Sadie Marie`)}
 <body style="margin:0;padding:0;width:100%;${creamBg}-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
-    Your ${serviceName} appointment is confirmed for ${appointmentWhen}.
+    Your ${displayService} appointment is confirmed for ${appointmentWhen}.
   </div>
 
   <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" class="dm-cream-bg" bgcolor="${PAGE_BG}" style="width:100%;min-width:100%;${creamBg}">
@@ -262,7 +300,7 @@ ${appointmentDetailsBlock(appointmentDate, appointmentTime)}
                 <tr>
                   <td align="center" class="body-copy dm-text-navy" style="padding-bottom:28px;font-family:${SERIF};font-size:17px;color:${NAVY};line-height:1.55;text-align:center;">
                     ${greeting}<br /><br />
-                    You&rsquo;ll get a reminder with pre-arrival notes before your visit — I can&rsquo;t wait to see you.<br /><br />
+                    ${bodyHtml}<br /><br />
                     <span style="font-size:15px;opacity:0.85;">Need to change plans? Please manage your booking with at least 24 hours&rsquo; notice.</span>
                   </td>
                 </tr>
@@ -289,15 +327,21 @@ export function generateReminderHtml({
   bodyCopy,
   cancelUrl,
 }: ReminderEmailContent): string {
+  const displayService = cleanEmailServiceTitle(serviceName);
   const appointmentWhen = `${appointmentDate} at ${appointmentTime}`;
-  const heroSub = `<strong class="dm-text-white" style="color:#ffffff;font-weight:700;">${serviceName}</strong> · ${appointmentWhen}`;
+  const heroSub = heroServiceWhenSubtitle(
+    displayService,
+    appointmentDate,
+    appointmentTime
+  );
+  const bodyHtml = formatEmailBodyHtml(bodyCopy);
 
   return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
-${emailDocumentHead(`${serviceName} — Sadie Marie`)}
+${emailDocumentHead(`${displayService} — Sadie Marie`)}
 <body style="margin:0;padding:0;width:100%;${creamBg}-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
-    Your ${serviceName} appointment is on ${appointmentWhen}.
+    Your ${displayService} appointment is on ${appointmentWhen}.
   </div>
 
   <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" class="dm-cream-bg" bgcolor="${PAGE_BG}" style="width:100%;min-width:100%;${creamBg}">
@@ -312,7 +356,7 @@ ${navyHeroRow('Almost here!', heroSub)}
 ${appointmentDetailsBlock(appointmentDate, appointmentTime)}
                 <tr>
                   <td align="center" class="body-copy dm-text-navy" style="padding-bottom:28px;font-family:${SERIF};font-size:17px;color:${NAVY};line-height:1.55;text-align:center;">
-                    ${bodyCopy}
+                    ${bodyHtml}
                   </td>
                 </tr>
 ${primaryButton(cancelUrl, 'Manage booking')}
@@ -334,9 +378,11 @@ ${studioFooterRow(true)}
 export function generateConsentRequestHtml({
   clientName,
   consentUrl,
+  bodyCopy,
 }: ConsentRequestEmailContent): string {
   const firstName = firstNameFrom(clientName);
   const greeting = firstName ? `Hi ${firstName},` : 'Hi,';
+  const bodyHtml = formatEmailBodyHtml(bodyCopy);
 
   return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
@@ -367,7 +413,7 @@ ${navyHeroRow('One more step', 'Please complete your consent form before your vi
                 <tr>
                   <td align="center" class="body-copy dm-text-navy" style="padding-top:20px;padding-bottom:28px;font-family:${SERIF};font-size:17px;color:${NAVY};line-height:1.55;text-align:center;">
                     ${greeting}<br /><br />
-                    Before your visit, please fill out and sign your intake &amp; consent form. You can save progress and return to the same link until you sign.
+                    ${bodyHtml}
                   </td>
                 </tr>
 ${primaryButton(consentUrl, 'Open consent form')}
