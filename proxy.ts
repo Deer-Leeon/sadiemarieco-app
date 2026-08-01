@@ -21,6 +21,19 @@ const isAdminRoute = createRouteMatcher([
  */
 const isStagingSignInRoute = createRouteMatcher(['/sign-in(.*)']);
 
+/**
+ * Booking checkout must stay on the staging host + staging DB. If these
+ * routes redirect to www, `/api/booking/init` follows the 307 and writes
+ * the hold on production while the browser stays on staging `/checkout`
+ * (countdown disappears; shared Cal slot is held against the wrong DB).
+ * Not marketing pages — `/checkout` is useless without a Cal uid.
+ */
+const isStagingCheckoutPipelineRoute = createRouteMatcher([
+  '/checkout(.*)',
+  '/api/booking(.*)',
+  '/api/stripe(.*)',
+]);
+
 /** Production paths that must not run Clerk session parsing (Bearer cron / webhooks). */
 const isClerkExcludedApi = createRouteMatcher([
   '/api/webhook(.*)',
@@ -44,8 +57,10 @@ async function userHasAdminAccess(userId: string): Promise<boolean> {
  *
  * Production: Clerk session only for admin surfaces.
  * Staging (`staging.sadiemarie.co` or APP_ENV=staging): public marketing is
- * hidden (redirect to production). `/admin` behaves like live — unsigned
- * visitors are sent to staging `/sign-in`, then allowlisted admins proceed.
+ * hidden (redirect to production). Checkout + booking/stripe APIs stay on
+ * this host so holds are not written to production. `/admin` behaves like
+ * live — unsigned visitors are sent to staging `/sign-in`, then allowlisted
+ * admins proceed.
  */
 export default clerkMiddleware(async (auth, req) => {
   const host = req.headers.get('host');
@@ -55,6 +70,10 @@ export default clerkMiddleware(async (auth, req) => {
     // Let the in-app Clerk widget run on this host (session cookies are
     // host-scoped; live www login does not unlock staging).
     if (isStagingSignInRoute(req)) {
+      return;
+    }
+
+    if (isStagingCheckoutPipelineRoute(req)) {
       return;
     }
 

@@ -322,17 +322,24 @@ export default function CheckoutClient({
   );
 
   // Poll the hold row so a cron-driven `canceled_by_system` flip disables
-  // checkout even if the local timer hasn't ticked yet.
+  // checkout even if the local timer hasn't ticked yet. Init is fire-and-
+  // forget before navigation, so retry quickly until the row appears.
   useEffect(() => {
     if (!uid) return;
 
     let cancelled = false;
+    let foundHold = Boolean(initialHoldCreatedAt);
+    let pollId = 0;
 
     const refreshHold = async () => {
       try {
         const res = await fetch(
           `/api/booking/hold?uid=${encodeURIComponent(uid)}`,
-          { headers: { Accept: 'application/json' } }
+          {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            redirect: 'manual',
+          }
         );
         if (cancelled) return;
         if (!res.ok) return;
@@ -343,7 +350,14 @@ export default function CheckoutClient({
           endTime?: string | null;
           serviceName?: string | null;
         };
-        if (data.createdAt) setHoldCreatedAt(data.createdAt);
+        if (data.createdAt) {
+          setHoldCreatedAt(data.createdAt);
+          if (!foundHold) {
+            foundHold = true;
+            window.clearInterval(pollId);
+            pollId = window.setInterval(refreshHold, 30_000);
+          }
+        }
         if (data.expired) setHoldExpired(true);
         if (data.bookingTime) setBookingTime(data.bookingTime);
         if (data.endTime !== undefined) setEndTime(data.endTime ?? null);
@@ -354,12 +368,12 @@ export default function CheckoutClient({
     };
 
     refreshHold();
-    const pollId = window.setInterval(refreshHold, 30_000);
+    pollId = window.setInterval(refreshHold, foundHold ? 30_000 : 2_000);
     return () => {
       cancelled = true;
       window.clearInterval(pollId);
     };
-  }, [uid]);
+  }, [uid, initialHoldCreatedAt]);
 
   // Countdown from `appointments.created_at` using CHECKOUT_HOLD_SECONDS.
   useEffect(() => {
@@ -548,20 +562,26 @@ export default function CheckoutClient({
           />
         ) : bootstrapError ? (
           <ErrorCard message={bootstrapError} />
-        ) : !elementsOptions || !stripePromise ? (
-          <LoadingCard />
         ) : (
-          <Elements stripe={stripePromise} options={elementsOptions}>
-            <CheckoutForm
-              uid={uid}
-              name={name}
-              email={email}
-              holdExpired={holdExpired}
-              countdownLabel={countdownLabel}
+          <>
+            <CheckoutHoldSummary
               appointmentWhen={appointmentWhen}
               serviceLabel={serviceLabel}
+              countdownLabel={countdownLabel}
             />
-          </Elements>
+            {!elementsOptions || !stripePromise ? (
+              <LoadingCard />
+            ) : (
+              <Elements stripe={stripePromise} options={elementsOptions}>
+                <CheckoutForm
+                  uid={uid}
+                  name={name}
+                  email={email}
+                  holdExpired={holdExpired}
+                />
+              </Elements>
+            )}
+          </>
         )}
       </section>
 
@@ -665,9 +685,63 @@ interface FormProps {
   name: string;
   email: string;
   holdExpired: boolean;
-  countdownLabel: string;
+}
+
+function CheckoutHoldSummary({
+  appointmentWhen,
+  serviceLabel,
+  countdownLabel,
+}: {
   appointmentWhen: { date: string; timeRange: string } | null;
-  serviceLabel: string;
+  serviceLabel: string | null;
+  countdownLabel: string;
+}) {
+  if (!appointmentWhen && !countdownLabel) return null;
+
+  return (
+    <div className="mb-6">
+      {appointmentWhen && (
+        <div className="rounded-md border border-stone-200 bg-white px-4 py-4 shadow-sm">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+            Appointment
+          </p>
+          <p className="mt-2 font-serif text-xl leading-snug text-stone-900">
+            {appointmentWhen.date}
+          </p>
+          <p className="mt-1 text-sm font-medium tabular-nums text-stone-700">
+            {appointmentWhen.timeRange}
+          </p>
+          {serviceLabel ? (
+            <p className="mt-2 text-xs leading-relaxed text-stone-500">
+              {serviceLabel}
+            </p>
+          ) : null}
+        </div>
+      )}
+
+      {countdownLabel ? (
+        <>
+          <div
+            className={`flex items-center justify-between rounded-md border border-stone-200 bg-stone-50 px-4 py-3 ${
+              appointmentWhen ? 'mt-3' : ''
+            }`}
+            aria-live="polite"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+              Time remaining
+            </p>
+            <p className="font-mono text-lg font-medium tabular-nums text-stone-900">
+              {countdownLabel}
+            </p>
+          </div>
+          <p className="mt-2 text-center text-[11px] text-stone-400">
+            Complete checkout within {checkoutHoldDurationLabel()} to hold
+            your time slot.
+          </p>
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 function CheckoutForm({
@@ -675,9 +749,6 @@ function CheckoutForm({
   name,
   email,
   holdExpired,
-  countdownLabel,
-  appointmentWhen,
-  serviceLabel,
 }: FormProps) {
   const stripe = useStripe();
   const elements = useElements();
@@ -793,45 +864,6 @@ function CheckoutForm({
           No charge today.
         </span>
       </p>
-
-      {appointmentWhen && (
-        <div className="mt-6 rounded-md border border-stone-200 bg-stone-50 px-4 py-4">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
-            Appointment
-          </p>
-          <p className="mt-2 font-serif text-xl leading-snug text-stone-900">
-            {appointmentWhen.date}
-          </p>
-          <p className="mt-1 text-sm font-medium tabular-nums text-stone-700">
-            {appointmentWhen.timeRange}
-          </p>
-          {serviceLabel ? (
-            <p className="mt-2 text-xs leading-relaxed text-stone-500">
-              {serviceLabel}
-            </p>
-          ) : null}
-        </div>
-      )}
-
-      {countdownLabel && (
-        <div
-          className="mt-5 flex items-center justify-between rounded-md border border-stone-200 bg-stone-50 px-4 py-3"
-          aria-live="polite"
-        >
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
-            Time remaining
-          </p>
-          <p className="font-mono text-lg font-medium tabular-nums text-stone-900">
-            {countdownLabel}
-          </p>
-        </div>
-      )}
-      {countdownLabel && (
-        <p className="mt-2 text-center text-[11px] text-stone-400">
-          Complete checkout within {checkoutHoldDurationLabel()} to hold
-          your time slot.
-        </p>
-      )}
 
       {name && (
         <div className="mt-6 rounded-md border border-stone-200 bg-stone-50 px-4 py-3">
