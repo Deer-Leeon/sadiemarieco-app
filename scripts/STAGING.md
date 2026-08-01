@@ -5,6 +5,7 @@ Stay on **one Vercel project** + **one Neon project**. Production = `main` → `
 ## Access model
 
 - On `staging.sadiemarie.co`, marketing pages require an allowlisted admin session; everyone else is **redirected to** `https://www.sadiemarie.co`.
+- Checkout pipeline stays on staging (no redirect): `/checkout`, `/api/booking/*`, `/api/stripe/*` — otherwise holds get written to the production DB.
 - `/admin` works like live: unsigned → staging `/sign-in` → allowlisted admins reach the dashboard (`lib/admin-allowlist.ts`).
 - Use the **same Clerk Production application** (same `pk_live_` / `sk_live_`) as live.
 - Clerk does **not** share `__session` across subdomains — sign in again on staging (same users/passwords).

@@ -375,9 +375,13 @@
 
       // Do not await — navigation must start immediately. Init hydrates
       // missing email/time from Cal when the embed omitted them (V2).
+      // Never follow a cross-host redirect (e.g. staging gate → www) —
+      // that would write the hold on production while checkout stays here.
       fetch('/api/booking/init', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        redirect: 'manual',
         body: JSON.stringify({
           calBookingUid: uid,
           name,
