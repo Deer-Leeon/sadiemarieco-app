@@ -36,6 +36,9 @@ import {
 import {
   FieldLabel,
   formatYesNo,
+  checkboxClass,
+  checkboxRowClass,
+  dateInputClass,
   inputClass,
   RequiredMark,
   SectionBody,
@@ -500,13 +503,15 @@ function EditableForm({
           Fields marked with <span className="text-red-600">*</span> are required.
         </p>
         <p className="mt-2 text-[11px] text-stone-400" aria-live="polite">
-          {draftStatus === 'saving'
-            ? 'Saving progress…'
-            : draftStatus === 'saved'
-              ? 'Progress saved — you can leave and return to this link anytime until you sign.'
-              : draftStatus === 'error'
-                ? 'Could not save progress. Check your connection and keep editing.'
-                : 'Your answers save automatically as you go.'}
+          <span className="block min-h-[3.5rem] leading-snug">
+            {draftStatus === 'saving'
+              ? 'Saving progress…'
+              : draftStatus === 'saved'
+                ? 'Progress saved — you can leave and return to this link anytime until you sign.'
+                : draftStatus === 'error'
+                  ? 'Could not save progress. Check your connection and keep editing.'
+                  : 'Your answers save automatically as you go.'}
+          </span>
         </p>
       </header>
 
@@ -514,7 +519,7 @@ function EditableForm({
         <SectionHeader title="Client information" />
         <SectionBody>
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block sm:col-span-2">
+            <label className="block min-w-0 sm:col-span-2">
               <FieldLabel required>Full name</FieldLabel>
               <input
                 type="text"
@@ -524,17 +529,17 @@ function EditableForm({
                 className={inputClass}
               />
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <FieldLabel required>Date of birth</FieldLabel>
               <input
                 type="date"
                 required
                 value={String(form.dob ?? '')}
                 onChange={(e) => setField('dob', e.target.value)}
-                className={inputClass}
+                className={dateInputClass}
               />
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <FieldLabel required>Phone number</FieldLabel>
               <input
                 type="tel"
@@ -544,7 +549,7 @@ function EditableForm({
                 className={inputClass}
               />
             </label>
-            <label className="block sm:col-span-2">
+            <label className="block min-w-0 sm:col-span-2">
               <FieldLabel required>Address</FieldLabel>
               <input
                 type="text"
@@ -554,7 +559,7 @@ function EditableForm({
                 className={inputClass}
               />
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <FieldLabel required>City</FieldLabel>
               <input
                 type="text"
@@ -564,7 +569,7 @@ function EditableForm({
                 className={inputClass}
               />
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <FieldLabel required>State</FieldLabel>
               <select
                 required
@@ -580,7 +585,7 @@ function EditableForm({
                 ))}
               </select>
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <FieldLabel required>Zip</FieldLabel>
               <input
                 type="text"
@@ -591,7 +596,7 @@ function EditableForm({
                 className={inputClass}
               />
             </label>
-            <label className="block sm:col-span-2">
+            <label className="block min-w-0 sm:col-span-2">
               <FieldLabel required>Email address</FieldLabel>
               <input
                 type="email"
@@ -601,7 +606,7 @@ function EditableForm({
                 className={inputClass}
               />
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <FieldLabel>Occupation</FieldLabel>
               <input
                 type="text"
@@ -610,7 +615,7 @@ function EditableForm({
                 className={inputClass}
               />
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <FieldLabel>How did you hear about us?</FieldLabel>
               <input
                 type="text"
@@ -619,7 +624,7 @@ function EditableForm({
                 className={inputClass}
               />
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <FieldLabel required>Emergency contact name</FieldLabel>
               <input
                 type="text"
@@ -629,7 +634,7 @@ function EditableForm({
                 className={inputClass}
               />
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <FieldLabel required>Emergency contact phone</FieldLabel>
               <input
                 type="tel"
@@ -777,19 +782,16 @@ function EditableForm({
                 Medical conditions — please check all that apply
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-2 p-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-1 p-3 sm:grid-cols-2 sm:gap-2 sm:p-4">
               {MEDICAL_CONDITION_CHECKLIST.map((item) => (
-                <label
-                  key={item.key}
-                  className="flex cursor-pointer items-center gap-2 text-sm text-stone-800"
-                >
+                <label key={item.key} className={checkboxRowClass}>
                   <input
                     type="checkbox"
                     checked={checklist[item.key]}
                     onChange={(e) => setChecklistItem(item.key, e.target.checked)}
-                    className="h-4 w-4 rounded border-stone-300"
+                    className={checkboxClass}
                   />
-                  {item.label}
+                  <span className="pt-0.5 leading-snug">{item.label}</span>
                 </label>
               ))}
             </div>
@@ -828,15 +830,17 @@ function EditableForm({
           </p>
           <ul className="divide-y divide-stone-200 rounded-md border border-stone-200">
             {CONSENT_STATEMENTS.map((item) => (
-              <li key={item.key} className="flex gap-3 bg-[#FAF9F6] p-3 first:rounded-t-md last:rounded-b-md">
-                <input
-                  type="checkbox"
-                  checked={statements[item.key]}
-                  onChange={(e) => setStatement(item.key, e.target.checked)}
-                  className="mt-1 h-4 w-4 shrink-0 rounded border-stone-400 text-stone-900"
-                  aria-required
-                />
-                <span className="text-sm leading-relaxed text-stone-800">{item.text}</span>
+              <li key={item.key} className="first:rounded-t-md last:rounded-b-md">
+                <label className={`${checkboxRowClass} gap-3 bg-[#FAF9F6] px-3 py-3.5`}>
+                  <input
+                    type="checkbox"
+                    checked={statements[item.key]}
+                    onChange={(e) => setStatement(item.key, e.target.checked)}
+                    className={`${checkboxClass} mt-0.5 border-stone-400`}
+                    aria-required
+                  />
+                  <span className="leading-relaxed text-stone-800">{item.text}</span>
+                </label>
               </li>
             ))}
           </ul>
