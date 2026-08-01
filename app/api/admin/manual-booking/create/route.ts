@@ -27,7 +27,6 @@ import {
   CAL_BOOKINGS_API_VERSION,
   confirmCalV2Booking,
   gateAdmin,
-  patchCalV2BookingLocation,
   proxyCalV2Post,
 } from '@/lib/cal-proxy';
 
@@ -175,19 +174,6 @@ function isScheduleOrBoundsError(status: number, message: string): boolean {
     lower.includes('schedule') ||
     lower.includes('working hours')
   );
-}
-
-async function ensureStudioBookingLocation(bookingUid: string): Promise<void> {
-  const patchError = await patchCalV2BookingLocation(
-    bookingUid,
-    studioBookingLocation()
-  );
-  if (patchError) {
-    console.warn('[api/admin/manual-booking/create] location PATCH failed', {
-      bookingUid,
-      patchError,
-    });
-  }
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -346,10 +332,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!result.ok) return result.response;
 
   const { uid, status } = extractBooking(result.data);
-
-  if (uid) {
-    await ensureStudioBookingLocation(uid);
-  }
 
   if (uid && status && status.toUpperCase() !== 'ACCEPTED') {
     const confirmError = await confirmCalV2Booking(uid);

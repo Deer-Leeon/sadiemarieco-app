@@ -159,15 +159,29 @@
 <div id="portal-modal-backdrop" class="portal-modal-backdrop" hidden></div>
 <div id="portal-modal" class="portal-modal" role="dialog" aria-modal="true" aria-labelledby="portal-modal-title" hidden>
   <h3 class="portal-card-title" id="portal-modal-title">Cancel this <em>appointment?</em></h3>
-  <p class="portal-card-body">
+  <p class="portal-card-body" id="portal-modal-body">
     Are you sure you want to cancel? This can't be undone — you'd need to book a new session
     if you change your mind.
   </p>
+  <p class="portal-modal-fee" id="portal-modal-fee" hidden></p>
   <div class="portal-actions portal-actions--end">
     <button type="button" class="btn-outline-navy" id="portal-modal-dismiss">Keep appointment</button>
     <button type="button" class="btn-navy portal-cancel-btn" id="portal-modal-confirm">Yes, cancel it</button>
   </div>
   <p class="portal-modal-error" id="portal-modal-error" hidden></p>
+</div>
+
+<!-- RESCHEDULE FEE CONFIRMATION MODAL -->
+<div id="portal-reschedule-modal" class="portal-modal" role="dialog" aria-modal="true" aria-labelledby="portal-reschedule-modal-title" hidden>
+  <h3 class="portal-card-title" id="portal-reschedule-modal-title">Reschedule this <em>appointment?</em></h3>
+  <p class="portal-card-body" id="portal-reschedule-modal-body">
+    You'll pick a new time on the next screen. Your current slot is released once you confirm the new one.
+  </p>
+  <p class="portal-modal-fee" id="portal-reschedule-modal-fee" hidden></p>
+  <div class="portal-actions portal-actions--end">
+    <button type="button" class="btn-outline-navy" id="portal-reschedule-modal-dismiss">Keep current time</button>
+    <button type="button" class="btn-navy" id="portal-reschedule-modal-confirm">Continue to reschedule</button>
+  </div>
 </div>
 
 <footer class="portal-footer">

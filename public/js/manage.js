@@ -7,8 +7,8 @@
    1. Read `uid` from the query string.
    2. Fetch booking details through /api/booking (server-side proxy to Cal.com).
    3. Render the details + actions, or an error/expired state.
-   4. Reschedule → mount a Cal.com inline embed with `rescheduleUid`.
-   5. Cancel → confirmation modal → POST /api/cancel-booking → success state.
+   4. Reschedule → fee confirmation modal → Cal.com inline embed with `rescheduleUid`.
+   5. Cancel → confirmation modal (with fee callout) → POST /api/cancel-booking → success state.
    ========================================================================== */
 
 (function () {
@@ -55,6 +55,13 @@
   const modalConfirm = el('portal-modal-confirm');
   const modalDismiss = el('portal-modal-dismiss');
   const modalError = el('portal-modal-error');
+  const modalFee = el('portal-modal-fee');
+
+  const rescheduleModal = el('portal-reschedule-modal');
+  const rescheduleModalBody = el('portal-reschedule-modal-body');
+  const rescheduleModalFee = el('portal-reschedule-modal-fee');
+  const rescheduleModalConfirm = el('portal-reschedule-modal-confirm');
+  const rescheduleModalDismiss = el('portal-reschedule-modal-dismiss');
 
   // ── HELPERS ──
   const setState = (name) => {
@@ -76,6 +83,64 @@
   const getQueryParam = (key) => {
     const params = new URLSearchParams(window.location.search);
     return (params.get(key) || '').trim();
+  };
+
+  /**
+   * Build fee warning copy from `/api/booking` `change_fee` preview.
+   * Returns { html, show } for the modal fee callout.
+   */
+  const describeChangeFee = (fee, action) => {
+    const verb = action === 'reschedule' ? 'Rescheduling' : 'Canceling';
+    if (!fee || fee.tier === 'none') {
+      return {
+        show: true,
+        html:
+          action === 'reschedule'
+            ? 'You\u2019re more than 24 hours before your appointment, so you can reschedule <strong>without a fee</strong>.'
+            : 'You\u2019re more than 24 hours before your appointment, so you can cancel <strong>without a fee</strong>.',
+      };
+    }
+
+    const pct = Math.round((fee.fraction || 0) * 100);
+    const isNoShow = fee.tier === 'no_show_full';
+    const windowLabel = isNoShow
+      ? 'under 2 hours before your appointment'
+      : 'within 24 hours of your appointment';
+
+    if (fee.waived) {
+      return {
+        show: true,
+        html: `${verb} ${windowLabel} would normally charge your card, but a <strong>one-time courtesy waiver</strong> applies \u2014 you won\u2019t be charged this time.`,
+      };
+    }
+
+    if (fee.amount_display) {
+      const noShowNote = isNoShow
+        ? ' (treated as a no-show at 100% of the service cost)'
+        : ` (${pct}% of the service cost)`;
+      return {
+        show: true,
+        html: `${verb} now will charge <strong>${fee.amount_display}</strong>${noShowNote} to the card on file.`,
+      };
+    }
+
+    // Price unknown — still warn with the policy %.
+    return {
+      show: true,
+      html: `${verb} ${windowLabel} may charge <strong>${pct}%</strong> of the service cost to the card on file. See our <a href="/#policies">studio policy</a>.`,
+    };
+  };
+
+  const setFeeCallout = (node, fee, action) => {
+    if (!node) return;
+    const desc = describeChangeFee(fee, action);
+    if (!desc.show) {
+      node.hidden = true;
+      node.innerHTML = '';
+      return;
+    }
+    node.innerHTML = desc.html;
+    node.hidden = false;
   };
 
   // Title in Cal's response looks like "Lamination + Tint between Host and Guest".
@@ -330,7 +395,38 @@
     return Number.isFinite(startMs) && startMs <= Date.now();
   };
 
-  const openReschedule = () => {
+  const openRescheduleModal = () => {
+    if (!booking) return;
+    if (appointmentHasStarted(booking)) {
+      showError(
+        'This appointment has started and can no longer be rescheduled. Please contact the studio if you need help.'
+      );
+      setState('loaded');
+      return;
+    }
+    setFeeCallout(rescheduleModalFee, booking.change_fee, 'reschedule');
+    if (rescheduleModalBody) {
+      rescheduleModalBody.textContent =
+        "You'll pick a new time on the next screen. Your current slot is released once you confirm the new one.";
+    }
+    modalBackdrop.hidden = false;
+    rescheduleModal.hidden = false;
+    requestAnimationFrame(() => rescheduleModalDismiss && rescheduleModalDismiss.focus());
+  };
+
+  const closeRescheduleModal = () => {
+    if (rescheduleModal) rescheduleModal.hidden = true;
+    // Keep backdrop if cancel modal is open (shouldn't happen).
+    if (modal && !modal.hidden) return;
+    modalBackdrop.hidden = true;
+  };
+
+  const confirmRescheduleModal = () => {
+    closeRescheduleModal();
+    proceedToReschedule();
+  };
+
+  const proceedToReschedule = () => {
     if (!booking) return;
     if (appointmentHasStarted(booking)) {
       showError(
@@ -346,6 +442,10 @@
     mountReschedule();
   };
 
+  const openReschedule = () => {
+    openRescheduleModal();
+  };
+
   const closeReschedule = () => {
     setState('loaded');
   };
@@ -358,6 +458,7 @@
       );
       return;
     }
+    setFeeCallout(modalFee, booking && booking.change_fee, 'cancel');
     modal.hidden = false;
     modalBackdrop.hidden = false;
     modalError.hidden = true;
@@ -370,6 +471,7 @@
 
   const closeCancelModal = () => {
     modal.hidden = true;
+    if (rescheduleModal && !rescheduleModal.hidden) return;
     modalBackdrop.hidden = true;
   };
 
@@ -424,11 +526,22 @@
   rescheduleBackBtn.addEventListener('click', closeReschedule);
   cancelBtn.addEventListener('click', openCancelModal);
   modalDismiss.addEventListener('click', closeCancelModal);
-  modalBackdrop.addEventListener('click', closeCancelModal);
+  modalBackdrop.addEventListener('click', () => {
+    if (rescheduleModal && !rescheduleModal.hidden) closeRescheduleModal();
+    else closeCancelModal();
+  });
   modalConfirm.addEventListener('click', confirmCancel);
+  if (rescheduleModalConfirm) {
+    rescheduleModalConfirm.addEventListener('click', confirmRescheduleModal);
+  }
+  if (rescheduleModalDismiss) {
+    rescheduleModalDismiss.addEventListener('click', closeRescheduleModal);
+  }
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !modal.hidden) closeCancelModal();
+    if (event.key !== 'Escape') return;
+    if (rescheduleModal && !rescheduleModal.hidden) closeRescheduleModal();
+    else if (modal && !modal.hidden) closeCancelModal();
   });
 
   // ── BOOT ──

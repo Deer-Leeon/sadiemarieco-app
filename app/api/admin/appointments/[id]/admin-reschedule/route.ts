@@ -38,7 +38,6 @@ import {
   CAL_BOOKINGS_API_VERSION,
   CAL_V2_BASE,
   confirmCalV2Booking,
-  patchCalV2BookingLocation,
   proxyCalV2Post,
 } from '@/lib/cal-proxy';
 import {
@@ -409,10 +408,6 @@ export async function POST(
         { status: 502 }
       );
     }
-
-    await patchCalV2BookingLocation(created.uid, studioBookingLocation()).catch(
-      () => undefined
-    );
 
     if (created.status && created.status.toUpperCase() !== 'ACCEPTED') {
       const confirmError = await confirmCalV2Booking(created.uid);
