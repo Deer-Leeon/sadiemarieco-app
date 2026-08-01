@@ -157,14 +157,18 @@ function friendlyStripeSetupError(error: {
   if (
     decline === 'expired_card' ||
     code === 'expired_card' ||
-    message.includes('expired')
+    code === 'invalid_expiry_year' ||
+    code === 'invalid_expiry_month' ||
+    code === 'incomplete_expiry' ||
+    message.includes('expir')
   ) {
-    return 'This card appears to be expired. Please check the date or try a different card.';
+    return 'The expiration date looks incorrect. Please check it and try again.';
   }
 
   if (
     decline === 'incorrect_cvc' ||
     code === 'incorrect_cvc' ||
+    code === 'incomplete_cvc' ||
     message.includes('security code') ||
     message.includes('cvc')
   ) {
@@ -172,14 +176,24 @@ function friendlyStripeSetupError(error: {
   }
 
   if (
+    decline === 'incorrect_zip' ||
+    code === 'incorrect_zip' ||
+    message.includes('zip') ||
+    message.includes('postal')
+  ) {
+    return 'The billing ZIP code looks incorrect. Please check it and try again.';
+  }
+
+  if (
     decline === 'incorrect_number' ||
     code === 'incorrect_number' ||
+    code === 'incomplete_number' ||
     message.includes('card number')
   ) {
     return 'That card number does not look right. Please check it and try again.';
   }
 
-  if (code === 'card_declined' || decline || message.includes('declined')) {
+  if (code === 'card_declined' || message.includes('declined')) {
     return 'Your card was declined. Please try a different card or contact your bank.';
   }
 
@@ -189,7 +203,7 @@ function friendlyStripeSetupError(error: {
     message.includes('processing error') ||
     message.includes('already succeeded')
   ) {
-    return 'Please re-enter your card details and try again.';
+    return 'Please check your card details and try again.';
   }
 
   if (error?.message && !message.includes('mode') && error.message.length < 160) {
@@ -791,6 +805,22 @@ function CheckoutForm({
       return;
     }
 
+    // Build a PaymentMethod from the *current* field values, then confirm a
+    // fresh SetupIntent with that id. Passing `elements` into confirmSetup
+    // after a bank decline can stick the Element on the failed attempt —
+    // wrong expiry then kept failing even after it was corrected.
+    const { error: pmError, paymentMethod } = await stripe.createPaymentMethod({
+      elements,
+    });
+    if (pmError || !paymentMethod?.id) {
+      setSubmitError(
+        friendlyStripeSetupError(pmError) ||
+          'We could not read your card details. Please check them and try again.'
+      );
+      setSubmitting(false);
+      return;
+    }
+
     let clientSecret: string;
     try {
       const res = await fetch('/api/stripe/create-setup-intent', {
@@ -828,12 +858,10 @@ function CheckoutForm({
     if (name) returnUrl.searchParams.set('name', name);
     if (email) returnUrl.searchParams.set('email', email);
 
-    // Fresh SetupIntent each submit — Elements stay mounted so card fields
-    // are preserved when we reject a wrong CVC and the client retries.
     const { error, setupIntent } = await stripe.confirmSetup({
-      elements,
       clientSecret,
       confirmParams: {
+        payment_method: paymentMethod.id,
         return_url: returnUrl.toString(),
       },
       redirect: 'if_required',
