@@ -965,8 +965,8 @@ a.service-item:focus-visible .service-action {
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
-  background: rgba(250, 248, 245, 0.94);
-  backdrop-filter: blur(2px);
+  background: rgba(250, 248, 245, 0.96);
+  backdrop-filter: blur(3px);
 }
 .booking-contact-warning[hidden] {
   display: none !important;
@@ -1001,6 +1001,57 @@ a.service-item:focus-visible .service-action {
 .booking-contact-warning-body em {
   font-style: italic;
 }
+.booking-contact-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 1rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #78716c;
+}
+.booking-contact-field input {
+  border: 1px solid rgba(28, 25, 23, 0.16);
+  background: #fafaf9;
+  color: var(--ink);
+  padding: 0.7rem 0.75rem;
+  font-size: 0.95rem;
+  letter-spacing: normal;
+  text-transform: none;
+  font-family: inherit;
+}
+.booking-contact-field input:focus {
+  outline: 2px solid rgba(13, 27, 42, 0.25);
+  outline-offset: 1px;
+  border-color: var(--navy);
+}
+.booking-contact-sms {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  color: #44403c;
+  cursor: pointer;
+}
+.booking-contact-sms input {
+  margin-top: 0.2rem;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  accent-color: var(--navy);
+}
+.booking-contact-error {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: #9f1239;
+}
+.booking-contact-error[hidden] {
+  display: none !important;
+}
 .booking-contact-warning-btn {
   margin-top: 1.1rem;
   width: 100%;
@@ -1015,6 +1066,10 @@ a.service-item:focus-visible .service-action {
 }
 .booking-contact-warning-btn:hover {
   background: #0a1624;
+}
+.booking-contact-warning-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 #drawer-cal-container {

@@ -371,16 +371,31 @@
     </div>
     <button id="close-drawer" type="button" aria-label="Close booking drawer">✕</button>
   </div>
-  <div id="booking-contact-warning" class="booking-contact-warning" hidden role="alert">
-    <div class="booking-contact-warning-card">
+  <div id="booking-contact-warning" class="booking-contact-warning" hidden>
+    <div class="booking-contact-warning-card" role="dialog" aria-labelledby="booking-contact-warning-title">
       <p class="booking-contact-warning-eyebrow">Almost there</p>
-      <p class="booking-contact-warning-title">We need a way to reach you</p>
+      <p id="booking-contact-warning-title" class="booking-contact-warning-title">We need a way to reach you</p>
       <p class="booking-contact-warning-body">
-        Please add an email address <em>or</em> check the box to receive appointment texts.
-        Your time was released — pick the slot again after you add one.
+        Add an email <em>or</em> opt in to appointment texts. Your time is still held —
+        you can update this and continue.
       </p>
-      <button type="button" id="booking-contact-warning-dismiss" class="booking-contact-warning-btn">
-        Got it — try again
+      <label class="booking-contact-field">
+        <span>Email</span>
+        <input
+          id="booking-contact-email"
+          type="email"
+          autocomplete="email"
+          inputmode="email"
+          placeholder="you@example.com"
+        />
+      </label>
+      <label class="booking-contact-sms">
+        <input id="booking-contact-sms" type="checkbox" />
+        <span>Yes, text me appointment updates from Sadie Marie</span>
+      </label>
+      <p id="booking-contact-error" class="booking-contact-error" hidden></p>
+      <button type="button" id="booking-contact-continue" class="booking-contact-warning-btn">
+        Continue to payment
       </button>
     </div>
   </div>
