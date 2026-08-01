@@ -10,18 +10,11 @@
  * check — common for some networks/wallets).
  */
 
-export type StripeCardCheckResult =
-  | 'pass'
-  | 'fail'
-  | 'unavailable'
-  | 'unchecked'
-  | null
-  | undefined;
-
+/** Stripe types these as `string | null`; we only act on the literal `'fail'`. */
 export interface StripeCardChecksLike {
-  cvc_check?: StripeCardCheckResult;
-  address_postal_code_check?: StripeCardCheckResult;
-  address_line1_check?: StripeCardCheckResult;
+  cvc_check?: string | null;
+  address_postal_code_check?: string | null;
+  address_line1_check?: string | null;
 }
 
 /** Human-readable reason when we must reject the vaulted card. */
