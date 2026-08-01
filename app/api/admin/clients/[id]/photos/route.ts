@@ -162,7 +162,7 @@ interface ProcessedImage {
 /** Encode the (already-built) sharp pipeline to a final
  *  format-appropriate buffer. Settings match /api/upload exactly. */
 async function encodeNormalised(
-  pipe: sharp.Sharp,
+  pipe: ReturnType<typeof sharp>,
   sourceMime: string
 ): Promise<{ buffer: Buffer; mime: string; ext: string }> {
   if (sourceMime === 'image/png') {

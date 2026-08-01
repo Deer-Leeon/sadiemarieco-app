@@ -5,6 +5,9 @@ import type { YesNo } from './consent-form-config';
 export const inputClass =
   'mt-1 w-full rounded-md border border-stone-200 bg-[#FAF9F6] px-3 py-2 text-sm text-stone-900 outline-none ring-stone-300 focus:ring-2';
 
+export const selectClass =
+  `${inputClass} appearance-none bg-size-[14px_14px] bg-position-[right_0.75rem_center] bg-no-repeat pr-9 bg-[url("data:image/svg+xml;utf8,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2020%2020'%20fill='%2378716c'><path%20d='M5.516%207.548L10%2012.032l4.484-4.484L16%209.064l-6%206-6-6z'/></svg>")]`;
+
 export const sectionClass =
   'overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm';
 

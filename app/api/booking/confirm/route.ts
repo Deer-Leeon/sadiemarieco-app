@@ -55,6 +55,11 @@ import {
   isCalBookingAlreadyConfirmed,
 } from '@/lib/cal-proxy';
 import { isValidEmail } from '@/lib/client-identity';
+import {
+  clientIpFromRequest,
+  RATE_LIMITS,
+  rejectUnlessRateAllowed,
+} from '@/lib/rate-limit';
 import { stripe } from '@/lib/stripe';
 import {
   getStripeEnvModes,
@@ -255,6 +260,12 @@ async function acceptOnCal(calEventId: string): Promise<string | null> {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const limited = await rejectUnlessRateAllowed({
+    key: `booking:confirm:${clientIpFromRequest(req)}`,
+    ...RATE_LIMITS.bookingConfirm,
+  });
+  if (limited) return limited;
+
   if (!stripe) {
     return NextResponse.json(
       {

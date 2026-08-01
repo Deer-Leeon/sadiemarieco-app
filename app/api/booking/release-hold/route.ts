@@ -15,6 +15,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAppointmentHoldByCalUid } from '@/lib/appointment-hold';
 import { isHoldExpired } from '@/lib/booking-hold';
 import { releaseAbandonedHoldByCalUid } from '@/lib/release-abandoned-hold';
+import {
+  clientIpFromRequest,
+  RATE_LIMITS,
+  rejectUnlessRateAllowed,
+} from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,6 +30,12 @@ function errorMessage(err: unknown): string {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const limited = await rejectUnlessRateAllowed({
+    key: `booking:release-hold:${clientIpFromRequest(req)}`,
+    ...RATE_LIMITS.bookingReleaseHold,
+  });
+  if (limited) return limited;
+
   let body: unknown;
   try {
     body = await req.json();

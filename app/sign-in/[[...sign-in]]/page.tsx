@@ -140,7 +140,9 @@ export default function SignInPage() {
               showOptionalFields: false,
               logoPlacement: 'none',
             },
-          }}
+            // Clerk appearance token typings drift across minor releases;
+            // runtime tokens above remain valid.
+          } as never}
         />
       </div>
 

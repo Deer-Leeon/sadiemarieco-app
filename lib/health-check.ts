@@ -103,6 +103,7 @@ async function checkEnvironment(): Promise<HealthCheckResult[]> {
     ['QSTASH_CURRENT_SIGNING_KEY', 'QStash signing key'],
     ['CRON_SECRET', 'Cron job secret'],
     ['BLOB_READ_WRITE_TOKEN', 'Vercel Blob token'],
+    ['CAL_WEBHOOK_SECRET', 'Cal.com webhook HMAC secret'],
   ] as const;
 
   const calKey = getCalComApiKey();
@@ -232,6 +233,45 @@ async function checkDatabase(): Promise<HealthCheckResult[]> {
       })
     );
     return checks;
+  }
+
+  try {
+    const { value: templateRows, latencyMs } = await timed(async () => {
+      const { rows } = await sql<{ consent_pdf_url: string | null }>`
+        SELECT consent_pdf_url
+        FROM studio_settings
+        WHERE id = 1
+        LIMIT 1
+      `;
+      return rows;
+    });
+    const url = templateRows[0]?.consent_pdf_url?.trim() || '';
+    checks.push(
+      result(
+        {
+          id: 'db-consent-template',
+          name: 'Consent PDF template',
+          category: 'Database',
+          status: url ? 'healthy' : 'unhealthy',
+          message: url
+            ? 'Consent PDF template is uploaded'
+            : 'No consent PDF template in studio_settings — clients cannot sign',
+          detail: url || undefined,
+        },
+        latencyMs
+      )
+    );
+  } catch (err) {
+    checks.push(
+      result({
+        id: 'db-consent-template',
+        name: 'Consent PDF template',
+        category: 'Database',
+        status: 'degraded',
+        message: 'Could not read studio_settings consent template',
+        detail: err instanceof Error ? err.message : String(err),
+      })
+    );
   }
 
   try {
@@ -449,6 +489,45 @@ async function checkCalCom(): Promise<HealthCheckResult[]> {
           category: 'Cal.com',
           status: 'degraded',
           message: 'Could not compare local services to Cal',
+          detail: err instanceof Error ? err.message : String(err),
+        })
+      );
+    }
+
+    try {
+      const { fetchDefaultSchedule } = await import(
+        '@/app/admin/availability/calSchedules'
+      );
+      const { value: schedule, latencyMs: scheduleMs } = await timed(async () =>
+        fetchDefaultSchedule(apiKey)
+      );
+      const windows = Array.isArray(schedule.availability)
+        ? schedule.availability.length
+        : 0;
+      checks.push(
+        result(
+          {
+            id: 'cal-schedules',
+            name: 'Cal.com default schedule (homepage hours)',
+            category: 'Cal.com',
+            status: windows > 0 ? 'healthy' : 'degraded',
+            message:
+              windows > 0
+                ? `Default schedule loaded (${windows} weekly window(s))`
+                : 'Default schedule has no weekly availability windows',
+            detail: schedule.name ? `schedule=${schedule.name}` : undefined,
+          },
+          scheduleMs
+        )
+      );
+    } catch (err) {
+      checks.push(
+        result({
+          id: 'cal-schedules',
+          name: 'Cal.com default schedule (homepage hours)',
+          category: 'Cal.com',
+          status: 'unhealthy',
+          message: 'Could not load Cal.com default schedule',
           detail: err instanceof Error ? err.message : String(err),
         })
       );

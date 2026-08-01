@@ -184,6 +184,41 @@ export interface UpdateSchedulePayload {
   overrides: ScheduleOverride[];
 }
 
+/** In-process TTL for public homepage hours (mirrors reconcileWithCal). */
+const SCHEDULE_TTL_MS = 60_000;
+let lastScheduleFetchedAt = 0;
+let cachedDefaultSchedule: Schedule | null = null;
+
+/**
+ * Cached default schedule for high-traffic public reads (homepage hours).
+ * Admin editors should keep calling {@link fetchDefaultSchedule} live.
+ */
+export async function fetchDefaultScheduleCached(
+  apiKey: string,
+  options: { force?: boolean } = {}
+): Promise<Schedule> {
+  const now = Date.now();
+  if (
+    !options.force &&
+    cachedDefaultSchedule &&
+    now - lastScheduleFetchedAt < SCHEDULE_TTL_MS
+  ) {
+    return cachedDefaultSchedule;
+  }
+  // Stamp before the fetch so concurrent homepage requests share one in-flight
+  // window instead of stampeding Cal (same pattern as reconcileWithCal).
+  lastScheduleFetchedAt = now;
+  const schedule = await fetchDefaultSchedule(apiKey);
+  cachedDefaultSchedule = schedule;
+  return schedule;
+}
+
+/** Drop the homepage schedule cache after an admin availability save. */
+export function invalidateDefaultScheduleCache(): void {
+  lastScheduleFetchedAt = 0;
+  cachedDefaultSchedule = null;
+}
+
 export async function updateSchedule(
   apiKey: string,
   scheduleId: number,
@@ -207,5 +242,8 @@ export async function updateSchedule(
       'Cal.com PATCH response missing `data` field — schedule likely updated, but the echo back was unusable.'
     );
   }
+  invalidateDefaultScheduleCache();
+  cachedDefaultSchedule = response.data;
+  lastScheduleFetchedAt = Date.now();
   return response.data;
 }
