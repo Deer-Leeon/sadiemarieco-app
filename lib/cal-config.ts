@@ -42,13 +42,14 @@ export const CAL_STUDIO_IN_PERSON_LOCATION = {
 };
 
 /**
- * The hidden admin override event type is configured for Cal Video only
- * (`integration`, not `address`). Time blocks and shadow-event fallbacks
- * must use this location shape or Cal rejects the create.
+ * Location for the hidden admin override / time-block shadow event.
+ * Same in-person studio address as public services — never Cal Video or
+ * other conferencing integrations.
  */
 export const CAL_ADMIN_OVERRIDE_BOOKING_LOCATION = {
-  type: 'integration' as const,
-  integration: 'cal-video' as const,
+  type: 'address' as const,
+  address: STUDIO_IN_PERSON_ADDRESS,
+  public: true,
 };
 
 /** Auto-confirm bookings (no Cal.com "requires confirmation" / pending checkout gate). */

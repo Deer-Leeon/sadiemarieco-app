@@ -85,16 +85,20 @@ async function callBookingConfirm(params: {
   name: string;
   email: string;
 }): Promise<{ calWarning: string | null }> {
-  const res = await fetch('/api/booking/confirm', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      setupIntentId: params.setupIntentId,
-      calBookingUid: params.calBookingUid,
-      ...(params.name ? { name: params.name } : {}),
-      ...(params.email ? { email: params.email } : {}),
-    }),
-  });
+  const res = await fetchWithTimeout(
+    '/api/booking/confirm',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        setupIntentId: params.setupIntentId,
+        calBookingUid: params.calBookingUid,
+        ...(params.name ? { name: params.name } : {}),
+        ...(params.email ? { email: params.email } : {}),
+      }),
+    },
+    45_000
+  );
 
   if (!res.ok) {
     const payload = (await res.json().catch(() => null)) as
@@ -115,6 +119,28 @@ async function callBookingConfirm(params: {
     cal_accept_error?: string | null;
   };
   return { calWarning: data.cal_accept_error ?? null };
+}
+
+/** Fetch that fails instead of hanging forever on a stalled network/API. */
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error(
+        'This is taking too long. Please check your connection and try again.'
+      );
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 function readThreeDsSetupIntentId(
@@ -735,6 +761,7 @@ function CheckoutForm({
   const elements = useElements();
 
   const [submitting, setSubmitting] = useState(false);
+  const [submitLabel, setSubmitLabel] = useState('Saving your card…');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<{
     calWarning: string | null;
@@ -747,6 +774,7 @@ function CheckoutForm({
   const finalizeBooking = useCallback(
     async (setupIntentId: string) => {
       setSubmitting(true);
+      setSubmitLabel('Confirming your appointment…');
       setSubmitError(null);
       try {
         const result = await callBookingConfirm({
@@ -764,6 +792,7 @@ function CheckoutForm({
             ? err.message
             : 'Your card was saved but we could not finalise the appointment. Please contact the studio.'
         );
+      } finally {
         setSubmitting(false);
       }
     },
@@ -796,92 +825,103 @@ function CheckoutForm({
     if (holdExpired || !stripe || !elements || submitting) return;
 
     setSubmitting(true);
+    setSubmitLabel('Saving your card…');
     setSubmitError(null);
 
-    const { error: elementsSubmitError } = await elements.submit();
-    if (elementsSubmitError) {
-      setSubmitError(friendlyStripeSetupError(elementsSubmitError));
-      setSubmitting(false);
-      return;
-    }
-
-    // Build a PaymentMethod from the *current* field values, then confirm a
-    // fresh SetupIntent with that id. Passing `elements` into confirmSetup
-    // after a bank decline can stick the Element on the failed attempt —
-    // wrong expiry then kept failing even after it was corrected.
-    const { error: pmError, paymentMethod } = await stripe.createPaymentMethod({
-      elements,
-    });
-    if (pmError || !paymentMethod?.id) {
-      setSubmitError(
-        friendlyStripeSetupError(pmError) ||
-          'We could not read your card details. Please check them and try again.'
-      );
-      setSubmitting(false);
-      return;
-    }
-
-    let clientSecret: string;
     try {
-      const res = await fetch('/api/stripe/create-setup-intent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          calBookingUid: uid,
-          ...(name ? { name } : {}),
-          ...(email ? { email } : {}),
-        }),
-      });
-      const payload = (await res.json().catch(() => null)) as
-        | { clientSecret?: string; error?: string; message?: string }
-        | null;
-      if (!res.ok || !payload?.clientSecret) {
-        throw new Error(
-          payload?.message ??
-            payload?.error ??
-            `Could not initialise checkout (HTTP ${res.status})`
-        );
+      const { error: elementsSubmitError } = await elements.submit();
+      if (elementsSubmitError) {
+        setSubmitError(friendlyStripeSetupError(elementsSubmitError));
+        return;
       }
-      clientSecret = payload.clientSecret;
+
+      // Fresh SetupIntent every submit so a prior decline cannot stick the
+      // Element on a dead intent. Confirm via `elements` (not a detached
+      // PaymentMethod id) so bank 3-D Secure challenges can open.
+      setSubmitLabel('Connecting securely…');
+      let clientSecret: string;
+      try {
+        const res = await fetchWithTimeout(
+          '/api/stripe/create-setup-intent',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              calBookingUid: uid,
+              ...(name ? { name } : {}),
+              ...(email ? { email } : {}),
+            }),
+          },
+          30_000
+        );
+        const payload = (await res.json().catch(() => null)) as
+          | { clientSecret?: string; error?: string; message?: string }
+          | null;
+        if (!res.ok || !payload?.clientSecret) {
+          throw new Error(
+            payload?.message ??
+              payload?.error ??
+              `Could not initialise checkout (HTTP ${res.status})`
+          );
+        }
+        clientSecret = payload.clientSecret;
+      } catch (err) {
+        setSubmitError(
+          err instanceof Error
+            ? err.message
+            : 'Could not initialise checkout. Please try again.'
+        );
+        return;
+      }
+
+      const returnUrl = new URL('/checkout', window.location.origin);
+      returnUrl.searchParams.set('uid', uid);
+      if (name) returnUrl.searchParams.set('name', name);
+      if (email) returnUrl.searchParams.set('email', email);
+
+      setSubmitLabel('Verifying with your bank…');
+      const { error, setupIntent } = await stripe.confirmSetup({
+        elements,
+        clientSecret,
+        confirmParams: {
+          return_url: returnUrl.toString(),
+        },
+        redirect: 'if_required',
+      });
+
+      if (error) {
+        setSubmitError(friendlyStripeSetupError(error));
+        return;
+      }
+
+      let finalIntent = setupIntent;
+      if (finalIntent?.status === 'requires_action') {
+        const next = await stripe.handleNextAction({ clientSecret });
+        if (next.error) {
+          setSubmitError(friendlyStripeSetupError(next.error));
+          return;
+        }
+        finalIntent = next.setupIntent ?? finalIntent;
+      }
+
+      if (!finalIntent || finalIntent.status !== 'succeeded') {
+        setSubmitError(
+          'Your card could not be confirmed. Please check the details and try again — if your bank asks to verify the charge, complete that prompt and retry.'
+        );
+        return;
+      }
+
+      setSubmitLabel('Confirming your appointment…');
+      await finalizeBooking(finalIntent.id);
     } catch (err) {
       setSubmitError(
         err instanceof Error
           ? err.message
-          : 'Could not initialise checkout. Please try again.'
+          : 'Something went wrong saving your card. Please try again.'
       );
+    } finally {
       setSubmitting(false);
-      return;
     }
-
-    const returnUrl = new URL('/checkout', window.location.origin);
-    returnUrl.searchParams.set('uid', uid);
-    if (name) returnUrl.searchParams.set('name', name);
-    if (email) returnUrl.searchParams.set('email', email);
-
-    const { error, setupIntent } = await stripe.confirmSetup({
-      clientSecret,
-      confirmParams: {
-        payment_method: paymentMethod.id,
-        return_url: returnUrl.toString(),
-      },
-      redirect: 'if_required',
-    });
-
-    if (error) {
-      setSubmitError(friendlyStripeSetupError(error));
-      setSubmitting(false);
-      return;
-    }
-
-    if (!setupIntent || setupIntent.status !== 'succeeded') {
-      setSubmitError(
-        'Your card could not be confirmed. Please check the details and try again.'
-      );
-      setSubmitting(false);
-      return;
-    }
-
-    await finalizeBooking(setupIntent.id);
   }
 
   if (confirmed) {
@@ -965,7 +1005,7 @@ function CheckoutForm({
         {submitting ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            <span>Saving your card&hellip;</span>
+            <span>{submitLabel}</span>
           </>
         ) : (
           <>
