@@ -10,6 +10,7 @@
 import { sql } from '@vercel/postgres';
 
 import { CAL_ABANDON_CANCEL_REASON } from '@/lib/booking-hold';
+import { notifyCheckoutAbandonedSms } from '@/lib/booking-notifications';
 
 const CAL_V2_BASE = 'https://api.cal.com/v2';
 const CAL_API_VERSION = '2024-08-13';
@@ -23,6 +24,10 @@ interface AppointmentHoldRow {
   id: string;
   cal_event_id: string | null;
   status: string;
+  client_phone: string | null;
+  service_name: string | null;
+  booking_time: Date | string | null;
+  sms_opt_in: boolean | null;
 }
 
 function errorMessage(err: unknown): string {
@@ -92,6 +97,31 @@ async function flipLocalStatus(appointmentId: string): Promise<boolean> {
   }
 }
 
+async function maybeNotifyAbandonedCheckout(row: AppointmentHoldRow): Promise<void> {
+  if (row.sms_opt_in !== true) return;
+  if (!row.client_phone) return;
+  const bookingTime =
+    row.booking_time instanceof Date
+      ? row.booking_time.toISOString()
+      : row.booking_time
+        ? String(row.booking_time)
+        : null;
+  try {
+    await notifyCheckoutAbandonedSms({
+      clientPhone: row.client_phone,
+      smsOptIn: row.sms_opt_in,
+      serviceName: row.service_name,
+      bookingTime,
+      bookingUid: row.cal_event_id,
+    });
+  } catch (err) {
+    console.warn('[release-abandoned-hold] abandoned SMS failed (non-fatal)', {
+      appointmentId: row.id,
+      error: errorMessage(err),
+    });
+  }
+}
+
 /**
  * Look up by Cal booking UID (preferred) and release if still pending.
  */
@@ -106,7 +136,8 @@ export async function releaseAbandonedHoldByCalUid(
   let row: AppointmentHoldRow | undefined;
   try {
     const { rows } = await sql<AppointmentHoldRow>`
-      SELECT id, cal_event_id, status
+      SELECT id, cal_event_id, status, client_phone, service_name,
+             booking_time, sms_opt_in
       FROM appointments
       WHERE cal_event_id = ${uid}
       LIMIT 1
@@ -157,6 +188,7 @@ async function releasePendingRow(
     );
     const flipped = await flipLocalStatus(row.id);
     if (flipped) {
+      await maybeNotifyAbandonedCheckout(row);
       return {
         ok: true,
         released: true,
@@ -192,6 +224,7 @@ async function releasePendingRow(
 
   const flipped = await flipLocalStatus(row.id);
   if (flipped) {
+    await maybeNotifyAbandonedCheckout(row);
     return {
       ok: true,
       released: true,
