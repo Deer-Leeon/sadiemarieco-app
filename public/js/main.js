@@ -383,17 +383,43 @@
     );
 
   const contactWarningEl = document.getElementById('booking-contact-warning');
-  const contactWarningDismiss = document.getElementById(
-    'booking-contact-warning-dismiss'
-  );
-  let contactWarningLink = null;
+  const contactEmailInput = document.getElementById('booking-contact-email');
+  const contactSmsInput = document.getElementById('booking-contact-sms');
+  const contactErrorEl = document.getElementById('booking-contact-error');
+  const contactContinueBtn = document.getElementById('booking-contact-continue');
+  let pendingContactBooking = null;
+
+  const hideCheckoutHandoff = () => {
+    const handoff = document.getElementById('checkout-handoff');
+    if (handoff) handoff.classList.remove('is-active');
+  };
 
   const hideContactWarning = () => {
     if (contactWarningEl) contactWarningEl.hidden = true;
+    if (contactErrorEl) {
+      contactErrorEl.hidden = true;
+      contactErrorEl.textContent = '';
+    }
+    if (contactContinueBtn) contactContinueBtn.disabled = false;
   };
 
-  const showContactWarning = (link) => {
-    contactWarningLink = link || null;
+  const setContactError = (message) => {
+    if (!contactErrorEl) return;
+    if (!message) {
+      contactErrorEl.hidden = true;
+      contactErrorEl.textContent = '';
+      return;
+    }
+    contactErrorEl.hidden = false;
+    contactErrorEl.textContent = message;
+  };
+
+  const showContactCapture = (booking) => {
+    pendingContactBooking = booking;
+    hideCheckoutHandoff();
+    if (contactEmailInput) contactEmailInput.value = '';
+    if (contactSmsInput) contactSmsInput.checked = false;
+    setContactError('');
     if (contactWarningEl) contactWarningEl.hidden = false;
     if (drawer && !drawer.classList.contains('drawer-open')) {
       drawer.classList.add('drawer-open');
@@ -401,21 +427,98 @@
     if (backdrop && !backdrop.classList.contains('drawer-open')) {
       backdrop.classList.add('drawer-open');
     }
+    window.setTimeout(() => {
+      if (contactEmailInput) contactEmailInput.focus();
+    }, 30);
   };
 
-  if (contactWarningDismiss) {
-    contactWarningDismiss.addEventListener('click', () => {
-      hideContactWarning();
-      const link = contactWarningLink;
-      contactWarningLink = null;
-      if (link) rebuildMount(link);
+  const goToCheckout = (booking, email) => {
+    const search = new URLSearchParams({ uid: booking.uid });
+    if (booking.name) search.set('name', booking.name);
+    if (emailLooksReal(email)) search.set('email', email);
+    window.location.replace(`/checkout?${search.toString()}`);
+  };
+
+  const initBookingHold = async (booking, email, smsOptIn) => {
+    const res = await fetch('/api/booking/init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      redirect: 'manual',
+      body: JSON.stringify({
+        calBookingUid: booking.uid,
+        name: booking.name,
+        email: emailLooksReal(email) ? email : '',
+        serviceName: booking.serviceName,
+        bookingTime: booking.bookingTime,
+        endTime: booking.endTime,
+        phone: booking.phone,
+        smsOptIn: smsOptIn === true
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+  };
+
+  if (contactContinueBtn) {
+    contactContinueBtn.addEventListener('click', () => {
+      void (async () => {
+        const booking = pendingContactBooking;
+        if (!booking || !booking.uid) return;
+
+        const email = contactEmailInput ? contactEmailInput.value.trim() : '';
+        const smsOptIn = Boolean(contactSmsInput && contactSmsInput.checked);
+        const hasEmail = emailLooksReal(email);
+
+        if (!hasEmail && !smsOptIn) {
+          setContactError(
+            'Add an email address or check the box for appointment texts.'
+          );
+          if (contactEmailInput) contactEmailInput.focus();
+          return;
+        }
+
+        setContactError('');
+        contactContinueBtn.disabled = true;
+        try {
+          const { res, data } = await initBookingHold(
+            booking,
+            hasEmail ? email : '',
+            smsOptIn
+          );
+          if (!res.ok || data.error === 'contact_required') {
+            setContactError(
+              (data && data.message) ||
+                'Add an email address or check the box for appointment texts.'
+            );
+            contactContinueBtn.disabled = false;
+            return;
+          }
+          hideContactWarning();
+          pendingContactBooking = null;
+          showCheckoutHandoff();
+          goToCheckout(booking, hasEmail ? email : '');
+        } catch (err) {
+          console.warn('[booking] contact continue failed', err);
+          setContactError('Something went wrong. Please try again.');
+          contactContinueBtn.disabled = false;
+        }
+      })();
     });
   }
 
-  const hideCheckoutHandoff = () => {
-    const handoff = document.getElementById('checkout-handoff');
-    if (handoff) handoff.classList.remove('is-active');
-  };
+  if (contactEmailInput) {
+    contactEmailInput.addEventListener('input', () => setContactError(''));
+    contactEmailInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (contactContinueBtn) contactContinueBtn.click();
+      }
+    });
+  }
+  if (contactSmsInput) {
+    contactSmsInput.addEventListener('change', () => setContactError(''));
+  }
 
   const redirectToCheckoutAfterBooking = (event, link) => {
     staleLinks.add(link);
@@ -425,16 +528,8 @@
 
     const run = async () => {
       try {
-        const {
-          uid,
-          name,
-          email,
-          serviceName,
-          bookingTime,
-          endTime,
-          phone,
-          smsOptIn
-        } = parseBookingFromEvent(event);
+        const booking = parseBookingFromEvent(event);
+        const { uid, email, smsOptIn } = booking;
 
         if (!uid) {
           console.warn(
@@ -450,57 +545,27 @@
         const hasEmail = emailLooksReal(email);
         const hasSms = smsOptIn === true;
 
-        // Cal's success payload often omits sms-consent — when email is
-        // missing, wait for /api/booking/init (hydrates from Cal) before
-        // sending the client to checkout.
+        // Cal iframe is cross-origin — we can't block Confirm itself. As soon
+        // as booking succeeds without visible contact, keep the hold and show
+        // an editable panel (no checkout handoff / no slot release).
         if (!hasEmail && !hasSms) {
-          showCheckoutHandoff();
-          let data = {};
+          showContactCapture(booking);
           try {
-            const res = await fetch('/api/booking/init', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin',
-              redirect: 'manual',
-              body: JSON.stringify({
-                calBookingUid: uid,
-                name,
-                email: '',
-                serviceName,
-                bookingTime,
-                endTime,
-                phone,
-                smsOptIn
-              })
-            });
-            data = await res.json().catch(() => ({}));
-            if (!res.ok || data.error === 'contact_required') {
-              checkoutRedirectedUids.delete(uid);
-              hideCheckoutHandoff();
-              showContactWarning(link);
-              return;
+            const { res } = await initBookingHold(booking, '', smsOptIn);
+            if (res.ok) {
+              // Cal had SMS opt-in even though the embed payload omitted it.
+              hideContactWarning();
+              pendingContactBooking = null;
+              showCheckoutHandoff();
+              goToCheckout(booking, '');
             }
           } catch (initErr) {
-            console.warn('[booking] /api/booking/init contact check failed', initErr);
-            checkoutRedirectedUids.delete(uid);
-            hideCheckoutHandoff();
-            showContactWarning(link);
-            return;
+            console.warn('[booking] contact hydrate check failed', initErr);
           }
-
-          const search = new URLSearchParams({ uid });
-          if (name) search.set('name', name);
-          window.location.replace(`/checkout?${search.toString()}`);
           return;
         }
 
-        // Hide the drawer and Cal iframe before navigation so the Cal
-        // "Your booking has been submitted" screen never flashes.
         showCheckoutHandoff();
-
-        const search = new URLSearchParams({ uid });
-        if (name) search.set('name', name);
-        if (hasEmail) search.set('email', email);
 
         fetch('/api/booking/init', {
           method: 'POST',
@@ -509,12 +574,12 @@
           redirect: 'manual',
           body: JSON.stringify({
             calBookingUid: uid,
-            name,
+            name: booking.name,
             email: hasEmail ? email : '',
-            serviceName,
-            bookingTime,
-            endTime,
-            phone,
+            serviceName: booking.serviceName,
+            bookingTime: booking.bookingTime,
+            endTime: booking.endTime,
+            phone: booking.phone,
             smsOptIn: hasSms
           }),
           keepalive: true
@@ -525,7 +590,7 @@
           );
         });
 
-        window.location.replace(`/checkout?${search.toString()}`);
+        goToCheckout(booking, hasEmail ? email : '');
       } catch (err) {
         console.error(
           '[booking] failed to redirect to /checkout after booking success',
@@ -670,7 +735,7 @@
   const closeDrawer = () => {
     if (!drawer || !backdrop) return;
     hideContactWarning();
-    contactWarningLink = null;
+    pendingContactBooking = null;
     drawer.classList.remove('drawer-open');
     backdrop.classList.remove('drawer-open');
   };

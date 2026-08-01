@@ -13,7 +13,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import {
-  CONTACT_CHANNEL_CANCEL_REASON,
   CONTACT_CHANNEL_REQUIRED_MESSAGE,
   hasBookingContactChannel,
   parseSmsOptInFromSources,
@@ -112,30 +111,6 @@ function parseInitBody(input: unknown): ParsedInit | { error: string } {
     bookingNotes: null,
     smsOptIn,
   };
-}
-
-async function cancelIncompleteContactBooking(uid: string): Promise<void> {
-  const apiKey = process.env.CAL_API_KEY;
-  if (!apiKey) return;
-  try {
-    await fetch(`${CAL_V2_BASE}/bookings/${encodeURIComponent(uid)}/cancel`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'cal-api-version': CAL_API_VERSION,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({
-        cancellationReason: CONTACT_CHANNEL_CANCEL_REASON,
-      }),
-    });
-  } catch (err) {
-    console.warn('[api/booking/init] contact-channel cancel failed', {
-      uid,
-      error: errorMessage(err),
-    });
-  }
 }
 
 /** Pull attendee + schedule fields from Cal when the embed omitted them. */
@@ -283,7 +258,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       smsOptIn: data.smsOptIn,
     })
   ) {
-    await cancelIncompleteContactBooking(data.calBookingUid);
     return NextResponse.json(
       {
         error: 'contact_required',
