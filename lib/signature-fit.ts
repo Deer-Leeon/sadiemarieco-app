@@ -28,15 +28,18 @@ export const SIGNATURE_BOX_PT = {
 export const TECHNICIAN_REVIEW_CHECKBOX_PT = {
   /** Left edge of the redrawn checkbox. */
   x: 60.5,
-  /** Bottom edge of the redrawn checkbox. */
-  y: 408,
+  /**
+   * Bottom edge of the redrawn checkbox.
+   * Tuned to the Canva ☐ baseline (~416.4pt) measured via pdf.js.
+   */
+  y: 414.5,
   /** Outer size of the redrawn checkbox square. */
   size: 9,
-  /** White erase covering the printed ☐ + label up to the signature line. */
+  /** White erase covering the printed ☐ + label under the signature line. */
   eraseX: 54,
-  eraseY: 400,
-  eraseWidth: 175,
-  eraseHeight: 32,
+  eraseY: 412,
+  eraseWidth: 180,
+  eraseHeight: 20,
   /** Label drawn to the right of the checkbox. */
   label: 'Reviewed by Technician',
   labelSize: 11,

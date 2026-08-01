@@ -13,6 +13,7 @@ import {
   LineCapStyle,
   PDFCheckBox,
   PDFDocument,
+  PDFName,
   PDFTextField,
   reduceRotation,
   rotateInPlace,
@@ -529,13 +530,28 @@ function refreshCheckboxAppearances(form: PDFForm): void {
 }
 
 /**
+ * Flatten leaves dangling Annots refs (e.g. 140/141) that no longer exist.
+ * Chrome's PDF viewer then hits Invalid XRef and can drop later page draws
+ * (including the technician-review stamp) while still showing earlier content.
+ */
+function clearDanglingPageAnnots(pdfDoc: PDFDocument): void {
+  for (const page of pdfDoc.getPages()) {
+    if (page.node.Annots()) {
+      page.node.delete(PDFName.of('Annots'));
+    }
+  }
+}
+
+/**
  * Bake form values into the page and remove all AcroForm fields so the signed
  * PDF is not fillable or editable in Preview/Chrome/Acrobat (read-only document).
+ * Returns the embedded stamp font so later draws can reuse it (avoid a second
+ * full-font embed that bloats + destabilizes the XRef).
  */
 async function finalizeFormAppearance(
   pdfDoc: PDFDocument,
   form: PDFForm
-): Promise<void> {
+): Promise<PDFFont> {
   const font = await embedStampFont(pdfDoc);
   const textPlacements = collectTextFieldPlacements(pdfDoc, form);
   clearTextFieldAppearancesForFlatten(form, font);
@@ -550,6 +566,7 @@ async function finalizeFormAppearance(
   }
 
   drawTextFieldPlacements(textPlacements, font);
+  clearDanglingPageAnnots(pdfDoc);
 
   const remainingFields = pdfDoc.getForm().getFields();
   if (remainingFields.length > 0) {
@@ -557,6 +574,8 @@ async function finalizeFormAppearance(
       `Consent PDF still has ${remainingFields.length} editable field(s) after flatten — refusing to save.`
     );
   }
+
+  return font;
 }
 
 async function loadTemplateUrl(): Promise<string> {
@@ -635,15 +654,23 @@ export async function generateUnsignedPreviewPDF(
 
 async function uploadSignedConsentPdf(
   clientId: string,
-  pdfBytes: Uint8Array
+  pdfBytes: Uint8Array,
+  options?: { uniquePathSuffix?: string }
 ): Promise<string> {
   const token = getBlobToken();
-  const pathname = `client-consents/${clientId}-signed.pdf`;
+  // Reviewed re-stamps must use a new pathname. Overwriting the same Blob URL
+  // often leaves Chrome/CDN serving the pre-review PDF (empty ☐) even though
+  // put() succeeds and the admin UI marks the client reviewed.
+  const suffix = options?.uniquePathSuffix
+    ? `-${options.uniquePathSuffix}`
+    : '';
+  const pathname = `client-consents/${clientId}-signed${suffix}.pdf`;
   try {
     const blob = await put(pathname, Buffer.from(pdfBytes), {
       access: 'public',
       contentType: 'application/pdf',
-      allowOverwrite: true,
+      allowOverwrite: !options?.uniquePathSuffix,
+      addRandomSuffix: false,
       token,
     });
     return blob.url;
@@ -663,10 +690,7 @@ async function uploadSignedConsentPdf(
  * Replace the printed ☐ Reviewed by Technician row with a clean checked
  * checkbox + label so the mark fits the box in every PDF viewer.
  */
-async function drawTechnicianReviewCheck(
-  pdfDoc: PDFDocument,
-  page: PDFPage
-): Promise<void> {
+function drawTechnicianReviewCheck(page: PDFPage, font: PDFFont): void {
   const {
     x,
     y,
@@ -714,7 +738,6 @@ async function drawTechnicianReviewCheck(
     lineCap: LineCapStyle.Round,
   });
 
-  const font = await embedStampFont(pdfDoc);
   page.drawText(label, {
     x: x + size + labelGap,
     y: y + (size - labelSize) / 2 + 0.75,
@@ -753,18 +776,24 @@ export async function stampConsentPDF(
   const dest = placeImageInBox(placement, fitted, { origin: 'bottom-left' });
   placement.page.drawImage(signatureImage, dest);
 
-  await finalizeFormAppearance(pdfDoc, form);
+  const font = await finalizeFormAppearance(pdfDoc, form);
 
   if (options?.technicianReviewed) {
     const pages = pdfDoc.getPages();
     if (pages.length === 0) {
       throw new Error('Consent PDF has no pages.');
     }
-    await drawTechnicianReviewCheck(pdfDoc, pages[pages.length - 1]!);
+    drawTechnicianReviewCheck(pages[pages.length - 1]!, font);
   }
 
   const pdfBytes = await pdfDoc.save();
-  return uploadSignedConsentPdf(clientId, pdfBytes);
+  return uploadSignedConsentPdf(
+    clientId,
+    pdfBytes,
+    options?.technicianReviewed
+      ? { uniquePathSuffix: `reviewed-${Date.now()}` }
+      : undefined
+  );
 }
 
 /**
