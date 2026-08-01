@@ -282,8 +282,8 @@ function buildIndexHtml(): string {
     <p class="intro">
       Static previews generated from the live <code>generateReminderHtml</code> template.
       <strong>No email is sent at booking</strong> — clients still get the confirmation SMS immediately.
-      All variants share the same layout: cursive <em>“Your appointment is almost here!”</em>,
-      navy banner with date/time, beige body with prep instructions, and a Cancel/Reschedule button.
+      All variants share the same layout: cursive <em>“Almost here!”</em>,
+      navy banner with date/time, beige body with prep instructions, and a Manage booking button.
     </p>
 
     <section class="schedule">
