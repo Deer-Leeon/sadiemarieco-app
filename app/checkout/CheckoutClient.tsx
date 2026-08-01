@@ -84,7 +84,10 @@ async function callBookingConfirm(params: {
   calBookingUid: string;
   name: string;
   email: string;
-}): Promise<{ calWarning: string | null }> {
+}): Promise<{
+  calWarning: string | null;
+  contact: { sms: boolean; email: boolean };
+}> {
   const res = await fetchWithTimeout(
     '/api/booking/confirm',
     {
@@ -117,8 +120,26 @@ async function callBookingConfirm(params: {
   const data = (await res.json()) as {
     ok?: boolean;
     cal_accept_error?: string | null;
+    contact?: { sms?: boolean; email?: boolean };
   };
-  return { calWarning: data.cal_accept_error ?? null };
+  // Prefer server flags (sms_opt_in + stored email). Fall back to the
+  // checkout URL email only when the payload omitted `contact`.
+  if (data.contact) {
+    return {
+      calWarning: data.cal_accept_error ?? null,
+      contact: {
+        sms: data.contact.sms === true,
+        email: data.contact.email === true,
+      },
+    };
+  }
+  return {
+    calWarning: data.cal_accept_error ?? null,
+    contact: {
+      sms: false,
+      email: Boolean(params.email),
+    },
+  };
 }
 
 /** Fetch that fails instead of hanging forever on a stalled network/API. */
@@ -638,6 +659,7 @@ function CheckoutThreeDSResume({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<{
     calWarning: string | null;
+    contact: { sms: boolean; email: boolean };
   } | null>(null);
   const resumeStartedRef = useRef(false);
 
@@ -654,7 +676,10 @@ function CheckoutThreeDSResume({
           email,
         });
         clearStripeRedirectParams(uid, name, email);
-        setConfirmed({ calWarning: result.calWarning });
+        setConfirmed({
+          calWarning: result.calWarning,
+          contact: result.contact,
+        });
       } catch (err) {
         setSubmitError(
           err instanceof Error
@@ -668,7 +693,13 @@ function CheckoutThreeDSResume({
   }, [uid, name, email, setupIntentId]);
 
   if (confirmed) {
-    return <SuccessCard name={name} calWarning={confirmed.calWarning} />;
+    return (
+      <SuccessCard
+        name={name}
+        calWarning={confirmed.calWarning}
+        contact={confirmed.contact}
+      />
+    );
   }
 
   if (submitError) {
@@ -765,6 +796,7 @@ function CheckoutForm({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<{
     calWarning: string | null;
+    contact: { sms: boolean; email: boolean };
   } | null>(null);
 
   const ready = stripe !== null && elements !== null;
@@ -785,7 +817,10 @@ function CheckoutForm({
         });
         clearStripeRedirectParams(uid, name, email);
         onConfirmed();
-        setConfirmed({ calWarning: result.calWarning });
+        setConfirmed({
+          calWarning: result.calWarning,
+          contact: result.contact,
+        });
       } catch (err) {
         setSubmitError(
           err instanceof Error
@@ -925,7 +960,13 @@ function CheckoutForm({
   }
 
   if (confirmed) {
-    return <SuccessCard name={name} calWarning={confirmed.calWarning} />;
+    return (
+      <SuccessCard
+        name={name}
+        calWarning={confirmed.calWarning}
+        contact={confirmed.contact}
+      />
+    );
   }
 
   return (
@@ -1101,16 +1142,27 @@ function ExpiredHoldCard({
   );
 }
 
+function successContactPhrase(contact: { sms: boolean; email: boolean }): string {
+  if (contact.sms && contact.email) return 'SMS or email';
+  if (contact.sms) return 'SMS';
+  if (contact.email) return 'email';
+  // Shouldn't happen after the contact-channel gate, but stay graceful.
+  return 'messages';
+}
+
 function SuccessCard({
   name,
   calWarning,
+  contact,
 }: {
   name: string;
   calWarning: string | null;
+  contact: { sms: boolean; email: boolean };
 }) {
   // Be defensive about a missing `name` — the URL may not carry one
   // when Cal's `bookingSuccessful` payload didn't include attendees.
   const firstName = (name || '').trim().split(/\s+/)[0] || '';
+  const channel = successContactPhrase(contact);
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-8 text-center shadow-sm shadow-stone-900/[0.03] sm:p-10">
       <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-stone-900 text-stone-50">
@@ -1120,8 +1172,8 @@ function SuccessCard({
         {firstName ? `Thank you, ${firstName}.` : 'You\u2019re all set.'}
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-stone-600">
-        Your appointment is confirmed. Check your email or texts for the
-        details and a link to manage your booking.
+        Your appointment is confirmed. Check your {channel} for the details
+        and a link to manage your booking.
       </p>
 
       {calWarning && (

@@ -56,6 +56,7 @@ import {
   isCalBookingAlreadyConfirmed,
 } from '@/lib/cal-proxy';
 import { isValidEmail } from '@/lib/client-identity';
+import { hasRealBookingEmail } from '@/lib/booking-contact-channel';
 import {
   clientIpFromRequest,
   RATE_LIMITS,
@@ -672,6 +673,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Non-blocking: Stripe + DB already succeeded. Idempotent via
   // webhook_events. SMS only when sms_opt_in === true (A2P).
   let notifications: Record<string, unknown> | null = null;
+  let contactSms = false;
+  let contactEmail = false;
   try {
     const { rows } = await sql<{
       booking_time: Date | string | null;
@@ -768,6 +771,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .filter(Boolean)
         .join(' ')
         .trim();
+      const resolvedEmail = appt.client_email || email || null;
+      contactSms = smsOptIn;
+      contactEmail = hasRealBookingEmail(resolvedEmail);
       notifications = await notifyBookingConfirmed({
         bookingUid: calBookingUid,
         bookingTime,
@@ -776,7 +782,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         clientName: clientName || name,
         serviceName: appt.service_name || 'appointment',
         clientId: appt.client_id,
-        clientEmail: appt.client_email || email || null,
+        clientEmail: resolvedEmail,
         skipIfAlreadySent: true,
         smsOptIn,
       });
@@ -785,12 +791,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         '[api/booking/confirm] no appointment row for notifications',
         { calBookingUid }
       );
+      contactEmail = hasRealBookingEmail(email);
     }
   } catch (err) {
     console.error('[api/booking/confirm] notifications failed (non-blocking)', {
       calBookingUid,
       error: errorMessage(err),
     });
+    if (!contactEmail) contactEmail = hasRealBookingEmail(email);
   }
 
   return NextResponse.json({
@@ -802,5 +810,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // will confirm shortly" so the client isn't left wondering.
     cal_accept_error: calError,
     notifications,
+    contact: {
+      sms: contactSms,
+      email: contactEmail,
+    },
   });
 }
