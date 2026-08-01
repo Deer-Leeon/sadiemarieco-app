@@ -327,7 +327,94 @@
     const phone =
       (typeof attendee.phoneNumber === 'string' && attendee.phoneNumber) ||
       '';
-    return { uid, name, email, serviceName, bookingTime, endTime, phone };
+    const responses =
+      (booking.responses && typeof booking.responses === 'object'
+        ? booking.responses
+        : null) ||
+      (payload.responses && typeof payload.responses === 'object'
+        ? payload.responses
+        : null) ||
+      {};
+    const fieldResponses =
+      (booking.bookingFieldsResponses &&
+      typeof booking.bookingFieldsResponses === 'object'
+        ? booking.bookingFieldsResponses
+        : null) ||
+      (payload.bookingFieldsResponses &&
+      typeof payload.bookingFieldsResponses === 'object'
+        ? payload.bookingFieldsResponses
+        : null) ||
+      {};
+    const smsRaw =
+      responses['sms-consent'] ??
+      responses.smsConsent ??
+      responses.sms_consent ??
+      fieldResponses['sms-consent'] ??
+      fieldResponses.smsConsent ??
+      fieldResponses.sms_consent ??
+      null;
+    let smsOptIn;
+    if (smsRaw && typeof smsRaw === 'object' && 'value' in smsRaw) {
+      smsOptIn = smsRaw.value === true || smsRaw.value === 'true';
+    } else if (smsRaw === true || smsRaw === 1 || smsRaw === 'true') {
+      smsOptIn = true;
+    } else if (smsRaw === false || smsRaw === 0 || smsRaw === 'false') {
+      smsOptIn = false;
+    }
+    return {
+      uid,
+      name,
+      email,
+      serviceName,
+      bookingTime,
+      endTime,
+      phone,
+      smsOptIn
+    };
+  };
+
+  const emailLooksReal = (email) =>
+    Boolean(
+      email &&
+        email.includes('@') &&
+        !/@sms\.cal\.com$/i.test(email) &&
+        !/^bookings\+/i.test(email) &&
+        !/@placeholder\.sadiemarie\.co$/i.test(email)
+    );
+
+  const contactWarningEl = document.getElementById('booking-contact-warning');
+  const contactWarningDismiss = document.getElementById(
+    'booking-contact-warning-dismiss'
+  );
+  let contactWarningLink = null;
+
+  const hideContactWarning = () => {
+    if (contactWarningEl) contactWarningEl.hidden = true;
+  };
+
+  const showContactWarning = (link) => {
+    contactWarningLink = link || null;
+    if (contactWarningEl) contactWarningEl.hidden = false;
+    if (drawer && !drawer.classList.contains('drawer-open')) {
+      drawer.classList.add('drawer-open');
+    }
+    if (backdrop && !backdrop.classList.contains('drawer-open')) {
+      backdrop.classList.add('drawer-open');
+    }
+  };
+
+  if (contactWarningDismiss) {
+    contactWarningDismiss.addEventListener('click', () => {
+      hideContactWarning();
+      const link = contactWarningLink;
+      contactWarningLink = null;
+      if (link) rebuildMount(link);
+    });
+  }
+
+  const hideCheckoutHandoff = () => {
+    const handoff = document.getElementById('checkout-handoff');
+    if (handoff) handoff.classList.remove('is-active');
   };
 
   const redirectToCheckoutAfterBooking = (event, link) => {
@@ -336,76 +423,118 @@
       if (otherLink !== link) staleLinks.add(otherLink);
     });
 
-    try {
-      const {
-        uid,
-        name,
-        email,
-        serviceName,
-        bookingTime,
-        endTime,
-        phone
-      } = parseBookingFromEvent(event);
-
-      if (!uid) {
-        console.warn(
-          '[booking] booking success event without uid — skipping redirect',
-          event
-        );
-        return;
-      }
-
-      if (checkoutRedirectedUids.has(uid)) return;
-      checkoutRedirectedUids.add(uid);
-
-      // Hide the drawer and Cal iframe before navigation so the Cal
-      // "Your booking has been submitted" screen never flashes.
-      showCheckoutHandoff();
-
-      const search = new URLSearchParams({ uid });
-      if (name) search.set('name', name);
-      // Never put Cal phone-gateway placeholders in the checkout URL
-      // (e.g. 18018224166@sms.cal.com) — Stripe Link would prefill them.
-      const emailLooksReal =
-        email &&
-        email.includes('@') &&
-        !/@sms\.cal\.com$/i.test(email) &&
-        !/^bookings\+/i.test(email);
-      if (emailLooksReal) search.set('email', email);
-
-      // Do not await — navigation must start immediately. Init hydrates
-      // missing email/time from Cal when the embed omitted them (V2).
-      // Never follow a cross-host redirect (e.g. staging gate → www) —
-      // that would write the hold on production while checkout stays here.
-      fetch('/api/booking/init', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        redirect: 'manual',
-        body: JSON.stringify({
-          calBookingUid: uid,
+    const run = async () => {
+      try {
+        const {
+          uid,
           name,
           email,
           serviceName,
           bookingTime,
           endTime,
-          phone
-        }),
-        keepalive: true
-      }).catch((initErr) => {
-        console.warn(
-          '[booking] /api/booking/init failed (checkout will still run)',
-          initErr
-        );
-      });
+          phone,
+          smsOptIn
+        } = parseBookingFromEvent(event);
 
-      window.location.replace(`/checkout?${search.toString()}`);
-    } catch (err) {
-      console.error(
-        '[booking] failed to redirect to /checkout after booking success',
-        err
-      );
-    }
+        if (!uid) {
+          console.warn(
+            '[booking] booking success event without uid — skipping redirect',
+            event
+          );
+          return;
+        }
+
+        if (checkoutRedirectedUids.has(uid)) return;
+        checkoutRedirectedUids.add(uid);
+
+        const hasEmail = emailLooksReal(email);
+        const hasSms = smsOptIn === true;
+
+        // Cal's success payload often omits sms-consent — when email is
+        // missing, wait for /api/booking/init (hydrates from Cal) before
+        // sending the client to checkout.
+        if (!hasEmail && !hasSms) {
+          showCheckoutHandoff();
+          let data = {};
+          try {
+            const res = await fetch('/api/booking/init', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              redirect: 'manual',
+              body: JSON.stringify({
+                calBookingUid: uid,
+                name,
+                email: '',
+                serviceName,
+                bookingTime,
+                endTime,
+                phone,
+                smsOptIn
+              })
+            });
+            data = await res.json().catch(() => ({}));
+            if (!res.ok || data.error === 'contact_required') {
+              checkoutRedirectedUids.delete(uid);
+              hideCheckoutHandoff();
+              showContactWarning(link);
+              return;
+            }
+          } catch (initErr) {
+            console.warn('[booking] /api/booking/init contact check failed', initErr);
+            checkoutRedirectedUids.delete(uid);
+            hideCheckoutHandoff();
+            showContactWarning(link);
+            return;
+          }
+
+          const search = new URLSearchParams({ uid });
+          if (name) search.set('name', name);
+          window.location.replace(`/checkout?${search.toString()}`);
+          return;
+        }
+
+        // Hide the drawer and Cal iframe before navigation so the Cal
+        // "Your booking has been submitted" screen never flashes.
+        showCheckoutHandoff();
+
+        const search = new URLSearchParams({ uid });
+        if (name) search.set('name', name);
+        if (hasEmail) search.set('email', email);
+
+        fetch('/api/booking/init', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          redirect: 'manual',
+          body: JSON.stringify({
+            calBookingUid: uid,
+            name,
+            email: hasEmail ? email : '',
+            serviceName,
+            bookingTime,
+            endTime,
+            phone,
+            smsOptIn: hasSms
+          }),
+          keepalive: true
+        }).catch((initErr) => {
+          console.warn(
+            '[booking] /api/booking/init failed (checkout will still run)',
+            initErr
+          );
+        });
+
+        window.location.replace(`/checkout?${search.toString()}`);
+      } catch (err) {
+        console.error(
+          '[booking] failed to redirect to /checkout after booking success',
+          err
+        );
+      }
+    };
+
+    void run();
   };
 
   const registerBookingRedirectHandlers = (nsApi, link) => {
@@ -540,6 +669,8 @@
 
   const closeDrawer = () => {
     if (!drawer || !backdrop) return;
+    hideContactWarning();
+    contactWarningLink = null;
     drawer.classList.remove('drawer-open');
     backdrop.classList.remove('drawer-open');
   };

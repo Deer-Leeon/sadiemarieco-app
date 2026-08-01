@@ -1120,8 +1120,8 @@ function SuccessCard({
         {firstName ? `Thank you, ${firstName}.` : 'You\u2019re all set.'}
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-stone-600">
-        Your appointment is confirmed. Check your email for the details
-        and a link to manage your booking.
+        Your appointment is confirmed. Check your email or texts for the
+        details and a link to manage your booking.
       </p>
 
       {calWarning && (

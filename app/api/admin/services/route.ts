@@ -338,14 +338,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   //       editor never ends up in a half-state where the row exists
   //       locally but the menu on Cal looks wrong.
   //
-  // What we do NOT attempt: `email.required: false`. Cal's API
-  // enforces `checkIsEmailUserAccessible` on every booking-fields
-  // shape that touches email on personal accounts (the validator is
-  // bypassed only on organisation-team event types — see Cal issue
-  // #25430 and the queued fix in PR #26316). Until that ships we
-  // accept the default required-email behaviour and surface a Cal
-  // dashboard deep-link in the admin UI so editors can toggle the
-  // field optional by hand if they want.
+  // What we do NOT force: SMS consent as a condition of booking (A2P).
+  // Email is sent as optional+visible via STUDIO_BOOKING_FIELDS; clients
+  // must still provide email OR opt in to texts (enforced post-submit).
   const slug = makeSlug(payload.title);
   // Narrowed by the `if (payload.is_group) return` early-exit above:
   // when the branch reaches here, is_group is false and the parser
@@ -906,33 +901,21 @@ interface CalCreateEventBody {
 }
 
 /**
- * Discriminated union of the booking-field shapes we actually send.
- * Cal.com v2 accepts a much larger oneOf (address/text/number/etc.) —
- * we only enumerate the two this route uses so the TypeScript checker
- * catches a typo on a property name at build time rather than letting
- * Cal reject it at runtime.
- *
- * Shapes derived from the OpenAPI schema at
- * https://cal.com/docs/api-reference/v2/event-types/create-an-event-type
- * (specifically SplitNameDefaultFieldInput_2024_06_14 and
- * PhoneFieldInput_2024_06_14).
- *
- * Email is deliberately absent. Cal.com's API runs a
- * `checkIsEmailUserAccessible` guard on every booking-fields shape
- * that touches email on personal accounts (see Cal issue #25430).
- * Since we can only set email back to its default required+visible
- * state — which is what Cal already does when we omit the field —
- * there is no benefit to sending it. The "make email optional"
- * affordance lives in the Cal dashboard, deep-linked from each card
- * on /admin/services.
- */
-/**
  * Discriminated union of the booking-field shapes we historically typed
  * here. The live payload now lives in `STUDIO_BOOKING_FIELDS`
  * (`lib/cal-event-studio-defaults.ts`) so SMS consent stays in sync
  * across create/update/backfill.
+ *
+ * Email is included as optional+visible (Cal now allows phone-or-email
+ * accessibility after API fix for #25430). Shapes derived from the
+ * OpenAPI schema at
+ * https://cal.com/docs/api-reference/v2/event-types/create-an-event-type
  */
-type CalBookingField = CalSplitNameField | CalPhoneField | CalBooleanField;
+type CalBookingField =
+  | CalSplitNameField
+  | CalEmailField
+  | CalPhoneField
+  | CalBooleanField;
 
 interface CalSplitNameField {
   type: 'splitName';
@@ -941,6 +924,14 @@ interface CalSplitNameField {
   lastNameLabel: string;
   lastNamePlaceholder: string;
   lastNameRequired: boolean;
+}
+
+interface CalEmailField {
+  type: 'email';
+  label: string;
+  placeholder: string;
+  required: boolean;
+  hidden: boolean;
 }
 
 interface CalPhoneField {
@@ -961,7 +952,7 @@ interface CalBooleanField {
 
 /**
  * Apply studio defaults on Cal: booking fields, auto-confirm, in-person location.
- * Email is omitted from bookingFields (Cal personal accounts reject API email tweaks).
+ * Includes optional email + required phone + optional SMS consent.
  */
 async function patchStudioCalEventDefaultsOnCal(
   calEventId: number,
