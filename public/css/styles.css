@@ -1011,6 +1011,9 @@ a.service-item:focus-visible .service-action {
   text-transform: uppercase;
   color: #78716c;
 }
+.booking-contact-email-wrap[hidden] {
+  display: none !important;
+}
 .booking-contact-field input {
   border: 1px solid rgba(28, 25, 23, 0.16);
   background: #fafaf9;
@@ -1030,7 +1033,7 @@ a.service-item:focus-visible .service-action {
   display: flex;
   align-items: flex-start;
   gap: 0.65rem;
-  margin-top: 0.85rem;
+  margin-top: 1rem;
   font-size: 0.88rem;
   line-height: 1.4;
   color: #44403c;
@@ -1070,6 +1073,27 @@ a.service-item:focus-visible .service-action {
 .booking-contact-warning-btn:disabled {
   opacity: 0.6;
   cursor: wait;
+}
+.booking-contact-email-toggle {
+  display: block;
+  width: 100%;
+  margin-top: 0.85rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #78716c;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  cursor: pointer;
+  text-align: center;
+}
+.booking-contact-email-toggle:hover {
+  color: var(--navy);
+}
+.booking-contact-email-toggle[hidden] {
+  display: none !important;
 }
 
 #drawer-cal-container {

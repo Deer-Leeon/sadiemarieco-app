@@ -117,10 +117,9 @@ export default async function ServicesPage() {
               <span className="font-medium">
                 First name, Last name, and Phone
               </span>{' '}
-              on every booking. Email is optional — clients must still
-              provide an email <span className="font-medium">or</span> opt
-              in to appointment texts (SMS consent stays optional for
-              compliance; one of the two is required).
+              on every booking. The booker asks for SMS opt-in on the form;
+              if they skip it, a follow-up step offers texts again or an
+              email instead (SMS consent stays optional for compliance).
             </p>
             <p className="mt-2">
               Every new service gets a{' '}
