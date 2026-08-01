@@ -304,24 +304,68 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const { setupIntentId, email, name, calBookingUid } = parsed;
 
-  // ── 0. HOLD GATE — abort if the abandoned-cart sweep released the slot ─
+  // ── 0. HOLD GATE — require a local pending hold; never confirm without one ─
+  // Init is fire-and-forget before /checkout navigation. If that failed (or
+  // the uid is forged), there is no row and we must not vault + accept on Cal.
+  let hold: Awaited<ReturnType<typeof getAppointmentHoldByCalUid>>;
   try {
-    const hold = await getAppointmentHoldByCalUid(calBookingUid);
-    if (hold) {
-      const status = (hold.status || '').toLowerCase();
-      if (status === 'canceled_by_system' || isHoldExpired(hold.created_at)) {
-        return NextResponse.json(
-          {
-            error: 'cart_hold_expired',
-            message: HOLD_EXPIRED_MESSAGE,
-          },
-          { status: 400 }
-        );
-      }
-    }
+    hold = await getAppointmentHoldByCalUid(calBookingUid);
   } catch (err) {
     const msg = errorMessage(err);
     console.error('[api/booking/confirm] hold lookup failed:', msg);
+    return NextResponse.json(
+      { error: 'hold_lookup_failed', message: msg },
+      { status: 500 }
+    );
+  }
+
+  if (!hold) {
+    return NextResponse.json(
+      {
+        error: 'appointment_not_found',
+        message:
+          'This booking hold was not found. Please pick a time on the calendar again.',
+      },
+      { status: 404 }
+    );
+  }
+
+  {
+    const status = (hold.status || '').toLowerCase();
+    if (status === 'canceled_by_system' || isHoldExpired(hold.created_at)) {
+      return NextResponse.json(
+        {
+          error: 'cart_hold_expired',
+          message: HOLD_EXPIRED_MESSAGE,
+        },
+        { status: 400 }
+      );
+    }
+    if (
+      status.startsWith('canceled') ||
+      status === 'cancelled' ||
+      status === 'no-show'
+    ) {
+      return NextResponse.json(
+        {
+          error: 'booking_not_confirmable',
+          message:
+            'This booking can no longer be confirmed. Please pick a new time on the calendar.',
+        },
+        { status: 409 }
+      );
+    }
+  }
+
+  // Linked Stripe ids for this booking (SetupIntent id written at mint time).
+  let existingStripe: Awaited<
+    ReturnType<typeof getAppointmentStripeByCalUid>
+  >;
+  try {
+    existingStripe = await getAppointmentStripeByCalUid(calBookingUid);
+  } catch (err) {
+    const msg = errorMessage(err);
+    console.error('[api/booking/confirm] stripe row lookup failed:', msg);
     return NextResponse.json(
       { error: 'hold_lookup_failed', message: msg },
       { status: 500 }
@@ -358,6 +402,45 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 400 }
       );
     }
+
+    // Bind SetupIntent → this Cal booking. Without this, a succeeded
+    // seti_ from booking A can be POSTed against booking B's uid.
+    const metaUid = (setupIntent.metadata?.cal_booking_uid ?? '').trim();
+    if (!metaUid || metaUid !== calBookingUid) {
+      console.warn('[api/booking/confirm] setup intent booking mismatch', {
+        calBookingUid,
+        metaUid: metaUid || null,
+        setupIntentId,
+      });
+      return NextResponse.json(
+        {
+          error: 'setup_intent_booking_mismatch',
+          message:
+            'This card session does not match the booking. Please try checkout again.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const linkedSetupIntentId = (
+      existingStripe?.stripe_setup_intent_id ?? ''
+    ).trim();
+    if (linkedSetupIntentId && linkedSetupIntentId !== setupIntentId) {
+      console.warn('[api/booking/confirm] setup intent not current for booking', {
+        calBookingUid,
+        setupIntentId,
+        linkedSetupIntentId,
+      });
+      return NextResponse.json(
+        {
+          error: 'setup_intent_stale',
+          message:
+            'This card session is out of date. Please try checkout again.',
+        },
+        { status: 400 }
+      );
+    }
+
     // After expansion, `payment_method` is the full object. Type guard
     // both shapes so a future refactor that drops the expand call
     // doesn't silently break the billing-details fallback.
@@ -436,7 +519,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       : '');
 
   // ── 2. STRIPE: attach PaymentMethod to vault Customer ─────────────
-  const existingStripe = await getAppointmentStripeByCalUid(calBookingUid);
   const customerFromIntent =
     typeof setupIntent.customer === 'string'
       ? setupIntent.customer
@@ -538,9 +620,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     `;
     dbLinked = (rowCount ?? 0) > 0;
     if (!dbLinked) {
-      console.warn(
-        '[api/booking/confirm] no appointments row matched cal_event_id — webhook may not have run yet',
+      // Hold gate required a row earlier — disappearance mid-request is
+      // unexpected; do not pretend the booking was confirmed locally.
+      console.error(
+        '[api/booking/confirm] appointments row missing after hold gate',
         { calBookingUid, stripeCustomerId }
+      );
+      return NextResponse.json(
+        {
+          error: 'appointment_not_found',
+          message:
+            'This booking hold was not found. Please pick a time on the calendar again.',
+          stripeCustomerId,
+        },
+        { status: 404 }
       );
     }
   } catch (err) {
