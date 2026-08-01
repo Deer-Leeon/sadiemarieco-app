@@ -23,7 +23,10 @@ Run after staging deploy, then again on production.
 
 ## Consent
 - [ ] Open consent link; submit with signature succeeds
-- [ ] `curl` POST with backdated `agreement_date` returns 400 `validation_failed`
+- [ ] Server validation rejects incomplete payloads with 400 `validation_failed`
+  (e.g. `POST /api/consent/preview` with empty `full_name` — no DB write).
+  Note: `agreement_date` is forced to studio “today” in `prepareConsentFormForServer`
+  before validate, so a backdated date alone will not 400.
 
 ## Webhook
 - [ ] POST `/api/webhook` without signature → 401
