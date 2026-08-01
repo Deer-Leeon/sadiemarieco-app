@@ -150,6 +150,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       customer: stripeCustomerId,
       usage: 'off_session',
       payment_method_types: ['card'],
+      // Prefer 3DS when the issuer/Radar recommends it — strengthens
+      // the mandate for later off-session no-show / late-cancel charges.
+      payment_method_options: {
+        card: {
+          request_three_d_secure: 'automatic',
+        },
+      },
       metadata: { cal_booking_uid: calBookingUid },
     });
 

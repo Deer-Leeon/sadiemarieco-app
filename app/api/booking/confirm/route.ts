@@ -48,6 +48,7 @@ import {
 } from '@/lib/appointment-stripe';
 import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
 import { notifyBookingConfirmed } from '@/lib/booking-notifications';
+import { stripeCardCheckRejection } from '@/lib/stripe-card-checks';
 import {
   CAL_BOOKINGS_API_VERSION,
   calUpstreamErrorMessage,
@@ -375,6 +376,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!paymentMethodId) {
       return NextResponse.json(
         { error: 'no_payment_method_on_setup_intent' },
+        { status: 400 }
+      );
+    }
+
+    // Banks may still approve SetupIntent when CVC/ZIP is wrong.
+    // Reject hard fails so we don't vault a card we can't charge later.
+    const pmFull =
+      typeof pm === 'object' && pm
+        ? pm
+        : await stripe.paymentMethods.retrieve(paymentMethodId);
+    const checkReject = stripeCardCheckRejection(
+      pmFull.card?.checks ?? null
+    );
+    if (checkReject) {
+      try {
+        if (pmFull.customer) {
+          await stripe.paymentMethods.detach(paymentMethodId);
+        }
+      } catch (detachErr) {
+        console.warn(
+          '[api/booking/confirm] detach after card-check fail:',
+          errorMessage(detachErr)
+        );
+      }
+      return NextResponse.json(
+        {
+          error: 'card_verification_failed',
+          message: checkReject,
+        },
         { status: 400 }
       );
     }
