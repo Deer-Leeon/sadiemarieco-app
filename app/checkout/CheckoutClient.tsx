@@ -311,6 +311,8 @@ export default function CheckoutClient({
   const [holdReleaseState, setHoldReleaseState] = useState<
     'idle' | 'releasing' | 'released' | 'failed'
   >('idle');
+  /** Hide appointment/countdown once checkout succeeds (thank-you card). */
+  const [checkoutComplete, setCheckoutComplete] = useState(false);
 
   const appointmentWhen = useMemo(
     () => (bookingTime ? formatAppointmentWhen(bookingTime, endTime) : null),
@@ -564,11 +566,13 @@ export default function CheckoutClient({
           <ErrorCard message={bootstrapError} />
         ) : (
           <>
-            <CheckoutHoldSummary
-              appointmentWhen={appointmentWhen}
-              serviceLabel={serviceLabel}
-              countdownLabel={countdownLabel}
-            />
+            {!checkoutComplete && (
+              <CheckoutHoldSummary
+                appointmentWhen={appointmentWhen}
+                serviceLabel={serviceLabel}
+                countdownLabel={countdownLabel}
+              />
+            )}
             {!elementsOptions || !stripePromise ? (
               <LoadingCard />
             ) : (
@@ -578,6 +582,7 @@ export default function CheckoutClient({
                   name={name}
                   email={email}
                   holdExpired={holdExpired}
+                  onConfirmed={() => setCheckoutComplete(true)}
                 />
               </Elements>
             )}
@@ -685,6 +690,7 @@ interface FormProps {
   name: string;
   email: string;
   holdExpired: boolean;
+  onConfirmed: () => void;
 }
 
 function CheckoutHoldSummary({
@@ -749,6 +755,7 @@ function CheckoutForm({
   name,
   email,
   holdExpired,
+  onConfirmed,
 }: FormProps) {
   const stripe = useStripe();
   const elements = useElements();
@@ -775,6 +782,7 @@ function CheckoutForm({
           email,
         });
         clearStripeRedirectParams(uid, name, email);
+        onConfirmed();
         setConfirmed({ calWarning: result.calWarning });
       } catch (err) {
         setSubmitError(
@@ -785,7 +793,7 @@ function CheckoutForm({
         setSubmitting(false);
       }
     },
-    [uid, name, email]
+    [uid, name, email, onConfirmed]
   );
 
   // In-page 3DS return (rare) or bookmarked return URL — same auto-finalise
