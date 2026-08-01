@@ -2567,8 +2567,16 @@ button.btn-outline-navy:disabled {
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 24px;
+  margin-bottom: 12px;
   flex-wrap: wrap;
+}
+.portal-reschedule-hint {
+  font-family: var(--sans);
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: rgba(13, 27, 42, 0.72);
+  margin: 0 0 18px;
+  max-width: 42rem;
 }
 .portal-reschedule-mount {
   background: var(--off-white);
