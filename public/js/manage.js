@@ -220,6 +220,42 @@
     } catch (e) { return '—'; }
   };
 
+  const toIsoMaybe = (value) => {
+    if (value == null || value === '') return null;
+    if (typeof value === 'string') {
+      const ms = new Date(value).getTime();
+      return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const ms = value < 1e12 ? value * 1000 : value;
+      const d = new Date(ms);
+      return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+    }
+    if (value instanceof Date) {
+      return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+    }
+    if (typeof value === 'object') {
+      return (
+        toIsoMaybe(value.date) ||
+        toIsoMaybe(value.start) ||
+        toIsoMaybe(value.startTime) ||
+        toIsoMaybe(value.end) ||
+        toIsoMaybe(value.endTime) ||
+        toIsoMaybe(value.time) ||
+        null
+      );
+    }
+    return null;
+  };
+
+  const firstIso = (...candidates) => {
+    for (let i = 0; i < candidates.length; i += 1) {
+      const iso = toIsoMaybe(candidates[i]);
+      if (iso) return iso;
+    }
+    return null;
+  };
+
   const parseBookingFromEvent = (event) => {
     const detail = (event && event.detail) || {};
     const payload =
@@ -227,31 +263,53 @@
       (event && event.data) ||
       detail ||
       {};
+    const nestedData =
+      (payload && payload.data && typeof payload.data === 'object'
+        ? payload.data
+        : null) || null;
     const b =
       (payload && payload.booking && typeof payload.booking === 'object'
         ? payload.booking
-        : null) || payload;
+        : null) ||
+      (nestedData && nestedData.booking && typeof nestedData.booking === 'object'
+        ? nestedData.booking
+        : null) ||
+      payload;
     const uidRaw =
       (typeof b.uid === 'string' && b.uid) ||
       (typeof payload.uid === 'string' && payload.uid) ||
+      (nestedData && typeof nestedData.uid === 'string' && nestedData.uid) ||
+      (typeof detail.uid === 'string' && detail.uid) ||
       '';
     const uid = uidRaw.trim();
-    const start =
-      (typeof b.startTime === 'string' && b.startTime) ||
-      (typeof b.start === 'string' && b.start) ||
-      (typeof payload.startTime === 'string' && payload.startTime) ||
-      (typeof payload.start === 'string' && payload.start) ||
-      null;
-    const end =
-      (typeof b.endTime === 'string' && b.endTime) ||
-      (typeof b.end === 'string' && b.end) ||
-      (typeof payload.endTime === 'string' && payload.endTime) ||
-      (typeof payload.end === 'string' && payload.end) ||
-      null;
+    const start = firstIso(
+      b.startTime,
+      b.start,
+      b.date,
+      payload.startTime,
+      payload.start,
+      payload.date,
+      nestedData && nestedData.startTime,
+      nestedData && nestedData.start,
+      nestedData && nestedData.date,
+      detail.startTime,
+      detail.start
+    );
+    const end = firstIso(
+      b.endTime,
+      b.end,
+      payload.endTime,
+      payload.end,
+      nestedData && nestedData.endTime,
+      nestedData && nestedData.end,
+      detail.endTime,
+      detail.end
+    );
     const title =
       (typeof b.title === 'string' && b.title) ||
       (typeof b.eventTitle === 'string' && b.eventTitle) ||
       (typeof payload.title === 'string' && payload.title) ||
+      (nestedData && typeof nestedData.title === 'string' && nestedData.title) ||
       null;
     const eventType =
       detail.type ||
@@ -482,8 +540,10 @@
     const parsed = parseBookingFromEvent(event);
     const { uid: newUid, start, end, title, eventType } = parsed;
 
-    // Ignore unrelated Cal events when listening via wildcard.
-    if (eventType && !isCalRescheduleSuccessType(eventType)) return;
+    // Wildcard listeners can emit noise. Prefer typed success events; still
+    // proceed when we have a concrete booking payload (uid and/or start).
+    const typedSuccess = isCalRescheduleSuccessType(eventType);
+    if (eventType && !typedSuccess && !newUid && !start) return;
 
     if (
       start &&
@@ -493,14 +553,27 @@
       rescheduleMounted = false;
       const uidToLoad = newUid || booking.uid;
       if (newUid) {
-        if (handledRescheduleUids.has(newUid)) return;
-        handledRescheduleUids.add(newUid);
+        if (handledRescheduleUids.has(`same:${newUid}`)) return;
+        handledRescheduleUids.add(`same:${newUid}`);
         replaceManageUidInUrl(newUid);
       }
       setInlineNotice(
         "You're already booked for this time. Pick a different date or time if you want to move your appointment."
       );
+      setState('loaded');
       loadBooking(uidToLoad);
+      return;
+    }
+
+    // Same UID with no detectable time change — treat as same-slot noop.
+    if (newUid && newUid === booking.uid && !start) {
+      if (rescheduleMount) rescheduleMount.innerHTML = '';
+      rescheduleMounted = false;
+      setInlineNotice(
+        "You're already booked for this time. Pick a different date or time if you want to move your appointment."
+      );
+      setState('loaded');
+      loadBooking(booking.uid);
       return;
     }
 
@@ -580,8 +653,9 @@
       theme: 'light',
       layout: 'month_view',
     };
-    // Already opted in for this appointment — prefill consent so Cal doesn't
-    // require a second checkbox (and so an unchecked box can't look "new").
+    // Prefill only — never remove/require sms-consent (A2P: docs/a2p-sms-compliance.md).
+    // Already opted in for this appointment — prefill so Cal doesn't look like
+    // a fresh opt-in (unchecked must not revoke sticky sms_opt_in server-side).
     if (booking.sms_opt_in === true) {
       embedConfig['sms-consent'] = 'true';
     }
