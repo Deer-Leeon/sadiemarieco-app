@@ -281,9 +281,9 @@ Sadie Marie: Your Consultation is in one hour. Please arrive a few minutes early
 
 | | |
 |---|---|
-| **Who** | n/a |
+| **Who** | System (Resend) via `notifyBookingConfirmed` |
 | **SMS** | none |
-| **Notes** | `sendBookingConfirmationEmail` exists in code but is **never called**. No app confirmation email today. |
+| **Notes** | Sent when a real client email exists (SMS opt-in optional). Skips placeholders (`@sms.cal.com`, `bookings+…`). Idempotent via `webhook_events` key `{uid}:email`. |
 
 ---
 
