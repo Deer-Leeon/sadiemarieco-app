@@ -37,7 +37,7 @@ Do not reintroduce those failure modes.
   - submitting the booking form
   - providing a phone number
 - Checkbox field: Cal booking field `sms-consent` (`type: boolean`, **`required: false`**).
-- Label must state that **consent is not required to book**.
+- Label must state that **consent to texts is not required to book** when an email is provided (email OR SMS opt-in — never SMS-only forced consent).
 - Never prefix the label with “Required —” or set `required: true` on `sms-consent`.
 
 **Code:** `lib/cal-event-studio-defaults.ts` → `STUDIO_BOOKING_FIELDS` / `STUDIO_SMS_CONSENT_LABEL`  

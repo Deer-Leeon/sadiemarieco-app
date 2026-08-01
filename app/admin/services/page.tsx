@@ -117,9 +117,10 @@ export default async function ServicesPage() {
               <span className="font-medium">
                 First name, Last name, and Phone
               </span>{' '}
-              on every booking. Email is optional (configure that on each
-              event type in Cal.com if needed — this CMS does not push that
-              toggle).
+              on every booking. Email is optional — clients must still
+              provide an email <span className="font-medium">or</span> opt
+              in to appointment texts (SMS consent stays optional for
+              compliance; one of the two is required).
             </p>
             <p className="mt-2">
               Every new service gets a{' '}

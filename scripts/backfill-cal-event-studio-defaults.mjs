@@ -21,6 +21,13 @@ const STUDIO_BOOKING_FIELDS = [
     lastNameRequired: true,
   },
   {
+    type: 'email',
+    label: 'Email (optional if you opt in to appointment texts below)',
+    placeholder: 'you@example.com',
+    required: false,
+    hidden: false,
+  },
+  {
     type: 'phone',
     slug: 'attendeePhoneNumber',
     label: 'Phone number',
@@ -32,7 +39,7 @@ const STUDIO_BOOKING_FIELDS = [
     type: 'boolean',
     slug: 'sms-consent',
     label:
-      'Yes, I agree to receive appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to book.\nPrivacy: https://sadiemarie.co/privacy\nTerms: https://sadiemarie.co/terms',
+      'Yes, I agree to receive appointment texts from Sadie Marie (confirmations, reminders, and follow-ups). Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent to texts is not required to book if you provide an email above.\nPrivacy: https://sadiemarie.co/privacy\nTerms: https://sadiemarie.co/terms',
     required: false,
   },
 ];

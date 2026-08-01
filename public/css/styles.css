@@ -957,6 +957,66 @@ a.service-item:focus-visible .service-action {
 }
 #close-drawer:active { transform: scale(0.94); }
 
+.booking-contact-warning {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(250, 248, 245, 0.94);
+  backdrop-filter: blur(2px);
+}
+.booking-contact-warning[hidden] {
+  display: none !important;
+}
+.booking-contact-warning-card {
+  width: min(100%, 22rem);
+  border: 1px solid rgba(28, 25, 23, 0.12);
+  background: #fff;
+  padding: 1.35rem 1.4rem 1.25rem;
+  box-shadow: 0 12px 40px rgba(28, 25, 23, 0.08);
+}
+.booking-contact-warning-eyebrow {
+  margin: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #78716c;
+}
+.booking-contact-warning-title {
+  margin: 0.45rem 0 0;
+  font-family: var(--serif);
+  font-size: 1.45rem;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.booking-contact-warning-body {
+  margin: 0.7rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: #57534e;
+}
+.booking-contact-warning-body em {
+  font-style: italic;
+}
+.booking-contact-warning-btn {
+  margin-top: 1.1rem;
+  width: 100%;
+  border: 1px solid var(--navy);
+  background: var(--navy);
+  color: var(--off-white);
+  padding: 0.7rem 1rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.booking-contact-warning-btn:hover {
+  background: #0a1624;
+}
+
 #drawer-cal-container {
   position: relative;
   flex: 1;

@@ -4,7 +4,7 @@
  * Creates (or refreshes) a `pending` appointments row immediately after
  * the Cal.com embed fires `bookingSuccessful` — before the client reaches
  * /checkout. Clients are upserted by phone (CRM identifier); email is
- * optional (receipts / Cal attendee fall back when absent).
+ * optional, but email OR SMS opt-in is required so we can reach them.
  *
  * Idempotent on `cal_event_id`. Never downgrades status on conflict.
  */
@@ -12,6 +12,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
+import {
+  CONTACT_CHANNEL_CANCEL_REASON,
+  CONTACT_CHANNEL_REQUIRED_MESSAGE,
+  hasBookingContactChannel,
+  parseSmsOptInFromSources,
+} from '@/lib/booking-contact-channel';
 import {
   isValidEmail,
   normaliseClientPhoneForStorage,
@@ -41,6 +47,7 @@ interface InitBody {
   bookingTime?: unknown;
   endTime?: unknown;
   phone?: unknown;
+  smsOptIn?: unknown;
 }
 
 interface ParsedInit {
@@ -52,6 +59,7 @@ interface ParsedInit {
   endTime: string | null;
   phone: string;
   bookingNotes: string | null;
+  smsOptIn: boolean | undefined;
 }
 
 function errorMessage(err: unknown): string {
@@ -86,6 +94,12 @@ function parseInitBody(input: unknown): ParsedInit | { error: string } {
 
   const email = normalizeClientEmailForStorage(rawEmail) ?? '';
   const name = rawName.length > 0 && rawName.length <= 200 ? rawName : '';
+  const smsOptIn =
+    body.smsOptIn === true
+      ? true
+      : body.smsOptIn === false
+        ? false
+        : undefined;
 
   return {
     calBookingUid,
@@ -96,7 +110,32 @@ function parseInitBody(input: unknown): ParsedInit | { error: string } {
     endTime: endTime || null,
     phone,
     bookingNotes: null,
+    smsOptIn,
   };
+}
+
+async function cancelIncompleteContactBooking(uid: string): Promise<void> {
+  const apiKey = process.env.CAL_API_KEY;
+  if (!apiKey) return;
+  try {
+    await fetch(`${CAL_V2_BASE}/bookings/${encodeURIComponent(uid)}/cancel`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'cal-api-version': CAL_API_VERSION,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        cancellationReason: CONTACT_CHANNEL_CANCEL_REASON,
+      }),
+    });
+  } catch (err) {
+    console.warn('[api/booking/init] contact-channel cancel failed', {
+      uid,
+      error: errorMessage(err),
+    });
+  }
 }
 
 /** Pull attendee + schedule fields from Cal when the embed omitted them. */
@@ -157,8 +196,20 @@ async function hydrateFromCal(
           ? booking.endTime
           : null;
 
+    const responses =
+      booking.responses && typeof booking.responses === 'object'
+        ? (booking.responses as Record<string, unknown>)
+        : null;
+    const fieldResponses =
+      booking.bookingFieldsResponses &&
+      typeof booking.bookingFieldsResponses === 'object'
+        ? (booking.bookingFieldsResponses as Record<string, unknown>)
+        : null;
+    const smsFromCal = parseSmsOptInFromSources(responses, fieldResponses);
+
     const bookingNotes =
-      partial.bookingNotes || extractCalBookingNotes(booking as Record<string, unknown>);
+      partial.bookingNotes ||
+      extractCalBookingNotes(booking as Record<string, unknown>);
 
     return {
       ...partial,
@@ -168,10 +219,21 @@ async function hydrateFromCal(
         '',
       name: partial.name || attendeeName,
       phone: partial.phone || attendeePhone,
-      serviceName: partial.serviceName !== 'appointment' ? partial.serviceName : title || partial.serviceName,
+      serviceName:
+        partial.serviceName !== 'appointment'
+          ? partial.serviceName
+          : title || partial.serviceName,
       bookingTime: partial.bookingTime || start,
       endTime: partial.endTime || end,
       bookingNotes,
+      smsOptIn:
+        partial.smsOptIn === true
+          ? true
+          : smsFromCal === true
+            ? true
+            : partial.smsOptIn === false
+              ? false
+              : smsFromCal,
     };
   } catch (err) {
     console.warn('[api/booking/init] Cal hydrate failed (non-fatal)', {
@@ -201,15 +263,40 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
 
+  // Always hydrate when contact channel is incomplete or schedule/notes missing.
   let data = parsed;
-  if (!data.email || !data.bookingTime || !data.bookingNotes) {
+  const needsHydrate =
+    !hasBookingContactChannel({
+      email: data.email,
+      smsOptIn: data.smsOptIn,
+    }) ||
+    !data.bookingTime ||
+    !data.bookingNotes ||
+    !data.phone;
+  if (needsHydrate) {
     data = await hydrateFromCal(data.calBookingUid, data);
   }
 
-  // Email is optional on Cal bookings. Prefer a real address when Cal
-  // (or the client) provided one; otherwise store NULL and let receipt /
-  // reminder emails skip gracefully.
+  if (
+    !hasBookingContactChannel({
+      email: data.email,
+      smsOptIn: data.smsOptIn,
+    })
+  ) {
+    await cancelIncompleteContactBooking(data.calBookingUid);
+    return NextResponse.json(
+      {
+        error: 'contact_required',
+        message: CONTACT_CHANNEL_REQUIRED_MESSAGE,
+      },
+      { status: 400 }
+    );
+  }
+
+  // Prefer a real address when Cal (or the client) provided one; otherwise
+  // store NULL and let receipt / reminder emails skip gracefully.
   const storedEmail = isValidEmail(data.email) ? data.email : null;
+  const smsOptIn = data.smsOptIn === true;
 
   const nameParts = splitName(data.name);
   const firstName = nameParts.first;
@@ -251,13 +338,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       INSERT INTO appointments (
         client_id, service_name, booking_time, end_time, cal_event_id,
         client_first_name, client_last_name, client_email, client_phone,
-        booking_notes, status
+        booking_notes, status, sms_opt_in
       )
       VALUES (
         ${clientId}, ${data.serviceName}, ${data.bookingTime}, ${data.endTime},
         ${data.calBookingUid},
         ${firstName}, ${lastName}, ${storedEmail}, ${appointmentPhone},
-        ${data.bookingNotes}, 'pending'
+        ${data.bookingNotes}, 'pending', ${smsOptIn ? true : null}
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,
@@ -277,7 +364,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           END
         ),
         client_phone = EXCLUDED.client_phone,
-        booking_notes = COALESCE(EXCLUDED.booking_notes, appointments.booking_notes)
+        booking_notes = COALESCE(EXCLUDED.booking_notes, appointments.booking_notes),
+        sms_opt_in = CASE
+          WHEN EXCLUDED.sms_opt_in IS TRUE THEN TRUE
+          ELSE appointments.sms_opt_in
+        END
     `;
 
     // One-shot delayed release — replaces the high-frequency cleanup cron.
