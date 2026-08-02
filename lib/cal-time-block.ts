@@ -8,7 +8,6 @@
  */
 
 import {
-  CAL_ADMIN_OVERRIDE_BOOKING_LOCATION,
   parseAdminOverrideEventId,
   STUDIO_TIMEZONE,
 } from '@/lib/cal-config';
@@ -44,6 +43,10 @@ async function createCalTimeBlockSegment(args: {
   overrideEventTypeId: number;
 }): Promise<{ ok: true; uid: string } | { ok: false; error: string }> {
   const phoneDigits = BLOCK_ATTENDEE_PHONE.replace(/\D/g, '');
+  // Do not send `location`. The admin override event type often still has a
+  // legacy Cal location (`type: "unknown"`). Posting `address` then fails with
+  // "Booking location with type address not valid…". Cal accepts bookings with
+  // no location object and uses the event type default.
   const calPayload: Record<string, unknown> = {
     eventTypeId: args.overrideEventTypeId,
     start: args.startUtc.toISOString(),
@@ -58,7 +61,6 @@ async function createCalTimeBlockSegment(args: {
       name: { firstName: 'Studio', lastName: 'Block' },
       attendeePhoneNumber: BLOCK_ATTENDEE_PHONE,
     },
-    location: CAL_ADMIN_OVERRIDE_BOOKING_LOCATION,
     metadata: {
       admin_time_block: 'true',
     },

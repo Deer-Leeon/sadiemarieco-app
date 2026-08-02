@@ -136,5 +136,31 @@ for (const row of rows) {
   }
 }
 
+const overrideId = Number(process.env.CAL_ADMIN_OVERRIDE_EVENT_ID?.trim() || '');
+if (Number.isInteger(overrideId) && overrideId > 0) {
+  try {
+    await calJson(`/event-types/${overrideId}`, apiKey, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        locations: [
+          {
+            type: 'address',
+            address: STUDIO_IN_PERSON_ADDRESS,
+            public: true,
+          },
+        ],
+      }),
+    });
+    ok += 1;
+    console.log(`✓ Admin override (cal ${overrideId}) locations → address`);
+  } catch (err) {
+    failed += 1;
+    console.error(
+      `✗ Admin override (cal ${overrideId}):`,
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
 console.log(`Done. ${ok} updated, ${failed} failed.`);
 if (failed > 0) process.exit(1);
