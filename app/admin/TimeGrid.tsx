@@ -373,16 +373,13 @@ function AppointmentBlock({
   onClick?: (appointment: Appointment) => void;
 }) {
   const { appointment: apt, topPct, heightPct, col, totalCols } = positioned;
-  // Canceled rows (admin- or client-initiated) are filtered out
-  // upstream in DashboardUI, so they never reach this pill. No-show
-  // rows DO render — with a struck-through, greyed-out treatment so
-  // the wasted slot stays visible without pretending it's bookable.
-  // Pending rows render too (same as List / day modal) with a dashed
-  // ring so awaiting-payment holds are obvious but not confused with
-  // confirmed bookings.
+  // Canceled rows (admin- or client-initiated) and pending checkout
+  // holds are filtered out upstream in DashboardUI, so they never
+  // reach this pill. No-show rows DO render — with a struck-through,
+  // greyed-out treatment so the wasted slot stays visible without
+  // pretending it's bookable.
   const statusLower = (apt.status || '').toLowerCase();
   const isNoShow = statusLower === 'no-show';
-  const isPending = statusLower === 'pending';
   const hasNoShowFlag = Boolean(apt.client_no_show_flag);
 
   const start = safeParseISO(apt.booking_time);
@@ -443,7 +440,6 @@ function AppointmentBlock({
   const flaggedClasses = hasNoShowFlag && !isNoShow
     ? 'ring-1 ring-inset ring-amber-400/70'
     : '';
-  const pendingClasses = isPending ? 'opacity-80 ring-1 ring-inset ring-dashed ring-stone-900/35' : '';
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : 'pointer-events-none';
@@ -465,16 +461,15 @@ function AppointmentBlock({
   const nameStyle = color ? { color: color.text } : undefined;
   const mutedStyle = color ? { color: color.textMuted } : undefined;
   const flagSuffix = hasNoShowFlag ? ', no-show flag' : '';
-  const pendingSuffix = isPending ? ' (awaiting payment)' : '';
 
   return (
     <button
       type="button"
       onClick={clickable ? handleClick : undefined}
       disabled={!clickable}
-      className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${pendingClasses} ${interactiveClasses}`}
-      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${pendingSuffix}${hasNoShowFlag ? ' · flagged' : ''}`}
-      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${isPending ? ', awaiting payment' : ''}${flagSuffix}`}
+      className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${interactiveClasses}`}
+      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${flagSuffix}`}
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,

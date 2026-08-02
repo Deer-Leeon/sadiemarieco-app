@@ -9,11 +9,9 @@
  *
  *   • 'pending'             — Cal.com webhook inserted the row but the
  *                             client hasn't completed the card-vaulting
- *                             handoff at /checkout yet. Visible on List
- *                             and all calendar views (Month / Week /
- *                             3-Day / day modal) with an "Awaiting
- *                             Payment" treatment so holds stay consistent
- *                             across every surface. Transitions to
+ *                             handoff at /checkout yet. Hidden from every
+ *                             admin bookings surface (List, Month, Week,
+ *                             3-Day, day modal). Transitions to
  *                             'confirmed' as soon as /api/booking/confirm
  *                             finishes its work.
  *   • 'confirmed'           — booking is live and on the schedule.
