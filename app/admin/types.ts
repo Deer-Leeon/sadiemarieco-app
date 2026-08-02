@@ -9,14 +9,13 @@
  *
  *   • 'pending'             — Cal.com webhook inserted the row but the
  *                             client hasn't completed the card-vaulting
- *                             handoff at /checkout yet. Hidden from the
- *                             Month/Week/3-Day calendar views so an
- *                             abandoned cart doesn't squat on a slot in
- *                             the admin's visual schedule; still visible
- *                             in List view with an "Awaiting Payment"
- *                             badge so the admin can audit drop-offs.
- *                             Transitions to 'confirmed' as soon as
- *                             /api/booking/confirm finishes its work.
+ *                             handoff at /checkout yet. Visible on List
+ *                             and all calendar views (Month / Week /
+ *                             3-Day / day modal) with an "Awaiting
+ *                             Payment" treatment so holds stay consistent
+ *                             across every surface. Transitions to
+ *                             'confirmed' as soon as /api/booking/confirm
+ *                             finishes its work.
  *   • 'confirmed'           — booking is live and on the schedule.
  *   • 'no-show'             — booking happened but the client never
  *                             arrived. Stays visible on the calendar

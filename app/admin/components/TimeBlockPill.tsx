@@ -43,7 +43,7 @@ export default function TimeBlockPill({
   onClick,
 }: Props) {
   const timeLabel = timeBlockTimeLabel(block);
-  const title = `${timeLabel}${block.note ? ` — ${block.note}` : ''} (click to remove)`;
+  const title = `${timeLabel}${block.note ? ` — ${block.note}` : ''} (click to edit)`;
   const shortBlock = heightPct < 6;
 
   const paddingClass = spacious ? 'px-3 py-2' : compact ? 'p-1.5' : 'p-2';
@@ -70,7 +70,7 @@ export default function TimeBlockPill({
         spacious ? 'flex flex-col justify-center' : ''
       }`}
       title={title}
-      aria-label={`Blocked time ${timeLabel}. Click to remove.`}
+      aria-label={`Blocked time ${timeLabel}. Click to edit.`}
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,

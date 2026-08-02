@@ -162,3 +162,35 @@ export async function deleteTimeBlock(
   }
   return { ok: true };
 }
+
+export async function updateTimeBlock(
+  blockId: string,
+  payload: { start: string; end: string; note: string | null }
+): Promise<
+  { ok: true; message?: string } | { ok: false; message: string }
+> {
+  const res = await fetch(`/api/admin/time-blocks/${blockId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string;
+  };
+  if (!res.ok) {
+    return {
+      ok: false,
+      message:
+        typeof data.message === 'string'
+          ? data.message
+          : 'Could not update the time block.',
+    };
+  }
+  return {
+    ok: true,
+    message:
+      typeof data.message === 'string' && data.message.trim()
+        ? data.message
+        : undefined,
+  };
+}
