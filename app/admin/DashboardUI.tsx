@@ -118,6 +118,11 @@ export default function DashboardUI({
     useState<Appointment | null>(null);
   const [manualBookingOpen, setManualBookingOpen] = useState(false);
   const [bookingToast, setBookingToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!bookingToast) return;
+    const timer = window.setTimeout(() => setBookingToast(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [bookingToast]);
   const [blockPendingEdit, setBlockPendingEdit] = useState<TimeBlock | null>(
     null
   );
@@ -285,7 +290,11 @@ export default function DashboardUI({
         ) : view === 'month' ? (
           <CalendarView
             appointments={visibleAppointments}
+            timeBlocks={displayTimeBlocks}
+            removingBlockId={removingBlockId}
             onAppointmentClick={setSelectedAppointment}
+            onBlockClick={setBlockPendingEdit}
+            onDayClick={setModalDate}
           />
         ) : view === '3day' ? (
           <TimeGrid
@@ -383,7 +392,6 @@ export default function DashboardUI({
           groupHeaders={manualBookingGroupHeaders}
           onClose={() => setManualBookingOpen(false)}
           onSuccess={() => {
-            setManualBookingOpen(false);
             setBookingToast('Appointment booked successfully.');
             router.refresh();
           }}
