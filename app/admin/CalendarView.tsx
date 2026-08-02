@@ -298,12 +298,11 @@ function AppointmentPill({
   appointment: Appointment;
   onClick?: (appointment: Appointment) => void;
 }) {
-  // Canceled rows are filtered upstream in DashboardUI before they
-  // ever reach CalendarView, so the visual special-cases here are
-  // no-show (strikethrough) and pending (dashed ring / awaiting).
+  // Canceled / pending rows are filtered upstream in DashboardUI before
+  // they ever reach CalendarView, so the only visual special-case here
+  // is no-show: strikethrough + greyed-out colours.
   const status = (appointment.status || '').toLowerCase();
   const isNoShow = status === 'no-show';
-  const isPending = status === 'pending';
   const hasNoShowFlag = Boolean(appointment.client_no_show_flag);
   const time = appointment.booking_time
     ? formatStudioClock(appointment.booking_time)
@@ -327,23 +326,20 @@ function AppointmentPill({
   const colorStyle = color
     ? { backgroundColor: color.accent, color: color.text }
     : undefined;
-  const pendingSuffix = isPending ? ' (awaiting payment)' : '';
 
   return (
     <button
       type="button"
       onClick={onClick ? handleClick : undefined}
-      title={`${time ? time + ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${pendingSuffix}${hasNoShowFlag ? ' · flagged' : ''}`}
-      aria-label={`Open booking: ${name}, ${service}${time ? `, ${time}` : ''}${isNoShow ? ', no-show' : ''}${isPending ? ', awaiting payment' : ''}${hasNoShowFlag ? ', no-show flag' : ''}`}
+      title={`${time ? time + ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${time ? `, ${time}` : ''}${isNoShow ? ', no-show' : ''}${hasNoShowFlag ? ', no-show flag' : ''}`}
       className={`relative block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] transition-colors ${
         isNoShow
           ? 'bg-stone-50 text-gray-400 line-through opacity-60 hover:bg-stone-100'
           : color
             ? 'hover:brightness-95'
             : 'bg-stone-100 text-stone-800 hover:bg-stone-200'
-      } ${hasNoShowFlag && !isNoShow ? 'ring-1 ring-inset ring-amber-400/70' : ''} ${
-        isPending ? 'opacity-80 ring-1 ring-inset ring-dashed ring-stone-900/35' : ''
-      } ${onClick ? 'cursor-pointer' : ''}`}
+      } ${hasNoShowFlag && !isNoShow ? 'ring-1 ring-inset ring-amber-400/70' : ''} ${onClick ? 'cursor-pointer' : ''}`}
       style={colorStyle}
     >
       {hasNoShowFlag ? (

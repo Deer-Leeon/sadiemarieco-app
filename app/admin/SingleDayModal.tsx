@@ -383,7 +383,6 @@ function ModalAppointment({
   const { appointment: apt, topPct, heightPct, col, totalCols } = positioned;
   const statusLower = (apt.status || '').toLowerCase();
   const isNoShow = statusLower === 'no-show';
-  const isPending = statusLower === 'pending';
   const hasNoShowFlag = Boolean(apt.client_no_show_flag);
 
   const start = safeParseISO(apt.booking_time);
@@ -412,22 +411,18 @@ function ModalAppointment({
       : 'border-l-[3px] border-stone-800 bg-stone-100';
   const flaggedClasses =
     hasNoShowFlag && !isNoShow ? 'ring-1 ring-inset ring-amber-400/70' : '';
-  const pendingClasses = isPending
-    ? 'opacity-80 ring-1 ring-inset ring-dashed ring-stone-900/35'
-    : '';
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : '';
-  const pendingSuffix = isPending ? ' (awaiting payment)' : '';
 
   return (
     <button
       type="button"
       onClick={clickable ? handleClick : undefined}
       disabled={!clickable}
-      className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${pendingClasses} ${interactiveClasses}`}
-      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${pendingSuffix}${hasNoShowFlag ? ' · flagged' : ''}`}
-      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${isPending ? ', awaiting payment' : ''}${hasNoShowFlag ? ', no-show flag' : ''}`}
+      className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${interactiveClasses}`}
+      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${hasNoShowFlag ? ', no-show flag' : ''}`}
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,

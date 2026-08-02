@@ -219,21 +219,17 @@ export default function DashboardUI({
   const showDateNav = view === '3day' || view === 'week';
 
   // Shared by List, Month, 3-day, Week, and the day modal so every
-  // surface shows the same bookings. Includes pending ("Awaiting Payment")
-  // and no-show; canceled / system-released holds stay hidden.
+  // surface shows the same bookings. Only confirmed / no-show rows —
+  // pending checkout holds and canceled bookings stay hidden.
   const visibleAppointments = useMemo(
     () =>
       appointmentsWithoutTimeBlockGhosts.filter((a) => {
         const s = (a.status || '').toLowerCase();
         return (
+          s !== 'pending' &&
           s !== 'canceled_by_admin' &&
           s !== 'canceled_by_client' &&
           s !== 'canceled_by_client_late' &&
-          // System-released holds (abandoned-checkout sweep) are
-          // hidden here too — they never made it past 'pending', so
-          // surfacing them in the booking list would be noise for the
-          // admin. Still visible in a client's profile history via
-          // ClientProfileModal for drop-off analytics.
           s !== 'canceled_by_system'
         );
       }),
