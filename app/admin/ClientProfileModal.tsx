@@ -435,6 +435,11 @@ function DossierSection({
   const [refreshKey, setRefreshKey] = useState(0);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingToast, setBookingToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!bookingToast) return;
+    const timer = window.setTimeout(() => setBookingToast(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [bookingToast]);
   const [crmStats, setCrmStats] = useState<ClientCrmStats>({
     total_bookings: client.total_bookings,
     lifetime_value: client.lifetime_value,
@@ -777,7 +782,6 @@ function DossierSection({
           prefilledClient={client}
           onClose={() => setBookingOpen(false)}
           onSuccess={() => {
-            setBookingOpen(false);
             setBookingToast('Appointment booked successfully.');
             setRefreshKey((k) => k + 1);
           }}

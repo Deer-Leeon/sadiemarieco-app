@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import { parseISO } from 'date-fns';
-import { Flag } from 'lucide-react';
+import { Flag, Loader2 } from 'lucide-react';
 
 import {
   addStudioCalendarDays,
   calendarDayUtcNoon,
   daysInStudioMonth,
   formatStudioClock,
+  formatStudioClockRange,
   formatStudioDayOfMonth,
   formatStudioMonthYear,
   startOfStudioMonthKey,
@@ -18,9 +19,10 @@ import {
   todayStudioDateKey,
 } from '@/lib/studio-calendar';
 
-import type { Appointment } from './types';
+import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import { getServiceColor } from './serviceColors';
+import { timeBlockTimeLabel } from './components/TimeBlockPill';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Constants
@@ -51,7 +53,12 @@ interface DayCell {
   date: Date;
   isToday: boolean;
   appointments: Appointment[];
+  timeBlocks: TimeBlock[];
 }
+
+type DayTimelineItem =
+  | { kind: 'appointment'; sort: number; appointment: Appointment }
+  | { kind: 'block'; sort: number; block: TimeBlock };
 
 interface MonthBlock {
   /** First day of the month (UTC-noon Date used as React key). */
@@ -84,7 +91,8 @@ interface MonthBlock {
  */
 function buildMonths(
   todayKey: string,
-  appointments: Appointment[]
+  appointments: Appointment[],
+  timeBlocks: TimeBlock[]
 ): MonthBlock[] {
   const nowMonthKey = studioMonthKey(todayKey);
   const startMonthKey = (() => {
@@ -113,6 +121,21 @@ function buildMonths(
     );
   }
 
+  const blocksByDay = new Map<string, TimeBlock[]>();
+  for (const block of timeBlocks) {
+    const key = studioDateKey(block.start_time);
+    if (!key) continue;
+    const list = blocksByDay.get(key);
+    if (list) list.push(block);
+    else blocksByDay.set(key, [block]);
+  }
+  for (const list of blocksByDay.values()) {
+    list.sort(
+      (a, b) =>
+        new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+    );
+  }
+
   return Array.from({ length: TOTAL_MONTHS }, (_, i) => {
     const [sy, sm] = startMonthKey.split('-').map(Number);
     const monthStart = new Date(Date.UTC(sy, sm - 1 + i, 1, 12));
@@ -129,6 +152,7 @@ function buildMonths(
         date: calendarDayUtcNoon(dateKey),
         isToday: dateKey === todayKey,
         appointments: byDay.get(dateKey) ?? [],
+        timeBlocks: blocksByDay.get(dateKey) ?? [],
       };
     });
 
@@ -140,6 +164,25 @@ function buildMonths(
       isCurrentMonth: monthKey === nowMonthKey,
     };
   });
+}
+
+function buildDayTimeline(cell: DayCell): DayTimelineItem[] {
+  const items: DayTimelineItem[] = [
+    ...cell.appointments.map((appointment) => ({
+      kind: 'appointment' as const,
+      sort: appointment.booking_time
+        ? parseISO(appointment.booking_time).getTime()
+        : 0,
+      appointment,
+    })),
+    ...cell.timeBlocks.map((block) => ({
+      kind: 'block' as const,
+      sort: new Date(block.start_time).getTime(),
+      block,
+    })),
+  ];
+  items.sort((a, b) => a.sort - b.sort);
+  return items;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -162,9 +205,15 @@ function buildMonths(
  */
 export default function CalendarView({
   appointments,
+  timeBlocks = [],
+  removingBlockId = null,
   onAppointmentClick,
+  onBlockClick,
+  onDayClick,
 }: {
   appointments: Appointment[];
+  timeBlocks?: TimeBlock[];
+  removingBlockId?: string | null;
   /**
    * Fired when the user clicks any appointment pill anywhere in the
    * month grid. Bubbles the bound Appointment up to DashboardUI so
@@ -172,14 +221,18 @@ export default function CalendarView({
    * the month view having to know anything about the modal itself.
    */
   onAppointmentClick?: (appointment: Appointment) => void;
+  /** Opens the edit-block dialog for a month-grid blocked-time pill. */
+  onBlockClick?: (block: TimeBlock) => void;
+  /** Opens SingleDayModal for the clicked day number. */
+  onDayClick?: (date: Date) => void;
 }) {
   // Studio "today" once per mount. If the dashboard stays open past
   // midnight Mountain the highlight may drift by a day until reload —
   // acceptable vs. wiring a setInterval just for the ring.
   const todayKey = useMemo(() => todayStudioDateKey(), []);
   const months = useMemo(
-    () => buildMonths(todayKey, appointments),
-    [todayKey, appointments]
+    () => buildMonths(todayKey, appointments, timeBlocks),
+    [todayKey, appointments, timeBlocks]
   );
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -237,7 +290,10 @@ export default function CalendarView({
                 <DayCellView
                   key={cell.dateKey}
                   cell={cell}
+                  removingBlockId={removingBlockId}
                   onAppointmentClick={onAppointmentClick}
+                  onBlockClick={onBlockClick}
+                  onDayClick={onDayClick}
                 />
               ))}
             </div>
@@ -254,40 +310,149 @@ export default function CalendarView({
 
 function DayCellView({
   cell,
+  removingBlockId,
   onAppointmentClick,
+  onBlockClick,
+  onDayClick,
 }: {
   cell: DayCell;
+  removingBlockId?: string | null;
   onAppointmentClick?: (appointment: Appointment) => void;
+  onBlockClick?: (block: TimeBlock) => void;
+  onDayClick?: (date: Date) => void;
 }) {
+  const timeline = buildDayTimeline(cell);
+  const hasBlocks = cell.timeBlocks.length > 0;
   const todayRing = cell.isToday ? 'ring-1 ring-stone-900/30' : '';
+  const dayNum = formatStudioDayOfMonth(cell.dateKey);
   const dayNumClass = cell.isToday
     ? 'inline-flex h-5 w-5 items-center justify-center rounded-full bg-stone-900 text-[11px] font-medium text-stone-50'
-    : 'text-xs font-medium text-stone-700';
+    : 'inline-flex h-5 min-w-5 items-center justify-center rounded-full text-xs font-medium text-stone-700';
 
   return (
     <div
-      className={`min-h-[100px] rounded-md border border-stone-200 bg-white p-1.5 text-left ${todayRing}`}
+      className={`relative min-h-[100px] overflow-hidden rounded-md border border-stone-200 bg-white p-1.5 text-left ${todayRing} ${
+        hasBlocks ? 'border-stone-300' : ''
+      }`}
     >
-      <div className="mb-1 flex items-center justify-between">
-        <span className={dayNumClass}>
-          {formatStudioDayOfMonth(cell.dateKey)}
-        </span>
-        {cell.appointments.length > 0 && (
-          <span className="text-[9px] text-stone-400">
-            {cell.appointments.length}
-          </span>
+      {/* Soft hatch wash when the day has blocked time — readable under pills. */}
+      {hasBlocks && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 opacity-[0.35]"
+          style={{
+            backgroundImage:
+              'repeating-linear-gradient(-45deg, transparent, transparent 5px, rgba(214,211,209,0.55) 5px, rgba(214,211,209,0.55) 6px)',
+          }}
+        />
+      )}
+      <div className="relative mb-1 flex items-center justify-between gap-1">
+        {onDayClick ? (
+          <button
+            type="button"
+            onClick={() => onDayClick(cell.date)}
+            title={`Open day view for ${cell.dateKey}`}
+            aria-label={`Open day view for ${cell.dateKey}`}
+            className={`${dayNumClass} transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/30 ${
+              cell.isToday
+                ? 'hover:bg-stone-800'
+                : 'hover:bg-stone-900 hover:text-stone-50'
+            }`}
+          >
+            {dayNum}
+          </button>
+        ) : (
+          <span className={dayNumClass}>{dayNum}</span>
+        )}
+        <div className="flex min-w-0 items-center gap-1">
+          {hasBlocks && (
+            <span
+              className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-stone-400/80"
+              title={`${cell.timeBlocks.length} blocked`}
+              aria-hidden="true"
+            />
+          )}
+          {cell.appointments.length > 0 && (
+            <span className="text-[9px] text-stone-400">
+              {cell.appointments.length}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="relative space-y-0.5">
+        {timeline.map((item) =>
+          item.kind === 'appointment' ? (
+            <AppointmentPill
+              key={item.appointment.id}
+              appointment={item.appointment}
+              onClick={onAppointmentClick}
+            />
+          ) : (
+            <MonthBlockPill
+              key={item.block.id}
+              block={item.block}
+              removing={removingBlockId === item.block.id}
+              onClick={onBlockClick}
+            />
+          )
         )}
       </div>
-      <div className="space-y-0.5">
-        {cell.appointments.map((a) => (
-          <AppointmentPill
-            key={a.id}
-            appointment={a}
-            onClick={onAppointmentClick}
-          />
-        ))}
-      </div>
     </div>
+  );
+}
+
+/**
+ * Compact month-grid blocked-time chip — same diagonal hatch language as
+ * the week/day TimeBlockPill, sized to sit beside appointment one-liners.
+ */
+function MonthBlockPill({
+  block,
+  removing = false,
+  onClick,
+}: {
+  block: TimeBlock;
+  removing?: boolean;
+  onClick?: (block: TimeBlock) => void;
+}) {
+  const range = timeBlockTimeLabel(block);
+  const note = block.note?.trim() || '';
+  const title = `${range}${note ? ` — ${note}` : ' — Blocked'}${
+    onClick ? ' (click to edit)' : ''
+  }`;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onClick?.(block)}
+      disabled={removing || !onClick}
+      title={title}
+      aria-label={`Blocked time ${range}${note ? `, ${note}` : ''}. Click to edit.`}
+      className={`relative flex w-full items-center gap-1 truncate rounded border border-stone-300/80 px-1.5 py-0.5 text-left text-[10px] text-stone-700 transition-[filter,opacity] hover:brightness-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/25 disabled:opacity-60 ${
+        onClick ? 'cursor-pointer' : ''
+      }`}
+      style={{
+        backgroundImage:
+          'repeating-linear-gradient(-45deg, #f5f5f4, #f5f5f4 4px, #e7e5e4 4px, #e7e5e4 8px)',
+      }}
+    >
+      {removing ? (
+        <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin text-stone-500" />
+      ) : (
+        <span
+          aria-hidden="true"
+          className="h-1 w-1 shrink-0 rounded-full bg-stone-500/70"
+        />
+      )}
+      <span className="min-w-0 truncate">
+        <span className="font-medium tracking-tight">
+          {formatStudioClockRange(block.start_time, block.end_time)}
+        </span>
+        <span className="text-stone-500">
+          {' · '}
+          {note || 'Blocked'}
+        </span>
+      </span>
+    </button>
   );
 }
 

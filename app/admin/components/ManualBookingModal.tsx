@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Loader2, X } from 'lucide-react';
+import { Check, Loader2, X } from 'lucide-react';
 
 import ManualBookingClientStep, {
   canAdvanceManualBookingClientStep,
@@ -43,6 +43,10 @@ interface Props {
    */
   prefilledClient?: Client;
   onClose: () => void;
+  /**
+   * Fired after each successful booking so the parent can toast + refresh.
+   * Does not close the modal — the success step offers Done / Book another.
+   */
   onSuccess: () => void;
 }
 
@@ -83,6 +87,49 @@ function ManualBookingCompletingOverlay() {
   );
 }
 
+function ManualBookingSuccessPanel({
+  clientName,
+  serviceTitle,
+  onDone,
+  onBookAnother,
+}: {
+  clientName: string;
+  serviceTitle: string;
+  onDone: () => void;
+  onBookAnother: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-5 py-8 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700">
+        <Check className="h-6 w-6" strokeWidth={2.25} aria-hidden="true" />
+      </div>
+      <div className="space-y-1.5">
+        <p className="font-serif text-xl text-stone-900">Appointment booked</p>
+        <p className="text-sm text-stone-600">
+          <span className="font-medium text-stone-800">{serviceTitle}</span>
+          {clientName ? (
+            <>
+              {' '}
+              for <span className="font-medium text-stone-800">{clientName}</span>
+            </>
+          ) : null}
+        </p>
+        <p className="text-xs text-stone-500">
+          Book another for the same client, or close when you&apos;re done.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+        <button type="button" onClick={onDone} className={BTN_SECONDARY}>
+          Done
+        </button>
+        <button type="button" onClick={onBookAnother} className={BTN_PRIMARY}>
+          Book another
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const EMPTY_FIELDS: ManualBookingClientFields = {
   firstName: '',
   lastName: '',
@@ -97,7 +144,7 @@ export default function ManualBookingModal({
   onClose,
   onSuccess,
 }: Props) {
-  const clientLocked = Boolean(prefilledClient);
+  const initiallyClientLocked = Boolean(prefilledClient);
 
   const [services, setServices] = useState<ManualBookingServiceOption[]>(
     servicesProp ?? []
@@ -111,6 +158,13 @@ export default function ManualBookingModal({
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
   const [step, setStep] = useState<WizardStep>(1);
+  const [phase, setPhase] = useState<'wizard' | 'success'>('wizard');
+  /** After a successful book, keep the same client for “Book another”. */
+  const [sessionClientLocked, setSessionClientLocked] = useState(false);
+  const [lastBooked, setLastBooked] = useState<{
+    clientName: string;
+    serviceTitle: string;
+  } | null>(null);
   const [selectedService, setSelectedService] =
     useState<ManualBookingServiceOption | null>(null);
   const [clientMode, setClientMode] = useState<ClientEntryMode>('existing');
@@ -125,6 +179,8 @@ export default function ManualBookingModal({
   const [completing, setCompleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+
+  const isClientLocked = initiallyClientLocked || sessionClientLocked;
 
   useEffect(() => {
     setMounted(true);
@@ -210,10 +266,10 @@ export default function ManualBookingModal({
   }, [onClose, completing]);
 
   useEffect(() => {
-    if (step !== 3) {
+    if (step !== 3 || phase !== 'wizard') {
       setSelectedSlot(null);
     }
-  }, [step]);
+  }, [step, phase]);
 
   function resolvedClientFields(): ManualBookingClientFields {
     if (clientMode === 'existing' && selectedClient) {
@@ -336,6 +392,19 @@ export default function ManualBookingModal({
         return;
       }
 
+      setLastBooked({
+        clientName: trimmedName,
+        serviceTitle: selectedService.title,
+      });
+      setSessionClientLocked(true);
+      setClientFields({
+        firstName: trimmedFirst,
+        lastName: trimmedLast,
+        phone: formatPhoneInputDisplay(parsedPhone.digits),
+        email: trimmedEmail ?? '',
+      });
+      setCompleting(false);
+      setPhase('success');
       onSuccess();
     } catch (err) {
       setError(
@@ -345,16 +414,25 @@ export default function ManualBookingModal({
     }
   }
 
+  function handleBookAnother() {
+    setPhase('wizard');
+    setStep(1);
+    setSelectedService(null);
+    setSelectedSlot(null);
+    setError(null);
+    setCompleting(false);
+  }
+
   const resolvedForGates = resolvedClientFields();
   const prefilledClientReady =
-    !clientLocked ||
+    !isClientLocked ||
     (resolvedForGates.firstName.trim().length > 0 &&
       resolvedForGates.lastName.trim().length > 0 &&
       parseClientPhone(resolvedForGates.phone) !== null);
 
   const canAdvanceFromStep1 =
     selectedService !== null &&
-    (!clientLocked || prefilledClientReady) &&
+    (!isClientLocked || prefilledClientReady) &&
     !catalogLoading &&
     !catalogError;
   const canAdvanceFromStep2 = canAdvanceManualBookingClientStep(
@@ -364,7 +442,7 @@ export default function ManualBookingModal({
   );
 
   function handleSelectClient(client: Client | null) {
-    if (clientLocked) return;
+    if (isClientLocked) return;
     setSelectedClient(client);
     setError(null);
     if (!client) {
@@ -375,7 +453,7 @@ export default function ManualBookingModal({
   }
 
   function handleModeChange(mode: ClientEntryMode) {
-    if (clientLocked) return;
+    if (isClientLocked) return;
     setClientMode(mode);
     setError(null);
     setSelectedClient(null);
@@ -389,7 +467,7 @@ export default function ManualBookingModal({
       onClose();
       return;
     }
-    if (step === 3 && clientLocked) {
+    if (step === 3 && isClientLocked) {
       setStep(1);
       return;
     }
@@ -399,7 +477,7 @@ export default function ManualBookingModal({
   function goForward() {
     setError(null);
     if (step === 1) {
-      if (clientLocked) {
+      if (isClientLocked) {
         if (!prefilledClientReady) {
           setError(
             'This client needs a first name, last name, and phone before booking.'
@@ -425,29 +503,44 @@ export default function ManualBookingModal({
   }
 
   const canBook = selectedSlot !== null && !completing;
+  const showingSuccess = phase === 'success';
 
-  const isScheduleStep = step === 3;
+  const isScheduleStep = !showingSuccess && step === 3;
   const modalWidth = isScheduleStep ? 'max-w-[460px]' : 'max-w-lg';
-  const lockedClientName = prefilledClient
-    ? clientDisplayName(prefilledClient.first_name, prefilledClient.last_name)
+  const lockedClientName = isClientLocked
+    ? joinFullName(
+        resolvedForGates.firstName.trim(),
+        resolvedForGates.lastName.trim()
+      ) ||
+      (prefilledClient
+        ? clientDisplayName(
+            prefilledClient.first_name,
+            prefilledClient.last_name
+          )
+        : '')
     : '';
 
-  const headerTitle =
-    (isScheduleStep || step === 2) && selectedService
+  const headerTitle = showingSuccess
+    ? 'Booked'
+    : (isScheduleStep || step === 2) && selectedService
       ? selectedService.title
-      : clientLocked
+      : isClientLocked
         ? lockedClientName || 'Book appointment'
         : 'New appointment';
 
-  const headerSubtitle = clientLocked
-    ? step === 1
-      ? `Choose a service for ${lockedClientName} · Step 1 of 2`
-      : `Pick an open date & time · Step 2 of 2`
-    : step === 1
-      ? 'Choose a service · Step 1 of 3'
-      : step === 2
-        ? 'Client details · Step 2 of 3'
-        : 'Pick an open date & time · Step 3 of 3';
+  const headerSubtitle = showingSuccess
+    ? lastBooked
+      ? `${lastBooked.serviceTitle}${lastBooked.clientName ? ` · ${lastBooked.clientName}` : ''}`
+      : 'Ready for the next one'
+    : isClientLocked
+      ? step === 1
+        ? `Choose a service for ${lockedClientName} · Step 1 of 2`
+        : `Pick an open date & time · Step 2 of 2`
+      : step === 1
+        ? 'Choose a service · Step 1 of 3'
+        : step === 2
+          ? 'Client details · Step 2 of 3'
+          : 'Pick an open date & time · Step 3 of 3';
 
   const displayName = joinFullName(
     resolvedForGates.firstName.trim(),
@@ -494,7 +587,7 @@ export default function ManualBookingModal({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {(error || catalogError) && (
+          {(error || catalogError) && !showingSuccess && (
             <div
               role="alert"
               className="mb-3 shrink-0 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800"
@@ -503,9 +596,18 @@ export default function ManualBookingModal({
             </div>
           )}
 
-          {step === 1 && (
+          {showingSuccess && lastBooked ? (
+            <ManualBookingSuccessPanel
+              clientName={lastBooked.clientName}
+              serviceTitle={lastBooked.serviceTitle}
+              onDone={onClose}
+              onBookAnother={handleBookAnother}
+            />
+          ) : null}
+
+          {!showingSuccess && step === 1 && (
             <div className="space-y-3">
-              {clientLocked && (
+              {isClientLocked && (
                 <p className="rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-600">
                   Booking for{' '}
                   <span className="font-medium text-stone-900">
@@ -513,7 +615,7 @@ export default function ManualBookingModal({
                   </span>
                 </p>
               )}
-              {clientLocked &&
+              {isClientLocked &&
                 (!resolvedForGates.firstName.trim() ||
                   !resolvedForGates.lastName.trim() ||
                   !parseClientPhone(resolvedForGates.phone)) && (
@@ -545,7 +647,7 @@ export default function ManualBookingModal({
             </div>
           )}
 
-          {step === 2 && !clientLocked && (
+          {!showingSuccess && step === 2 && !isClientLocked && (
             <ManualBookingClientStep
               mode={clientMode}
               onModeChange={handleModeChange}
@@ -560,7 +662,7 @@ export default function ManualBookingModal({
             />
           )}
 
-          {step === 3 && selectedService && (
+          {!showingSuccess && step === 3 && selectedService && (
             <>
               {completing ? (
                 <ManualBookingCompletingOverlay />
@@ -577,47 +679,49 @@ export default function ManualBookingModal({
           )}
         </div>
 
-        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-stone-200 bg-[#FAF9F6] px-5 py-3">
-          <button
-            type="button"
-            onClick={goBack}
-            disabled={completing}
-            className={BTN_SECONDARY}
-          >
-            {step === 1 ? 'Cancel' : 'Back'}
-          </button>
+        {!showingSuccess && (
+          <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-stone-200 bg-[#FAF9F6] px-5 py-3">
+            <button
+              type="button"
+              onClick={goBack}
+              disabled={completing}
+              className={BTN_SECONDARY}
+            >
+              {step === 1 ? 'Cancel' : 'Back'}
+            </button>
 
-          {step < 3 ? (
-            <button
-              type="button"
-              onClick={goForward}
-              disabled={
-                (step === 1 && !canAdvanceFromStep1) ||
-                (step === 2 && !canAdvanceFromStep2) ||
-                completing
-              }
-              className={BTN_PRIMARY}
-            >
-              Continue
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void handleBook()}
-              disabled={!canBook}
-              className={BTN_PRIMARY}
-            >
-              {completing ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Booking…
-                </>
-              ) : (
-                'Book appointment'
-              )}
-            </button>
-          )}
-        </footer>
+            {step < 3 ? (
+              <button
+                type="button"
+                onClick={goForward}
+                disabled={
+                  (step === 1 && !canAdvanceFromStep1) ||
+                  (step === 2 && !canAdvanceFromStep2) ||
+                  completing
+                }
+                className={BTN_PRIMARY}
+              >
+                Continue
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void handleBook()}
+                disabled={!canBook}
+                className={BTN_PRIMARY}
+              >
+                {completing ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Booking…
+                  </>
+                ) : (
+                  'Book appointment'
+                )}
+              </button>
+            )}
+          </footer>
+        )}
       </div>
     </div>,
     document.body
