@@ -153,7 +153,7 @@ export default function SingleDayModal({
           />
 
           <p className="shrink-0 border-b border-stone-200 px-4 py-2.5 text-center text-[11px] uppercase tracking-[0.22em] text-stone-500">
-            Click an hour to block time
+            Click an hour to block · click a block to edit
           </p>
 
           <div className="min-h-0 flex-1 overflow-hidden px-1 pb-1 pt-1">
@@ -381,7 +381,9 @@ function ModalAppointment({
   onClick?: (appointment: Appointment) => void;
 }) {
   const { appointment: apt, topPct, heightPct, col, totalCols } = positioned;
-  const isNoShow = (apt.status || '').toLowerCase() === 'no-show';
+  const statusLower = (apt.status || '').toLowerCase();
+  const isNoShow = statusLower === 'no-show';
+  const isPending = statusLower === 'pending';
   const hasNoShowFlag = Boolean(apt.client_no_show_flag);
 
   const start = safeParseISO(apt.booking_time);
@@ -410,18 +412,22 @@ function ModalAppointment({
       : 'border-l-[3px] border-stone-800 bg-stone-100';
   const flaggedClasses =
     hasNoShowFlag && !isNoShow ? 'ring-1 ring-inset ring-amber-400/70' : '';
+  const pendingClasses = isPending
+    ? 'opacity-80 ring-1 ring-inset ring-dashed ring-stone-900/35'
+    : '';
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : '';
+  const pendingSuffix = isPending ? ' (awaiting payment)' : '';
 
   return (
     <button
       type="button"
       onClick={clickable ? handleClick : undefined}
       disabled={!clickable}
-      className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${interactiveClasses}`}
-      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}`}
-      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${hasNoShowFlag ? ', no-show flag' : ''}`}
+      className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${pendingClasses} ${interactiveClasses}`}
+      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${pendingSuffix}${hasNoShowFlag ? ' · flagged' : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${isPending ? ', awaiting payment' : ''}${hasNoShowFlag ? ', no-show flag' : ''}`}
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,

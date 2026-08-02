@@ -39,6 +39,7 @@ import CalendarView from './CalendarView';
 import TimeGrid from './TimeGrid';
 import SingleDayModal from './SingleDayModal';
 import AppointmentModal from './AppointmentModal';
+import BlockTimeDialog from './BlockTimeDialog';
 import RemoveBlockDialog from './components/RemoveBlockDialog';
 import {
   deleteTimeBlock,
@@ -117,6 +118,9 @@ export default function DashboardUI({
     useState<Appointment | null>(null);
   const [manualBookingOpen, setManualBookingOpen] = useState(false);
   const [bookingToast, setBookingToast] = useState<string | null>(null);
+  const [blockPendingEdit, setBlockPendingEdit] = useState<TimeBlock | null>(
+    null
+  );
   const [blockPendingRemove, setBlockPendingRemove] = useState<TimeBlock | null>(
     null
   );
@@ -169,6 +173,7 @@ export default function DashboardUI({
       });
     }
     setBlockPendingRemove(null);
+    setBlockPendingEdit(null);
 
     const result = await deleteTimeBlock(blockId);
     setRemovingBlockId(null);
@@ -213,17 +218,9 @@ export default function DashboardUI({
 
   const showDateNav = view === '3day' || view === 'week';
 
-  // The list view shows everything operationally relevant — confirmed,
-  // no-show, AND pending (with an "Awaiting Payment" badge so the admin
-  // can audit abandoned checkouts). Canceled rows (admin- or client-
-  // initiated) disappear entirely; the studio doesn't want to see ghost
-  // slots. The original Appointment records remain in the DB and
-  // surface in the client profile's history so McKenna can audit the
-  // cancellation later.
-  //
-  // No-show rows render with a struck-through visual treatment defined
-  // in each child view, so a wasted slot stays visible at-a-glance
-  // without pretending the slot is still bookable.
+  // Shared by List, Month, 3-day, Week, and the day modal so every
+  // surface shows the same bookings. Includes pending ("Awaiting Payment")
+  // and no-show; canceled / system-released holds stay hidden.
   const visibleAppointments = useMemo(
     () =>
       appointmentsWithoutTimeBlockGhosts.filter((a) => {
@@ -241,20 +238,6 @@ export default function DashboardUI({
         );
       }),
     [appointmentsWithoutTimeBlockGhosts]
-  );
-
-  // The Month/Week/3-Day time-grid views show only bookings that are
-  // actually on the schedule. 'pending' rows (Cal webhook fired but
-  // the client hasn't completed /checkout yet) are excluded so an
-  // abandoned cart never squats on a slot in the admin's visual
-  // schedule. The List view still shows them so the admin can spot
-  // the drop-off and reach out manually.
-  const calendarAppointments = useMemo(
-    () =>
-      visibleAppointments.filter(
-        (a) => (a.status || '').toLowerCase() !== 'pending'
-      ),
-    [visibleAppointments]
   );
 
   return (
@@ -305,30 +288,30 @@ export default function DashboardUI({
           )
         ) : view === 'month' ? (
           <CalendarView
-            appointments={calendarAppointments}
+            appointments={visibleAppointments}
             onAppointmentClick={setSelectedAppointment}
           />
         ) : view === '3day' ? (
           <TimeGrid
-            appointments={calendarAppointments}
+            appointments={visibleAppointments}
             timeBlocks={displayTimeBlocks}
             removingBlockId={removingBlockId}
             currentDate={currentDate}
             daysToShow={3}
             onDayClick={setModalDate}
             onAppointmentClick={setSelectedAppointment}
-            onBlockClick={setBlockPendingRemove}
+            onBlockClick={setBlockPendingEdit}
           />
         ) : (
           <TimeGrid
-            appointments={calendarAppointments}
+            appointments={visibleAppointments}
             timeBlocks={displayTimeBlocks}
             removingBlockId={removingBlockId}
             currentDate={currentDate}
             daysToShow={7}
             onDayClick={setModalDate}
             onAppointmentClick={setSelectedAppointment}
-            onBlockClick={setBlockPendingRemove}
+            onBlockClick={setBlockPendingEdit}
           />
         )}
       </main>
@@ -352,10 +335,30 @@ export default function DashboardUI({
           removingBlockId={removingBlockId}
           onClose={() => setModalDate(null)}
           onAppointmentClick={setSelectedAppointment}
-          onBlockClick={setBlockPendingRemove}
+          onBlockClick={setBlockPendingEdit}
           onBlocksChanged={(infoMessage) => {
             if (infoMessage) setBookingToast(infoMessage);
             router.refresh();
+          }}
+        />
+      )}
+      {blockPendingEdit !== null && (
+        <BlockTimeDialog
+          activeDate={calendarDayUtcNoon(
+            studioDateKey(blockPendingEdit.start_time)
+          )}
+          editingBlock={blockPendingEdit}
+          onClose={() => {
+            if (removingBlockId) return;
+            setBlockPendingEdit(null);
+          }}
+          onUpdated={(infoMessage) => {
+            if (infoMessage) setBookingToast(infoMessage);
+            setBlockPendingEdit(null);
+            router.refresh();
+          }}
+          onRequestRemove={(block) => {
+            setBlockPendingRemove(block);
           }}
         />
       )}
