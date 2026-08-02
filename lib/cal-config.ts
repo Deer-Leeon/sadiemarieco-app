@@ -43,8 +43,9 @@ export const CAL_STUDIO_IN_PERSON_LOCATION = {
 
 /**
  * Location for the hidden admin override / time-block shadow event.
- * Same in-person studio address as public services — never Cal Video or
- * other conferencing integrations.
+ * Prefer omitting `location` on create when the Cal event still has a legacy
+ * `unknown` location (common for older in-person types). When the event is
+ * patched to studio address, bookings may send {@link CAL_STUDIO_IN_PERSON_LOCATION}.
  */
 export const CAL_ADMIN_OVERRIDE_BOOKING_LOCATION = {
   type: 'address' as const,
