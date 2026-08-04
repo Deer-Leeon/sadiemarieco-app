@@ -32,7 +32,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
   ];
 
   return paths.map(({ path, priority, changeFrequency }) => ({
-    url: `${STUDIO_SITE_URL}${path === '/' ? '' : path}`,
+    // Keep homepage with a trailing slash so it matches the canonical on `/`.
+    url: path === '/' ? `${STUDIO_SITE_URL}/` : `${STUDIO_SITE_URL}${path}`,
     lastModified: LAST_MOD,
     changeFrequency,
     priority,

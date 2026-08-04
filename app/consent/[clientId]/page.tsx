@@ -1,7 +1,7 @@
 import ConsentFormClient from './ConsentFormClient';
 
 export const metadata = {
-  title: 'Client intake & consent · Sadie Marie',
+  title: 'Client intake & consent',
   description: 'Complete your intake and consent form for Sadie Marie.',
   robots: { index: false, follow: false },
 };

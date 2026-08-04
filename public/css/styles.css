@@ -3043,6 +3043,13 @@ button.btn-outline-navy:disabled {
   text-underline-offset: 3px;
 }
 .legal-prose a:hover { opacity: 0.8; }
+/* CTA buttons inside prose must keep cream text on navy (link color would crush contrast). */
+.legal-prose a.btn-navy,
+.legal-prose a.btn-navy:hover {
+  color: var(--off-white);
+  opacity: 1;
+  text-decoration: none;
+}
 .legal-prose strong { font-weight: 500; }
 
 @media (max-width: 640px) {
