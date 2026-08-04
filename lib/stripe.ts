@@ -7,9 +7,8 @@
  *     breakage when Stripe ships a new pinned version on the dashboard
  *     side and Node SDKs that don't override would auto-upgrade),
  *   • `process.env.STRIPE_SECRET_KEY` is read at module-init time and
- *     the missing-key error surfaces immediately at cold start
- *     instead of as a confusing TypeError on the first checkout
- *     attempt.
+ *     routes can return a consistent `stripe_not_configured` response
+ *     when it is absent.
  *
  * Server-only. The browser must never see this module — putting it
  * under `lib/` (not `app/api/_lib`) keeps it out of Next's app routing
@@ -20,19 +19,13 @@ import Stripe from 'stripe';
 
 const SECRET = process.env.STRIPE_SECRET_KEY;
 
-if (!SECRET && process.env.NODE_ENV === 'production') {
-  // Hard-fail in production builds. In development we still construct
-  // a Stripe client below so the route can return a structured error
-  // ("stripe_not_configured") rather than 500ing on undefined.SDK init.
-  throw new Error(
-    'STRIPE_SECRET_KEY is required in production but is not set'
-  );
-}
-
 /**
- * `null` when the key is missing in non-production — every route that
- * uses this MUST handle the null branch and return a 503 with a
- * "stripe_not_configured" code so the UI can surface a clear message.
+ * `null` when the key is missing — every route that uses this MUST handle the
+ * null branch and return a 503 with a "stripe_not_configured" code.
+ *
+ * Do not throw at module evaluation time. Next evaluates route modules while
+ * collecting build output, and build workers don't always receive runtime
+ * secrets. Runtime health checks still treat a missing key as unhealthy.
  *
  * The API version is whatever the Stripe SDK considers its latest at
  * the time of `npm install` — we deliberately do NOT pin a date string

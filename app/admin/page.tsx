@@ -57,6 +57,16 @@ interface DbRow {
   // by /api/booking/confirm after a successful SetupIntent on /checkout.
   // Null for legacy / admin-created bookings — see types.ts.
   stripe_customer_id: string | null;
+  terminal_payment_intent_id: string | null;
+  terminal_reader_id: string | null;
+  terminal_payment_status: string | null;
+  terminal_currency: string | null;
+  terminal_base_amount_cents: number | null;
+  terminal_tip_amount_cents: number | null;
+  terminal_total_amount_cents: number | null;
+  terminal_failure_code: string | null;
+  terminal_failure_message: string | null;
+  terminal_paid_at: Date | string | null;
   client_no_show_flag: boolean | null;
 }
 
@@ -127,8 +137,9 @@ export default async function AdminPage() {
 
   try {
     // LEFT JOIN to site_services on the cleaned service title so the
-    // appointment-details modal can show the price + description
-    // alongside the booking. Cal stores `service_name` as the FULL
+    // appointment-details modal can show service metadata alongside the
+    // booking. Price comes from the immutable appointment snapshot. Cal
+    // stores `service_name` as the FULL
     // event title ("Classic Lash Set between Sadie Marie and Leon"),
     // so we strip everything from the first ' between ' onward via
     // split_part before matching against site_services.title.
@@ -195,10 +206,20 @@ export default async function AdminPage() {
           ),
           FALSE
         ) AS client_no_show_flag,
-        s.price       AS service_price,
+        a.quoted_service_price_cents::numeric / 100 AS service_price,
         s.description AS service_description,
         s.slug        AS service_slug,
-        s.color       AS service_color
+        s.color       AS service_color,
+        pay.stripe_payment_intent_id AS terminal_payment_intent_id,
+        pay.stripe_reader_id AS terminal_reader_id,
+        pay.status AS terminal_payment_status,
+        pay.currency AS terminal_currency,
+        pay.base_amount_cents AS terminal_base_amount_cents,
+        pay.tip_amount_cents AS terminal_tip_amount_cents,
+        pay.total_amount_cents AS terminal_total_amount_cents,
+        pay.failure_code AS terminal_failure_code,
+        pay.failure_message AS terminal_failure_message,
+        pay.paid_at AS terminal_paid_at
       FROM appointments a
       LEFT JOIN LATERAL (
         SELECT s.price, s.description, s.slug, s.color
@@ -224,6 +245,26 @@ export default async function AdminPage() {
         ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
         LIMIT 1
       ) s ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          p.stripe_payment_intent_id,
+          p.stripe_reader_id,
+          p.status,
+          p.currency,
+          p.base_amount_cents,
+          p.tip_amount_cents,
+          p.total_amount_cents,
+          p.failure_code,
+          p.failure_message,
+          p.paid_at
+        FROM appointment_payments p
+        WHERE p.appointment_id = a.id::text
+          AND p.payment_kind = 'service_payment'
+        ORDER BY
+          CASE WHEN p.status = 'succeeded' THEN 0 ELSE 1 END,
+          p.created_at DESC
+        LIMIT 1
+      ) pay ON TRUE
       WHERE a.booking_time >= NOW() - INTERVAL '30 days'
       ORDER BY a.booking_time ASC
       LIMIT 1000
@@ -255,6 +296,28 @@ export default async function AdminPage() {
       service_slug: r.service_slug,
       service_color: r.service_color,
       stripe_customer_id: r.stripe_customer_id,
+      terminal_payment:
+        r.terminal_payment_intent_id &&
+        r.terminal_reader_id &&
+        r.terminal_payment_status &&
+        ['pending', 'processing', 'succeeded', 'failed', 'canceled'].includes(
+          r.terminal_payment_status
+        )
+          ? {
+              payment_intent_id: r.terminal_payment_intent_id,
+              reader_id: r.terminal_reader_id,
+              status: r.terminal_payment_status as NonNullable<
+                Appointment['terminal_payment']
+              >['status'],
+              currency: r.terminal_currency || 'usd',
+              base_amount_cents: Number(r.terminal_base_amount_cents || 0),
+              tip_amount_cents: Number(r.terminal_tip_amount_cents || 0),
+              total_amount_cents: Number(r.terminal_total_amount_cents || 0),
+              failure_code: r.terminal_failure_code,
+              failure_message: r.terminal_failure_message,
+              paid_at: serializeDate(r.terminal_paid_at),
+            }
+          : null,
       client_no_show_flag: Boolean(r.client_no_show_flag),
     }));
   } catch (err) {

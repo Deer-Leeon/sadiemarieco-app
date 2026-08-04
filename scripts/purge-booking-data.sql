@@ -6,6 +6,7 @@
 --
 -- Deletes:
 --   • webhook_events   (SMS/email idempotency keys)
+--   • appointment_payments (Stripe Terminal ledger + active reader locks)
 --   • appointments     (Cal.com booking rows + Stripe refs)
 --   • client_photos    (admin gallery blobs — DB rows only; see runner note)
 --   • client_notes     (admin CRM notes)
@@ -18,6 +19,7 @@
 
 TRUNCATE TABLE
   webhook_events,
+  appointment_payments,
   appointments,
   client_photos,
   client_notes,
