@@ -1458,6 +1458,7 @@ function TerminalChargeView({
   >(null);
   const [busy, setBusy] = useState<'start' | 'retry' | 'cancel' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showAttemptResult, setShowAttemptResult] = useState(false);
   const paidNotified = useRef(false);
   const amountCents =
     appointment.service_price == null
@@ -1491,7 +1492,15 @@ function TerminalChargeView({
           | TerminalApiPayload
           | null;
         if (disposed) return;
-        if (data?.payment) setPayment(data.payment);
+        if (data?.payment) {
+          setPayment(data.payment);
+          if (
+            data.payment.status === 'failed' ||
+            data.payment.status === 'canceled'
+          ) {
+            setShowAttemptResult(true);
+          }
+        }
         if (data?.reader) setReader(data.reader);
         if (!res.ok && data?.message) setError(data.message);
       } catch {
@@ -1511,6 +1520,7 @@ function TerminalChargeView({
     if (busy) return;
     setBusy(kind);
     setError(null);
+    if (kind !== 'cancel') setShowAttemptResult(false);
     const suffix =
       kind === 'start'
         ? ''
@@ -1525,7 +1535,15 @@ function TerminalChargeView({
       const data = (await res.json().catch(() => null)) as
         | TerminalApiPayload
         | null;
-      if (data?.payment) setPayment(data.payment);
+      if (data?.payment) {
+        setPayment(data.payment);
+        if (
+          data.payment.status === 'failed' ||
+          data.payment.status === 'canceled'
+        ) {
+          setShowAttemptResult(true);
+        }
+      }
       if (data?.reader) setReader(data.reader);
       if (!res.ok) {
         const recoverable =
@@ -1544,8 +1562,8 @@ function TerminalChargeView({
   }
 
   const isPaid = payment?.status === 'succeeded';
-  const isFailed = payment?.status === 'failed';
-  const isCanceled = payment?.status === 'canceled';
+  const isFailed = showAttemptResult && payment?.status === 'failed';
+  const isCanceled = showAttemptResult && payment?.status === 'canceled';
   const displayTotal = isPaid
     ? payment.total_amount_cents
     : payment?.base_amount_cents || amountCents;
@@ -1682,7 +1700,7 @@ function TerminalChargeView({
               10%, 15%, 20%, custom tip, or no tip before payment.
             </p>
 
-            {(error || payment?.failure_message) && (
+            {(error || (showAttemptResult && payment?.failure_message)) && (
               <div
                 role="alert"
                 className="mt-5 w-full max-w-sm rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800"
@@ -1693,7 +1711,11 @@ function TerminalChargeView({
 
             <button
               type="button"
-              onClick={() => void runAction(isFailed ? 'retry' : 'start')}
+              onClick={() =>
+                void runAction(
+                  payment?.status === 'failed' ? 'retry' : 'start'
+                )
+              }
               disabled={busy !== null || amountCents < 50}
               className="mt-6 inline-flex items-center gap-2 rounded-full bg-stone-900 px-6 py-2.5 text-xs font-medium uppercase tracking-[0.18em] text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
             >
