@@ -1,7 +1,7 @@
 import ConsentDocumentClient from './ConsentDocumentClient';
 
 export const metadata = {
-  title: 'Your signed consent · Sadie Marie',
+  title: 'Your signed consent',
   description: 'View and download your signed Sadie Marie intake and consent form.',
   robots: { index: false, follow: false },
 };

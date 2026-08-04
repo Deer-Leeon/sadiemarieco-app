@@ -6,7 +6,7 @@ import { isHoldExpired } from '@/lib/booking-hold';
 import CheckoutClient from './CheckoutClient';
 
 export const metadata = {
-  title: 'Secure your appointment · Sadie Marie',
+  title: 'Secure your appointment',
   description:
     'Save a card on file to confirm your Sadie Marie booking.',
   robots: { index: false, follow: false },
@@ -30,7 +30,7 @@ type CheckoutPageProps = {
  *     side dynamic rendering and emits a build-time warning.
  *   • Keeping page.tsx server-side lets us export `metadata` (which
  *     can't live on a Client Component) so the tab title reads
- *     "Secure your appointment" instead of the parent layout default.
+ *     "Secure your appointment · Sadie Marie" via the root title template.
  *
  * The fallback is a minimal cream-on-cream skeleton so the page never
  * flashes a stark white screen between server paint and client mount.
