@@ -11,6 +11,7 @@
 --   • client_photos    (admin gallery blobs — DB rows only; see runner note)
 --   • client_notes     (admin CRM notes)
 --   • client_intake_forms (consent answers + stamped PDF URLs)
+--   • studio_time_blocks (admin calendar blocks)
 --   • clients          (CRM directory)
 --
 -- Does NOT delete Vercel Blob objects referenced by client_photos or
@@ -24,5 +25,6 @@ TRUNCATE TABLE
   client_photos,
   client_notes,
   client_intake_forms,
+  studio_time_blocks,
   clients
 RESTART IDENTITY CASCADE;

@@ -71,6 +71,7 @@ import type {
   ClientCrmStats,
   ClientNote,
   ClientPhoto,
+  TerminalPaymentSummary,
 } from './types';
 import AppointmentHistoryList from './AppointmentHistoryList';
 import { appointmentServiceLabel, clientDisplayName, formatLifetimeSpend } from './helpers';
@@ -771,6 +772,21 @@ function DossierSection({
           onClose={handleCloseStacked}
           onMutated={() => {
             mutatedRef.current = true;
+          }}
+          onPaymentUpdated={(payment: TerminalPaymentSummary | null) => {
+            mutatedRef.current = true;
+            setOpenAppointment((prev) =>
+              prev ? { ...prev, terminal_payment: payment } : null
+            );
+            setAppts((prev) =>
+              prev
+                ? prev.map((a) =>
+                    a.id === openAppointment.id
+                      ? { ...a, terminal_payment: payment }
+                      : a
+                  )
+                : prev
+            );
           }}
           stacked
           allowClientProfileLink={false}
@@ -1793,6 +1809,21 @@ function AppointmentsView({ client }: { client: Client }) {
           onClose={handleCloseStacked}
           onMutated={() => {
             mutatedRef.current = true;
+          }}
+          onPaymentUpdated={(payment: TerminalPaymentSummary | null) => {
+            mutatedRef.current = true;
+            setOpenAppointment((prev) =>
+              prev ? { ...prev, terminal_payment: payment } : null
+            );
+            setAppts((prev) =>
+              prev
+                ? prev.map((a) =>
+                    a.id === openAppointment.id
+                      ? { ...a, terminal_payment: payment }
+                      : a
+                  )
+                : prev
+            );
           }}
           stacked
           allowClientProfileLink={false}

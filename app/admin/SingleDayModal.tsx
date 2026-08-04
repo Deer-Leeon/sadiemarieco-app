@@ -11,9 +11,11 @@ import {
 } from '@/lib/studio-calendar';
 
 import BlockTimeDialog from './BlockTimeDialog';
+import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import { settlementAriaLabel } from './settlementDisplay';
 import { getServiceColor } from './serviceColors';
 import {
   HOURS,
@@ -414,6 +416,7 @@ function ModalAppointment({
   const interactiveClasses = clickable
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : '';
+  const settledLabel = settlementAriaLabel(apt.terminal_payment);
 
   return (
     <button
@@ -421,8 +424,8 @@ function ModalAppointment({
       onClick={clickable ? handleClick : undefined}
       disabled={!clickable}
       className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${interactiveClasses}`}
-      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}`}
-      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${hasNoShowFlag ? ', no-show flag' : ''}`}
+      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}${settledLabel ? ` · ${settledLabel}` : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${hasNoShowFlag ? ', no-show flag' : ''}${settledLabel ? `, ${settledLabel}` : ''}`}
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,
@@ -435,14 +438,17 @@ function ModalAppointment({
         }),
       }}
     >
-      {hasNoShowFlag ? (
-        <span
-          className="pointer-events-none absolute right-1.5 top-1.5 inline-flex h-4 w-4 items-center justify-center rounded-sm bg-amber-50/95 text-amber-800 shadow-sm"
-          aria-hidden="true"
-        >
-          <Flag className="h-2.5 w-2.5" strokeWidth={2.4} />
-        </span>
-      ) : null}
+      <span className="pointer-events-none absolute right-1.5 top-1.5 z-10 flex items-start gap-0.5">
+        <SettlementCheckMarker payment={apt.terminal_payment} size="md" />
+        {hasNoShowFlag ? (
+          <span
+            className="inline-flex h-4 w-4 items-center justify-center rounded-sm bg-amber-50/95 text-amber-800 shadow-sm"
+            aria-hidden="true"
+          >
+            <Flag className="h-2.5 w-2.5" strokeWidth={2.4} />
+          </span>
+        ) : null}
+      </span>
       <div
         className={`truncate text-sm font-medium ${
           isNoShow
