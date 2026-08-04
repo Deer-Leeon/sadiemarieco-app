@@ -13,7 +13,7 @@ result logo also depend on work outside the codebase.
    - Phone: (385) 200-3904
    - Website: https://www.sadiemarie.co
 3. Primary category: **Eyelash Salon** (or Beauty Salon) + add brows/skincare.
-4. Upload the square logo (`public/assets/brand/logo-512.png`) and cover photos.
+4. Upload the square logo (`public/assets/brand/logo-512.png` — the real cream script mark) and cover photos.
 5. Add services with prices where possible; keep hours aligned with Cal.
 6. Post regularly and reply to every review.
 7. Copy the Place URL / Place ID into `NEXT_PUBLIC_GOOGLE_PLACE_ID` if not already set (used for reviews sync + schema `sameAs`).
