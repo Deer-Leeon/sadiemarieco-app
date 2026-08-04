@@ -18,7 +18,9 @@ export const SEO_DEFAULT_DESCRIPTION =
 export function faviconLinkTags(): string {
   return [
     `<link rel="icon" href="/favicon.ico" sizes="any">`,
+    `<link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png">`,
     `<link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png">`,
+    `<link rel="icon" type="image/png" sizes="48x48" href="/assets/brand/favicon-48.png">`,
     `<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">`,
     `<link rel="apple-touch-icon" href="/apple-touch-icon.png">`,
   ].join('\n  ');
