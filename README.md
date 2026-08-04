@@ -1,6 +1,6 @@
-# Sadie Marie Beauty Studio
+# Sadie Marie
 
-Editorial-magazine-inspired site for **Sadie Marie — Luxury Beauty Studio** in
+Editorial-magazine-inspired site for **Sadie Marie** in
 Lehi, Utah. Hybrid architecture: static HTML/CSS/JS marketing site + magic-link
 booking portal, with a Clerk-protected Next.js admin dashboard layered on top.
 All real-time integration (Cal.com webhooks, Twilio SMS, QStash scheduling)
@@ -319,4 +319,4 @@ Tested in the latest versions of Chrome, Safari, Firefox, and Edge. Uses modern 
 
 ## License
 
-© Sadie Marie Beauty Studio. All rights reserved.
+© Sadie Marie. All rights reserved.

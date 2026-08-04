@@ -49,6 +49,19 @@ const nextConfig = {
       { source: '/manage', destination: '/manage.html' },
       { source: '/privacy', destination: '/privacy.html' },
       { source: '/terms', destination: '/terms.html' },
+      {
+        source: '/lash-extensions-lehi',
+        destination: '/lash-extensions-lehi.html',
+      },
+      {
+        source: '/brow-services-lehi',
+        destination: '/brow-services-lehi.html',
+      },
+      {
+        source: '/beauty-studio-lehi',
+        destination: '/beauty-studio-lehi.html',
+      },
+      { source: '/areas-we-serve', destination: '/areas-we-serve.html' },
     ];
   },
 };

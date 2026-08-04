@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Sadie Marie Beauty Studio (Lehi, UT) — a hybrid Next.js 16 / static-HTML site:
+Sadie Marie (Lehi, UT) — a hybrid Next.js 16 / static-HTML site:
 marketing site + client booking/consent flows + a Clerk-gated admin dashboard,
 all on one Vercel deployment with a Neon Postgres database.
 

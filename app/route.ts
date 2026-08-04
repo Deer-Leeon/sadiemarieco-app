@@ -46,8 +46,23 @@ import { sql } from '@vercel/postgres';
 
 import { fetchDefaultScheduleCached } from './admin/availability/calSchedules';
 import { reconcileWithCal } from './admin/services/sync';
-import { renderWeeklyHoursHtml } from '@/lib/format-weekly-hours';
+import {
+  renderWeeklyHoursHtml,
+  weeklyHoursForSchema,
+} from '@/lib/format-weekly-hours';
 import { getCalComApiKey } from '@/lib/cal-config';
+import {
+  buildBeautySalonJsonLd,
+  buildFaqPageJsonLd,
+  HOMEPAGE_FAQS,
+  jsonLdScriptTag,
+} from '@/lib/seo-json-ld';
+import {
+  buildMetaHead,
+  SEO_DEFAULT_DESCRIPTION,
+  SEO_DEFAULT_TITLE,
+} from '@/lib/seo-meta';
+import type { ScheduleAvailability } from './admin/availability/calSchedules';
 
 // Node.js runtime required for `node:fs` — the Edge runtime doesn't
 // expose the filesystem. Default runtime for route handlers is already
@@ -80,6 +95,8 @@ const CAL_USERNAME = 'mckenna-sadiemarie';
 const SERVICES_TOKEN = '<!-- INJECT_SERVICES_HTML -->';
 const HOURS_TOKEN = '<!-- INJECT_HOURS_HTML -->';
 const LCP_HINTS_TOKEN = '<!-- INJECT_LCP_HINTS -->';
+const SEO_HEAD_TOKEN = '<!-- INJECT_SEO_HEAD -->';
+const JSON_LD_TOKEN = '<!-- INJECT_JSON_LD -->';
 
 /** Shown when Cal is unreachable or no weekly hours are configured. */
 const HOURS_FALLBACK_HTML =
@@ -272,13 +289,19 @@ export async function GET(): Promise<Response> {
   let imageMap: Record<string, SiteImage>;
   let servicesHtml: string;
   let hoursHtml: string;
+  let schemaHours: ReturnType<typeof weeklyHoursForSchema> = [];
   try {
-    [html, imageMap, servicesHtml, hoursHtml] = await Promise.all([
+    const [pageHtml, images, services, hoursBundle] = await Promise.all([
       loadIndexHtml(),
       fetchImageMap(),
       fetchServicesHtml(),
-      fetchWeeklyHoursHtml(),
+      fetchWeeklyHoursBundle(),
     ]);
+    html = pageHtml;
+    imageMap = images;
+    servicesHtml = services;
+    hoursHtml = hoursBundle.html;
+    schemaHours = hoursBundle.schemaHours;
   } catch (err) {
     // If the HTML file is genuinely missing in production something is
     // catastrophically wrong with the deploy — surface a 500 so the
@@ -290,7 +313,24 @@ export async function GET(): Promise<Response> {
     });
   }
 
-  let rendered = injectLcpHints(html, imageMap);
+  const seoHead = buildMetaHead({
+    title: SEO_DEFAULT_TITLE,
+    description: SEO_DEFAULT_DESCRIPTION,
+    canonicalPath: '/',
+  });
+  const jsonLd = [
+    jsonLdScriptTag(
+      buildBeautySalonJsonLd({
+        hours: schemaHours,
+        placeId: process.env.NEXT_PUBLIC_GOOGLE_PLACE_ID,
+      })
+    ),
+    jsonLdScriptTag(buildFaqPageJsonLd(HOMEPAGE_FAQS)),
+  ].join('\n  ');
+
+  let rendered = html.replace(SEO_HEAD_TOKEN, seoHead);
+  rendered = rendered.replace(JSON_LD_TOKEN, jsonLd);
+  rendered = injectLcpHints(rendered, imageMap);
   rendered = injectImageUrls(rendered, imageMap);
   rendered = injectCaptions(rendered, imageMap);
   rendered = rendered.replace(SERVICES_TOKEN, servicesHtml);
@@ -331,19 +371,26 @@ async function fetchImageMap(): Promise<Record<string, SiteImage>> {
  * Pull recurring weekly hours from Cal.com's default schedule (same
  * source as /admin/availability). Date overrides are ignored.
  */
-async function fetchWeeklyHoursHtml(): Promise<string> {
+async function fetchWeeklyHoursBundle(): Promise<{
+  html: string;
+  schemaHours: ReturnType<typeof weeklyHoursForSchema>;
+}> {
   const apiKey = getCalComApiKey();
   if (!apiKey) {
     console.error('[/] weekly hours: CAL_API_KEY is not set');
-    return HOURS_FALLBACK_HTML;
+    return { html: HOURS_FALLBACK_HTML, schemaHours: [] };
   }
 
   try {
     const schedule = await fetchDefaultScheduleCached(apiKey);
-    return renderWeeklyHoursHtml(schedule.availability);
+    const availability = schedule.availability as ScheduleAvailability[];
+    return {
+      html: renderWeeklyHoursHtml(availability),
+      schemaHours: weeklyHoursForSchema(availability),
+    };
   } catch (err) {
     console.error('[/] weekly hours Cal fetch failed:', err);
-    return HOURS_FALLBACK_HTML;
+    return { html: HOURS_FALLBACK_HTML, schemaHours: [] };
   }
 }
 

@@ -9,6 +9,7 @@ export const metadata = {
   title: 'Secure your appointment · Sadie Marie',
   description:
     'Save a card on file to confirm your Sadie Marie booking.',
+  robots: { index: false, follow: false },
 };
 
 type CheckoutPageProps = {

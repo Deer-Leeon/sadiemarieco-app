@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Sadie Marie — Luxury Beauty Studio
+   Sadie Marie
    Stylesheet
    ========================================================================== */
 
@@ -1822,6 +1822,15 @@ a.service-item:focus-visible .service-action {
   color: var(--navy);
   border-bottom-color: rgba(13,27,42,0.45);
 }
+.contact-maps-link {
+  margin-top: 10px;
+}
+.contact-maps-link a {
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .map-container {
   width: 100%;
   align-self: stretch;
@@ -3039,4 +3048,25 @@ button.btn-outline-navy:disabled {
 @media (max-width: 640px) {
   .legal-main { padding: 32px 20px 56px; }
   .legal-prose { font-size: 1.02rem; }
+}
+
+/* ── SEO landing pages ── */
+.seo-landing-prose .seo-landing-cta {
+  display: inline-block;
+  margin-top: 8px;
+  text-decoration: none;
+}
+.seo-landing-related {
+  margin-top: 28px;
+  font-size: 0.95rem;
+  color: var(--ink-soft, #5c574f);
+}
+.seo-city-list {
+  columns: 2;
+  max-width: 420px;
+  margin: 0 0 1.5em;
+  padding-left: 1.2em;
+}
+@media (max-width: 520px) {
+  .seo-city-list { columns: 1; }
 }

@@ -2,7 +2,7 @@
   "name": "sadiemarie-app",
   "version": "1.0.0",
   "private": true,
-  "description": "Static marketing site + Vercel serverless functions for Sadie Marie Beauty Studio (booking management portal + Cal.com → Twilio SMS webhook).",
+  "description": "Static marketing site + Vercel serverless functions for Sadie Marie (booking management portal + Cal.com → Twilio SMS webhook).",
   "engines": {
     "node": ">=18"
   },
