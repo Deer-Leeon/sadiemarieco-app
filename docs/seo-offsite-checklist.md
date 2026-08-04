@@ -39,7 +39,7 @@ result logo also depend on work outside the codebase.
 ## Reviews
 
 - Keep asking happy clients for Google reviews
-- Site carousel syncs via `/api/cron/sync-reviews` (scheduled every 6 hours in `vercel.json`)
+- Site carousel syncs via `/api/cron/sync-reviews` (QStash daily schedule — not Vercel Cron)
 
 ## Validate after deploy
 
