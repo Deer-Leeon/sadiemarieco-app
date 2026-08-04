@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import { getSucceededAppointmentPayment } from '@/lib/appointment-settlement';
 import {
   claimTerminalReader,
   findTerminalAppointment,
@@ -65,12 +66,23 @@ export async function POST(
       );
     }
 
-    const [appointment, payment] = await Promise.all([
+    const [appointment, payment, succeeded] = await Promise.all([
       findTerminalAppointment(id),
       getLatestTerminalPayment(id),
+      getSucceededAppointmentPayment(id),
     ]);
     if (!appointment || !payment) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    }
+    if (succeeded && succeeded.payment_kind !== 'service_payment') {
+      return NextResponse.json(
+        {
+          error: 'already_paid',
+          message: 'This appointment has already been settled.',
+          payment: succeeded,
+        },
+        { status: 409 }
+      );
     }
     if ((appointment.status || '').toLowerCase() !== 'confirmed') {
       return NextResponse.json(
@@ -106,8 +118,20 @@ export async function POST(
       );
     }
 
+    if (!payment.reader_id || !payment.payment_intent_id) {
+      return NextResponse.json(
+        {
+          error: 'not_a_terminal_payment',
+          message: 'This settlement was not collected on the Terminal.',
+          payment,
+        },
+        { status: 409 }
+      );
+    }
+
+    const paymentIntentId = payment.payment_intent_id;
     const intent = await terminal.stripe.paymentIntents.retrieve(
-      payment.payment_intent_id,
+      paymentIntentId,
       { expand: ['latest_charge'] }
     );
     if (intent.status === 'succeeded' || intent.status === 'canceled') {
@@ -122,14 +146,14 @@ export async function POST(
     let retryReaderId = payment.reader_id;
     if (retryReaderId !== terminal.config.readerId) {
       await reassignTerminalPaymentReader(
-        payment.payment_intent_id,
+        paymentIntentId,
         terminal.config.readerId
       );
       retryReaderId = terminal.config.readerId;
     }
 
     try {
-      await claimTerminalReader(payment.payment_intent_id);
+      await claimTerminalReader(paymentIntentId);
     } catch (err) {
       if (!isTerminalReaderLockConflict(err)) throw err;
       return NextResponse.json(
@@ -147,7 +171,7 @@ export async function POST(
       const processed = await processTerminalPayment({
         stripe: terminal.stripe,
         readerId: retryReaderId,
-        paymentIntentId: payment.payment_intent_id,
+        paymentIntentId,
         amountEligibleCents: payment.base_amount_cents,
       });
       return NextResponse.json({
@@ -165,7 +189,7 @@ export async function POST(
         const reconciled = await reconcileTerminalPayment({
           stripe: terminal.stripe,
           readerId: retryReaderId,
-          paymentIntentId: payment.payment_intent_id,
+          paymentIntentId,
         });
         if (
           reconciled.payment?.status === 'succeeded' ||
@@ -198,7 +222,7 @@ export async function POST(
         );
       }
       const failed = await markTerminalPaymentFailure(
-        payment.payment_intent_id,
+        paymentIntentId,
         detail.code,
         detail.message
       );

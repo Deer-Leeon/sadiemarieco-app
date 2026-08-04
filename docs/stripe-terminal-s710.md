@@ -81,6 +81,18 @@ failed card attempt reuses the same Stripe PaymentIntent. The migration also
 snapshots each appointment's quoted service price so later catalog edits cannot
 change the amount charged.
 
+## Manual settlements
+
+From the appointment modal, admins can also:
+
+- **Cash** — mark the quoted service price as paid in cash (no Terminal)
+- **Comp** — mark complimentary / no charge
+- **Undo settlement** — available only for cash/comp (not Terminal card charges)
+
+These write `appointment_payments` rows with `payment_kind` `cash` or
+`complimentary`. Card charges remain `service_payment` and must be refunded
+in Stripe if reversed.
+
 ## Admin flow
 
 1. Open a confirmed appointment with a valid service price.

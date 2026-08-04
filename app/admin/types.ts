@@ -213,9 +213,9 @@ export interface Appointment {
    */
   stripe_customer_id: string | null;
   /**
-   * Latest Stripe Terminal service-payment attempt for this appointment.
-   * `succeeded` means the service has been paid in person; other states let
-   * the modal resume/reconcile an interrupted reader flow.
+   * Latest settlement for this appointment (Terminal card, cash, or
+   * complimentary). `succeeded` means the service is settled; other
+   * Terminal states let the modal resume/reconcile an interrupted reader.
    */
   terminal_payment: TerminalPaymentSummary | null;
   /**
@@ -235,9 +235,26 @@ export type TerminalPaymentStatus =
   | 'failed'
   | 'canceled';
 
+export type AppointmentPaymentKind =
+  | 'service_payment'
+  | 'cash'
+  | 'complimentary';
+
+export function isAppointmentPaymentKind(
+  value: unknown
+): value is AppointmentPaymentKind {
+  return (
+    value === 'service_payment' ||
+    value === 'cash' ||
+    value === 'complimentary'
+  );
+}
+
 export interface TerminalPaymentSummary {
-  payment_intent_id: string;
-  reader_id: string;
+  id: string;
+  payment_kind: AppointmentPaymentKind;
+  payment_intent_id: string | null;
+  reader_id: string | null;
   status: TerminalPaymentStatus;
   currency: string;
   base_amount_cents: number;
@@ -245,6 +262,8 @@ export interface TerminalPaymentSummary {
   total_amount_cents: number;
   failure_code: string | null;
   failure_message: string | null;
+  note: string | null;
+  settled_by_email: string | null;
   paid_at: string | null;
 }
 
