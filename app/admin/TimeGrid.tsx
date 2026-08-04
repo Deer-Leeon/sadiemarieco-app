@@ -15,7 +15,9 @@ import {
 
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
+import { settlementAriaLabel } from './settlementDisplay';
 import { getServiceColor } from './serviceColors';
 import {
   HOURS,
@@ -461,6 +463,8 @@ function AppointmentBlock({
   const nameStyle = color ? { color: color.text } : undefined;
   const mutedStyle = color ? { color: color.textMuted } : undefined;
   const flagSuffix = hasNoShowFlag ? ', no-show flag' : '';
+  const settledLabel = settlementAriaLabel(apt.terminal_payment);
+  const settledSuffix = settledLabel ? `, ${settledLabel}` : '';
 
   return (
     <button
@@ -468,8 +472,8 @@ function AppointmentBlock({
       onClick={clickable ? handleClick : undefined}
       disabled={!clickable}
       className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${interactiveClasses}`}
-      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}`}
-      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${flagSuffix}`}
+      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}${settledLabel ? ` · ${settledLabel}` : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${flagSuffix}${settledSuffix}`}
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,
@@ -482,15 +486,18 @@ function AppointmentBlock({
         }),
       }}
     >
-      {hasNoShowFlag ? (
-        <span
-          className="pointer-events-none absolute right-0.5 top-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm bg-amber-50/95 text-amber-800 shadow-sm"
-          aria-hidden="true"
-          title="Client has an active no-show flag"
-        >
-          <Flag className="h-2.5 w-2.5" strokeWidth={2.4} />
-        </span>
-      ) : null}
+      <span className="pointer-events-none absolute right-0.5 top-0.5 z-10 flex items-start gap-0.5">
+        <SettlementCheckMarker payment={apt.terminal_payment} />
+        {hasNoShowFlag ? (
+          <span
+            className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm bg-amber-50/95 text-amber-800 shadow-sm"
+            aria-hidden="true"
+            title="Client has an active no-show flag"
+          >
+            <Flag className="h-2.5 w-2.5" strokeWidth={2.4} />
+          </span>
+        ) : null}
+      </span>
       {stacked ? (
         <>
           <div className={nameClass} style={nameStyle}>

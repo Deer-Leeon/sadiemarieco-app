@@ -21,8 +21,10 @@ import {
 
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
-import { getServiceColor } from './serviceColors';
+import { SettlementCheckMarker } from './components/SettlementMarker';
 import { timeBlockTimeLabel } from './components/TimeBlockPill';
+import { settlementAriaLabel } from './settlementDisplay';
+import { getServiceColor } from './serviceColors';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Constants
@@ -491,13 +493,14 @@ function AppointmentPill({
   const colorStyle = color
     ? { backgroundColor: color.accent, color: color.text }
     : undefined;
+  const settledLabel = settlementAriaLabel(appointment.terminal_payment);
 
   return (
     <button
       type="button"
       onClick={onClick ? handleClick : undefined}
-      title={`${time ? time + ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}`}
-      aria-label={`Open booking: ${name}, ${service}${time ? `, ${time}` : ''}${isNoShow ? ', no-show' : ''}${hasNoShowFlag ? ', no-show flag' : ''}`}
+      title={`${time ? time + ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}${settledLabel ? ` · ${settledLabel}` : ''}`}
+      aria-label={`Open booking: ${name}, ${service}${time ? `, ${time}` : ''}${isNoShow ? ', no-show' : ''}${hasNoShowFlag ? ', no-show flag' : ''}${settledLabel ? `, ${settledLabel}` : ''}`}
       className={`relative block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] transition-colors ${
         isNoShow
           ? 'bg-stone-50 text-gray-400 line-through opacity-60 hover:bg-stone-100'
@@ -507,13 +510,16 @@ function AppointmentPill({
       } ${hasNoShowFlag && !isNoShow ? 'ring-1 ring-inset ring-amber-400/70' : ''} ${onClick ? 'cursor-pointer' : ''}`}
       style={colorStyle}
     >
-      {hasNoShowFlag ? (
-        <Flag
-          className="pointer-events-none absolute right-0.5 top-0.5 h-2 w-2 text-amber-800"
-          strokeWidth={2.6}
-          aria-hidden="true"
-        />
-      ) : null}
+      <span className="pointer-events-none absolute right-0.5 top-0.5 z-10 flex items-center gap-0.5">
+        <SettlementCheckMarker payment={appointment.terminal_payment} />
+        {hasNoShowFlag ? (
+          <Flag
+            className="h-2 w-2 text-amber-800"
+            strokeWidth={2.6}
+            aria-hidden="true"
+          />
+        ) : null}
+      </span>
       <span className="font-medium">{time}</span>{' '}
       <span
         className={isNoShow ? 'text-gray-400' : color ? '' : 'text-stone-600'}

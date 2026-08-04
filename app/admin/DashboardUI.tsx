@@ -27,7 +27,7 @@ import type {
   ManualBookingServiceGroupHeader,
   ManualBookingServiceOption,
 } from './components/manual-booking-utils';
-import type { Appointment, Client, TimeBlock, ViewMode } from './types';
+import type { Appointment, Client, TerminalPaymentSummary, TimeBlock, ViewMode } from './types';
 import {
   appointmentBelongsToClient,
   withClientNoShowFlag,
@@ -221,6 +221,20 @@ export default function DashboardUI({
     router.refresh();
   }
 
+  /** Patch settlement markers in the open modal + calendar/list immediately. */
+  function handlePaymentUpdated(payment: TerminalPaymentSummary | null) {
+    setSelectedAppointment((prev) =>
+      prev ? { ...prev, terminal_payment: payment } : null
+    );
+    setAppointments((prev) => {
+      const id = selectedAppointment?.id;
+      if (!id) return prev;
+      return prev.map((a) =>
+        a.id === id ? { ...a, terminal_payment: payment } : a
+      );
+    });
+  }
+
   const showDateNav = view === '3day' || view === 'week';
 
   // Shared by List, Month, 3-day, Week, and the day modal so every
@@ -383,6 +397,7 @@ export default function DashboardUI({
           appointment={selectedAppointment}
           onClose={() => setSelectedAppointment(null)}
           onClientUpdated={handleClientNoShowFlagChanged}
+          onPaymentUpdated={handlePaymentUpdated}
         />
       )}
 

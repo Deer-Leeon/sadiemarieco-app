@@ -2,6 +2,7 @@
 
 import type { Appointment } from './types';
 import { appointmentServiceLabel, clientDisplayName, isAppointmentCanceled } from './helpers';
+import { SettlementBadge } from './components/SettlementMarker';
 import { getServiceColor } from './serviceColors';
 import { formatStudioClock } from '@/lib/studio-calendar';
 
@@ -157,7 +158,10 @@ export function AppointmentListRow({
           </p>
         )}
       </div>
-      <AppointmentStatusPill status={appointment.status} />
+      <div className="flex flex-col items-end gap-1">
+        <AppointmentStatusPill status={appointment.status} />
+        <SettlementBadge payment={appointment.terminal_payment} />
+      </div>
     </>
   );
 

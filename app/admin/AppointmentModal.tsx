@@ -106,6 +106,12 @@ interface Props {
    * update pill markers immediately.
    */
   onClientUpdated?: (client: Client) => void;
+  /**
+   * Fired when cash/comp/card settlement (or undo) succeeds so parents
+   * can patch `selectedAppointment` + list/calendar rows without waiting
+   * for a close/reopen cycle. `null` means the appointment is unpaid again.
+   */
+  onPaymentUpdated?: (payment: TerminalPaymentSummary | null) => void;
 }
 
 /**
@@ -175,6 +181,7 @@ export default function AppointmentModal({
   onMutated,
   allowClientProfileLink = true,
   onClientUpdated,
+  onPaymentUpdated,
 }: Props) {
   const router = useRouter();
 
@@ -191,6 +198,16 @@ export default function AppointmentModal({
   // of the modal rather than flashing the details view first.
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [isCollectingPayment, setIsCollectingPayment] = useState(false);
+
+  // Settlement UI reads this instead of the prop alone — parents often
+  // hold a stale `selectedAppointment` until close/reopen, and
+  // router.refresh() does not rewrite that client-side snapshot.
+  const [livePayment, setLivePayment] = useState<TerminalPaymentSummary | null>(
+    appointment.terminal_payment
+  );
+  useEffect(() => {
+    setLivePayment(appointment.terminal_payment);
+  }, [appointment.id, appointment.terminal_payment]);
 
   // Loading state for the No-show / Cancel status PATCH. We disable
   // BOTH buttons (not just the clicked one) while one request is in
@@ -209,6 +226,13 @@ export default function AppointmentModal({
   const [settlementNote, setSettlementNote] = useState('');
   const [settlementBusy, setSettlementBusy] = useState(false);
   const [settlementError, setSettlementError] = useState<string | null>(null);
+
+  const applyLivePayment = (payment: TerminalPaymentSummary | null) => {
+    setLivePayment(payment);
+    onPaymentUpdated?.(payment);
+    router.refresh();
+    onMutated?.();
+  };
 
   const canChargeNoShow =
     appointmentHasVaultedCard(
@@ -347,6 +371,7 @@ export default function AppointmentModal({
       const data = (await res.json().catch(() => null)) as {
         message?: string;
         error?: string;
+        payment?: TerminalPaymentSummary | null;
       } | null;
       if (!res.ok) {
         setSettlementError(
@@ -356,8 +381,14 @@ export default function AppointmentModal({
       }
       setSettlementConfirm(null);
       setSettlementNote('');
-      router.refresh();
-      onMutated?.();
+      // Undo returns a canceled row — treat as unpaid for the modal UI.
+      applyLivePayment(
+        isUndo
+          ? null
+          : data?.payment?.status === 'succeeded'
+            ? data.payment
+            : data?.payment ?? null
+      );
     } catch (err) {
       setSettlementError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -477,9 +508,8 @@ export default function AppointmentModal({
             appointment={appointment}
             onBack={() => setIsCollectingPayment(false)}
             onDone={onClose}
-            onPaid={() => {
-              router.refresh();
-              onMutated?.();
+            onPaid={(payment) => {
+              applyLivePayment(payment);
             }}
           />
         ) : view === 'client' && allowClientProfileLink ? (
@@ -509,16 +539,14 @@ export default function AppointmentModal({
                 ) : null}
                 <DateTimeBox appointment={appointment} />
                 <ServiceBox appointment={appointment} />
-                {appointment.terminal_payment?.status === 'succeeded' ? (
+                {livePayment?.status === 'succeeded' ? (
                   <PaymentBox
-                    payment={appointment.terminal_payment}
+                    payment={livePayment}
                     onUndo={
                       readOnly
                         ? undefined
-                        : appointment.terminal_payment.payment_kind ===
-                              'cash' ||
-                            appointment.terminal_payment.payment_kind ===
-                              'complimentary'
+                        : livePayment.payment_kind === 'cash' ||
+                            livePayment.payment_kind === 'complimentary'
                           ? () => openSettlementConfirm('undo')
                           : undefined
                     }
@@ -538,8 +566,8 @@ export default function AppointmentModal({
                   Number.isFinite(appointment.service_price) &&
                   appointment.service_price > 0
                 }
-                paid={appointment.terminal_payment?.status === 'succeeded'}
-                paymentKind={appointment.terminal_payment?.payment_kind ?? null}
+                paid={livePayment?.status === 'succeeded'}
+                paymentKind={livePayment?.payment_kind ?? null}
                 chargeAmountCents={
                   appointment.service_price == null
                     ? 0
@@ -1605,7 +1633,7 @@ function TerminalChargeView({
   appointment: Appointment;
   onBack: () => void;
   onDone: () => void;
-  onPaid: () => void;
+  onPaid: (payment: TerminalPaymentSummary) => void;
 }) {
   const [payment, setPayment] = useState<TerminalPaymentSummary | null>(
     appointment.terminal_payment
@@ -1633,8 +1661,8 @@ function TerminalChargeView({
   useEffect(() => {
     if (payment?.status !== 'succeeded' || paidNotified.current) return;
     paidNotified.current = true;
-    onPaid();
-  }, [payment?.status, onPaid]);
+    onPaid(payment);
+  }, [payment, onPaid]);
 
   useEffect(() => {
     if (!active || !payment?.payment_intent_id) return;
