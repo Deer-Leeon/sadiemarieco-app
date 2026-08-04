@@ -13,8 +13,10 @@ import {
   AlertCircle,
   ArrowLeft,
   Calendar,
+  CheckCircle2,
   ChevronRight,
   Clock,
+  CreditCard,
   DollarSign,
   ExternalLink,
   Flag,
@@ -22,7 +24,9 @@ import {
   Mail,
   MessageSquare,
   Phone,
+  RefreshCw,
   Scissors,
+  Wifi,
   X,
 } from 'lucide-react';
 
@@ -37,7 +41,12 @@ import {
   extractBookingDataFromEvent,
 } from '@/lib/cal-embed-shared';
 
-import type { Appointment, AppointmentStatus, Client } from './types';
+import type {
+  Appointment,
+  AppointmentStatus,
+  Client,
+  TerminalPaymentSummary,
+} from './types';
 import { appointmentServiceLabel, clientDisplayName, isAppointmentReadOnly } from './helpers';
 import {
   NO_SHOW_PENALTY_FRACTION,
@@ -180,6 +189,7 @@ export default function AppointmentModal({
   // signals success (router.refresh + onClose), we drop straight out
   // of the modal rather than flashing the details view first.
   const [isRescheduling, setIsRescheduling] = useState(false);
+  const [isCollectingPayment, setIsCollectingPayment] = useState(false);
 
   // Loading state for the No-show / Cancel status PATCH. We disable
   // BOTH buttons (not just the clicked one) while one request is in
@@ -377,6 +387,8 @@ export default function AppointmentModal({
         aria-label={
           isRescheduling
             ? 'Reschedule appointment'
+            : isCollectingPayment
+              ? 'Collect appointment payment'
             : view === 'client'
               ? 'Client profile'
               : readOnly
@@ -395,6 +407,16 @@ export default function AppointmentModal({
             onClose={() => {
               onMutated?.();
               onClose();
+            }}
+          />
+        ) : isCollectingPayment ? (
+          <TerminalChargeView
+            appointment={appointment}
+            onBack={() => setIsCollectingPayment(false)}
+            onDone={onClose}
+            onPaid={() => {
+              router.refresh();
+              onMutated?.();
             }}
           />
         ) : view === 'client' && allowClientProfileLink ? (
@@ -424,6 +446,9 @@ export default function AppointmentModal({
                 ) : null}
                 <DateTimeBox appointment={appointment} />
                 <ServiceBox appointment={appointment} />
+                {appointment.terminal_payment?.status === 'succeeded' ? (
+                  <PaymentBox payment={appointment.terminal_payment} />
+                ) : null}
               </div>
             </div>
 
@@ -432,7 +457,19 @@ export default function AppointmentModal({
             ) : (
               <ActionFooter
                 canReschedule={Boolean(appointment.service_slug)}
+                canCharge={
+                  appointment.service_price != null &&
+                  Number.isFinite(appointment.service_price) &&
+                  appointment.service_price > 0
+                }
+                paid={appointment.terminal_payment?.status === 'succeeded'}
+                chargeAmountCents={
+                  appointment.service_price == null
+                    ? 0
+                    : Math.round(appointment.service_price * 100)
+                }
                 onReschedule={() => setIsRescheduling(true)}
+                onCharge={() => setIsCollectingPayment(true)}
                 onNoShow={() => openStatusConfirm('no-show')}
                 onCancel={() => openStatusConfirm('cancel')}
                 statusAction={statusAction}
@@ -705,9 +742,41 @@ function ServiceBox({ appointment }: { appointment: Appointment }) {
   );
 }
 
+function PaymentBox({ payment }: { payment: TerminalPaymentSummary }) {
+  return (
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+            <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-emerald-700">
+              Paid in person
+            </p>
+            <p className="text-sm text-emerald-950">
+              Service {formatCentsUsd(payment.base_amount_cents)}
+              {payment.tip_amount_cents > 0
+                ? ` + ${formatCentsUsd(payment.tip_amount_cents)} tip`
+                : ' · No tip'}
+            </p>
+          </div>
+        </div>
+        <p className="font-serif text-xl text-emerald-950">
+          {formatCentsUsd(payment.total_amount_cents)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ActionFooter({
   canReschedule,
+  canCharge,
+  paid,
+  chargeAmountCents,
   onReschedule,
+  onCharge,
   onNoShow,
   onCancel,
   statusAction,
@@ -720,7 +789,11 @@ function ActionFooter({
    * than opening an empty embed.
    */
   canReschedule: boolean;
+  canCharge: boolean;
+  paid: boolean;
+  chargeAmountCents: number;
   onReschedule: () => void;
+  onCharge: () => void;
   onNoShow: () => void;
   onCancel: () => void;
   /**
@@ -744,7 +817,35 @@ function ActionFooter({
           Couldn&rsquo;t update — {statusError}
         </div>
       )}
-      <div className="flex items-center justify-end gap-2 px-6 py-4">
+      <div className="flex flex-wrap items-center justify-end gap-2 px-6 py-4">
+        <button
+          type="button"
+          onClick={onCharge}
+          disabled={!canCharge || paid || busy}
+          title={
+            paid
+              ? 'This appointment is already paid.'
+              : canCharge
+                ? 'Send this service payment to the Stripe Terminal.'
+                : 'Cannot charge — this appointment has no service price.'
+          }
+          className={`inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-medium uppercase tracking-[0.16em] transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+            paid
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              : 'border-stone-800 bg-stone-800 text-white hover:bg-stone-900'
+          }`}
+        >
+          {paid ? (
+            <CheckCircle2 className="h-3.5 w-3.5" />
+          ) : (
+            <CreditCard className="h-3.5 w-3.5" />
+          )}
+          {paid
+            ? 'Paid'
+            : chargeAmountCents > 0
+              ? `Charge ${formatCentsUsd(chargeAmountCents)}`
+              : 'Charge'}
+        </button>
         <button
           type="button"
           onClick={onReschedule}
@@ -1320,6 +1421,296 @@ function RescheduleView({
               rescheduled from the dashboard.
             </p>
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface TerminalApiPayload {
+  payment?: TerminalPaymentSummary | null;
+  reader?: {
+    id?: string;
+    label?: string;
+    status?: string | null;
+    action_status?: string | null;
+  };
+  error?: string;
+  message?: string;
+}
+
+function TerminalChargeView({
+  appointment,
+  onBack,
+  onDone,
+  onPaid,
+}: {
+  appointment: Appointment;
+  onBack: () => void;
+  onDone: () => void;
+  onPaid: () => void;
+}) {
+  const [payment, setPayment] = useState<TerminalPaymentSummary | null>(
+    appointment.terminal_payment
+  );
+  const [reader, setReader] = useState<
+    TerminalApiPayload['reader'] | null
+  >(null);
+  const [busy, setBusy] = useState<'start' | 'retry' | 'cancel' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const paidNotified = useRef(false);
+  const amountCents =
+    appointment.service_price == null
+      ? 0
+      : Math.round(appointment.service_price * 100);
+  const clientName = clientDisplayName(
+    appointment.client_first_name,
+    appointment.client_last_name
+  );
+  const serviceLabel = appointmentServiceLabel(appointment);
+  const active =
+    payment?.status === 'pending' || payment?.status === 'processing';
+
+  useEffect(() => {
+    if (payment?.status !== 'succeeded' || paidNotified.current) return;
+    paidNotified.current = true;
+    onPaid();
+  }, [payment?.status, onPaid]);
+
+  useEffect(() => {
+    if (!active || !payment?.payment_intent_id) return;
+    let disposed = false;
+
+    const check = async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/appointments/${appointment.id}/terminal-payment`,
+          { cache: 'no-store' }
+        );
+        const data = (await res.json().catch(() => null)) as
+          | TerminalApiPayload
+          | null;
+        if (disposed) return;
+        if (data?.payment) setPayment(data.payment);
+        if (data?.reader) setReader(data.reader);
+        if (!res.ok && data?.message) setError(data.message);
+      } catch {
+        // A transient polling failure must not interrupt an active reader.
+      }
+    };
+
+    void check();
+    const timer = window.setInterval(check, 1500);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [active, appointment.id, payment?.payment_intent_id]);
+
+  async function runAction(kind: 'start' | 'retry' | 'cancel') {
+    if (busy) return;
+    setBusy(kind);
+    setError(null);
+    const suffix =
+      kind === 'start'
+        ? ''
+        : kind === 'retry'
+          ? '/retry'
+          : '/cancel';
+    try {
+      const res = await fetch(
+        `/api/admin/appointments/${appointment.id}/terminal-payment${suffix}`,
+        { method: 'POST' }
+      );
+      const data = (await res.json().catch(() => null)) as
+        | TerminalApiPayload
+        | null;
+      if (data?.payment) setPayment(data.payment);
+      if (data?.reader) setReader(data.reader);
+      if (!res.ok) {
+        const recoverable =
+          data?.error === 'payment_in_progress' ||
+          data?.error === 'retry_required' ||
+          data?.error === 'already_paid';
+        if (!recoverable || !data?.payment) {
+          setError(data?.message || data?.error || `HTTP ${res.status}`);
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const isPaid = payment?.status === 'succeeded';
+  const isFailed = payment?.status === 'failed';
+  const isCanceled = payment?.status === 'canceled';
+  const displayTotal = isPaid
+    ? payment.total_amount_cents
+    : payment?.base_amount_cents || amountCents;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center justify-between border-b border-stone-200 px-5 py-4">
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={busy === 'cancel'}
+          className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:bg-stone-100 disabled:opacity-50"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Appointment
+        </button>
+        <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-stone-500">
+          Stripe Terminal
+        </p>
+        <button
+          type="button"
+          onClick={isPaid ? onDone : onBack}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900"
+          aria-label={isPaid ? 'Done' : 'Close payment'}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-8 text-center">
+        {isPaid ? (
+          <>
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+              <CheckCircle2 className="h-7 w-7" />
+            </span>
+            <p className="mt-4 text-[10px] font-medium uppercase tracking-[0.28em] text-emerald-700">
+              Payment complete
+            </p>
+            <h2 className="mt-1 font-serif text-3xl text-stone-900">
+              {formatCentsUsd(displayTotal)}
+            </h2>
+            <p className="mt-2 text-sm text-stone-600">
+              {serviceLabel} for {clientName}
+            </p>
+
+            <div className="mt-6 w-full max-w-sm divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white px-4 text-sm">
+              <div className="flex justify-between py-3 text-stone-600">
+                <span>Service</span>
+                <span>{formatCentsUsd(payment.base_amount_cents)}</span>
+              </div>
+              <div className="flex justify-between py-3 text-stone-600">
+                <span>Tip</span>
+                <span>{formatCentsUsd(payment.tip_amount_cents)}</span>
+              </div>
+              <div className="flex justify-between py-3 font-medium text-stone-900">
+                <span>Total paid</span>
+                <span>{formatCentsUsd(payment.total_amount_cents)}</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={onDone}
+              className="mt-6 rounded-full bg-stone-900 px-6 py-2.5 text-xs font-medium uppercase tracking-[0.18em] text-white transition-colors hover:bg-stone-800"
+            >
+              Done
+            </button>
+          </>
+        ) : active ? (
+          <>
+            <span className="relative flex h-16 w-16 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700">
+              <Wifi className="h-6 w-6" />
+              <span className="absolute inset-0 animate-ping rounded-full border border-stone-300 opacity-40" />
+            </span>
+            <p className="mt-5 text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
+              Sent to reader
+            </p>
+            <h2 className="mt-1 font-serif text-2xl text-stone-900">
+              Waiting for {clientName}
+            </h2>
+            <p className="mt-2 max-w-sm text-sm leading-relaxed text-stone-600">
+              The S710 will ask for a tip, then the client can tap, insert, or
+              swipe their card.
+            </p>
+            <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-700">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {formatCentsUsd(payment?.base_amount_cents || amountCents)} before
+              tip
+            </div>
+            {reader?.label ? (
+              <p className="mt-2 text-xs text-stone-400">
+                {reader.label} · {reader.status || 'connecting'}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void runAction('cancel')}
+              disabled={busy !== null}
+              className="mt-6 rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50"
+            >
+              {busy === 'cancel' ? 'Canceling…' : 'Cancel payment'}
+            </button>
+          </>
+        ) : (
+          <>
+            <span
+              className={`flex h-14 w-14 items-center justify-center rounded-full ${
+                isFailed || isCanceled
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-stone-100 text-stone-700'
+              }`}
+            >
+              {isFailed || isCanceled ? (
+                <RefreshCw className="h-6 w-6" />
+              ) : (
+                <CreditCard className="h-6 w-6" />
+              )}
+            </span>
+            <p className="mt-4 text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
+              {isFailed
+                ? 'Payment not completed'
+                : isCanceled
+                  ? 'Payment canceled'
+                  : 'In-person payment'}
+            </p>
+            <h2 className="mt-1 font-serif text-3xl text-stone-900">
+              {formatCentsUsd(amountCents)}
+            </h2>
+            <p className="mt-2 text-sm text-stone-600">
+              {serviceLabel} for {clientName}
+            </p>
+            <p className="mt-4 max-w-sm text-xs leading-relaxed text-stone-500">
+              The amount is fixed to the service price. The reader will offer
+              10%, 15%, 20%, custom tip, or no tip before payment.
+            </p>
+
+            {(error || payment?.failure_message) && (
+              <div
+                role="alert"
+                className="mt-5 w-full max-w-sm rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800"
+              >
+                {error || payment?.failure_message}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => void runAction(isFailed ? 'retry' : 'start')}
+              disabled={busy !== null || amountCents < 50}
+              className="mt-6 inline-flex items-center gap-2 rounded-full bg-stone-900 px-6 py-2.5 text-xs font-medium uppercase tracking-[0.18em] text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
+            >
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : isFailed ? (
+                <RefreshCw className="h-4 w-4" />
+              ) : (
+                <CreditCard className="h-4 w-4" />
+              )}
+              {busy
+                ? 'Sending…'
+                : isFailed
+                  ? 'Try reader again'
+                  : 'Send to terminal'}
+            </button>
+          </>
         )}
       </div>
     </div>

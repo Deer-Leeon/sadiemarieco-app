@@ -381,6 +381,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ON CONFLICT (cal_event_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,
         service_name = EXCLUDED.service_name,
+        quoted_service_price_cents = COALESCE(
+          appointments.quoted_service_price_cents,
+          EXCLUDED.quoted_service_price_cents
+        ),
         booking_time = EXCLUDED.booking_time,
         end_time = EXCLUDED.end_time,
         client_first_name = EXCLUDED.client_first_name,

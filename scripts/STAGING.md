@@ -68,6 +68,9 @@ node --env-file=.env.local scripts/reset-staging-neon.mjs
 | `PUBLIC_BASE_URL` | `https://staging.sadiemarie.co` |
 | `NEXT_PUBLIC_PUBLIC_BASE_URL` | `https://staging.sadiemarie.co` |
 | Stripe keys | **test** (`sk_test_` / `pk_test_`) — never live keys on staging |
+| `STRIPE_TERMINAL_READER_ID` | Test-mode simulated S710 `tmr_…` |
+| `STRIPE_TERMINAL_LOCATION_ID` | Test-mode Terminal location `tml_…` |
+| `STRIPE_WEBHOOK_SECRET` | Signing secret for the staging `/api/stripe/webhook` endpoint |
 | Clerk keys | **same** app as production |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_PHONE_NUMBER` | **same as production** (otherwise Settings toggle cannot send) |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | **same as production** (consent + reminder emails) |
@@ -83,6 +86,10 @@ node --env-file=.env.local scripts/reset-staging-neon.mjs
 | `staging.sadiemarie.co` | **Test** | `sk_test_` + `pk_test_` |
 
 Live mode rejects Stripe test card numbers and only accepts real cards. Test mode never charges real cards. After changing keys, redeploy that environment (`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` is baked at build time). Confirm on each host via `/admin/health` → “Stripe key mode (live vs test)”.
+
+Stripe Terminal also has separate live/test readers, locations, and webhook
+secrets. See [`docs/stripe-terminal-s710.md`](../docs/stripe-terminal-s710.md).
+Never put the physical live S710 reader id on staging.
 
 Redeploy the `staging` branch after env changes.
 

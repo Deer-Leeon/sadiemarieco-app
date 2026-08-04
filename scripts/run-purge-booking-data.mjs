@@ -14,6 +14,7 @@ import { sql } from '@vercel/postgres';
 
 const TABLES = [
   'clients',
+  'appointment_payments',
   'appointments',
   'webhook_events',
   'client_photos',
@@ -57,6 +58,7 @@ console.log('\n→ TRUNCATE booking tables…');
 await sql.query(`
   TRUNCATE TABLE
     webhook_events,
+    appointment_payments,
     appointments,
     client_photos,
     client_notes,

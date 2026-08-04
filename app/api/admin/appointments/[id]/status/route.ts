@@ -252,7 +252,7 @@ async function findAppointmentForNoShow(
         a.client_phone,
         a.booking_time,
         a.sms_opt_in,
-        s.price AS service_price
+        a.quoted_service_price_cents::numeric / 100 AS service_price
       FROM appointments a
       LEFT JOIN LATERAL (
         SELECT s.price
@@ -296,7 +296,7 @@ async function findAppointmentForNoShow(
         a.client_phone,
         a.booking_time,
         a.sms_opt_in,
-        s.price AS service_price
+        a.quoted_service_price_cents::numeric / 100 AS service_price
       FROM appointments a
       LEFT JOIN LATERAL (
         SELECT s.price

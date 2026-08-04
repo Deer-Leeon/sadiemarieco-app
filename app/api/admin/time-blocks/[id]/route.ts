@@ -320,6 +320,7 @@ export async function PATCH(
           service_slug: null,
           service_color: null,
           stripe_customer_id: null,
+          terminal_payment: null,
           client_no_show_flag: false,
         },
         new Set(oldUids)
@@ -528,6 +529,7 @@ export async function DELETE(
             service_slug: null,
             service_color: null,
             stripe_customer_id: null,
+            terminal_payment: null,
             client_no_show_flag: false,
           },
           new Set<string>()

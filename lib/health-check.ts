@@ -98,6 +98,9 @@ async function checkEnvironment(): Promise<HealthCheckResult[]> {
     ['TWILIO_PHONE_NUMBER', 'Twilio sender number'],
     ['STRIPE_SECRET_KEY', 'Stripe secret key'],
     ['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY', 'Stripe publishable key'],
+    ['STRIPE_TERMINAL_READER_ID', 'Stripe Terminal reader ID'],
+    ['STRIPE_TERMINAL_LOCATION_ID', 'Stripe Terminal location ID'],
+    ['STRIPE_WEBHOOK_SECRET', 'Stripe webhook signing secret'],
     ['RESEND_API_KEY', 'Resend API key'],
     ['QSTASH_TOKEN', 'QStash publish token'],
     ['QSTASH_CURRENT_SIGNING_KEY', 'QStash signing key'],
@@ -759,6 +762,7 @@ async function checkTwilio(): Promise<HealthCheckResult[]> {
 }
 
 async function checkStripe(): Promise<HealthCheckResult[]> {
+  const checks: HealthCheckResult[] = [];
   const client = stripe;
   if (!client) {
     return [
@@ -776,7 +780,7 @@ async function checkStripe(): Promise<HealthCheckResult[]> {
     const { latencyMs } = await timed(async () => {
       await client.balance.retrieve();
     });
-    return [
+    checks.push(
       result(
         {
           id: 'stripe-api',
@@ -785,10 +789,10 @@ async function checkStripe(): Promise<HealthCheckResult[]> {
           message: 'Stripe API reachable — used for checkout vault, no-show, and late-cancel fees',
         },
         latencyMs
-      ),
-    ];
+      )
+    );
   } catch (err) {
-    return [
+    checks.push(
       result({
         id: 'stripe-api',
         name: 'Stripe API',
@@ -796,9 +800,113 @@ async function checkStripe(): Promise<HealthCheckResult[]> {
         status: 'unhealthy',
         message: 'Stripe balance.retrieve() failed',
         detail: err instanceof Error ? err.message : String(err),
-      }),
-    ];
+      })
+    );
+    return checks;
   }
+
+  const readerId = process.env.STRIPE_TERMINAL_READER_ID?.trim() || '';
+  const locationId =
+    process.env.STRIPE_TERMINAL_LOCATION_ID?.trim() || '';
+  if (!readerId) {
+    checks.push(
+      result({
+        id: 'stripe-terminal-reader',
+        name: 'Stripe Terminal S710',
+        category: 'Payments (Stripe)',
+        status: 'unhealthy',
+        message: 'STRIPE_TERMINAL_READER_ID is not configured',
+      })
+    );
+    return checks;
+  }
+
+  try {
+    const { value: reader, latencyMs } = await timed(() =>
+      client.terminal.readers.retrieve(readerId)
+    );
+    if ('deleted' in reader && reader.deleted) {
+      checks.push(
+        result(
+          {
+            id: 'stripe-terminal-reader',
+            name: 'Stripe Terminal S710',
+            category: 'Payments (Stripe)',
+            status: 'unhealthy',
+            message: 'Configured Terminal reader was deleted',
+            detail: readerId,
+          },
+          latencyMs
+        )
+      );
+      return checks;
+    }
+
+    const actualLocation =
+      typeof reader.location === 'string'
+        ? reader.location
+        : reader.location?.id || null;
+    const modes = getStripeEnvModes();
+    const readerMode = reader.livemode ? 'live' : 'test';
+    const modeMatches = readerMode === modes.expected;
+    const locationMatches =
+      !locationId || actualLocation === locationId;
+    const online = reader.status === 'online';
+
+    checks.push(
+      result(
+        {
+          id: 'stripe-terminal-reader',
+          name: 'Stripe Terminal S710',
+          category: 'Payments (Stripe)',
+          status:
+            modeMatches && locationMatches && online
+              ? 'healthy'
+              : !modeMatches || !locationMatches
+                ? 'unhealthy'
+                : 'degraded',
+          message: online
+            ? `${reader.label || reader.id} online (${readerMode} mode)`
+            : `${reader.label || reader.id} is ${reader.status || 'offline'}`,
+          detail: [
+            `reader=${reader.id}`,
+            `device=${reader.device_type}`,
+            `location=${actualLocation || 'none'}`,
+            `expected_location=${locationId || 'not set'}`,
+            `mode=${readerMode}`,
+            `expected_mode=${modes.expected}`,
+          ].join(', '),
+        },
+        latencyMs
+      )
+    );
+  } catch (err) {
+    checks.push(
+      result({
+        id: 'stripe-terminal-reader',
+        name: 'Stripe Terminal S710',
+        category: 'Payments (Stripe)',
+        status: 'unhealthy',
+        message: 'Could not retrieve the configured Terminal reader',
+        detail: err instanceof Error ? err.message : String(err),
+      })
+    );
+  }
+
+  checks.push(
+    result({
+      id: 'stripe-terminal-webhook',
+      name: 'Stripe Terminal webhook',
+      category: 'Payments (Stripe)',
+      status: envPresent('STRIPE_WEBHOOK_SECRET') ? 'healthy' : 'unhealthy',
+      message: envPresent('STRIPE_WEBHOOK_SECRET')
+        ? 'Webhook signing secret configured'
+        : 'STRIPE_WEBHOOK_SECRET missing — interrupted payments cannot reconcile',
+      detail: '/api/stripe/webhook',
+    })
+  );
+
+  return checks;
 }
 
 async function checkQStash(): Promise<HealthCheckResult[]> {

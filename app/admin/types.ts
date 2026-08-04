@@ -160,9 +160,10 @@ export interface Appointment {
    */
   booking_notes: string | null;
   /**
-   * Price for this appointment's service, joined in from
-   * `site_services.price` on title match. Null when no matching CMS
-   * row exists (legacy bookings, manually renamed services, etc.).
+   * Immutable service price quoted when the appointment was created.
+   * Stored as integer cents on `appointments.quoted_service_price_cents`
+   * and converted to dollars at the server boundary. Null when no matching
+   * catalog service existed for a legacy booking.
    * The modal hides the price line entirely when null rather than
    * showing a misleading "$0".
    */
@@ -212,6 +213,12 @@ export interface Appointment {
    */
   stripe_customer_id: string | null;
   /**
+   * Latest Stripe Terminal service-payment attempt for this appointment.
+   * `succeeded` means the service has been paid in person; other states let
+   * the modal resume/reconcile an interrupted reader flow.
+   */
+  terminal_payment: TerminalPaymentSummary | null;
+  /**
    * True when the linked CRM client currently has an active no-show
    * attention flag (`clients.no_show_flag`). Joined onto calendar /
    * list payloads so 3-day / week / month pills can show a subtle
@@ -219,6 +226,26 @@ export interface Appointment {
    * row itself. False when unknown or cleared.
    */
   client_no_show_flag: boolean;
+}
+
+export type TerminalPaymentStatus =
+  | 'pending'
+  | 'processing'
+  | 'succeeded'
+  | 'failed'
+  | 'canceled';
+
+export interface TerminalPaymentSummary {
+  payment_intent_id: string;
+  reader_id: string;
+  status: TerminalPaymentStatus;
+  currency: string;
+  base_amount_cents: number;
+  tip_amount_cents: number;
+  total_amount_cents: number;
+  failure_code: string | null;
+  failure_message: string | null;
+  paid_at: string | null;
 }
 
 /**
