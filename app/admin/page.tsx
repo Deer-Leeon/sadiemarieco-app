@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { loadCalEventTypeMaps } from '@/lib/cal-config';
 import { normalizeStoredBookingNotes } from '@/lib/cal-booking-notes';
 import { ALLOWED_ADMIN_EMAILS } from '@/lib/admin-allowlist';
+import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
 
 import DashboardUI from './DashboardUI';
 import type { Appointment, TimeBlock } from './types';
@@ -57,6 +58,8 @@ interface DbRow {
   // by /api/booking/confirm after a successful SetupIntent on /checkout.
   // Null for legacy / admin-created bookings — see types.ts.
   stripe_customer_id: string | null;
+  terminal_payment_id: string | null;
+  terminal_payment_kind: string | null;
   terminal_payment_intent_id: string | null;
   terminal_reader_id: string | null;
   terminal_payment_status: string | null;
@@ -66,6 +69,8 @@ interface DbRow {
   terminal_total_amount_cents: number | null;
   terminal_failure_code: string | null;
   terminal_failure_message: string | null;
+  terminal_note: string | null;
+  terminal_settled_by_email: string | null;
   terminal_paid_at: Date | string | null;
   client_no_show_flag: boolean | null;
 }
@@ -210,6 +215,8 @@ export default async function AdminPage() {
         s.description AS service_description,
         s.slug        AS service_slug,
         s.color       AS service_color,
+        pay.id AS terminal_payment_id,
+        pay.payment_kind AS terminal_payment_kind,
         pay.stripe_payment_intent_id AS terminal_payment_intent_id,
         pay.stripe_reader_id AS terminal_reader_id,
         pay.status AS terminal_payment_status,
@@ -219,6 +226,8 @@ export default async function AdminPage() {
         pay.total_amount_cents AS terminal_total_amount_cents,
         pay.failure_code AS terminal_failure_code,
         pay.failure_message AS terminal_failure_message,
+        pay.note AS terminal_note,
+        pay.settled_by_email AS terminal_settled_by_email,
         pay.paid_at AS terminal_paid_at
       FROM appointments a
       LEFT JOIN LATERAL (
@@ -247,6 +256,8 @@ export default async function AdminPage() {
       ) s ON TRUE
       LEFT JOIN LATERAL (
         SELECT
+          p.id,
+          p.payment_kind,
           p.stripe_payment_intent_id,
           p.stripe_reader_id,
           p.status,
@@ -256,10 +267,11 @@ export default async function AdminPage() {
           p.total_amount_cents,
           p.failure_code,
           p.failure_message,
+          p.note,
+          p.settled_by_email,
           p.paid_at
         FROM appointment_payments p
         WHERE p.appointment_id = a.id::text
-          AND p.payment_kind = 'service_payment'
         ORDER BY
           CASE WHEN p.status = 'succeeded' THEN 0 ELSE 1 END,
           p.created_at DESC
@@ -296,28 +308,7 @@ export default async function AdminPage() {
       service_slug: r.service_slug,
       service_color: r.service_color,
       stripe_customer_id: r.stripe_customer_id,
-      terminal_payment:
-        r.terminal_payment_intent_id &&
-        r.terminal_reader_id &&
-        r.terminal_payment_status &&
-        ['pending', 'processing', 'succeeded', 'failed', 'canceled'].includes(
-          r.terminal_payment_status
-        )
-          ? {
-              payment_intent_id: r.terminal_payment_intent_id,
-              reader_id: r.terminal_reader_id,
-              status: r.terminal_payment_status as NonNullable<
-                Appointment['terminal_payment']
-              >['status'],
-              currency: r.terminal_currency || 'usd',
-              base_amount_cents: Number(r.terminal_base_amount_cents || 0),
-              tip_amount_cents: Number(r.terminal_tip_amount_cents || 0),
-              total_amount_cents: Number(r.terminal_total_amount_cents || 0),
-              failure_code: r.terminal_failure_code,
-              failure_message: r.terminal_failure_message,
-              paid_at: serializeDate(r.terminal_paid_at),
-            }
-          : null,
+      terminal_payment: mapSqlPaymentFields(r),
       client_no_show_flag: Boolean(r.client_no_show_flag),
     }));
   } catch (err) {

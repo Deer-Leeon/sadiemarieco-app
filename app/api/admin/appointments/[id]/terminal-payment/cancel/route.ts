@@ -57,9 +57,21 @@ export async function POST(
       );
     }
 
-    const reader = await terminal.stripe.terminal.readers.retrieve(
-      payment.reader_id
-    );
+    if (!payment.reader_id || !payment.payment_intent_id) {
+      return NextResponse.json(
+        {
+          error: 'not_a_terminal_payment',
+          message: 'This settlement was not collected on the Terminal.',
+          payment,
+        },
+        { status: 409 }
+      );
+    }
+
+    const readerId = payment.reader_id;
+    const paymentIntentId = payment.payment_intent_id;
+
+    const reader = await terminal.stripe.terminal.readers.retrieve(readerId);
     if (!('deleted' in reader && reader.deleted)) {
       const actionIntent =
         reader.action?.process_payment_intent?.payment_intent ?? null;
@@ -67,10 +79,10 @@ export async function POST(
         typeof actionIntent === 'string' ? actionIntent : actionIntent?.id;
       if (
         reader.action?.status === 'in_progress' &&
-        actionIntentId === payment.payment_intent_id
+        actionIntentId === paymentIntentId
       ) {
         try {
-          await terminal.stripe.terminal.readers.cancelAction(payment.reader_id);
+          await terminal.stripe.terminal.readers.cancelAction(readerId);
         } catch (err) {
           const detail = terminalErrorDetails(err);
           if (detail.code !== 'terminal_reader_busy') throw err;
@@ -88,7 +100,7 @@ export async function POST(
     }
 
     let intent = await terminal.stripe.paymentIntents.retrieve(
-      payment.payment_intent_id,
+      paymentIntentId,
       { expand: ['latest_charge'] }
     );
     if (

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import { getSucceededAppointmentPayment } from '@/lib/appointment-settlement';
 import {
   countTerminalAttempts,
   findTerminalAppointment,
@@ -92,17 +93,19 @@ export async function POST(
       );
     }
 
-    const existing = await getLatestTerminalPayment(appointment.id);
-    if (existing?.status === 'succeeded') {
+    const succeeded = await getSucceededAppointmentPayment(appointment.id);
+    if (succeeded) {
       return NextResponse.json(
         {
           error: 'already_paid',
           message: 'This appointment has already been paid.',
-          payment: existing,
+          payment: succeeded,
         },
         { status: 409 }
       );
     }
+
+    const existing = await getLatestTerminalPayment(appointment.id);
     if (existing && existing.status !== 'canceled') {
       return NextResponse.json(
         {
@@ -275,6 +278,12 @@ export async function GET(
     const payment = await getLatestTerminalPayment(id);
     if (!payment) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    }
+    if (!payment.reader_id || !payment.payment_intent_id) {
+      return NextResponse.json({
+        payment,
+        reader: null,
+      });
     }
 
     const reconciled = await reconcileTerminalPayment({

@@ -37,6 +37,7 @@ import type { Appointment } from '@/app/admin/types';
 import { normalizeStoredBookingNotes } from '@/lib/cal-booking-notes';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
 import { sqlPhoneVariants } from '@/lib/client-identity';
+import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -78,6 +79,8 @@ interface AppointmentRow {
   // Stripe Customer id (`cus_…`) for the vaulted card-on-file. Written
   // by /api/booking/confirm after a successful SetupIntent on /checkout.
   stripe_customer_id: string | null;
+  terminal_payment_id: string | null;
+  terminal_payment_kind: string | null;
   terminal_payment_intent_id: string | null;
   terminal_reader_id: string | null;
   terminal_payment_status: string | null;
@@ -87,6 +90,8 @@ interface AppointmentRow {
   terminal_total_amount_cents: number | null;
   terminal_failure_code: string | null;
   terminal_failure_message: string | null;
+  terminal_note: string | null;
+  terminal_settled_by_email: string | null;
   terminal_paid_at: Date | string | null;
   booking_notes: string | null;
   client_no_show_flag: boolean | null;
@@ -123,28 +128,7 @@ function rowToAppointment(row: AppointmentRow): Appointment {
     service_slug: row.service_slug,
     service_color: row.service_color,
     stripe_customer_id: row.stripe_customer_id,
-    terminal_payment:
-      row.terminal_payment_intent_id &&
-      row.terminal_reader_id &&
-      row.terminal_payment_status &&
-      ['pending', 'processing', 'succeeded', 'failed', 'canceled'].includes(
-        row.terminal_payment_status
-      )
-        ? {
-            payment_intent_id: row.terminal_payment_intent_id,
-            reader_id: row.terminal_reader_id,
-            status: row.terminal_payment_status as NonNullable<
-              Appointment['terminal_payment']
-            >['status'],
-            currency: row.terminal_currency || 'usd',
-            base_amount_cents: Number(row.terminal_base_amount_cents || 0),
-            tip_amount_cents: Number(row.terminal_tip_amount_cents || 0),
-            total_amount_cents: Number(row.terminal_total_amount_cents || 0),
-            failure_code: row.terminal_failure_code,
-            failure_message: row.terminal_failure_message,
-            paid_at: serializeDate(row.terminal_paid_at),
-          }
-        : null,
+    terminal_payment: mapSqlPaymentFields(row),
     client_no_show_flag: Boolean(row.client_no_show_flag),
   };
 }
@@ -232,6 +216,8 @@ export async function GET(
         s.description AS service_description,
         s.slug        AS service_slug,
         s.color       AS service_color,
+        pay.id AS terminal_payment_id,
+        pay.payment_kind AS terminal_payment_kind,
         pay.stripe_payment_intent_id AS terminal_payment_intent_id,
         pay.stripe_reader_id AS terminal_reader_id,
         pay.status AS terminal_payment_status,
@@ -241,6 +227,8 @@ export async function GET(
         pay.total_amount_cents AS terminal_total_amount_cents,
         pay.failure_code AS terminal_failure_code,
         pay.failure_message AS terminal_failure_message,
+        pay.note AS terminal_note,
+        pay.settled_by_email AS terminal_settled_by_email,
         pay.paid_at AS terminal_paid_at
       FROM appointments a
       LEFT JOIN LATERAL (
@@ -269,6 +257,8 @@ export async function GET(
       ) s ON TRUE
       LEFT JOIN LATERAL (
         SELECT
+          p.id,
+          p.payment_kind,
           p.stripe_payment_intent_id,
           p.stripe_reader_id,
           p.status,
@@ -278,10 +268,11 @@ export async function GET(
           p.total_amount_cents,
           p.failure_code,
           p.failure_message,
+          p.note,
+          p.settled_by_email,
           p.paid_at
         FROM appointment_payments p
         WHERE p.appointment_id = a.id::text
-          AND p.payment_kind = 'service_payment'
         ORDER BY
           CASE WHEN p.status = 'succeeded' THEN 0 ELSE 1 END,
           p.created_at DESC

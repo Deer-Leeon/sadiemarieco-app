@@ -7,6 +7,10 @@ import type {
   TerminalPaymentStatus,
   TerminalPaymentSummary,
 } from '@/app/admin/types';
+import {
+  type AppointmentPaymentRow,
+  paymentRowToSummary,
+} from '@/lib/appointment-settlement';
 import { stripe } from '@/lib/stripe';
 import {
   getStripeEnvModes,
@@ -26,20 +30,8 @@ export interface TerminalAppointment {
   stripe_customer_id: string | null;
   client_email: string | null;
 }
-interface PaymentRow {
-  appointment_id: string;
-  cal_booking_uid: string | null;
-  stripe_payment_intent_id: string;
-  stripe_reader_id: string;
-  status: TerminalPaymentStatus;
-  currency: string;
-  base_amount_cents: number;
-  tip_amount_cents: number;
-  total_amount_cents: number;
-  failure_code: string | null;
-  failure_message: string | null;
-  paid_at: Date | string | null;
-}
+
+type PaymentRow = AppointmentPaymentRow;
 
 export interface TerminalConfiguration {
   readerId: string;
@@ -49,27 +41,6 @@ export interface TerminalConfiguration {
 export type TerminalConfigResult =
   | { ok: true; stripe: Stripe; config: TerminalConfiguration }
   | { ok: false; status: number; error: string; message: string };
-
-function serializeDate(value: Date | string | null): string | null {
-  if (!value) return null;
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function paymentRowToSummary(row: PaymentRow): TerminalPaymentSummary {
-  return {
-    payment_intent_id: row.stripe_payment_intent_id,
-    reader_id: row.stripe_reader_id,
-    status: row.status,
-    currency: row.currency,
-    base_amount_cents: Number(row.base_amount_cents),
-    tip_amount_cents: Number(row.tip_amount_cents),
-    total_amount_cents: Number(row.total_amount_cents),
-    failure_code: row.failure_code,
-    failure_message: row.failure_message,
-    paid_at: serializeDate(row.paid_at),
-  };
-}
 
 export function getTerminalConfiguration(): TerminalConfigResult {
   if (!stripe) {
@@ -208,8 +179,10 @@ export async function getLatestTerminalPayment(
 ): Promise<TerminalPaymentSummary | null> {
   const { rows } = await sql<PaymentRow>`
     SELECT
+      id,
       appointment_id,
       cal_booking_uid,
+      payment_kind,
       stripe_payment_intent_id,
       stripe_reader_id,
       status,
@@ -219,6 +192,8 @@ export async function getLatestTerminalPayment(
       total_amount_cents,
       failure_code,
       failure_message,
+      note,
+      settled_by_email,
       paid_at
     FROM appointment_payments
     WHERE appointment_id = ${appointmentId}
@@ -236,8 +211,10 @@ export async function getTerminalPaymentByIntent(
 ): Promise<TerminalPaymentSummary | null> {
   const { rows } = await sql<PaymentRow>`
     SELECT
+      id,
       appointment_id,
       cal_booking_uid,
+      payment_kind,
       stripe_payment_intent_id,
       stripe_reader_id,
       status,
@@ -247,6 +224,8 @@ export async function getTerminalPaymentByIntent(
       total_amount_cents,
       failure_code,
       failure_message,
+      note,
+      settled_by_email,
       paid_at
     FROM appointment_payments
     WHERE stripe_payment_intent_id = ${paymentIntentId}
@@ -299,8 +278,10 @@ export async function insertTerminalPayment(args: {
     ON CONFLICT (stripe_payment_intent_id) DO UPDATE SET
       updated_at = NOW()
     RETURNING
+      id,
       appointment_id,
       cal_booking_uid,
+      payment_kind,
       stripe_payment_intent_id,
       stripe_reader_id,
       status,
@@ -310,6 +291,8 @@ export async function insertTerminalPayment(args: {
       total_amount_cents,
       failure_code,
       failure_message,
+      note,
+      settled_by_email,
       paid_at
   `;
   return paymentRowToSummary(rows[0]);
@@ -329,8 +312,10 @@ export async function claimTerminalReader(
       AND status <> 'succeeded'
       AND status <> 'canceled'
     RETURNING
+      id,
       appointment_id,
       cal_booking_uid,
+      payment_kind,
       stripe_payment_intent_id,
       stripe_reader_id,
       status,
@@ -340,6 +325,8 @@ export async function claimTerminalReader(
       total_amount_cents,
       failure_code,
       failure_message,
+      note,
+      settled_by_email,
       paid_at
   `;
   if (!rows[0]) {
@@ -360,8 +347,10 @@ export async function reassignTerminalPaymentReader(
     WHERE stripe_payment_intent_id = ${paymentIntentId}
       AND status = 'failed'
     RETURNING
+      id,
       appointment_id,
       cal_booking_uid,
+      payment_kind,
       stripe_payment_intent_id,
       stripe_reader_id,
       status,
@@ -371,6 +360,8 @@ export async function reassignTerminalPaymentReader(
       total_amount_cents,
       failure_code,
       failure_message,
+      note,
+      settled_by_email,
       paid_at
   `;
   if (!rows[0]) {
@@ -449,7 +440,7 @@ export async function syncTerminalPaymentFromStripe(
 ): Promise<TerminalPaymentSummary | null> {
   const state = paymentStateFromStripe(intent, readerAction);
   const tipAmount = Math.max(0, intent.amount_details?.tip?.amount || 0);
-  const totalAmount = Math.max(intent.amount_received || 0, intent.amount);
+  // Keep total = base + tip so the settlement amounts check stays valid.
   const paidAt =
     state.status === 'succeeded'
       ? new Date(
@@ -470,7 +461,7 @@ export async function syncTerminalPaymentFromStripe(
       END,
       currency = ${intent.currency.toLowerCase()},
       tip_amount_cents = ${tipAmount},
-      total_amount_cents = GREATEST(base_amount_cents, ${totalAmount}),
+      total_amount_cents = base_amount_cents + ${tipAmount},
       failure_code = ${state.failureCode},
       failure_message = ${state.failureMessage},
       paid_at = CASE
@@ -481,8 +472,10 @@ export async function syncTerminalPaymentFromStripe(
       updated_at = NOW()
     WHERE stripe_payment_intent_id = ${intent.id}
     RETURNING
+      id,
       appointment_id,
       cal_booking_uid,
+      payment_kind,
       stripe_payment_intent_id,
       stripe_reader_id,
       status,
@@ -492,6 +485,8 @@ export async function syncTerminalPaymentFromStripe(
       total_amount_cents,
       failure_code,
       failure_message,
+      note,
+      settled_by_email,
       paid_at
   `;
   return rows[0] ? paymentRowToSummary(rows[0]) : null;
@@ -520,8 +515,10 @@ export async function markTerminalPaymentFailure(
       updated_at = NOW()
     WHERE stripe_payment_intent_id = ${paymentIntentId}
     RETURNING
+      id,
       appointment_id,
       cal_booking_uid,
+      payment_kind,
       stripe_payment_intent_id,
       stripe_reader_id,
       status,
@@ -531,6 +528,8 @@ export async function markTerminalPaymentFailure(
       total_amount_cents,
       failure_code,
       failure_message,
+      note,
+      settled_by_email,
       paid_at
   `;
   return rows[0] ? paymentRowToSummary(rows[0]) : null;

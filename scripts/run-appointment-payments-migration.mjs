@@ -84,8 +84,8 @@ const statements = [
     appointment_id TEXT NOT NULL,
     cal_booking_uid TEXT,
     payment_kind TEXT NOT NULL DEFAULT 'service_payment',
-    stripe_payment_intent_id TEXT NOT NULL UNIQUE,
-    stripe_reader_id TEXT NOT NULL,
+    stripe_payment_intent_id TEXT UNIQUE,
+    stripe_reader_id TEXT,
     currency TEXT NOT NULL DEFAULT 'usd',
     base_amount_cents INTEGER NOT NULL,
     tip_amount_cents INTEGER NOT NULL DEFAULT 0,
@@ -93,32 +93,52 @@ const statements = [
     status TEXT NOT NULL DEFAULT 'pending',
     failure_code TEXT,
     failure_message TEXT,
+    note TEXT,
+    settled_by_email TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     paid_at TIMESTAMPTZ,
     CONSTRAINT appointment_payments_kind_chk
-      CHECK (payment_kind IN ('service_payment')),
+      CHECK (payment_kind IN ('service_payment', 'cash', 'complimentary')),
     CONSTRAINT appointment_payments_status_chk
       CHECK (status IN ('pending', 'processing', 'succeeded', 'failed', 'canceled')),
     CONSTRAINT appointment_payments_currency_chk
       CHECK (currency ~ '^[a-z]{3}$'),
     CONSTRAINT appointment_payments_amounts_chk
       CHECK (
-        base_amount_cents >= 50
+        base_amount_cents >= 0
         AND tip_amount_cents >= 0
-        AND total_amount_cents >= base_amount_cents
+        AND total_amount_cents = base_amount_cents + tip_amount_cents
+        AND (
+          payment_kind IN ('cash', 'complimentary')
+          OR (
+            payment_kind = 'service_payment'
+            AND base_amount_cents >= 50
+            AND stripe_payment_intent_id IS NOT NULL
+            AND stripe_reader_id IS NOT NULL
+          )
+        )
       ),
     CONSTRAINT appointment_payments_pi_format_chk
-      CHECK (stripe_payment_intent_id ~ '^pi_[A-Za-z0-9_]+$'),
+      CHECK (
+        stripe_payment_intent_id IS NULL
+        OR stripe_payment_intent_id ~ '^pi_[A-Za-z0-9_]+$'
+      ),
     CONSTRAINT appointment_payments_reader_format_chk
-      CHECK (stripe_reader_id ~ '^tmr_[A-Za-z0-9_]+$')
+      CHECK (
+        stripe_reader_id IS NULL
+        OR stripe_reader_id ~ '^tmr_[A-Za-z0-9_]+$'
+      )
   )`,
   `CREATE INDEX IF NOT EXISTS appointment_payments_appointment_idx
     ON appointment_payments (appointment_id, created_at DESC)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS appointment_payments_one_active_service_idx
     ON appointment_payments (appointment_id)
     WHERE payment_kind = 'service_payment'
-      AND status IN ('pending', 'processing', 'succeeded', 'failed')`,
+      AND status IN ('pending', 'processing', 'failed')`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS appointment_payments_one_succeeded_idx
+    ON appointment_payments (appointment_id)
+    WHERE status = 'succeeded'`,
   `CREATE UNIQUE INDEX IF NOT EXISTS appointment_payments_one_active_reader_idx
     ON appointment_payments (stripe_reader_id)
     WHERE status IN ('pending', 'processing')`,

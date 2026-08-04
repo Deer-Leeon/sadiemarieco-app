@@ -43,6 +43,7 @@ import {
 
 import type {
   Appointment,
+  AppointmentPaymentKind,
   AppointmentStatus,
   Client,
   TerminalPaymentSummary,
@@ -202,6 +203,12 @@ export default function AppointmentModal({
   const [statusConfirm, setStatusConfirm] = useState<StatusConfirmKind | null>(
     null
   );
+  const [settlementConfirm, setSettlementConfirm] = useState<
+    'cash' | 'complimentary' | 'undo' | null
+  >(null);
+  const [settlementNote, setSettlementNote] = useState('');
+  const [settlementBusy, setSettlementBusy] = useState(false);
+  const [settlementError, setSettlementError] = useState<string | null>(null);
 
   const canChargeNoShow =
     appointmentHasVaultedCard(
@@ -302,9 +309,60 @@ export default function AppointmentModal({
   };
 
   const openStatusConfirm = (kind: StatusConfirmKind) => {
-    if (statusAction !== null || readOnly) return;
+    if (statusAction !== null || settlementBusy || readOnly) return;
     setStatusError(null);
     setStatusConfirm(kind);
+  };
+
+  const openSettlementConfirm = (
+    kind: 'cash' | 'complimentary' | 'undo'
+  ) => {
+    if (statusAction !== null || settlementBusy || readOnly) return;
+    setSettlementError(null);
+    setSettlementNote('');
+    setSettlementConfirm(kind);
+  };
+
+  const submitSettlement = async () => {
+    if (!settlementConfirm || settlementBusy) return;
+    setSettlementBusy(true);
+    setSettlementError(null);
+    try {
+      const isUndo = settlementConfirm === 'undo';
+      const res = await fetch(
+        `/api/admin/appointments/${appointment.id}/settlement${
+          isUndo ? '/undo' : ''
+        }`,
+        {
+          method: 'POST',
+          headers: isUndo ? undefined : { 'Content-Type': 'application/json' },
+          body: isUndo
+            ? undefined
+            : JSON.stringify({
+                method: settlementConfirm,
+                note: settlementNote.trim() || undefined,
+              }),
+        }
+      );
+      const data = (await res.json().catch(() => null)) as {
+        message?: string;
+        error?: string;
+      } | null;
+      if (!res.ok) {
+        setSettlementError(
+          data?.message || data?.error || `HTTP ${res.status}`
+        );
+        return;
+      }
+      setSettlementConfirm(null);
+      setSettlementNote('');
+      router.refresh();
+      onMutated?.();
+    } catch (err) {
+      setSettlementError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSettlementBusy(false);
+    }
   };
 
   // ESC to close. Bound at window so the modal closes regardless of
@@ -326,6 +384,10 @@ export default function AppointmentModal({
         setStatusConfirm(null);
         return;
       }
+      if (settlementConfirm !== null) {
+        setSettlementConfirm(null);
+        return;
+      }
       onClose();
     }
     window.addEventListener('keydown', onKey);
@@ -334,7 +396,7 @@ export default function AppointmentModal({
       if (i >= 0) escStack.splice(i, 1);
       window.removeEventListener('keydown', onKey);
     };
-  }, [onClose, statusConfirm]);
+  }, [onClose, statusConfirm, settlementConfirm]);
 
   // Body scroll lock + restore. Snapshotting `previous` rather than
   // hard-coding '' on cleanup means we cooperate with any parent
@@ -373,6 +435,7 @@ export default function AppointmentModal({
       }`}
       onClick={() => {
         if (statusConfirm) setStatusConfirm(null);
+        else if (settlementConfirm) setSettlementConfirm(null);
         else onClose();
       }}
       onWheel={(e) => e.stopPropagation()}
@@ -447,7 +510,20 @@ export default function AppointmentModal({
                 <DateTimeBox appointment={appointment} />
                 <ServiceBox appointment={appointment} />
                 {appointment.terminal_payment?.status === 'succeeded' ? (
-                  <PaymentBox payment={appointment.terminal_payment} />
+                  <PaymentBox
+                    payment={appointment.terminal_payment}
+                    onUndo={
+                      readOnly
+                        ? undefined
+                        : appointment.terminal_payment.payment_kind ===
+                              'cash' ||
+                            appointment.terminal_payment.payment_kind ===
+                              'complimentary'
+                          ? () => openSettlementConfirm('undo')
+                          : undefined
+                    }
+                    undoBusy={settlementBusy}
+                  />
                 ) : null}
               </div>
             </div>
@@ -463,6 +539,7 @@ export default function AppointmentModal({
                   appointment.service_price > 0
                 }
                 paid={appointment.terminal_payment?.status === 'succeeded'}
+                paymentKind={appointment.terminal_payment?.payment_kind ?? null}
                 chargeAmountCents={
                   appointment.service_price == null
                     ? 0
@@ -470,10 +547,35 @@ export default function AppointmentModal({
                 }
                 onReschedule={() => setIsRescheduling(true)}
                 onCharge={() => setIsCollectingPayment(true)}
+                onMarkCash={() => openSettlementConfirm('cash')}
+                onMarkComplimentary={() =>
+                  openSettlementConfirm('complimentary')
+                }
                 onNoShow={() => openStatusConfirm('no-show')}
                 onCancel={() => openStatusConfirm('cancel')}
                 statusAction={statusAction}
-                statusError={statusError}
+                statusError={statusError || settlementError}
+              />
+            )}
+
+            {!readOnly && settlementConfirm && (
+              <SettlementConfirmDialog
+                kind={settlementConfirm}
+                amountCents={
+                  appointment.service_price == null
+                    ? 0
+                    : Math.round(appointment.service_price * 100)
+                }
+                note={settlementNote}
+                onNoteChange={setSettlementNote}
+                busy={settlementBusy}
+                error={settlementError}
+                onDismiss={() => {
+                  if (settlementBusy) return;
+                  setSettlementConfirm(null);
+                  setSettlementError(null);
+                }}
+                onConfirm={() => void submitSettlement()}
               />
             )}
 
@@ -742,30 +844,65 @@ function ServiceBox({ appointment }: { appointment: Appointment }) {
   );
 }
 
-function PaymentBox({ payment }: { payment: TerminalPaymentSummary }) {
+function settlementLabel(kind: AppointmentPaymentKind | null | undefined): string {
+  if (kind === 'cash') return 'Paid cash';
+  if (kind === 'complimentary') return 'Complimentary';
+  return 'Paid in person';
+}
+
+function PaymentBox({
+  payment,
+  onUndo,
+  undoBusy,
+}: {
+  payment: TerminalPaymentSummary;
+  onUndo?: () => void;
+  undoBusy?: boolean;
+}) {
+  const isComp = payment.payment_kind === 'complimentary';
+  const isCash = payment.payment_kind === 'cash';
+
   return (
     <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
             <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
           </span>
           <div>
             <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-emerald-700">
-              Paid in person
+              {settlementLabel(payment.payment_kind)}
             </p>
             <p className="text-sm text-emerald-950">
-              Service {formatCentsUsd(payment.base_amount_cents)}
-              {payment.tip_amount_cents > 0
-                ? ` + ${formatCentsUsd(payment.tip_amount_cents)} tip`
-                : ' · No tip'}
+              {isComp
+                ? 'No charge · settled without payment'
+                : `Service ${formatCentsUsd(payment.base_amount_cents)}${
+                    payment.tip_amount_cents > 0
+                      ? ` + ${formatCentsUsd(payment.tip_amount_cents)} tip`
+                      : isCash
+                        ? ' · Cash'
+                        : ' · No tip'
+                  }`}
             </p>
+            {payment.note ? (
+              <p className="mt-1 text-xs text-emerald-800/80">{payment.note}</p>
+            ) : null}
           </div>
         </div>
         <p className="font-serif text-xl text-emerald-950">
-          {formatCentsUsd(payment.total_amount_cents)}
+          {isComp ? 'Comp' : formatCentsUsd(payment.total_amount_cents)}
         </p>
       </div>
+      {onUndo ? (
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={undoBusy}
+          className="mt-3 text-xs font-medium uppercase tracking-[0.16em] text-emerald-800/80 transition-colors hover:text-emerald-950 disabled:opacity-50"
+        >
+          {undoBusy ? 'Undoing…' : 'Undo settlement'}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -774,41 +911,38 @@ function ActionFooter({
   canReschedule,
   canCharge,
   paid,
+  paymentKind,
   chargeAmountCents,
   onReschedule,
   onCharge,
+  onMarkCash,
+  onMarkComplimentary,
   onNoShow,
   onCancel,
   statusAction,
   statusError,
 }: {
-  /**
-   * False when the appointment has no `cal_uid` (legacy / corrupted
-   * row). Cal's reschedule URL requires the booking UID, so without
-   * it the button is greyed out and tooltips an explanation rather
-   * than opening an empty embed.
-   */
   canReschedule: boolean;
   canCharge: boolean;
   paid: boolean;
+  paymentKind: AppointmentPaymentKind | null;
   chargeAmountCents: number;
   onReschedule: () => void;
   onCharge: () => void;
+  onMarkCash: () => void;
+  onMarkComplimentary: () => void;
   onNoShow: () => void;
   onCancel: () => void;
-  /**
-   * Which status mutation is currently in flight, if any. Drives
-   * the per-button spinner and disables BOTH buttons (so the admin
-   * can't fire two PATCHes that race the router refresh + close).
-   */
   statusAction: null | 'no-show' | 'canceled_by_admin';
-  /**
-   * Surfaced under the footer when the PATCH fails. Cleared
-   * automatically on the next attempt.
-   */
   statusError: string | null;
 }) {
   const busy = statusAction !== null;
+  const paidLabel =
+    paymentKind === 'cash'
+      ? 'Cash'
+      : paymentKind === 'complimentary'
+        ? 'Comped'
+        : 'Paid';
 
   return (
     <div className="border-t border-stone-200 bg-white">
@@ -818,13 +952,39 @@ function ActionFooter({
         </div>
       )}
       <div className="flex flex-wrap items-center justify-end gap-2 px-6 py-4">
+        {!paid ? (
+          <>
+            <button
+              type="button"
+              onClick={onMarkComplimentary}
+              disabled={busy}
+              title="Mark this appointment complimentary with no charge"
+              className="rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Comp
+            </button>
+            <button
+              type="button"
+              onClick={onMarkCash}
+              disabled={!canCharge || busy}
+              title={
+                canCharge
+                  ? 'Mark this appointment paid in cash'
+                  : 'Cannot mark cash — this appointment has no service price.'
+              }
+              className="rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.16em] text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cash
+            </button>
+          </>
+        ) : null}
         <button
           type="button"
           onClick={onCharge}
           disabled={!canCharge || paid || busy}
           title={
             paid
-              ? 'This appointment is already paid.'
+              ? 'This appointment is already settled.'
               : canCharge
                 ? 'Send this service payment to the Stripe Terminal.'
                 : 'Cannot charge — this appointment has no service price.'
@@ -841,7 +1001,7 @@ function ActionFooter({
             <CreditCard className="h-3.5 w-3.5" />
           )}
           {paid
-            ? 'Paid'
+            ? paidLabel
             : chargeAmountCents > 0
               ? `Charge ${formatCentsUsd(chargeAmountCents)}`
               : 'Charge'}
@@ -867,28 +1027,25 @@ function ActionFooter({
           className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white"
         >
           {statusAction === 'no-show' ? (
-            <>
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Updating
-            </>
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
-            'No-show'
+            <Flag className="h-3.5 w-3.5" />
           )}
+          No-show
         </button>
         <button
           type="button"
           onClick={onCancel}
           disabled={busy}
+          title="Cancel this appointment"
           className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white"
         >
           {statusAction === 'canceled_by_admin' ? (
-            <>
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Canceling
-            </>
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
-            'Cancel'
+            <X className="h-3.5 w-3.5" />
           )}
+          Cancel
         </button>
       </div>
     </div>
@@ -1470,7 +1627,8 @@ function TerminalChargeView({
   );
   const serviceLabel = appointmentServiceLabel(appointment);
   const active =
-    payment?.status === 'pending' || payment?.status === 'processing';
+    (payment?.payment_kind === 'service_payment' || !payment?.payment_kind) &&
+    (payment?.status === 'pending' || payment?.status === 'processing');
 
   useEffect(() => {
     if (payment?.status !== 'succeeded' || paidNotified.current) return;
@@ -1734,6 +1892,108 @@ function TerminalChargeView({
             </button>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function SettlementConfirmDialog({
+  kind,
+  amountCents,
+  note,
+  onNoteChange,
+  busy,
+  error,
+  onDismiss,
+  onConfirm,
+}: {
+  kind: 'cash' | 'complimentary' | 'undo';
+  amountCents: number;
+  note: string;
+  onNoteChange: (value: string) => void;
+  busy: boolean;
+  error: string | null;
+  onDismiss: () => void;
+  onConfirm: () => void;
+}) {
+  const title =
+    kind === 'undo'
+      ? 'Undo settlement?'
+      : kind === 'cash'
+        ? 'Mark as paid cash?'
+        : 'Mark as complimentary?';
+  const body =
+    kind === 'undo'
+      ? 'This clears the cash or complimentary mark so you can charge or settle again.'
+      : kind === 'cash'
+        ? `Record ${formatCentsUsd(amountCents)} as paid in cash. No card charge will be sent to the Terminal.`
+        : 'Mark this appointment settled with no charge. Useful for friends, trades, or gifts.';
+
+  return (
+    <div
+      className="absolute inset-0 z-10 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-[2px]"
+      onClick={onDismiss}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settlement-confirm-title"
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-stone-200/80 bg-[#FAF9F6] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 pt-6">
+          <h2
+            id="settlement-confirm-title"
+            className="font-serif text-2xl text-stone-900"
+          >
+            {title}
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-stone-600">{body}</p>
+          {kind !== 'undo' ? (
+            <label className="mt-4 block">
+              <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
+                Note (optional)
+              </span>
+              <input
+                type="text"
+                value={note}
+                onChange={(e) => onNoteChange(e.target.value)}
+                maxLength={500}
+                disabled={busy}
+                placeholder="Friend, trade, gift…"
+                className="mt-1.5 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-stone-400"
+              />
+            </label>
+          ) : null}
+          {error ? (
+            <p className="mt-3 text-sm text-rose-700" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </div>
+        <div className="mt-6 flex items-center justify-end gap-2 border-t border-stone-200 bg-white px-6 py-4">
+          <button
+            type="button"
+            onClick={onDismiss}
+            disabled={busy}
+            className="rounded-full px-4 py-2 text-xs font-medium uppercase tracking-[0.16em] text-stone-500 transition-colors hover:bg-stone-100 disabled:opacity-50"
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-4 py-2 text-xs font-medium uppercase tracking-[0.16em] text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {kind === 'undo'
+              ? 'Undo'
+              : kind === 'cash'
+                ? 'Mark cash'
+                : 'Mark complimentary'}
+          </button>
+        </div>
       </div>
     </div>
   );
