@@ -1,13 +1,18 @@
-const PUBLIC_BASE_URL = 'https://www.sadiemarie.co';
+import {
+  STUDIO_ADDRESS_ONE_LINE,
+  STUDIO_PHONE_DISPLAY,
+  STUDIO_PHONE_TEL,
+  STUDIO_SITE_URL,
+} from '@/lib/studio-nap';
+
+const PUBLIC_BASE_URL = STUDIO_SITE_URL;
 const PAGE_BG = '#ebe8e4';
 const NAVY = '#0d1b2a';
 const NAVY_BTN = '#2a4460';
 const SERIF = "'Times New Roman', Times, Georgia, serif";
 const SCRIPT = "'Pinyon Script', 'Brush Script MT', 'Segoe Script', cursive";
 const CARD_WIDTH = 680;
-const STUDIO_ADDRESS = '61 W 3200 N, Suite #10, Lehi, UT 84043';
-const STUDIO_PHONE_DISPLAY = '(385) 200-3904';
-const STUDIO_PHONE_TEL = '3852003904';
+const STUDIO_ADDRESS = STUDIO_ADDRESS_ONE_LINE;
 
 /** Inline + class hook — Gmail dark mode often skips solid bgcolor but keeps gradients. */
 const creamBg = `background-color:${PAGE_BG};background-image:linear-gradient(${PAGE_BG},${PAGE_BG});`;

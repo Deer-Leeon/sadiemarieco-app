@@ -2,9 +2,31 @@ import type { Metadata } from 'next';
 import { ClerkProvider } from '@clerk/nextjs';
 import './globals.css';
 
+import {
+  SEO_DEFAULT_DESCRIPTION,
+  SEO_DEFAULT_TITLE,
+} from '@/lib/seo-meta';
+import { STUDIO_OG_IMAGE_URL, STUDIO_SITE_URL } from '@/lib/studio-nap';
+
 export const metadata: Metadata = {
-  title: 'Sadie Marie',
-  description: 'Sadie Marie',
+  metadataBase: new URL(STUDIO_SITE_URL),
+  title: {
+    default: SEO_DEFAULT_TITLE,
+    template: '%s · Sadie Marie',
+  },
+  description: SEO_DEFAULT_DESCRIPTION,
+  openGraph: {
+    siteName: 'Sadie Marie',
+    images: [{ url: STUDIO_OG_IMAGE_URL, width: 1200, height: 630 }],
+  },
+  icons: {
+    icon: [
+      { url: '/favicon.ico' },
+      { url: '/assets/brand/favicon-32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
 };
 
 /**

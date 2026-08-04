@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Sadie Marie — Luxury Beauty Studio
+   Sadie Marie
    Main JavaScript: nav scroll behavior, scroll-reveal animations,
    FAQ accordion, services accordion with lazy-loaded Cal.com widgets
    ========================================================================== */

@@ -1,5 +1,10 @@
 import { SignIn } from '@clerk/nextjs';
 
+export const metadata = {
+  title: 'Admin sign-in',
+  robots: { index: false, follow: false },
+};
+
 /**
  * Custom sign-in page styled to match the cream/champagne admin aesthetic.
  *

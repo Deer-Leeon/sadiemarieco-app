@@ -7,7 +7,7 @@ This document is the source of truth for Sadie Marie’s **transactional appoint
 **Privacy Policy URL:** `https://sadiemarie.co/privacy`  
 **Terms & Conditions URL:** `https://sadiemarie.co/terms`
 
-If the Twilio Brand is registered under a different name (e.g. “Sadie Marie Beauty Studio”), either update the Brand to **Sadie Marie** or update every client-facing legal/opt-in surface to that exact registered name. Brand mismatch causes rejection.
+If the Twilio Brand is registered under a different name (e.g. “Sadie Marie”), either update the Brand to **Sadie Marie** or update every client-facing legal/opt-in surface to that exact registered name. Brand mismatch causes rejection.
 
 ---
 

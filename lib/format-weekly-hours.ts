@@ -82,3 +82,28 @@ export function renderWeeklyHoursHtml(
 
   return lines.join('<br>');
 }
+
+/**
+ * Opening hours for schema.org (ISO weekday: Mon=1 … Sun=7).
+ * Times stay as 24h HH:MM from Cal.
+ */
+export function weeklyHoursForSchema(
+  availability: ScheduleAvailability[]
+): Array<{ dayOfWeek: number; opens: string; closes: string }> {
+  const byDay = weeklyWindowsByDay(availability);
+  const out: Array<{ dayOfWeek: number; opens: string; closes: string }> = [];
+
+  for (const idx of DAY_INDICES) {
+    const window = byDay.get(idx);
+    if (!window) continue;
+    // Cal uses Sun=0 … Sat=6; schema.org uses Mon=1 … Sun=7.
+    const dayOfWeek = idx === 0 ? 7 : idx;
+    out.push({
+      dayOfWeek,
+      opens: window.startTime,
+      closes: window.endTime,
+    });
+  }
+
+  return out;
+}

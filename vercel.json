@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/cleanup-abandoned",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/sync-reviews",
+      "schedule": "0 */6 * * *"
     }
   ]
 }
