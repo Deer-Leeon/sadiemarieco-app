@@ -119,13 +119,21 @@ export async function validateConfiguredTerminalReader(
     };
   }
 
-  const expectedMode = getStripeEnvModes().expected;
-  if ((reader.livemode ? 'live' : 'test') !== expectedMode) {
+  // Match the reader to the secret key in use (not deployment "expected"
+  // mode). Local `next-dev` defaults expected→test so day-to-day work stays
+  // safe, but live keys in `.env.local` must be able to talk to the live S710.
+  const modes = getStripeEnvModes();
+  const readerMode = reader.livemode ? 'live' : 'test';
+  const requiredMode =
+    modes.secret === 'live' || modes.secret === 'test'
+      ? modes.secret
+      : modes.expected;
+  if (readerMode !== requiredMode) {
     return {
       ok: false,
       status: 503,
       error: 'terminal_reader_mode_mismatch',
-      message: `The configured reader is not in Stripe ${expectedMode} mode.`,
+      message: `The configured reader is not in Stripe ${requiredMode} mode.`,
     };
   }
 
@@ -253,6 +261,7 @@ export async function insertTerminalPayment(args: {
   readerId: string;
   currency: string;
   amountCents: number;
+  note?: string | null;
 }): Promise<TerminalPaymentSummary> {
   const { rows } = await sql<PaymentRow>`
     INSERT INTO appointment_payments (
@@ -263,7 +272,8 @@ export async function insertTerminalPayment(args: {
       currency,
       base_amount_cents,
       total_amount_cents,
-      status
+      status,
+      note
     )
     VALUES (
       ${args.appointmentId},
@@ -273,7 +283,8 @@ export async function insertTerminalPayment(args: {
       ${args.currency},
       ${args.amountCents},
       ${args.amountCents},
-      'pending'
+      'pending',
+      ${args.note ?? null}
     )
     ON CONFLICT (stripe_payment_intent_id) DO UPDATE SET
       updated_at = NOW()
@@ -535,6 +546,57 @@ export async function markTerminalPaymentFailure(
   return rows[0] ? paymentRowToSummary(rows[0]) : null;
 }
 
+/**
+ * Clear a failed (or same-intent) leftover reader action so the next
+ * `processPaymentIntent` can bind cleanly. Does not interrupt a different
+ * appointment's in-progress collection.
+ */
+export async function clearStaleReaderAction(
+  client: Stripe,
+  readerId: string,
+  opts?: { paymentIntentId?: string }
+): Promise<void> {
+  try {
+    const reader = await client.terminal.readers.retrieve(readerId);
+    if ('deleted' in reader && reader.deleted) return;
+    const action = reader.action;
+    if (!action) return;
+
+    const actionIntent =
+      action.process_payment_intent?.payment_intent ?? null;
+    const actionIntentId =
+      typeof actionIntent === 'string' ? actionIntent : actionIntent?.id;
+
+    const shouldCancel =
+      action.status === 'failed' ||
+      (action.status === 'in_progress' &&
+        Boolean(opts?.paymentIntentId) &&
+        actionIntentId === opts?.paymentIntentId);
+
+    if (!shouldCancel) return;
+
+    try {
+      await client.terminal.readers.cancelAction(readerId);
+    } catch (err) {
+      const detail = terminalErrorDetails(err);
+      if (
+        detail.code === 'terminal_reader_busy' ||
+        detail.message.toLowerCase().includes('no action')
+      ) {
+        return;
+      }
+      console.warn('[stripe-terminal] clearStaleReaderAction ignored', detail);
+    }
+  } catch (err) {
+    const detail = terminalErrorDetails(err);
+    if (detail.code === 'resource_missing') return;
+    console.warn(
+      '[stripe-terminal] clearStaleReaderAction retrieve failed',
+      detail
+    );
+  }
+}
+
 export async function processTerminalPayment(args: {
   stripe: Stripe;
   readerId: string;
@@ -544,6 +606,10 @@ export async function processTerminalPayment(args: {
   reader: Stripe.Terminal.Reader;
   payment: TerminalPaymentSummary | null;
 }> {
+  await clearStaleReaderAction(args.stripe, args.readerId, {
+    paymentIntentId: args.paymentIntentId,
+  });
+
   const reader = await args.stripe.terminal.readers.processPaymentIntent(
     args.readerId,
     {
