@@ -20,6 +20,7 @@ import {
   DollarSign,
   ExternalLink,
   Flag,
+  Heart,
   Loader2,
   Mail,
   MessageSquare,
@@ -40,6 +41,14 @@ import {
   CAL_USERNAME,
   extractBookingDataFromEvent,
 } from '@/lib/cal-embed-shared';
+import {
+  applyTerminalDiscount,
+  formatCentsAsDollarInput,
+  isValidTerminalCustomAmountCents,
+  parseDollarsToCents,
+  TERMINAL_DISCOUNT_PERCENTS,
+  type TerminalDiscountPercent,
+} from '@/lib/terminal-discount';
 
 import type {
   Appointment,
@@ -539,19 +548,35 @@ export default function AppointmentModal({
                 ) : null}
                 <DateTimeBox appointment={appointment} />
                 <ServiceBox appointment={appointment} />
-                {livePayment?.status === 'succeeded' ? (
-                  <PaymentBox
-                    payment={livePayment}
-                    onUndo={
-                      readOnly
-                        ? undefined
-                        : livePayment.payment_kind === 'cash' ||
-                            livePayment.payment_kind === 'complimentary'
+                {!readOnly ? (
+                  livePayment?.status === 'succeeded' ? (
+                    <PaymentBox
+                      payment={livePayment}
+                      onUndo={
+                        livePayment.payment_kind === 'cash' ||
+                        livePayment.payment_kind === 'complimentary'
                           ? () => openSettlementConfirm('undo')
                           : undefined
-                    }
-                    undoBusy={settlementBusy}
-                  />
+                      }
+                      undoBusy={settlementBusy}
+                    />
+                  ) : (
+                    <UnsettledPaymentBox
+                      canCharge={
+                        appointment.service_price != null &&
+                        Number.isFinite(appointment.service_price) &&
+                        appointment.service_price > 0
+                      }
+                      busy={settlementBusy || statusAction !== null}
+                      onCharge={() => setIsCollectingPayment(true)}
+                      onMarkCash={() => openSettlementConfirm('cash')}
+                      onMarkComplimentary={() =>
+                        openSettlementConfirm('complimentary')
+                      }
+                    />
+                  )
+                ) : livePayment?.status === 'succeeded' ? (
+                  <PaymentBox payment={livePayment} />
                 ) : null}
               </div>
             </div>
@@ -561,24 +586,7 @@ export default function AppointmentModal({
             ) : (
               <ActionFooter
                 canReschedule={Boolean(appointment.service_slug)}
-                canCharge={
-                  appointment.service_price != null &&
-                  Number.isFinite(appointment.service_price) &&
-                  appointment.service_price > 0
-                }
-                paid={livePayment?.status === 'succeeded'}
-                paymentKind={livePayment?.payment_kind ?? null}
-                chargeAmountCents={
-                  appointment.service_price == null
-                    ? 0
-                    : Math.round(appointment.service_price * 100)
-                }
                 onReschedule={() => setIsRescheduling(true)}
-                onCharge={() => setIsCollectingPayment(true)}
-                onMarkCash={() => openSettlementConfirm('cash')}
-                onMarkComplimentary={() =>
-                  openSettlementConfirm('complimentary')
-                }
                 onNoShow={() => openStatusConfirm('no-show')}
                 onCancel={() => openStatusConfirm('cancel')}
                 statusAction={statusAction}
@@ -935,42 +943,91 @@ function PaymentBox({
   );
 }
 
-function ActionFooter({
-  canReschedule,
+function UnsettledPaymentBox({
   canCharge,
-  paid,
-  paymentKind,
-  chargeAmountCents,
-  onReschedule,
+  busy,
   onCharge,
   onMarkCash,
   onMarkComplimentary,
+}: {
+  canCharge: boolean;
+  busy: boolean;
+  onCharge: () => void;
+  onMarkCash: () => void;
+  onMarkComplimentary: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-4">
+      <p className="text-xs font-medium text-stone-700">Payment</p>
+      <p className="mt-1 text-sm text-stone-600">
+        Choose how this appointment was settled.
+      </p>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <button
+          type="button"
+          onClick={onCharge}
+          disabled={!canCharge || busy}
+          title={
+            canCharge
+              ? 'Send this service payment to the Stripe Terminal.'
+              : 'Cannot charge — this appointment has no service price.'
+          }
+          className="flex flex-col items-center gap-1.5 rounded-[10px] border border-stone-200 bg-stone-50 px-2 py-3 text-stone-900 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <CreditCard className="h-4 w-4" />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em]">
+            Charge
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onMarkCash}
+          disabled={!canCharge || busy}
+          title={
+            canCharge
+              ? 'Mark this appointment paid in cash'
+              : 'Cannot mark cash — this appointment has no service price.'
+          }
+          className="flex flex-col items-center gap-1.5 rounded-[10px] border border-stone-200 bg-stone-50 px-2 py-3 text-stone-900 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <DollarSign className="h-4 w-4" />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em]">
+            Cash
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onMarkComplimentary}
+          disabled={busy}
+          title="Mark this appointment complimentary with no charge"
+          className="flex flex-col items-center gap-1.5 rounded-[10px] border border-stone-200 bg-stone-50 px-2 py-3 text-stone-900 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Heart className="h-4 w-4" />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em]">
+            Comp
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ActionFooter({
+  canReschedule,
+  onReschedule,
   onNoShow,
   onCancel,
   statusAction,
   statusError,
 }: {
   canReschedule: boolean;
-  canCharge: boolean;
-  paid: boolean;
-  paymentKind: AppointmentPaymentKind | null;
-  chargeAmountCents: number;
   onReschedule: () => void;
-  onCharge: () => void;
-  onMarkCash: () => void;
-  onMarkComplimentary: () => void;
   onNoShow: () => void;
   onCancel: () => void;
   statusAction: null | 'no-show' | 'canceled_by_admin';
   statusError: string | null;
 }) {
   const busy = statusAction !== null;
-  const paidLabel =
-    paymentKind === 'cash'
-      ? 'Cash'
-      : paymentKind === 'complimentary'
-        ? 'Comped'
-        : 'Paid';
 
   return (
     <div className="border-t border-stone-200 bg-white">
@@ -980,60 +1037,6 @@ function ActionFooter({
         </div>
       )}
       <div className="flex flex-wrap items-center justify-end gap-2 px-6 py-4">
-        {!paid ? (
-          <>
-            <button
-              type="button"
-              onClick={onMarkComplimentary}
-              disabled={busy}
-              title="Mark this appointment complimentary with no charge"
-              className="rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Comp
-            </button>
-            <button
-              type="button"
-              onClick={onMarkCash}
-              disabled={!canCharge || busy}
-              title={
-                canCharge
-                  ? 'Mark this appointment paid in cash'
-                  : 'Cannot mark cash — this appointment has no service price.'
-              }
-              className="rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.16em] text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Cash
-            </button>
-          </>
-        ) : null}
-        <button
-          type="button"
-          onClick={onCharge}
-          disabled={!canCharge || paid || busy}
-          title={
-            paid
-              ? 'This appointment is already settled.'
-              : canCharge
-                ? 'Send this service payment to the Stripe Terminal.'
-                : 'Cannot charge — this appointment has no service price.'
-          }
-          className={`inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-medium uppercase tracking-[0.16em] transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
-            paid
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-              : 'border-stone-800 bg-stone-800 text-white hover:bg-stone-900'
-          }`}
-        >
-          {paid ? (
-            <CheckCircle2 className="h-3.5 w-3.5" />
-          ) : (
-            <CreditCard className="h-3.5 w-3.5" />
-          )}
-          {paid
-            ? paidLabel
-            : chargeAmountCents > 0
-              ? `Charge ${formatCentsUsd(chargeAmountCents)}`
-              : 'Charge'}
-        </button>
         <button
           type="button"
           onClick={onReschedule}
@@ -1644,11 +1647,28 @@ function TerminalChargeView({
   const [busy, setBusy] = useState<'start' | 'retry' | 'cancel' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAttemptResult, setShowAttemptResult] = useState(false);
+  const [discountPercent, setDiscountPercent] =
+    useState<TerminalDiscountPercent>(0);
+  const [amountMode, setAmountMode] = useState<'discount' | 'custom'>(
+    'discount'
+  );
+  const [customDollars, setCustomDollars] = useState(() =>
+    formatCentsAsDollarInput(
+      appointment.service_price == null
+        ? 0
+        : Math.round(appointment.service_price * 100)
+    )
+  );
   const paidNotified = useRef(false);
-  const amountCents =
+  const quotedCents =
     appointment.service_price == null
       ? 0
       : Math.round(appointment.service_price * 100);
+  const customCents = parseDollarsToCents(customDollars);
+  const amountCents =
+    amountMode === 'custom'
+      ? customCents ?? 0
+      : applyTerminalDiscount(quotedCents, discountPercent);
   const clientName = clientDisplayName(
     appointment.client_first_name,
     appointment.client_last_name
@@ -1716,25 +1736,46 @@ function TerminalChargeView({
     try {
       const res = await fetch(
         `/api/admin/appointments/${appointment.id}/terminal-payment${suffix}`,
-        { method: 'POST' }
+        {
+          method: 'POST',
+          ...(kind === 'start'
+            ? {
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(
+                  amountMode === 'custom'
+                    ? { custom_amount_cents: amountCents }
+                    : { discount_percent: discountPercent }
+                ),
+              }
+            : {}),
+        }
       );
       const data = (await res.json().catch(() => null)) as
         | TerminalApiPayload
         | null;
       if (data?.payment) {
         setPayment(data.payment);
+        const staleRetryRequired =
+          kind === 'start' && data.error === 'retry_required';
         if (
-          data.payment.status === 'failed' ||
-          data.payment.status === 'canceled'
+          !staleRetryRequired &&
+          (data.payment.status === 'failed' ||
+            data.payment.status === 'canceled')
         ) {
           setShowAttemptResult(true);
         }
       }
       if (data?.reader) setReader(data.reader);
       if (!res.ok) {
+        // Legacy servers returned retry_required for a prior failed attempt —
+        // automatically re-send instead of flashing the stale cancel error.
+        if (kind === 'start' && data?.error === 'retry_required') {
+          setBusy(null);
+          await runAction('retry');
+          return;
+        }
         const recoverable =
           data?.error === 'payment_in_progress' ||
-          data?.error === 'retry_required' ||
           data?.error === 'already_paid';
         if (!recoverable || !data?.payment) {
           setError(data?.message || data?.error || `HTTP ${res.status}`);
@@ -1753,6 +1794,10 @@ function TerminalChargeView({
   const displayTotal = isPaid
     ? payment.total_amount_cents
     : payment?.base_amount_cents || amountCents;
+  const canStart =
+    amountMode === 'custom'
+      ? isValidTerminalCustomAmountCents(customCents)
+      : amountCents >= 50;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -1809,6 +1854,11 @@ function TerminalChargeView({
                 <span>{formatCentsUsd(payment.total_amount_cents)}</span>
               </div>
             </div>
+            {payment.note ? (
+              <p className="mt-3 max-w-sm text-xs text-stone-500">
+                {payment.note}
+              </p>
+            ) : null}
 
             <button
               type="button"
@@ -1876,14 +1926,120 @@ function TerminalChargeView({
                   : 'In-person payment'}
             </p>
             <h2 className="mt-1 font-serif text-3xl text-stone-900">
-              {formatCentsUsd(amountCents)}
+              {formatCentsUsd(
+                isFailed
+                  ? payment?.base_amount_cents || amountCents
+                  : amountCents
+              )}
             </h2>
+            {amountMode === 'custom' && !isFailed ? (
+              <p className="mt-1 text-sm text-stone-500">
+                Custom amount
+                {quotedCents > 0 ? (
+                  <>
+                    <span className="mx-1.5">·</span>
+                    quoted {formatCentsUsd(quotedCents)}
+                  </>
+                ) : null}
+              </p>
+            ) : discountPercent > 0 && !isFailed ? (
+              <p className="mt-1 text-sm text-stone-500">
+                <span className="line-through">
+                  {formatCentsUsd(quotedCents)}
+                </span>
+                <span className="mx-1.5">·</span>
+                {discountPercent}% off
+              </p>
+            ) : null}
             <p className="mt-2 text-sm text-stone-600">
               {serviceLabel} for {clientName}
             </p>
+
+            {!isFailed ? (
+              <div className="mt-5 w-full max-w-sm">
+                <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
+                  Amount
+                </p>
+                <div
+                  className="mt-2 grid grid-cols-5 gap-1.5"
+                  role="group"
+                  aria-label="Charge amount"
+                >
+                  {TERMINAL_DISCOUNT_PERCENTS.map((percent) => {
+                    const selected =
+                      amountMode === 'discount' && discountPercent === percent;
+                    return (
+                      <button
+                        key={percent}
+                        type="button"
+                        onClick={() => {
+                          setAmountMode('discount');
+                          setDiscountPercent(percent);
+                        }}
+                        disabled={busy !== null}
+                        className={`rounded-full border px-1.5 py-2 text-[11px] font-medium transition-colors disabled:opacity-50 ${
+                          selected
+                            ? 'border-stone-900 bg-stone-900 text-white'
+                            : 'border-stone-200 bg-white text-stone-700 hover:bg-stone-50'
+                        }`}
+                      >
+                        {percent === 0 ? 'Full' : `${percent}%`}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAmountMode('custom');
+                      if (!customDollars.trim()) {
+                        setCustomDollars(formatCentsAsDollarInput(quotedCents));
+                      }
+                    }}
+                    disabled={busy !== null}
+                    className={`rounded-full border px-1.5 py-2 text-[11px] font-medium transition-colors disabled:opacity-50 ${
+                      amountMode === 'custom'
+                        ? 'border-stone-900 bg-stone-900 text-white'
+                        : 'border-stone-200 bg-white text-stone-700 hover:bg-stone-50'
+                    }`}
+                  >
+                    Custom
+                  </button>
+                </div>
+                {amountMode === 'custom' ? (
+                  <label className="mt-3 block text-left">
+                    <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-stone-500">
+                      Charge amount (USD)
+                    </span>
+                    <div className="relative mt-1.5">
+                      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-stone-400">
+                        $
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={customDollars}
+                        onChange={(e) => setCustomDollars(e.target.value)}
+                        disabled={busy !== null}
+                        className="w-full rounded-lg border border-stone-200 bg-white py-2.5 pl-7 pr-3 text-sm text-stone-900 outline-none focus:border-stone-400 disabled:opacity-50"
+                        placeholder="0.00"
+                        aria-label="Custom charge amount in dollars"
+                      />
+                    </div>
+                    {customDollars.trim() &&
+                    !isValidTerminalCustomAmountCents(customCents) ? (
+                      <p className="mt-1.5 text-xs text-rose-700">
+                        Enter an amount between $0.50 and $10,000.00
+                      </p>
+                    ) : null}
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+
             <p className="mt-4 max-w-sm text-xs leading-relaxed text-stone-500">
-              The amount is fixed to the service price. The reader will offer
-              10%, 15%, 20%, custom tip, or no tip before payment.
+              {isFailed
+                ? 'Retry sends the same amount to the reader again. Cancel first if you need a different amount.'
+                : 'Choose full price, a discount, or a custom amount. The reader will still offer tip options.'}
             </p>
 
             {(error || (showAttemptResult && payment?.failure_message)) && (
@@ -1902,7 +2058,10 @@ function TerminalChargeView({
                   payment?.status === 'failed' ? 'retry' : 'start'
                 )
               }
-              disabled={busy !== null || amountCents < 50}
+              disabled={
+                busy !== null ||
+                (payment?.status === 'failed' ? false : !canStart)
+              }
               className="mt-6 inline-flex items-center gap-2 rounded-full bg-stone-900 px-6 py-2.5 text-xs font-medium uppercase tracking-[0.18em] text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
             >
               {busy ? (
