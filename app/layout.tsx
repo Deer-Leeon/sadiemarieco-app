@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import { ClerkProvider } from '@clerk/nextjs';
+import { Analytics } from '@vercel/analytics/next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import './globals.css';
 
 import {
@@ -39,7 +41,8 @@ export const metadata: Metadata = {
  * those are served directly from /public as static HTML and bypass the
  * Next.js render tree entirely. ClerkProvider here only affects routes
  * that resolve through the App Router (i.e. /admin and any future
- * Next.js routes we add).
+ * Next.js routes we add). Marketing HTML (`/`, SEO landings, etc.) gets
+ * Analytics/Speed Insights via scripts in those static files.
  */
 export default function RootLayout({
   children,
@@ -80,7 +83,11 @@ export default function RootLayout({
             rel="stylesheet"
           />
         </head>
-        <body>{children}</body>
+        <body>
+          {children}
+          <Analytics />
+          <SpeedInsights />
+        </body>
       </html>
     </ClerkProvider>
   );
