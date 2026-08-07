@@ -3,12 +3,17 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { track } from '@vercel/analytics';
 import {
   checkoutHoldDurationLabel,
   formatCountdownMmSs,
   holdDeadlineMs,
   HOLD_EXPIRED_MESSAGE,
 } from '@/lib/booking-hold';
+import {
+  analyticsServiceLabel,
+  BOOKING_ANALYTICS_EVENTS,
+} from '@/lib/booking-analytics';
 import { isValidEmail } from '@/lib/client-identity';
 import {
   formatAppointmentWhen,
@@ -22,6 +27,17 @@ import {
   useStripe,
 } from '@stripe/react-stripe-js';
 import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
+
+function trackCheckoutEvent(
+  name: string,
+  data?: Record<string, string | number | boolean | null>
+) {
+  try {
+    track(name, data);
+  } catch {
+    /* analytics must never break checkout */
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Stripe.js singleton
@@ -392,15 +408,50 @@ export default function CheckoutClient({
     [serviceName]
   );
 
+  const analyticsService = useMemo(
+    () => analyticsServiceLabel(serviceName),
+    [serviceName]
+  );
+
+  // Funnel: /checkout painted (abandon vs convert measured from here).
+  useEffect(() => {
+    if (!uid) return;
+    trackCheckoutEvent(BOOKING_ANALYTICS_EVENTS.CHECKOUT_VIEWED, {
+      service: analyticsService,
+      alreadyExpired: initialHoldExpired,
+    });
+    // Once per mount / uid — do not re-fire when service name hydrates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+  }, [uid]);
+
+  // Funnel: hold expired on this page (local timer or server flip).
+  const expiredTrackedRef = useRef(false);
+  useEffect(() => {
+    if (!holdExpired || expiredTrackedRef.current) return;
+    expiredTrackedRef.current = true;
+    trackCheckoutEvent(BOOKING_ANALYTICS_EVENTS.CHECKOUT_EXPIRED, {
+      service: analyticsService,
+    });
+  }, [holdExpired, analyticsService]);
+
   // Poll the hold row so a cron-driven `canceled_by_system` flip disables
   // checkout even if the local timer hasn't ticked yet. Init is fire-and-
   // forget before navigation, so retry quickly until the row appears.
+  // Stop polling once the hold is gone/expired — abandoned checkout tabs
+  // otherwise hit Postgres forever (Chrome throttles background timers to
+  // ~60s, which is enough to keep Neon from scaling to zero).
   useEffect(() => {
-    if (!uid) return;
+    if (!uid || holdExpired) return;
 
     let cancelled = false;
     let foundHold = Boolean(initialHoldCreatedAt);
+    let missCount = 0;
     let pollId = 0;
+
+    const stopPolling = () => {
+      window.clearInterval(pollId);
+      pollId = 0;
+    };
 
     const refreshHold = async () => {
       try {
@@ -413,7 +464,22 @@ export default function CheckoutClient({
           }
         );
         if (cancelled) return;
+
+        if (res.status === 404) {
+          missCount += 1;
+          // Hold was known then vanished (released / canceled) — stop.
+          // Or init never produced a row after a short wait — stop so a
+          // forgotten tab cannot pin the database awake.
+          if (foundHold || missCount >= 45) {
+            setHoldExpired(true);
+            stopPolling();
+          }
+          return;
+        }
+
         if (!res.ok) return;
+
+        missCount = 0;
         const data = (await res.json()) as {
           createdAt?: string | null;
           expired?: boolean;
@@ -425,11 +491,15 @@ export default function CheckoutClient({
           setHoldCreatedAt(data.createdAt);
           if (!foundHold) {
             foundHold = true;
-            window.clearInterval(pollId);
+            stopPolling();
             pollId = window.setInterval(refreshHold, 30_000);
           }
         }
-        if (data.expired) setHoldExpired(true);
+        if (data.expired) {
+          setHoldExpired(true);
+          stopPolling();
+          return;
+        }
         if (data.bookingTime) setBookingTime(data.bookingTime);
         if (data.endTime !== undefined) setEndTime(data.endTime ?? null);
         if (data.serviceName) setServiceName(data.serviceName);
@@ -442,9 +512,9 @@ export default function CheckoutClient({
     pollId = window.setInterval(refreshHold, foundHold ? 30_000 : 2_000);
     return () => {
       cancelled = true;
-      window.clearInterval(pollId);
+      stopPolling();
     };
-  }, [uid, initialHoldCreatedAt]);
+  }, [uid, initialHoldCreatedAt, holdExpired]);
 
   // Countdown from `appointments.created_at` using CHECKOUT_HOLD_SECONDS.
   useEffect(() => {
@@ -604,6 +674,7 @@ export default function CheckoutClient({
                 name={name}
                 email={email}
                 holdExpired={holdExpired}
+                service={analyticsService}
                 onConfirmed={() => setCheckoutComplete(true)}
               />
             </Elements>
@@ -721,6 +792,7 @@ interface FormProps {
   name: string;
   email: string;
   holdExpired: boolean;
+  service: string;
   onConfirmed: () => void;
 }
 
@@ -786,6 +858,7 @@ function CheckoutForm({
   name,
   email,
   holdExpired,
+  service,
   onConfirmed,
 }: FormProps) {
   const stripe = useStripe();
@@ -858,6 +931,10 @@ function CheckoutForm({
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (holdExpired || !stripe || !elements || submitting) return;
+
+    trackCheckoutEvent(BOOKING_ANALYTICS_EVENTS.CHECKOUT_PAYMENT_ATTEMPT, {
+      service,
+    });
 
     setSubmitting(true);
     setSubmitLabel('Saving your card…');
