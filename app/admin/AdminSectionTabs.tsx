@@ -36,6 +36,7 @@ const SECTIONS: AdminSection[] = [
   { href: '/admin/clients', label: 'Clients' },
   { href: '/admin/website', label: 'Website' },
   { href: '/admin/services', label: 'Services' },
+  { href: '/admin/funnel', label: 'Funnel' },
   { href: '/admin/settings', label: 'Settings' },
   { href: '/admin/sms-messages', label: 'SMS Messages' },
   { href: '/admin/email-messages', label: 'Email Messages' },

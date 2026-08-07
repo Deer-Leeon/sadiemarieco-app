@@ -43,6 +43,11 @@ import { sql } from '@vercel/postgres';
 
 import { getAppointmentHoldByCalUid } from '@/lib/appointment-hold';
 import {
+  analyticsServiceLabel,
+  BOOKING_ANALYTICS_EVENTS,
+  trackBookingEvent,
+} from '@/lib/booking-analytics';
+import {
   getAppointmentStripeByCalUid,
   STRIPE_CUSTOMER_ID_RE,
 } from '@/lib/appointment-stripe';
@@ -800,6 +805,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
     if (!contactEmail) contactEmail = hasRealBookingEmail(email);
   }
+
+  await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.BOOKING_CONFIRMED, {
+    service: analyticsServiceLabel(hold.service_name),
+  });
 
   return NextResponse.json({
     ok: true,

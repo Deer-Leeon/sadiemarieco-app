@@ -13,6 +13,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import {
+  analyticsServiceLabel,
+  BOOKING_ANALYTICS_EVENTS,
+  trackBookingEvent,
+} from '@/lib/booking-analytics';
+import {
   CONTACT_CHANNEL_REQUIRED_MESSAGE,
   hasBookingContactChannel,
   parseSmsOptInFromSources,
@@ -375,6 +380,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         reason: releaseJob.reason,
       });
     }
+
+    await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.HOLD_CREATED, {
+      service: analyticsServiceLabel(data.serviceName),
+    });
 
     return NextResponse.json({
       ok: true,
