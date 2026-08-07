@@ -3,6 +3,7 @@ import { currentUser } from '@clerk/nextjs/server';
 import Link from 'next/link';
 
 import {
+  formatFunnelTimestamp,
   getBookingFunnelStats,
   type FunnelRangeDays,
   type FunnelSummary,
@@ -14,17 +15,30 @@ import AdminSectionTabs from '../AdminSectionTabs';
 
 export const dynamic = 'force-dynamic';
 
-const RANGES: FunnelRangeDays[] = [7, 30, 90];
+const RANGES: FunnelRangeDays[] = [1, 7, 30, 90];
 
 function parseRange(raw: string | undefined): FunnelRangeDays {
   const n = Number(raw);
-  if (n === 7 || n === 30 || n === 90) return n;
+  if (n === 1 || n === 7 || n === 30 || n === 90) return n;
   return 30;
 }
 
 function pctLabel(value: number | null): string {
   if (value == null) return '—';
   return `${value}%`;
+}
+
+function statusTone(status: string): string {
+  switch (status) {
+    case 'confirmed':
+      return 'text-emerald-800';
+    case 'pending':
+      return 'text-amber-800';
+    case 'canceled_by_system':
+      return 'text-rose-800';
+    default:
+      return 'text-stone-600';
+  }
 }
 
 function FunnelTotals({ summary }: { summary: FunnelSummary }) {
@@ -34,6 +48,7 @@ function FunnelTotals({ summary }: { summary: FunnelSummary }) {
     { label: 'Confirmed', value: totals.confirmed },
     { label: 'Abandoned checkout', value: totals.abandonedCheckout },
     { label: 'Still pending', value: totals.pendingCheckout },
+    { label: 'Other outcome', value: totals.canceledOther },
     {
       label: 'Checkout → booked',
       value: pctLabel(totals.checkoutConversionPct),
@@ -41,7 +56,7 @@ function FunnelTotals({ summary }: { summary: FunnelSummary }) {
   ];
 
   return (
-    <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+    <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       {cards.map((card) => (
         <div
           key={card.label}
@@ -141,6 +156,7 @@ export default async function AdminFunnelPage({
                     <th className="py-2 pr-4 font-medium tabular-nums">
                       Pending
                     </th>
+                    <th className="py-2 pr-4 font-medium tabular-nums">Other</th>
                     <th className="py-2 font-medium tabular-nums">Convert</th>
                   </tr>
                 </thead>
@@ -161,8 +177,64 @@ export default async function AdminFunnelPage({
                       <td className="py-2.5 pr-4 tabular-nums">
                         {row.pendingCheckout}
                       </td>
+                      <td className="py-2.5 pr-4 tabular-nums">
+                        {row.canceledOther}
+                      </td>
                       <td className="py-2.5 tabular-nums">
                         {pctLabel(row.checkoutConversionPct)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section className="mt-10">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-400">
+              Recent holds
+            </h2>
+            <p className="text-xs text-stone-400">
+              Hold created = when they submitted Cal details. Newest first
+              (up to 100).
+            </p>
+          </div>
+          {summary.recentHolds.length === 0 ? (
+            <p className="mt-4 text-sm text-stone-500">
+              No holds in this window yet.
+            </p>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-xl text-left text-sm">
+                <thead>
+                  <tr className="border-b border-stone-200 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-400">
+                    <th className="py-2 pr-4 font-medium">Hold created</th>
+                    <th className="py-2 pr-4 font-medium">Service</th>
+                    <th className="py-2 pr-4 font-medium">Client</th>
+                    <th className="py-2 pr-4 font-medium">Appointment</th>
+                    <th className="py-2 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.recentHolds.map((hold) => (
+                    <tr
+                      key={hold.id}
+                      className="border-b border-stone-100 text-stone-800"
+                    >
+                      <td className="py-2.5 pr-4 whitespace-nowrap tabular-nums text-stone-600">
+                        {formatFunnelTimestamp(hold.holdCreatedAt)}
+                      </td>
+                      <td className="py-2.5 pr-4">{hold.service}</td>
+                      <td className="py-2.5 pr-4">{hold.clientName}</td>
+                      <td className="py-2.5 pr-4 whitespace-nowrap tabular-nums text-stone-600">
+                        {formatFunnelTimestamp(hold.bookingTime)}
+                      </td>
+                      <td
+                        className={`py-2.5 ${statusTone(hold.status)}`}
+                      >
+                        {hold.statusLabel}
                       </td>
                     </tr>
                   ))}
