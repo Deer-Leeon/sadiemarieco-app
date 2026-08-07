@@ -274,7 +274,14 @@
     requestAnimationFrame(applyFrameBounds);
   };
 
-  const registerDrawerEmbedUi = (nsApi) => {
+  const bookingAnalytics = () => window.SadieBookingAnalytics || null;
+
+  const trackBooking = (name, data) => {
+    const api = bookingAnalytics();
+    if (api && typeof api.track === 'function') api.track(name, data);
+  };
+
+  const registerDrawerEmbedUi = (nsApi, link) => {
     const base = window.calUiConfig || {};
     nsApi('ui', Object.assign({}, base, {
       theme: 'light',
@@ -283,9 +290,30 @@
       'ui.autoscroll': 'false'
     }));
 
-    const onStepChange = () => scrollDrawerToTop();
-    ['routeChanged', 'linkReady'].forEach((action) => {
-      nsApi('on', { action, callback: onStepChange });
+    const service =
+      (bookingAnalytics() &&
+        bookingAnalytics().serviceFromCalLink &&
+        bookingAnalytics().serviceFromCalLink(link)) ||
+      link ||
+      'Unknown';
+
+    const onStepChange = (event) => {
+      scrollDrawerToTop();
+      if (!event) return;
+      const api = bookingAnalytics();
+      const step =
+        (api && api.classifyCalRoute && api.classifyCalRoute(event)) ||
+        'unknown';
+      const events = (api && api.events) || {};
+      trackBooking(events.CAL_STEP || 'Booking Cal Step', {
+        service,
+        step
+      });
+    };
+    nsApi('on', { action: 'routeChanged', callback: onStepChange });
+    nsApi('on', {
+      action: 'linkReady',
+      callback: () => scrollDrawerToTop()
     });
   };
 
@@ -432,6 +460,11 @@
   const showContactCapture = (booking) => {
     pendingContactBooking = booking;
     hideCheckoutHandoff();
+    const api = bookingAnalytics();
+    const events = (api && api.events) || {};
+    trackBooking(events.CONTACT_CAPTURE || 'Booking Contact Capture', {
+      service: (booking && booking.serviceName) || 'Unknown'
+    });
     if (contactEmailInput) contactEmailInput.value = '';
     if (contactSmsInput) contactSmsInput.checked = false;
     if (contactEmailWrap) contactEmailWrap.hidden = true;
@@ -599,6 +632,14 @@
         if (checkoutRedirectedUids.has(uid)) return;
         checkoutRedirectedUids.add(uid);
 
+        const api = bookingAnalytics();
+        const events = (api && api.events) || {};
+        trackBooking(events.DETAILS_SUBMITTED || 'Booking Details Submitted', {
+          service: booking.serviceName || 'Unknown',
+          hasName: Boolean(booking.name),
+          hasPhone: Boolean(booking.phone)
+        });
+
         const hasEmail = emailLooksReal(email);
         const hasSms = smsOptIn === true;
 
@@ -706,7 +747,7 @@
             'ui.autoscroll': 'false'
           }
         });
-        registerDrawerEmbedUi(nsApi);
+        registerDrawerEmbedUi(nsApi, link);
         registerBookingRedirectHandlers(nsApi, link);
         bindDrawerEmbedFrame(mount);
       }
@@ -798,6 +839,14 @@
     scrollDrawerToTop();
     const activeMount = mountsByLink.get(link);
     if (activeMount) bindDrawerEmbedFrame(activeMount);
+
+    const api = bookingAnalytics();
+    const events = (api && api.events) || {};
+    trackBooking(events.SERVICE_OPENED || 'Booking Service Opened', {
+      service: (meta && meta.name) || (api && api.serviceFromCalLink
+        ? api.serviceFromCalLink(link)
+        : link)
+    });
   };
 
   const closeDrawer = () => {

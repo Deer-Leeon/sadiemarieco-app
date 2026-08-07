@@ -9,6 +9,11 @@
 
 import { sql } from '@vercel/postgres';
 
+import {
+  analyticsServiceLabel,
+  BOOKING_ANALYTICS_EVENTS,
+  trackBookingEvent,
+} from '@/lib/booking-analytics';
 import { CAL_ABANDON_CANCEL_REASON } from '@/lib/booking-hold';
 import { notifyCheckoutAbandonedSms } from '@/lib/booking-notifications';
 
@@ -189,6 +194,10 @@ async function releasePendingRow(
     const flipped = await flipLocalStatus(row.id);
     if (flipped) {
       await maybeNotifyAbandonedCheckout(row);
+      await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.HOLD_ABANDONED, {
+        service: analyticsServiceLabel(row.service_name),
+        source: 'no_cal_uid',
+      });
       return {
         ok: true,
         released: true,
@@ -225,6 +234,10 @@ async function releasePendingRow(
   const flipped = await flipLocalStatus(row.id);
   if (flipped) {
     await maybeNotifyAbandonedCheckout(row);
+    await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.HOLD_ABANDONED, {
+      service: analyticsServiceLabel(row.service_name),
+      source: 'cal_cancel',
+    });
     return {
       ok: true,
       released: true,
