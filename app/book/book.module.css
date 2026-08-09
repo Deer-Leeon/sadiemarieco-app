@@ -227,6 +227,18 @@
   color: #586574;
 }
 
+.req {
+  color: #9f1239;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.nameRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 .field input {
   appearance: none;
   border: 1px solid #c8cdd6;
@@ -291,7 +303,6 @@
 .reviewMeta,
 .reviewWhen,
 .reviewNote,
-.reviewContact,
 .policyBox p {
   margin: 8px 0 0;
   font-size: 14px;
@@ -320,6 +331,137 @@
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: #0d1b2a !important;
+}
+
+.contactCard {
+  background: #fff;
+  border: 1px solid #dde0e6;
+  padding: 18px;
+}
+
+.contactCardEyebrow {
+  margin: 0 0 12px;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #586574;
+}
+
+.contactDl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.contactDl div {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.contactDl dt {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #8a93a0;
+}
+
+.contactDl dd {
+  margin: 0;
+  font-size: 15px;
+  color: #0d1b2a;
+  font-family: 'Bodoni Moda', Georgia, serif;
+  word-break: break-word;
+}
+
+.reachOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 18px;
+  background: rgba(245, 243, 240, 0.96);
+  backdrop-filter: blur(4px);
+}
+
+.reachCard {
+  width: min(100%, 22rem);
+  background: #fff;
+  border: 1px solid rgba(13, 27, 42, 0.12);
+  padding: 1.35rem 1.4rem 1.25rem;
+  box-shadow: 0 12px 40px rgba(13, 27, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reachEyebrow {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #586574;
+}
+
+.reachTitle {
+  margin: 0;
+  font-family: 'Bodoni Moda', Georgia, serif;
+  font-size: 1.45rem;
+  line-height: 1.2;
+  color: #0d1b2a;
+}
+
+.reachBody {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: #57534e;
+}
+
+.reachSms {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #1a1a24;
+}
+
+.reachSms input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.reachPrimary {
+  appearance: none;
+  border: 0;
+  width: 100%;
+  background: #0d1b2a;
+  color: #f5f3f0;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 14px 16px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.reachEmailToggle {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 4px 0 0;
+  font-size: 12px;
+  color: #2a4460;
+  text-decoration: underline;
+  cursor: pointer;
+  text-align: center;
 }
 
 .footer {
