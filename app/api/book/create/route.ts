@@ -52,6 +52,8 @@ interface CreateBody {
   slug?: unknown;
   start?: unknown;
   name?: unknown;
+  firstName?: unknown;
+  lastName?: unknown;
   phone?: unknown;
   email?: unknown;
   smsOptIn?: unknown;
@@ -132,7 +134,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const slug = typeof body.slug === 'string' ? body.slug.trim() : '';
   const startRaw = typeof body.start === 'string' ? body.start.trim() : '';
-  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const firstNameRaw =
+    typeof body.firstName === 'string' ? body.firstName.trim() : '';
+  const lastNameRaw =
+    typeof body.lastName === 'string' ? body.lastName.trim() : '';
+  const nameFromBody = typeof body.name === 'string' ? body.name.trim() : '';
+  const split =
+    firstNameRaw || lastNameRaw
+      ? { first: firstNameRaw, last: lastNameRaw }
+      : splitName(nameFromBody);
+  const first = split.first;
+  const last = split.last;
+  const name = [first, last].filter(Boolean).join(' ');
   const phoneRaw = typeof body.phone === 'string' ? body.phone.trim() : '';
   const emailRaw =
     typeof body.email === 'string'
@@ -152,9 +165,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { status: 400 }
     );
   }
+  if (!first || first.length > 100) {
+    return NextResponse.json(
+      { error: 'invalid_name', message: 'Enter your first name.' },
+      { status: 400 }
+    );
+  }
+  if (!last || last.length > 100) {
+    return NextResponse.json(
+      { error: 'invalid_name', message: 'Enter your last name.' },
+      { status: 400 }
+    );
+  }
   if (!name || name.length > 200) {
     return NextResponse.json(
-      { error: 'invalid_name', message: 'Enter your full name.' },
+      { error: 'invalid_name', message: 'Enter your first and last name.' },
       { status: 400 }
     );
   }
@@ -221,14 +246,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       err instanceof CalStartTimeError ? err.message : 'Invalid start time';
     return NextResponse.json(
       { error: 'invalid_start', message },
-      { status: 400 }
-    );
-  }
-
-  const { first, last } = splitName(name);
-  if (!first) {
-    return NextResponse.json(
-      { error: 'invalid_name', message: 'Enter your first and last name.' },
       { status: 400 }
     );
   }

@@ -102,12 +102,15 @@ export default function BookClient() {
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [selectedStart, setSelectedStart] = useState<string | null>(null);
 
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [smsOptIn, setSmsOptIn] = useState(false);
   const [email, setEmail] = useState('');
-  const [showEmail, setShowEmail] = useState(false);
+  const [showReachPanel, setShowReachPanel] = useState(false);
+  const [showEmailInReach, setShowEmailInReach] = useState(false);
   const [contactError, setContactError] = useState<string | null>(null);
+  const [reachError, setReachError] = useState<string | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -225,9 +228,20 @@ export default function BookClient() {
     return map;
   }, [services]);
 
+  const fullName = useMemo(
+    () => [firstName.trim(), lastName.trim()].filter(Boolean).join(' '),
+    [firstName, lastName]
+  );
+
   const stepIndex = STEPS.indexOf(step);
 
   const goBack = () => {
+    if (showReachPanel) {
+      setShowReachPanel(false);
+      setShowEmailInReach(false);
+      setReachError(null);
+      return;
+    }
     if (step === 'service') {
       router.push('/#services');
       return;
@@ -255,23 +269,46 @@ export default function BookClient() {
 
   const continueFromContact = () => {
     setContactError(null);
-    const name = fullName.trim();
-    if (!name || name.split(/\s+/).length < 2) {
-      setContactError('Enter your first and last name.');
+    setReachError(null);
+    if (!firstName.trim()) {
+      setContactError('Enter your first name.');
+      return;
+    }
+    if (!lastName.trim()) {
+      setContactError('Enter your last name.');
       return;
     }
     if (!phone.trim()) {
       setContactError('Enter your phone number.');
       return;
     }
-    if (!smsOptIn && !email.trim()) {
-      setShowEmail(true);
-      setContactError(
-        'Check the text opt-in, or add an email so we can reach you.'
-      );
+    if (smsOptIn || email.trim()) {
+      setShowReachPanel(false);
+      setStep('review');
       return;
     }
-    setStep('review');
+    // Match desktop: ask again to opt into texts before revealing email.
+    setShowReachPanel(true);
+    setShowEmailInReach(false);
+  };
+
+  const continueFromReachPanel = () => {
+    setReachError(null);
+    if (smsOptIn) {
+      setShowReachPanel(false);
+      setStep('review');
+      return;
+    }
+    if (showEmailInReach && email.trim()) {
+      setShowReachPanel(false);
+      setStep('review');
+      return;
+    }
+    if (!showEmailInReach) {
+      setReachError('Check the box so we can text appointment updates.');
+      return;
+    }
+    setReachError('Add an email so we can reach you about your booking.');
   };
 
   const submitBooking = async () => {
@@ -288,7 +325,9 @@ export default function BookClient() {
         body: JSON.stringify({
           slug: selected.slug,
           start: selectedStart,
-          name: fullName.trim(),
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          name: fullName,
           phone: phone.trim(),
           email: email.trim() || undefined,
           smsOptIn,
@@ -305,18 +344,20 @@ export default function BookClient() {
       if (!res.ok || !data?.calBookingUid) {
         if (data?.error === 'phone_not_sms_capable') {
           setSmsOptIn(false);
-          setShowEmail(true);
           setStep('contact');
-          setContactError(
+          setShowReachPanel(true);
+          setShowEmailInReach(true);
+          setReachError(
             data.message ||
               'That number may not receive texts. Add an email instead.'
           );
           return;
         }
         if (data?.error === 'contact_required') {
-          setShowEmail(true);
           setStep('contact');
-          setContactError(data.message || 'Add email or text opt-in.');
+          setShowReachPanel(true);
+          setShowEmailInReach(false);
+          setReachError(data.message || 'Add email or text opt-in.');
           return;
         }
         setSubmitError(data?.message || 'Could not hold that time. Try again.');
@@ -478,23 +519,43 @@ export default function BookClient() {
 
         {step === 'contact' && (
           <section className={styles.section}>
+            <div className={styles.nameRow}>
+              <label className={styles.field}>
+                <span>
+                  First name <abbr className={styles.req} title="required">*</abbr>
+                </span>
+                <input
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  autoComplete="given-name"
+                  placeholder="First name"
+                  required
+                />
+              </label>
+              <label className={styles.field}>
+                <span>
+                  Last name <abbr className={styles.req} title="required">*</abbr>
+                </span>
+                <input
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  autoComplete="family-name"
+                  placeholder="Last name"
+                  required
+                />
+              </label>
+            </div>
             <label className={styles.field}>
-              <span>Full name</span>
-              <input
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                autoComplete="name"
-                placeholder="First and last name"
-              />
-            </label>
-            <label className={styles.field}>
-              <span>Phone</span>
+              <span>
+                Phone number <abbr className={styles.req} title="required">*</abbr>
+              </span>
               <input
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 autoComplete="tel"
                 inputMode="tel"
-                placeholder="(385) 555-1234"
+                placeholder="+1 555 123 4567"
+                required
               />
             </label>
             <label className={styles.smsLabel}>
@@ -508,27 +569,6 @@ export default function BookClient() {
               />
               <span>{STUDIO_SMS_CONSENT_LABEL}</span>
             </label>
-            {!showEmail && !smsOptIn && (
-              <button
-                type="button"
-                className={styles.textLink}
-                onClick={() => setShowEmail(true)}
-              >
-                Prefer email instead?
-              </button>
-            )}
-            {(showEmail || (!smsOptIn && email)) && (
-              <label className={styles.field}>
-                <span>Email for appointment updates</span>
-                <input
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
-                  inputMode="email"
-                  placeholder="you@example.com"
-                />
-              </label>
-            )}
             {contactError && <p className={styles.error}>{contactError}</p>}
           </section>
         )}
@@ -554,8 +594,7 @@ export default function BookClient() {
                 <span>{selected.priceLabel}</span>
               </p>
               <p className={styles.reviewNote}>
-                No charge today — you&apos;ll save a card to hold the time
-                (no-show / late-cancel protection).
+                No charge today — a card is saved to hold your appointment.
               </p>
             </div>
             <div className={styles.policyBox}>
@@ -567,25 +606,91 @@ export default function BookClient() {
                 charged 100%.
               </p>
             </div>
-            <div className={styles.reviewContact}>
-              <p>
-                <strong>{fullName.trim()}</strong>
-              </p>
-              <p>{phone.trim()}</p>
-              <p>
-                {smsOptIn
-                  ? 'Texts: opted in'
-                  : email.trim()
-                    ? `Email: ${email.trim()}`
-                    : 'Contact on file'}
-              </p>
+            <div className={styles.contactCard}>
+              <p className={styles.contactCardEyebrow}>Contact</p>
+              <dl className={styles.contactDl}>
+                <div>
+                  <dt>Name</dt>
+                  <dd>{fullName}</dd>
+                </div>
+                <div>
+                  <dt>Phone</dt>
+                  <dd>{phone.trim()}</dd>
+                </div>
+                <div>
+                  <dt>Updates</dt>
+                  <dd>
+                    {smsOptIn
+                      ? 'Text messages opted in'
+                      : email.trim()
+                        ? `Email · ${email.trim()}`
+                        : '—'}
+                  </dd>
+                </div>
+              </dl>
             </div>
             {submitError && <p className={styles.error}>{submitError}</p>}
           </section>
         )}
       </main>
 
-      {(step === 'when' || step === 'contact' || step === 'review') && (
+      {showReachPanel && (
+        <div className={styles.reachOverlay} role="dialog" aria-modal="true">
+          <div className={styles.reachCard}>
+            <p className={styles.reachEyebrow}>Almost there</p>
+            <p className={styles.reachTitle}>We need a way to reach you</p>
+            <p className={styles.reachBody}>
+              Check the box so we can text appointment updates. Your time is
+              still held.
+            </p>
+            <label className={styles.reachSms}>
+              <input
+                type="checkbox"
+                checked={smsOptIn}
+                onChange={(e) => {
+                  setSmsOptIn(e.target.checked);
+                  setReachError(null);
+                }}
+              />
+              <span>Yes, text me appointment updates from Sadie Marie</span>
+            </label>
+            {showEmailInReach && (
+              <label className={styles.field}>
+                <span>Email for appointment updates</span>
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  inputMode="email"
+                  placeholder="you@example.com"
+                />
+              </label>
+            )}
+            {reachError && <p className={styles.error}>{reachError}</p>}
+            <button
+              type="button"
+              className={styles.reachPrimary}
+              onClick={continueFromReachPanel}
+            >
+              Continue
+            </button>
+            {!showEmailInReach && (
+              <button
+                type="button"
+                className={styles.reachEmailToggle}
+                onClick={() => {
+                  setShowEmailInReach(true);
+                  setReachError(null);
+                }}
+              >
+                Prefer email instead?
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {(step === 'when' || step === 'contact' || step === 'review') &&
+        !showReachPanel && (
         <footer className={styles.footer}>
           {selected && (
             <div className={styles.footerTotal}>
