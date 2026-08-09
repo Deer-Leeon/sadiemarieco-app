@@ -281,6 +281,32 @@
     if (api && typeof api.track === 'function') api.track(name, data);
   };
 
+  /** Phone guided booker — desktop keeps the Cal drawer. */
+  const isPhoneBookerViewport = () =>
+    window.matchMedia('(max-width: 768px)').matches;
+
+  const goToPhoneBooker = (slug) => {
+    const url = slug
+      ? `/book?service=${encodeURIComponent(slug)}`
+      : '/book';
+    window.location.assign(url);
+  };
+
+  const slugFromCalLink = (link) => {
+    if (!link) return '';
+    const parts = String(link).split('/').filter(Boolean);
+    return parts[parts.length - 1] || '';
+  };
+
+  // Mobile Book Now / #services CTAs → guided /book flow.
+  document.querySelectorAll('a[href="#services"]').forEach((anchor) => {
+    anchor.addEventListener('click', (event) => {
+      if (!isPhoneBookerViewport()) return;
+      event.preventDefault();
+      goToPhoneBooker('');
+    });
+  });
+
   const registerDrawerEmbedUi = (nsApi, link) => {
     const base = window.calUiConfig || {};
     nsApi('ui', Object.assign({}, base, {
@@ -893,7 +919,13 @@
       // so stopImmediatePropagation prevents Cal's listener from running.
       event.stopImmediatePropagation();
 
-      openDrawer(item.getAttribute('data-cal-link'), {
+      const link = item.getAttribute('data-cal-link');
+      if (isPhoneBookerViewport()) {
+        goToPhoneBooker(slugFromCalLink(link));
+        return;
+      }
+
+      openDrawer(link, {
         name: readText(item, '.service-name'),
         price: readText(item, '.service-price'),
         duration: readText(item, '.service-duration')

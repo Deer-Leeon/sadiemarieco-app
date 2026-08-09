@@ -1077,6 +1077,30 @@ function CheckoutForm({
         disabled={holdExpired || submitting}
         className="mt-6 disabled:pointer-events-none disabled:opacity-50"
       >
+        {/*
+          Apple Pay / wallets: placeholder until Stripe Dashboard Apple Pay
+          domain verification + Express Checkout Element in setup mode.
+          Checkout still vaults a card (SetupIntent) — no charge today.
+        */}
+        <div
+          className="mb-4 flex items-center justify-between gap-3 rounded-md border border-dashed border-stone-300 bg-stone-50 px-4 py-3"
+          aria-disabled="true"
+        >
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-stone-800">Apple Pay</p>
+            <p className="mt-0.5 text-[11px] text-stone-500">
+              Coming soon — use your card below for now.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled
+            className="shrink-0 rounded-full border border-stone-300 bg-stone-200/80 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.16em] text-stone-500"
+          >
+            Unavailable
+          </button>
+        </div>
+
         <PaymentElement
           options={{
             layout: { type: 'tabs', defaultCollapsed: false },
