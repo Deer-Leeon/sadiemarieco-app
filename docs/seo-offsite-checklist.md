@@ -17,6 +17,7 @@ result logo also depend on work outside the codebase.
 5. Add services with prices where possible; keep hours aligned with Cal.
 6. Post regularly and reply to every review.
 7. Copy the Place URL / Place ID into `NEXT_PUBLIC_GOOGLE_PLACE_ID` if not already set (used for reviews sync + schema `sameAs`).
+8. **Booking link:** set the Google Business Profile / Maps **Book** appointment URL to `https://www.sadiemarie.co/book` (phone guided booker). Do not use `#services` — that dumps people onto the marketing list.
 
 ## Google Search Console
 

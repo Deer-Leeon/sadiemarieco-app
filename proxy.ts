@@ -30,7 +30,9 @@ const isStagingSignInRoute = createRouteMatcher(['/sign-in(.*)']);
  */
 const isStagingCheckoutPipelineRoute = createRouteMatcher([
   '/checkout(.*)',
+  '/book(.*)',
   '/api/booking(.*)',
+  '/api/book(.*)',
   '/api/stripe(.*)',
 ]);
 

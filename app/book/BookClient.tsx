@@ -1,0 +1,631 @@
+'use client';
+
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { track } from '@vercel/analytics';
+
+import {
+  analyticsServiceLabel,
+  BOOKING_ANALYTICS_EVENTS,
+} from '@/lib/booking-analytics';
+import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-public';
+import { STUDIO_SMS_CONSENT_LABEL } from '@/lib/cal-event-studio-defaults';
+import { formatAppointmentWhen } from '@/lib/format-booking-time';
+import { STUDIO_TIMEZONE } from '@/lib/cal-config';
+
+import styles from './book.module.css';
+
+type Step = 'service' | 'when' | 'contact' | 'review';
+
+interface BookService {
+  slug: string;
+  title: string;
+  category: string;
+  description: string | null;
+  priceLabel: string;
+  durationMins: number;
+  durationLabel: string;
+}
+
+function trackBook(name: string, data?: Record<string, string | number | boolean | null>) {
+  try {
+    track(name, data);
+  } catch {
+    /* ignore */
+  }
+}
+
+function studioTodayYmd(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: STUDIO_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function addDaysYmd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function formatDayChip(ymd: string): { weekday: string; monthDay: string } {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 18, 0, 0));
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: STUDIO_TIMEZONE,
+    weekday: 'short',
+  }).format(dt);
+  const monthDay = new Intl.DateTimeFormat('en-US', {
+    timeZone: STUDIO_TIMEZONE,
+    month: 'short',
+    day: 'numeric',
+  }).format(dt);
+  return { weekday, monthDay };
+}
+
+function formatSlotTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: STUDIO_TIMEZONE,
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(d);
+}
+
+function isPhoneViewport(): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.matchMedia(`(max-width: ${BOOK_PHONE_MAX_WIDTH_PX}px)`).matches;
+}
+
+const STEPS: Step[] = ['service', 'when', 'contact', 'review'];
+
+export default function BookClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const presetSlug = searchParams.get('service')?.trim() ?? '';
+
+  const [ready, setReady] = useState(false);
+  const [step, setStep] = useState<Step>('service');
+  const [services, setServices] = useState<BookService[]>([]);
+  const [servicesError, setServicesError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<BookService | null>(null);
+
+  const [dayOptions, setDayOptions] = useState<string[]>([]);
+  const [selectedDay, setSelectedDay] = useState<string>('');
+  const [slotsByDay, setSlotsByDay] = useState<Record<string, string[]>>({});
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [slotsError, setSlotsError] = useState<string | null>(null);
+  const [selectedStart, setSelectedStart] = useState<string | null>(null);
+
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [smsOptIn, setSmsOptIn] = useState(false);
+  const [email, setEmail] = useState('');
+  const [showEmail, setShowEmail] = useState(false);
+  const [contactError, setContactError] = useState<string | null>(null);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isPhoneViewport()) {
+      window.location.replace('/#services');
+      return;
+    }
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/book/services', {
+          headers: { Accept: 'application/json' },
+        });
+        const data = (await res.json().catch(() => null)) as {
+          services?: BookService[];
+          message?: string;
+        } | null;
+        if (cancelled) return;
+        if (!res.ok) {
+          setServicesError(data?.message || 'Could not load services.');
+          return;
+        }
+        const list = data?.services ?? [];
+        setServices(list);
+        if (presetSlug) {
+          const match = list.find((s) => s.slug === presetSlug);
+          if (match) {
+            setSelected(match);
+            setStep('when');
+            trackBook(BOOKING_ANALYTICS_EVENTS.SERVICE_OPENED, {
+              service: analyticsServiceLabel(match.title),
+              source: 'phone_booker',
+            });
+          }
+        }
+      } catch {
+        if (!cancelled) setServicesError('Could not load services.');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, presetSlug]);
+
+  const loadSlots = useCallback(async (slug: string) => {
+    setSlotsLoading(true);
+    setSlotsError(null);
+    const start = studioTodayYmd();
+    const end = addDaysYmd(start, 20);
+    const days: string[] = [];
+    for (let i = 0; i <= 20; i += 1) days.push(addDaysYmd(start, i));
+    setDayOptions(days);
+    setSelectedDay(start);
+    setSelectedStart(null);
+
+    try {
+      const params = new URLSearchParams({
+        slug,
+        date: start,
+        end,
+      });
+      const res = await fetch(`/api/book/slots?${params}`, {
+        headers: { Accept: 'application/json' },
+      });
+      const data = (await res.json().catch(() => null)) as {
+        slots?: Record<string, string[]>;
+        message?: string;
+      } | null;
+      if (!res.ok) {
+        setSlotsByDay({});
+        setSlotsError(data?.message || 'Could not load times.');
+        return;
+      }
+      setSlotsByDay(data?.slots ?? {});
+      const firstWithSlots = days.find((d) => (data?.slots?.[d]?.length ?? 0) > 0);
+      if (firstWithSlots) setSelectedDay(firstWithSlots);
+    } catch {
+      setSlotsError('Could not load times.');
+      setSlotsByDay({});
+    } finally {
+      setSlotsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (step === 'when' && selected?.slug) {
+      void loadSlots(selected.slug);
+    }
+  }, [step, selected?.slug, loadSlots]);
+
+  const daySlots = useMemo(
+    () => (selectedDay ? slotsByDay[selectedDay] ?? [] : []),
+    [selectedDay, slotsByDay]
+  );
+
+  const appointmentWhen = useMemo(() => {
+    if (!selectedStart) return null;
+    return formatAppointmentWhen(selectedStart, null);
+  }, [selectedStart]);
+
+  const servicesByCategory = useMemo(() => {
+    const map = new Map<string, BookService[]>();
+    for (const s of services) {
+      const list = map.get(s.category) ?? [];
+      list.push(s);
+      map.set(s.category, list);
+    }
+    return map;
+  }, [services]);
+
+  const stepIndex = STEPS.indexOf(step);
+
+  const goBack = () => {
+    if (step === 'service') {
+      router.push('/#services');
+      return;
+    }
+    const prev = STEPS[Math.max(0, stepIndex - 1)];
+    setStep(prev);
+    setSubmitError(null);
+    setContactError(null);
+  };
+
+  const pickService = (service: BookService) => {
+    setSelected(service);
+    setSelectedStart(null);
+    trackBook(BOOKING_ANALYTICS_EVENTS.SERVICE_OPENED, {
+      service: analyticsServiceLabel(service.title),
+      source: 'phone_booker',
+    });
+    setStep('when');
+  };
+
+  const continueFromWhen = () => {
+    if (!selectedStart) return;
+    setStep('contact');
+  };
+
+  const continueFromContact = () => {
+    setContactError(null);
+    const name = fullName.trim();
+    if (!name || name.split(/\s+/).length < 2) {
+      setContactError('Enter your first and last name.');
+      return;
+    }
+    if (!phone.trim()) {
+      setContactError('Enter your phone number.');
+      return;
+    }
+    if (!smsOptIn && !email.trim()) {
+      setShowEmail(true);
+      setContactError(
+        'Check the text opt-in, or add an email so we can reach you.'
+      );
+      return;
+    }
+    setStep('review');
+  };
+
+  const submitBooking = async () => {
+    if (!selected || !selectedStart || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await fetch('/api/book/create', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          slug: selected.slug,
+          start: selectedStart,
+          name: fullName.trim(),
+          phone: phone.trim(),
+          email: email.trim() || undefined,
+          smsOptIn,
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        calBookingUid?: string;
+        name?: string;
+        email?: string;
+        error?: string;
+        message?: string;
+      } | null;
+
+      if (!res.ok || !data?.calBookingUid) {
+        if (data?.error === 'phone_not_sms_capable') {
+          setSmsOptIn(false);
+          setShowEmail(true);
+          setStep('contact');
+          setContactError(
+            data.message ||
+              'That number may not receive texts. Add an email instead.'
+          );
+          return;
+        }
+        if (data?.error === 'contact_required') {
+          setShowEmail(true);
+          setStep('contact');
+          setContactError(data.message || 'Add email or text opt-in.');
+          return;
+        }
+        setSubmitError(data?.message || 'Could not hold that time. Try again.');
+        return;
+      }
+
+      const params = new URLSearchParams({ uid: data.calBookingUid });
+      if (data.name) params.set('name', data.name);
+      if (data.email) params.set('email', data.email);
+      window.location.assign(`/checkout?${params.toString()}`);
+    } catch {
+      setSubmitError('Something went wrong. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!ready) {
+    return (
+      <div className={styles.shell}>
+        <p className={styles.loading}>Opening booking…</p>
+      </div>
+    );
+  }
+
+  const stepTitle =
+    step === 'service'
+      ? 'Select a service'
+      : step === 'when'
+        ? 'Pick a time'
+        : step === 'contact'
+          ? 'Your details'
+          : 'Review and continue';
+
+  return (
+    <div className={styles.shell}>
+      <header className={styles.topBar}>
+        <button
+          type="button"
+          className={styles.iconBtn}
+          onClick={goBack}
+          aria-label={step === 'service' ? 'Close' : 'Back'}
+        >
+          {step === 'service' ? '✕' : '←'}
+        </button>
+        <p className={styles.brand}>Sadie Marie</p>
+        <Link href="/" className={styles.iconBtn} aria-label="Home">
+          ✕
+        </Link>
+      </header>
+
+      <div className={styles.progress} aria-hidden="true">
+        {STEPS.map((s, i) => (
+          <span
+            key={s}
+            className={`${styles.progressDot} ${i <= stepIndex ? styles.progressDotOn : ''}`}
+          />
+        ))}
+      </div>
+
+      <main className={styles.main}>
+        <h1 className={styles.title}>{stepTitle}</h1>
+
+        {step === 'service' && (
+          <section className={styles.section}>
+            {servicesError && <p className={styles.error}>{servicesError}</p>}
+            {!servicesError && services.length === 0 && (
+              <p className={styles.muted}>Loading services…</p>
+            )}
+            {[...servicesByCategory.entries()].map(([category, list]) => (
+              <div key={category} className={styles.categoryBlock}>
+                <p className={styles.categoryLabel}>{category}</p>
+                <ul className={styles.serviceList}>
+                  {list.map((service) => (
+                    <li key={service.slug}>
+                      <button
+                        type="button"
+                        className={styles.serviceRow}
+                        onClick={() => pickService(service)}
+                      >
+                        <span className={styles.serviceMain}>
+                          <span className={styles.serviceName}>
+                            {service.title}
+                          </span>
+                          {service.description ? (
+                            <span className={styles.serviceDesc}>
+                              {service.description}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className={styles.serviceMeta}>
+                          <span className={styles.servicePrice}>
+                            {service.priceLabel}
+                          </span>
+                          <span className={styles.serviceDuration}>
+                            {service.durationLabel}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {step === 'when' && selected && (
+          <section className={styles.section}>
+            <p className={styles.selectedService}>
+              {selected.title} · {selected.priceLabel} · {selected.durationLabel}
+            </p>
+            {slotsLoading && <p className={styles.muted}>Loading times…</p>}
+            {slotsError && <p className={styles.error}>{slotsError}</p>}
+            {!slotsLoading && !slotsError && (
+              <>
+                <div className={styles.dayScroller}>
+                  {dayOptions.map((ymd) => {
+                    const chip = formatDayChip(ymd);
+                    const count = slotsByDay[ymd]?.length ?? 0;
+                    const active = ymd === selectedDay;
+                    return (
+                      <button
+                        key={ymd}
+                        type="button"
+                        disabled={count === 0}
+                        className={`${styles.dayChip} ${active ? styles.dayChipOn : ''}`}
+                        onClick={() => {
+                          setSelectedDay(ymd);
+                          setSelectedStart(null);
+                        }}
+                      >
+                        <span>{chip.weekday}</span>
+                        <span>{chip.monthDay}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className={styles.slotGrid}>
+                  {daySlots.length === 0 ? (
+                    <p className={styles.muted}>No openings this day.</p>
+                  ) : (
+                    daySlots.map((iso) => (
+                      <button
+                        key={iso}
+                        type="button"
+                        className={`${styles.slotChip} ${selectedStart === iso ? styles.slotChipOn : ''}`}
+                        onClick={() => setSelectedStart(iso)}
+                      >
+                        {formatSlotTime(iso)}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+        {step === 'contact' && (
+          <section className={styles.section}>
+            <label className={styles.field}>
+              <span>Full name</span>
+              <input
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                autoComplete="name"
+                placeholder="First and last name"
+              />
+            </label>
+            <label className={styles.field}>
+              <span>Phone</span>
+              <input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                autoComplete="tel"
+                inputMode="tel"
+                placeholder="(385) 555-1234"
+              />
+            </label>
+            <label className={styles.smsLabel}>
+              <input
+                type="checkbox"
+                checked={smsOptIn}
+                onChange={(e) => {
+                  setSmsOptIn(e.target.checked);
+                  setContactError(null);
+                }}
+              />
+              <span>{STUDIO_SMS_CONSENT_LABEL}</span>
+            </label>
+            {!showEmail && !smsOptIn && (
+              <button
+                type="button"
+                className={styles.textLink}
+                onClick={() => setShowEmail(true)}
+              >
+                Prefer email instead?
+              </button>
+            )}
+            {(showEmail || (!smsOptIn && email)) && (
+              <label className={styles.field}>
+                <span>Email for appointment updates</span>
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  inputMode="email"
+                  placeholder="you@example.com"
+                />
+              </label>
+            )}
+            {contactError && <p className={styles.error}>{contactError}</p>}
+          </section>
+        )}
+
+        {step === 'review' && selected && selectedStart && (
+          <section className={styles.section}>
+            <div className={styles.reviewCard}>
+              <p className={styles.reviewEyebrow}>Your appointment</p>
+              <p className={styles.reviewService}>{selected.title}</p>
+              <p className={styles.reviewMeta}>
+                {selected.durationLabel} · {selected.priceLabel}
+              </p>
+              {appointmentWhen && (
+                <p className={styles.reviewWhen}>
+                  {appointmentWhen.date}
+                  <br />
+                  {appointmentWhen.timeRange}
+                </p>
+              )}
+              <hr className={styles.reviewRule} />
+              <p className={styles.reviewTotal}>
+                <span>Total</span>
+                <span>{selected.priceLabel}</span>
+              </p>
+              <p className={styles.reviewNote}>
+                No charge today — you&apos;ll save a card to hold the time
+                (no-show / late-cancel protection).
+              </p>
+            </div>
+            <div className={styles.policyBox}>
+              <p className={styles.policyTitle}>Cancellation policy</p>
+              <p>
+                Please give at least 24 hours&apos; notice to cancel or
+                reschedule. Cancellations inside 24 hours may be charged up to
+                50% of the service. No-shows (or cancels within 2 hours) may be
+                charged 100%.
+              </p>
+            </div>
+            <div className={styles.reviewContact}>
+              <p>
+                <strong>{fullName.trim()}</strong>
+              </p>
+              <p>{phone.trim()}</p>
+              <p>
+                {smsOptIn
+                  ? 'Texts: opted in'
+                  : email.trim()
+                    ? `Email: ${email.trim()}`
+                    : 'Contact on file'}
+              </p>
+            </div>
+            {submitError && <p className={styles.error}>{submitError}</p>}
+          </section>
+        )}
+      </main>
+
+      {(step === 'when' || step === 'contact' || step === 'review') && (
+        <footer className={styles.footer}>
+          {selected && (
+            <div className={styles.footerTotal}>
+              <span className={styles.footerPrice}>{selected.priceLabel}</span>
+              <span className={styles.footerHint}>
+                {step === 'review' ? 'Then secure checkout' : selected.title}
+              </span>
+            </div>
+          )}
+          {step === 'when' && (
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              disabled={!selectedStart}
+              onClick={continueFromWhen}
+            >
+              Continue
+            </button>
+          )}
+          {step === 'contact' && (
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              onClick={continueFromContact}
+            >
+              Continue
+            </button>
+          )}
+          {step === 'review' && (
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              disabled={submitting}
+              onClick={() => void submitBooking()}
+            >
+              {submitting ? 'Holding your time…' : 'Continue to checkout'}
+            </button>
+          )}
+        </footer>
+      )}
+    </div>
+  );
+}
