@@ -11,6 +11,7 @@ export interface BookableService {
   description: string | null;
   price: string;
   priceLabel: string;
+  priceCents: number;
   durationMins: number;
   durationLabel: string;
   calEventId: number;
@@ -20,6 +21,13 @@ function formatPrice(price: string): string {
   const n = Number(price);
   if (!Number.isFinite(n)) return `$${price}`;
   return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
+}
+
+/** Dollars string from DB → integer cents for Stripe / Apple Pay. */
+export function priceToCents(price: string): number {
+  const n = Number(price);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(n * 100);
 }
 
 function formatDuration(mins: number): string {
@@ -65,6 +73,7 @@ export async function loadBookableServices(): Promise<BookableService[]> {
     description: row.description,
     price: row.price,
     priceLabel: formatPrice(row.price),
+    priceCents: priceToCents(row.price),
     durationMins: row.duration_mins,
     durationLabel: formatDuration(row.duration_mins),
     calEventId: row.cal_event_id,

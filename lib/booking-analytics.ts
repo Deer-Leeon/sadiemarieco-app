@@ -7,11 +7,12 @@
  * Event catalogue (see also public/js/booking-analytics.js):
  *   Booking Service Opened   — service drawer opened
  *   Booking Cal Step         — Cal embed navigated (calendar / time / details)
- *   Booking Details Submitted — Cal Confirm (name + slot committed)
+ *   Booking Details Submitted — Cal Confirm / phone book create
+ *                               (`source`: phone_booker | phone_booker_apple_pay)
  *   Booking Contact Capture  — post-book contact panel shown
  *   Booking Hold Created     — /api/booking/init wrote pending row
  *   Checkout Viewed          — /checkout painted
- *   Checkout Payment Attempt — card submit started
+ *   Checkout Payment Attempt — card or Apple Pay submit started
  *   Checkout Expired         — hold expired UI shown
  *   Booking Hold Abandoned   — pending → canceled_by_system
  *   Booking Confirmed        — /api/booking/confirm succeeded

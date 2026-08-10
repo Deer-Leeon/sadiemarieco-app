@@ -34,6 +34,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           category,
           description,
           priceLabel,
+          priceCents,
           durationMins,
           durationLabel,
         }) => ({
@@ -42,6 +43,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           category,
           description,
           priceLabel,
+          priceCents,
           durationMins,
           durationLabel,
         })
