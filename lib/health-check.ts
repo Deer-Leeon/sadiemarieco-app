@@ -284,6 +284,7 @@ async function checkDatabase(): Promise<HealthCheckResult[]> {
         pending_holds: string;
         stale_pending: string;
         recent_webhooks: string;
+        recent_appointments: string;
         upcoming_confirmed: string;
       }>`
         SELECT
@@ -297,6 +298,9 @@ async function checkDatabase(): Promise<HealthCheckResult[]> {
           (SELECT COUNT(*)::text FROM webhook_events
            WHERE processed_at > NOW() - INTERVAL '7 days') AS recent_webhooks,
           (SELECT COUNT(*)::text FROM appointments
+           WHERE created_at > NOW() - INTERVAL '7 days'
+             AND status NOT IN ('pending', 'canceled_by_system')) AS recent_appointments,
+          (SELECT COUNT(*)::text FROM appointments
            WHERE status = 'confirmed' AND booking_time > NOW()) AS upcoming_confirmed
       `;
       return r[0];
@@ -306,6 +310,7 @@ async function checkDatabase(): Promise<HealthCheckResult[]> {
     const pendingHolds = Number(rows?.pending_holds ?? 0);
     const stalePending = Number(rows?.stale_pending ?? 0);
     const recentWebhooks = Number(rows?.recent_webhooks ?? 0);
+    const recentAppointments = Number(rows?.recent_appointments ?? 0);
     const upcomingConfirmed = Number(rows?.upcoming_confirmed ?? 0);
 
     checks.push(
@@ -352,16 +357,26 @@ async function checkDatabase(): Promise<HealthCheckResult[]> {
       })
     );
 
+    // Quiet periods (no bookings) are healthy. Only flag when appointments
+    // landed but nothing hit webhook_events (dedupe / SMS / email paths).
+    const webhookStatus =
+      recentWebhooks > 0
+        ? 'healthy'
+        : recentAppointments === 0
+          ? 'healthy'
+          : 'degraded';
     checks.push(
       result({
         id: 'db-webhook-activity',
         name: 'Recent webhook processing',
         category: 'Database',
-        status: recentWebhooks > 0 ? 'healthy' : 'degraded',
+        status: webhookStatus,
         message:
           recentWebhooks > 0
             ? `${recentWebhooks} webhook event(s) in the last 7 days`
-            : 'No webhook_events rows in the last 7 days',
+            : recentAppointments === 0
+              ? 'No recent bookings or webhook events (quiet period)'
+              : `${recentAppointments} appointment(s) in the last 7 days but 0 webhook_events`,
         detail: 'Includes Cal webhook dedup and email idempotency keys',
       })
     );
