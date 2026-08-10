@@ -142,6 +142,10 @@ export default function BookClient() {
     () => ({
       mode: 'setup',
       currency: 'usd',
+      // Must match SetupIntent `payment_method_types: ['card']` from
+      // /api/stripe/create-setup-intent — otherwise Apple Pay confirm fails with
+      // "collected through … automatic payment methods".
+      paymentMethodTypes: ['card'],
       appearance: {
         theme: 'flat',
         variables: {
