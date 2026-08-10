@@ -620,8 +620,14 @@ export default function BookClient() {
         ))}
       </div>
 
-      <main className={styles.main}>
-        <h1 className={styles.title}>{stepTitle}</h1>
+      <main
+        className={`${styles.main} ${step === 'review' ? styles.mainReview : ''}`}
+      >
+        <h1
+          className={`${styles.title} ${step === 'review' ? styles.titleReview : ''}`}
+        >
+          {stepTitle}
+        </h1>
 
         {step === 'service' && (
           <section className={styles.section}>
@@ -776,60 +782,62 @@ export default function BookClient() {
         )}
 
         {step === 'review' && selected && selectedStart && (
-          <section className={styles.section}>
-            <div className={styles.reviewCard}>
-              <p className={styles.reviewEyebrow}>Your appointment</p>
-              <p className={styles.reviewService}>{selected.title}</p>
-              <p className={styles.reviewMeta}>
-                {selected.durationLabel} · {selected.priceLabel}
-              </p>
-              {appointmentWhen && (
-                <p className={styles.reviewWhen}>
-                  {appointmentWhen.date}
-                  <br />
-                  {appointmentWhen.timeRange}
+          <section className={`${styles.section} ${styles.reviewSection}`}>
+            <div className={styles.reviewSheet}>
+              <div className={styles.reviewBlock}>
+                <p className={styles.reviewEyebrow}>Your appointment</p>
+                <p className={styles.reviewService}>{selected.title}</p>
+                <p className={styles.reviewMeta}>
+                  {selected.durationLabel} · {selected.priceLabel}
+                  {appointmentWhen
+                    ? ` · ${appointmentWhen.date} · ${appointmentWhen.timeRange}`
+                    : ''}
                 </p>
-              )}
+                <p className={styles.reviewTotal}>
+                  <span>Total</span>
+                  <span>{selected.priceLabel}</span>
+                </p>
+                <p className={styles.reviewNote}>
+                  No charge today — a card is saved to hold your appointment.
+                </p>
+              </div>
+
               <hr className={styles.reviewRule} />
-              <p className={styles.reviewTotal}>
-                <span>Total</span>
-                <span>{selected.priceLabel}</span>
-              </p>
-              <p className={styles.reviewNote}>
-                No charge today — a card is saved to hold your appointment.
-              </p>
-            </div>
-            <div className={styles.policyBox}>
-              <p className={styles.policyTitle}>Cancellation policy</p>
-              <p>
-                Please give at least 24 hours&apos; notice to cancel or
-                reschedule. Cancellations inside 24 hours may be charged up to
-                50% of the service. No-shows (or cancels within 2 hours) may be
-                charged 100%.
-              </p>
-            </div>
-            <div className={styles.contactCard}>
-              <p className={styles.contactCardEyebrow}>Contact</p>
-              <dl className={styles.contactDl}>
-                <div>
-                  <dt>Name</dt>
-                  <dd>{fullName}</dd>
-                </div>
-                <div>
-                  <dt>Phone</dt>
-                  <dd>{phone.trim()}</dd>
-                </div>
-                <div>
-                  <dt>Updates</dt>
-                  <dd>
-                    {smsOptIn
-                      ? 'Text messages opted in'
-                      : email.trim()
-                        ? `Email · ${email.trim()}`
-                        : '—'}
-                  </dd>
-                </div>
-              </dl>
+
+              <div className={styles.reviewBlock}>
+                <p className={styles.reviewEyebrow}>Contact</p>
+                <dl className={styles.contactDl}>
+                  <div>
+                    <dt>Name</dt>
+                    <dd>{fullName}</dd>
+                  </div>
+                  <div>
+                    <dt>Phone</dt>
+                    <dd>{phone.trim()}</dd>
+                  </div>
+                  <div>
+                    <dt>Updates</dt>
+                    <dd>
+                      {smsOptIn
+                        ? 'Text messages opted in'
+                        : email.trim()
+                          ? `Email · ${email.trim()}`
+                          : '—'}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <hr className={styles.reviewRule} />
+
+              <div className={styles.reviewBlock}>
+                <p className={styles.policyTitle}>Cancellation</p>
+                <p className={styles.policyCopy}>
+                  24+ hours notice to cancel or reschedule. Inside 24 hours may
+                  be charged up to 50%; no-shows (or cancels within 2 hours) may
+                  be charged 100%.
+                </p>
+              </div>
             </div>
             {submitError && <p className={styles.error}>{submitError}</p>}
           </section>
