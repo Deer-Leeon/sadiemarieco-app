@@ -36,6 +36,15 @@ const isStagingCheckoutPipelineRoute = createRouteMatcher([
   '/api/stripe(.*)',
 ]);
 
+/**
+ * Apple Pay / Payment Method Domains verification fetches this without a
+ * Clerk session. Staging must not 307 → www or Safari never enables Apple Pay
+ * for `staging.sadiemarie.co` (especially Stripe test mode).
+ */
+const isApplePayDomainAssociation = createRouteMatcher([
+  '/.well-known/apple-developer-merchantid-domain-association',
+]);
+
 /** Production paths that must not run Clerk session parsing (Bearer cron / webhooks). */
 const isClerkExcludedApi = createRouteMatcher([
   '/api/webhook(.*)',
@@ -72,6 +81,10 @@ export default clerkMiddleware(async (auth, req) => {
     // Let the in-app Clerk widget run on this host (session cookies are
     // host-scoped; live www login does not unlock staging).
     if (isStagingSignInRoute(req)) {
+      return;
+    }
+
+    if (isApplePayDomainAssociation(req)) {
       return;
     }
 
