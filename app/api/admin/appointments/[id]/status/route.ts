@@ -56,6 +56,10 @@ import {
 import { recordClientNoShow, consumeFeeWaiveNext, clearFeeWaiveNext } from '@/lib/client-no-show';
 import { chargeNoShowPenalty } from '@/lib/no-show-charge';
 import {
+  isPrepaidPayNowAppointment,
+  refundPrepaidBooking,
+} from '@/lib/prepaid-booking-refund';
+import {
   notifyAdminAppointmentStatusSms,
   notifyFeeFreePassSms,
 } from '@/lib/booking-notifications';
@@ -97,6 +101,8 @@ interface AppointmentForNoShow {
   cal_event_id: string | null;
   status: string | null;
   stripe_customer_id: string | null;
+  stripe_payment_intent_id: string | null;
+  payment_timing: string | null;
   client_id: string | null;
   service_name: string | null;
   service_price: string | null;
@@ -247,6 +253,8 @@ async function findAppointmentForNoShow(
         a.cal_event_id,
         a.status,
         a.stripe_customer_id,
+        a.stripe_payment_intent_id,
+        a.payment_timing,
         a.client_id::text AS client_id,
         a.service_name,
         a.client_phone,
@@ -291,6 +299,8 @@ async function findAppointmentForNoShow(
         a.cal_event_id,
         a.status,
         a.stripe_customer_id,
+        a.stripe_payment_intent_id,
+        a.payment_timing,
         a.client_id::text AS client_id,
         a.service_name,
         a.client_phone,
@@ -375,10 +385,20 @@ async function findAppointmentForLifecycleSms(
 
 async function findAppointmentCalUid(
   idParam: string
-): Promise<{ id: string | number; cal_event_id: string | null } | null> {
+): Promise<{
+  id: string | number;
+  cal_event_id: string | null;
+  stripe_payment_intent_id: string | null;
+  payment_timing: string | null;
+} | null> {
   if (UUID_RE.test(idParam)) {
-    const { rows } = await sql<{ id: string; cal_event_id: string | null }>`
-      SELECT id, cal_event_id
+    const { rows } = await sql<{
+      id: string;
+      cal_event_id: string | null;
+      stripe_payment_intent_id: string | null;
+      payment_timing: string | null;
+    }>`
+      SELECT id, cal_event_id, stripe_payment_intent_id, payment_timing
       FROM appointments
       WHERE id = ${idParam}::uuid
       LIMIT 1
@@ -387,8 +407,13 @@ async function findAppointmentCalUid(
   }
   const intId = parseIntegerId(idParam);
   if (intId !== null) {
-    const { rows } = await sql<{ id: number; cal_event_id: string | null }>`
-      SELECT id, cal_event_id
+    const { rows } = await sql<{
+      id: number;
+      cal_event_id: string | null;
+      stripe_payment_intent_id: string | null;
+      payment_timing: string | null;
+    }>`
+      SELECT id, cal_event_id, stripe_payment_intent_id, payment_timing
       FROM appointments
       WHERE id = ${intId}
       LIMIT 1
@@ -478,7 +503,39 @@ export async function PATCH(
         'appointment';
 
       if (chargeNoShow) {
-        if (!existing.stripe_customer_id) {
+        if (isPrepaidPayNowAppointment(existing)) {
+          // Already paid online — keep 100% (no second charge).
+          const refundResult = await refundPrepaidBooking({
+            paymentIntentId: String(existing.stripe_payment_intent_id),
+            keepFraction: 1,
+            appointmentId: existing.id,
+            calBookingUid: existing.cal_event_id,
+            reason: `No-show fee (100%) — ${serviceLabel}`,
+            feeType: 'no_show_penalty',
+          });
+          if (!refundResult.ok) {
+            return NextResponse.json(
+              {
+                error: refundResult.error || 'prepaid_no_show_failed',
+                message:
+                  refundResult.message ||
+                  'Could not apply the prepaid no-show policy.',
+              },
+              { status: 502 }
+            );
+          }
+          const kept =
+            refundResult.keptAmountCents ??
+            refundResult.amountCents ??
+            Math.round(
+              (Number.isFinite(priceRaw) ? priceRaw : 0) * 100
+            );
+          noShowCharge = {
+            payment_intent_id: String(existing.stripe_payment_intent_id),
+            amount_cents: kept,
+            currency: refundResult.currency || 'usd',
+          };
+        } else if (!existing.stripe_customer_id) {
           return NextResponse.json(
             {
               error: 'no_vaulted_card',
@@ -487,31 +544,31 @@ export async function PATCH(
             },
             { status: 400 }
           );
+        } else {
+          const chargeResult = await chargeNoShowPenalty({
+            stripeCustomerId: existing.stripe_customer_id,
+            servicePriceDollars: priceRaw,
+            appointmentId: String(existing.id),
+            calBookingUid: existing.cal_event_id,
+            serviceLabel,
+          });
+
+          if (!('paymentIntentId' in chargeResult)) {
+            return NextResponse.json(
+              {
+                error: chargeResult.error,
+                message: chargeResult.message,
+              },
+              { status: chargeResult.status }
+            );
+          }
+
+          noShowCharge = {
+            payment_intent_id: chargeResult.paymentIntentId,
+            amount_cents: chargeResult.amountCents,
+            currency: chargeResult.currency,
+          };
         }
-
-        const chargeResult = await chargeNoShowPenalty({
-          stripeCustomerId: existing.stripe_customer_id,
-          servicePriceDollars: priceRaw,
-          appointmentId: String(existing.id),
-          calBookingUid: existing.cal_event_id,
-          serviceLabel,
-        });
-
-        if (!('paymentIntentId' in chargeResult)) {
-          return NextResponse.json(
-            {
-              error: chargeResult.error,
-              message: chargeResult.message,
-            },
-            { status: chargeResult.status }
-          );
-        }
-
-        noShowCharge = {
-          payment_intent_id: chargeResult.paymentIntentId,
-          amount_cents: chargeResult.amountCents,
-          currency: chargeResult.currency,
-        };
       }
     }
 
@@ -535,6 +592,35 @@ export async function PATCH(
           '[api/admin/appointments/[id]/status] cancel requested on row with no cal_event_id — local-only flip',
           { id: existing.id }
         );
+      }
+      if (isPrepaidPayNowAppointment(existing)) {
+        const refundResult = await refundPrepaidBooking({
+          paymentIntentId: String(existing.stripe_payment_intent_id),
+          keepFraction: 0,
+          appointmentId: existing.id,
+          calBookingUid: existing.cal_event_id,
+          reason: 'Full refund — canceled by admin',
+          feeType: 'prepaid_admin_cancel_refund',
+        });
+        if (!refundResult.ok) {
+          console.warn(
+            '[api/admin/appointments/[id]/status] prepaid admin cancel refund failed (non-blocking)',
+            {
+              id: existing.id,
+              error: refundResult.error,
+              message: refundResult.message,
+            }
+          );
+        } else {
+          console.log(
+            '[api/admin/appointments/[id]/status] prepaid admin cancel refunded',
+            {
+              id: existing.id,
+              refundAmountCents: refundResult.refundAmountCents,
+              refundId: refundResult.refundId,
+            }
+          );
+        }
       }
     }
 

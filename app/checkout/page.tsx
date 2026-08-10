@@ -44,6 +44,7 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
   let initialBookingTime: string | null = null;
   let initialEndTime: string | null = null;
   let initialServiceName: string | null = null;
+  let initialQuotedServicePriceCents: number | null = null;
 
   if (uid) {
     const hold = await getAppointmentHoldByCalUid(uid);
@@ -55,6 +56,7 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
       initialBookingTime = hold.booking_time;
       initialEndTime = hold.end_time;
       initialServiceName = hold.service_name;
+      initialQuotedServicePriceCents = hold.quoted_service_price_cents;
     }
   }
 
@@ -66,6 +68,7 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
         initialBookingTime={initialBookingTime}
         initialEndTime={initialEndTime}
         initialServiceName={initialServiceName}
+        initialQuotedServicePriceCents={initialQuotedServicePriceCents}
       />
     </Suspense>
   );

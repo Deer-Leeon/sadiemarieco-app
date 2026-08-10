@@ -53,6 +53,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       bookingTime: row.booking_time,
       endTime: row.end_time,
       serviceName: row.service_name,
+      quotedServicePriceCents: row.quoted_service_price_cents,
     });
   } catch (err) {
     console.error('[api/booking/hold] GET failed:', errorMessage(err));

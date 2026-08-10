@@ -63,6 +63,8 @@ function clearStripeRedirectParams(uid: string, name: string, email: string) {
   const url = new URL(window.location.href);
   url.searchParams.delete('setup_intent');
   url.searchParams.delete('setup_intent_client_secret');
+  url.searchParams.delete('payment_intent');
+  url.searchParams.delete('payment_intent_client_secret');
   url.searchParams.delete('redirect_status');
   url.searchParams.set('uid', uid);
   if (name) url.searchParams.set('name', name);
@@ -78,7 +80,8 @@ function clearStripeRedirectParams(uid: string, name: string, email: string) {
 }
 
 async function callBookingConfirm(params: {
-  setupIntentId: string;
+  setupIntentId?: string;
+  paymentIntentId?: string;
   calBookingUid: string;
   name: string;
   email: string;
@@ -92,7 +95,9 @@ async function callBookingConfirm(params: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        setupIntentId: params.setupIntentId,
+        ...(params.paymentIntentId
+          ? { paymentIntentId: params.paymentIntentId }
+          : { setupIntentId: params.setupIntentId }),
         calBookingUid: params.calBookingUid,
         ...(params.name ? { name: params.name } : {}),
         ...(params.email ? { email: params.email } : {}),
@@ -168,6 +173,14 @@ function readThreeDsSetupIntentId(
   if (params.get('redirect_status') !== 'succeeded') return null;
   const id = params.get('setup_intent')?.trim() ?? '';
   return id.startsWith('seti_') ? id : null;
+}
+
+function readThreeDsPaymentIntentId(
+  params: ReturnType<typeof useSearchParams>
+): string | null {
+  if (params.get('redirect_status') !== 'succeeded') return null;
+  const id = params.get('payment_intent')?.trim() ?? '';
+  return id.startsWith('pi_') ? id : null;
 }
 
 /**
@@ -335,6 +348,7 @@ interface CheckoutClientProps {
   initialBookingTime?: string | null;
   initialEndTime?: string | null;
   initialServiceName?: string | null;
+  initialQuotedServicePriceCents?: number | null;
 }
 
 export default function CheckoutClient({
@@ -343,6 +357,7 @@ export default function CheckoutClient({
   initialBookingTime = null,
   initialEndTime = null,
   initialServiceName = null,
+  initialQuotedServicePriceCents = null,
 }: CheckoutClientProps) {
   const params = useSearchParams();
   // The Cal.com embed handler in `public/js/main.js` redirects here on
@@ -356,8 +371,13 @@ export default function CheckoutClient({
   // Cal phone-only bookings pass <digits>@sms.cal.com — never prefill Stripe Link with that.
   const emailRaw = params.get('email')?.trim() ?? '';
   const email = isValidEmail(emailRaw) ? emailRaw.trim().toLowerCase() : '';
+  const payNow = params.get('payMode')?.trim() === 'now';
   const threeDsSetupIntentId = useMemo(
     () => readThreeDsSetupIntentId(params),
+    [params]
+  );
+  const threeDsPaymentIntentId = useMemo(
+    () => readThreeDsPaymentIntentId(params),
     [params]
   );
 
@@ -374,6 +394,9 @@ export default function CheckoutClient({
   const [serviceName, setServiceName] = useState<string | null>(
     initialServiceName
   );
+  const [quotedServicePriceCents, setQuotedServicePriceCents] = useState<
+    number | null
+  >(initialQuotedServicePriceCents);
   /** Gate the return CTA until Cal cancel finishes — otherwise the booker can reopen while the only Saturday slot is still held. */
   const [holdReleaseState, setHoldReleaseState] = useState<
     'idle' | 'releasing' | 'released' | 'failed'
@@ -485,6 +508,14 @@ export default function CheckoutClient({
         if (data.bookingTime) setBookingTime(data.bookingTime);
         if (data.endTime !== undefined) setEndTime(data.endTime ?? null);
         if (data.serviceName) setServiceName(data.serviceName);
+        if (
+          typeof (data as { quotedServicePriceCents?: unknown })
+            .quotedServicePriceCents === 'number'
+        ) {
+          setQuotedServicePriceCents(
+            (data as { quotedServicePriceCents: number }).quotedServicePriceCents
+          );
+        }
       } catch {
         // Non-fatal — the local countdown still enforces the window.
       }
@@ -613,15 +644,27 @@ export default function CheckoutClient({
     }
   }, [uid, holdExpired, threeDsSetupIntentId]);
 
-  const elementsOptions: StripeElementsOptions = useMemo(
-    () => ({
-      mode: 'setup',
+  const elementsOptions: StripeElementsOptions = useMemo(() => {
+    if (payNow) {
+      const amount =
+        quotedServicePriceCents && quotedServicePriceCents > 0
+          ? quotedServicePriceCents
+          : 50;
+      return {
+        mode: 'payment' as const,
+        amount,
+        currency: 'usd',
+        appearance: STRIPE_APPEARANCE,
+        paymentMethodTypes: ['card'],
+      };
+    }
+    return {
+      mode: 'setup' as const,
       currency: 'usd',
       appearance: STRIPE_APPEARANCE,
       paymentMethodTypes: ['card'],
-    }),
-    []
-  );
+    };
+  }, [payNow, quotedServicePriceCents]);
 
   return (
     <main className="flex min-h-screen w-full flex-col items-center bg-[#FAF9F6] px-4 py-12 font-sans sm:py-16">
@@ -630,6 +673,13 @@ export default function CheckoutClient({
       <section className="mt-10 w-full max-w-md">
         {holdExpired ? (
           <ExpiredHoldCard releaseState={holdReleaseState} />
+        ) : threeDsPaymentIntentId ? (
+          <CheckoutThreeDSResume
+            uid={uid}
+            name={name}
+            email={email}
+            paymentIntentId={threeDsPaymentIntentId}
+          />
         ) : threeDsSetupIntentId ? (
           <CheckoutThreeDSResume
             uid={uid}
@@ -650,13 +700,19 @@ export default function CheckoutClient({
                 countdownLabel={countdownLabel}
               />
             )}
-            <Elements stripe={stripePromise} options={elementsOptions}>
+            <Elements
+              key={payNow ? 'payment' : 'setup'}
+              stripe={stripePromise}
+              options={elementsOptions}
+            >
               <CheckoutForm
                 uid={uid}
                 name={name}
                 email={email}
                 holdExpired={holdExpired}
                 service={analyticsService}
+                payNow={payNow}
+                quotedServicePriceCents={quotedServicePriceCents}
                 onConfirmed={() => setCheckoutComplete(true)}
               />
             </Elements>
@@ -702,11 +758,13 @@ function CheckoutThreeDSResume({
   name,
   email,
   setupIntentId,
+  paymentIntentId,
 }: {
   uid: string;
   name: string;
   email: string;
-  setupIntentId: string;
+  setupIntentId?: string;
+  paymentIntentId?: string;
 }) {
   const [submitting, setSubmitting] = useState(true);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -715,15 +773,18 @@ function CheckoutThreeDSResume({
     contact: { sms: boolean; email: boolean };
   } | null>(null);
   const resumeStartedRef = useRef(false);
+  const intentKey = paymentIntentId || setupIntentId || '';
 
   useEffect(() => {
-    if (!uid || resumeStartedRef.current) return;
+    if (!uid || !intentKey || resumeStartedRef.current) return;
     resumeStartedRef.current = true;
 
     (async () => {
       try {
         const result = await callBookingConfirm({
-          setupIntentId,
+          ...(paymentIntentId
+            ? { paymentIntentId }
+            : { setupIntentId: setupIntentId! }),
           calBookingUid: uid,
           name,
           email,
@@ -737,13 +798,15 @@ function CheckoutThreeDSResume({
         setSubmitError(
           err instanceof Error
             ? err.message
-            : 'Your card was saved but we could not finalise the appointment. Please contact the studio.'
+            : paymentIntentId
+              ? 'Your payment went through but we could not finalise the appointment. Please contact the studio.'
+              : 'Your card was saved but we could not finalise the appointment. Please contact the studio.'
         );
       } finally {
         setSubmitting(false);
       }
     })();
-  }, [uid, name, email, setupIntentId]);
+  }, [uid, name, email, intentKey, paymentIntentId, setupIntentId]);
 
   if (confirmed) {
     return (
@@ -775,6 +838,8 @@ interface FormProps {
   email: string;
   holdExpired: boolean;
   service: string;
+  payNow: boolean;
+  quotedServicePriceCents: number | null;
   onConfirmed: () => void;
 }
 
@@ -841,13 +906,17 @@ function CheckoutForm({
   email,
   holdExpired,
   service,
+  payNow,
+  quotedServicePriceCents,
   onConfirmed,
 }: FormProps) {
   const stripe = useStripe();
   const elements = useElements();
 
   const [submitting, setSubmitting] = useState(false);
-  const [submitLabel, setSubmitLabel] = useState('Saving your card…');
+  const [submitLabel, setSubmitLabel] = useState(
+    payNow ? 'Processing payment…' : 'Saving your card…'
+  );
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<{
     calWarning: string | null;
@@ -859,13 +928,13 @@ function CheckoutForm({
   const resumeStartedRef = useRef(false);
 
   const finalizeBooking = useCallback(
-    async (setupIntentId: string) => {
+    async (intent: { setupIntentId?: string; paymentIntentId?: string }) => {
       setSubmitting(true);
       setSubmitLabel('Confirming your appointment…');
       setSubmitError(null);
       try {
         const result = await callBookingConfirm({
-          setupIntentId,
+          ...intent,
           calBookingUid: uid,
           name,
           email,
@@ -880,7 +949,9 @@ function CheckoutForm({
         setSubmitError(
           err instanceof Error
             ? err.message
-            : 'Your card was saved but we could not finalise the appointment. Please contact the studio.'
+            : intent.paymentIntentId
+              ? 'Your payment went through but we could not finalise the appointment. Please contact the studio.'
+              : 'Your card was saved but we could not finalise the appointment. Please contact the studio.'
         );
       } finally {
         setSubmitting(false);
@@ -897,11 +968,17 @@ function CheckoutForm({
     }
     const redirectStatus = searchParams.get('redirect_status');
     const setupIntentId = searchParams.get('setup_intent')?.trim() ?? '';
-    if (redirectStatus !== 'succeeded' || !setupIntentId.startsWith('seti_')) {
+    const paymentIntentId = searchParams.get('payment_intent')?.trim() ?? '';
+    if (redirectStatus !== 'succeeded') return;
+    if (paymentIntentId.startsWith('pi_')) {
+      resumeStartedRef.current = true;
+      void finalizeBooking({ paymentIntentId });
       return;
     }
-    resumeStartedRef.current = true;
-    void finalizeBooking(setupIntentId);
+    if (setupIntentId.startsWith('seti_')) {
+      resumeStartedRef.current = true;
+      void finalizeBooking({ setupIntentId });
+    }
   }, [
     holdExpired,
     uid,
@@ -916,10 +993,11 @@ function CheckoutForm({
 
     trackCheckoutEvent(BOOKING_ANALYTICS_EVENTS.CHECKOUT_PAYMENT_ATTEMPT, {
       service,
+      payment_timing: payNow ? 'pay_now' : 'pay_later',
     });
 
     setSubmitting(true);
-    setSubmitLabel('Saving your card…');
+    setSubmitLabel(payNow ? 'Processing payment…' : 'Saving your card…');
     setSubmitError(null);
 
     try {
@@ -929,14 +1007,14 @@ function CheckoutForm({
         return;
       }
 
-      // Fresh SetupIntent every submit so a prior decline cannot stick the
-      // Element on a dead intent. Confirm via `elements` (not a detached
-      // PaymentMethod id) so bank 3-D Secure challenges can open.
       setSubmitLabel('Connecting securely…');
+      const intentPath = payNow
+        ? '/api/stripe/create-booking-payment-intent'
+        : '/api/stripe/create-setup-intent';
       let clientSecret: string;
       try {
         const res = await fetchWithTimeout(
-          '/api/stripe/create-setup-intent',
+          intentPath,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -972,46 +1050,85 @@ function CheckoutForm({
       returnUrl.searchParams.set('uid', uid);
       if (name) returnUrl.searchParams.set('name', name);
       if (email) returnUrl.searchParams.set('email', email);
+      if (payNow) returnUrl.searchParams.set('payMode', 'now');
 
       setSubmitLabel('Verifying with your bank…');
-      const { error, setupIntent } = await stripe.confirmSetup({
-        elements,
-        clientSecret,
-        confirmParams: {
-          return_url: returnUrl.toString(),
-        },
-        redirect: 'if_required',
-      });
+      if (payNow) {
+        const { error, paymentIntent } = await stripe.confirmPayment({
+          elements,
+          clientSecret,
+          confirmParams: {
+            return_url: returnUrl.toString(),
+          },
+          redirect: 'if_required',
+        });
 
-      if (error) {
-        setSubmitError(friendlyStripeSetupError(error));
-        return;
-      }
-
-      let finalIntent = setupIntent;
-      if (finalIntent?.status === 'requires_action') {
-        const next = await stripe.handleNextAction({ clientSecret });
-        if (next.error) {
-          setSubmitError(friendlyStripeSetupError(next.error));
+        if (error) {
+          setSubmitError(friendlyStripeSetupError(error));
           return;
         }
-        finalIntent = next.setupIntent ?? finalIntent;
-      }
 
-      if (!finalIntent || finalIntent.status !== 'succeeded') {
-        setSubmitError(
-          'Your card could not be confirmed. Please check the details and try again — if your bank asks to verify the charge, complete that prompt and retry.'
-        );
-        return;
-      }
+        let finalPi = paymentIntent;
+        if (finalPi?.status === 'requires_action') {
+          const next = await stripe.handleNextAction({ clientSecret });
+          if (next.error) {
+            setSubmitError(friendlyStripeSetupError(next.error));
+            return;
+          }
+          finalPi = next.paymentIntent ?? finalPi;
+        }
 
-      setSubmitLabel('Confirming your appointment…');
-      await finalizeBooking(finalIntent.id);
+        if (!finalPi || finalPi.status !== 'succeeded') {
+          setSubmitError(
+            'Your payment could not be confirmed. Please check the details and try again.'
+          );
+          return;
+        }
+
+        setSubmitLabel('Confirming your appointment…');
+        await finalizeBooking({ paymentIntentId: finalPi.id });
+      } else {
+        const { error, setupIntent } = await stripe.confirmSetup({
+          elements,
+          clientSecret,
+          confirmParams: {
+            return_url: returnUrl.toString(),
+          },
+          redirect: 'if_required',
+        });
+
+        if (error) {
+          setSubmitError(friendlyStripeSetupError(error));
+          return;
+        }
+
+        let finalIntent = setupIntent;
+        if (finalIntent?.status === 'requires_action') {
+          const next = await stripe.handleNextAction({ clientSecret });
+          if (next.error) {
+            setSubmitError(friendlyStripeSetupError(next.error));
+            return;
+          }
+          finalIntent = next.setupIntent ?? finalIntent;
+        }
+
+        if (!finalIntent || finalIntent.status !== 'succeeded') {
+          setSubmitError(
+            'Your card could not be confirmed. Please check the details and try again — if your bank asks to verify the charge, complete that prompt and retry.'
+          );
+          return;
+        }
+
+        setSubmitLabel('Confirming your appointment…');
+        await finalizeBooking({ setupIntentId: finalIntent.id });
+      }
     } catch (err) {
       setSubmitError(
         err instanceof Error
           ? err.message
-          : 'Something went wrong saving your card. Please try again.'
+          : payNow
+            ? 'Something went wrong processing your payment. Please try again.'
+            : 'Something went wrong saving your card. Please try again.'
       );
     } finally {
       setSubmitting(false);
@@ -1034,13 +1151,31 @@ function CheckoutForm({
       className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm shadow-stone-900/[0.03] sm:p-10"
     >
       <h2 className="font-serif text-2xl text-stone-900">
-        Secure your appointment
+        {payNow ? 'Pay for your appointment' : 'Secure your appointment'}
       </h2>
       <p className="mt-2 text-sm leading-relaxed text-stone-500">
-        We&rsquo;ll save your card on file to confirm the booking.
-        <span className="mt-1 block font-medium text-stone-700">
-          No charge today.
-        </span>
+        {payNow ? (
+          <>
+            You&rsquo;ll be charged now for the full service. Your card stays on
+            file for cancellation policy if needed.
+            {quotedServicePriceCents && quotedServicePriceCents > 0 ? (
+              <span className="mt-1 block font-medium text-stone-700">
+                Charged today:{' '}
+                {new Intl.NumberFormat('en-US', {
+                  style: 'currency',
+                  currency: 'USD',
+                }).format(quotedServicePriceCents / 100)}
+              </span>
+            ) : null}
+          </>
+        ) : (
+          <>
+            We&rsquo;ll save your card on file to confirm the booking.
+            <span className="mt-1 block font-medium text-stone-700">
+              No charge today.
+            </span>
+          </>
+        )}
       </p>
 
       {name && (
@@ -1110,14 +1245,15 @@ function CheckoutForm({
         ) : (
           <>
             <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-            <span>Secure Appointment</span>
+            <span>{payNow ? 'Pay & confirm' : 'Secure Appointment'}</span>
           </>
         )}
       </button>
 
       <p className="mt-4 text-center text-[11px] leading-relaxed text-stone-400">
-        Your card will only be charged for no-shows or late cancellations,
-        per studio policy.
+        {payNow
+          ? 'Paid in full online. Cancellation policy still applies to refunds.'
+          : 'Your card will only be charged for no-shows or late cancellations, per studio policy.'}
       </p>
     </form>
   );
@@ -1239,7 +1375,7 @@ function SuccessCard({
         <div className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-left text-xs text-amber-900">
           <p className="font-medium">Heads up</p>
           <p className="mt-1 leading-relaxed">
-            Your card is saved, but we couldn&rsquo;t finalise the calendar
+            Your booking is recorded, but we couldn&rsquo;t finalise the calendar
             invite automatically. The studio will confirm with you shortly.
           </p>
         </div>

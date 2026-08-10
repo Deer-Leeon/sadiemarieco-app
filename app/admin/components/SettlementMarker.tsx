@@ -24,7 +24,7 @@ export function SettlementCheckMarker({
 }) {
   if (!isAppointmentSettled(payment)) return null;
 
-  const label = settlementShortLabel(payment?.payment_kind);
+  const label = settlementShortLabel(payment);
   const Icon =
     payment?.payment_kind === 'cash'
       ? DollarSign
@@ -60,7 +60,7 @@ export function SettlementBadge({
 }) {
   if (!isAppointmentSettled(payment)) return null;
 
-  const label = settlementShortLabel(payment?.payment_kind);
+  const label = settlementShortLabel(payment);
   const Icon =
     payment?.payment_kind === 'cash'
       ? DollarSign
