@@ -43,6 +43,8 @@ import {
   RATE_LIMITS,
   rejectUnlessRateAllowed,
 } from '@/lib/rate-limit';
+import { releaseAbandonedHoldByCalUid } from '@/lib/release-abandoned-hold';
+import { scheduleAbandonedHoldRelease } from '@/lib/schedule-abandoned-hold-release';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -300,6 +302,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // Schedule before init so a crash / init failure still auto-releases.
+  // Duplicate with init + webhook is fine (release is idempotent).
+  try {
+    const releaseJob = await scheduleAbandonedHoldRelease(extracted.uid);
+    if (!releaseJob.scheduled) {
+      console.warn('[api/book/create] abandoned-hold release not scheduled', {
+        calBookingUid: extracted.uid,
+        reason: releaseJob.reason,
+      });
+    }
+  } catch (err) {
+    console.warn('[api/book/create] abandoned-hold schedule threw', {
+      calBookingUid: extracted.uid,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   const initUrl = new URL('/api/booking/init', req.nextUrl.origin);
   let initRes: Response;
   try {
@@ -324,6 +343,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   } catch (err) {
     await cancelCalBooking(extracted.uid);
+    // Flip any webhook-created pending row immediately (don't wait for QStash).
+    // No abandoned SMS — this is an init rollback, not a real checkout abandon.
+    try {
+      await releaseAbandonedHoldByCalUid(extracted.uid, {
+        sendAbandonedSms: false,
+      });
+    } catch (releaseErr) {
+      console.warn('[api/book/create] local release after init fetch failure', {
+        uid: extracted.uid,
+        error:
+          releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
+      });
+    }
     console.error('[api/book/create] init fetch failed', err);
     return NextResponse.json(
       {
@@ -342,6 +374,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   if (!initRes.ok) {
     await cancelCalBooking(extracted.uid);
+    try {
+      await releaseAbandonedHoldByCalUid(extracted.uid, {
+        sendAbandonedSms: false,
+      });
+    } catch (releaseErr) {
+      console.warn('[api/book/create] local release after init failure', {
+        uid: extracted.uid,
+        error:
+          releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
+      });
+    }
     return NextResponse.json(
       {
         error: initData?.error || 'init_failed',

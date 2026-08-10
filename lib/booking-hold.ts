@@ -5,8 +5,9 @@
  *   • `api/webhook.js` (SYSTEM_ABANDON_CANCEL_REASON + legacy list)
  *
  * Holds are released by a per-booking QStash delayed message scheduled
- * from `/api/booking/init`, the checkout page at 00:00, and a daily
- * Vercel cron sweep (`/api/cron/cleanup-abandoned`).
+ * from `/api/booking/init`, the Cal webhook (public pending upserts),
+ * `/api/book/create`, the checkout page at 00:00, and a daily Vercel
+ * cron sweep (`/api/cron/cleanup-abandoned`).
  */
 
 /** Source of truth for countdown + QStash delay. */

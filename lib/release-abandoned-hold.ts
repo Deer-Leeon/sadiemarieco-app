@@ -102,7 +102,11 @@ async function flipLocalStatus(appointmentId: string): Promise<boolean> {
   }
 }
 
-async function maybeNotifyAbandonedCheckout(row: AppointmentHoldRow): Promise<void> {
+async function maybeNotifyAbandonedCheckout(
+  row: AppointmentHoldRow,
+  sendAbandonedSms: boolean
+): Promise<void> {
+  if (!sendAbandonedSms) return;
   if (row.sms_opt_in !== true) return;
   if (!row.client_phone) return;
   const bookingTime =
@@ -127,11 +131,21 @@ async function maybeNotifyAbandonedCheckout(row: AppointmentHoldRow): Promise<vo
   }
 }
 
+export interface ReleaseAbandonedHoldOptions {
+  /**
+   * When false, flip/cancel without the checkout-abandoned SMS.
+   * Used for phone-booker init rollbacks (not a real abandon).
+   * Default true.
+   */
+  sendAbandonedSms?: boolean;
+}
+
 /**
  * Look up by Cal booking UID (preferred) and release if still pending.
  */
 export async function releaseAbandonedHoldByCalUid(
-  calBookingUid: string
+  calBookingUid: string,
+  options?: ReleaseAbandonedHoldOptions
 ): Promise<ReleaseAbandonedHoldResult> {
   const uid = typeof calBookingUid === 'string' ? calBookingUid.trim() : '';
   if (!uid) {
@@ -160,12 +174,14 @@ export async function releaseAbandonedHoldByCalUid(
     return { ok: true, released: false, skipped: 'appointment_not_found' };
   }
 
-  return releasePendingRow(row);
+  return releasePendingRow(row, options);
 }
 
 async function releasePendingRow(
-  row: AppointmentHoldRow
+  row: AppointmentHoldRow,
+  options?: ReleaseAbandonedHoldOptions
 ): Promise<ReleaseAbandonedHoldResult> {
+  const sendAbandonedSms = options?.sendAbandonedSms !== false;
   const status = (row.status || '').toLowerCase();
   if (status !== 'pending') {
     return {
@@ -193,11 +209,13 @@ async function releasePendingRow(
     );
     const flipped = await flipLocalStatus(row.id);
     if (flipped) {
-      await maybeNotifyAbandonedCheckout(row);
-      await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.HOLD_ABANDONED, {
-        service: analyticsServiceLabel(row.service_name),
-        source: 'no_cal_uid',
-      });
+      await maybeNotifyAbandonedCheckout(row, sendAbandonedSms);
+      if (sendAbandonedSms) {
+        await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.HOLD_ABANDONED, {
+          service: analyticsServiceLabel(row.service_name),
+          source: 'no_cal_uid',
+        });
+      }
       return {
         ok: true,
         released: true,
@@ -233,11 +251,13 @@ async function releasePendingRow(
 
   const flipped = await flipLocalStatus(row.id);
   if (flipped) {
-    await maybeNotifyAbandonedCheckout(row);
-    await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.HOLD_ABANDONED, {
-      service: analyticsServiceLabel(row.service_name),
-      source: 'cal_cancel',
-    });
+    await maybeNotifyAbandonedCheckout(row, sendAbandonedSms);
+    if (sendAbandonedSms) {
+      await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.HOLD_ABANDONED, {
+        service: analyticsServiceLabel(row.service_name),
+        source: 'cal_cancel',
+      });
+    }
     return {
       ok: true,
       released: true,
