@@ -117,10 +117,7 @@ const EXPRESS_OPTIONS: StripeExpressCheckoutElementOptions = {
   buttonTheme: { applePay: 'black' },
   buttonHeight: 48,
   paymentMethods: {
-    // `always` still requires a registered domain for the publishable key's
-    // mode, but does not hide the button when Wallet has no active card —
-    // common friction when testing staging with test keys.
-    applePay: 'always',
+    applePay: 'auto',
     googlePay: 'never',
     link: 'never',
     paypal: 'never',
