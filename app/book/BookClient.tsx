@@ -23,6 +23,9 @@ import styles from './book.module.css';
 
 type Step = 'service' | 'when' | 'contact' | 'review';
 
+/** Phone /book date strip + Cal slots fetch (inclusive of today). */
+const BOOK_AVAILABILITY_DAYS = 90;
+
 interface BookService {
   slug: string;
   title: string;
@@ -194,9 +197,12 @@ export default function BookClient() {
     setSlotsLoading(true);
     setSlotsError(null);
     const start = studioTodayYmd();
-    const end = addDaysYmd(start, 20);
+    // Inclusive horizon: today through today + 89 (= 90 calendar days).
+    const end = addDaysYmd(start, BOOK_AVAILABILITY_DAYS - 1);
     const days: string[] = [];
-    for (let i = 0; i <= 20; i += 1) days.push(addDaysYmd(start, i));
+    for (let i = 0; i < BOOK_AVAILABILITY_DAYS; i += 1) {
+      days.push(addDaysYmd(start, i));
+    }
     setDayOptions(days);
     setSelectedDay(start);
     setSelectedStart(null);
