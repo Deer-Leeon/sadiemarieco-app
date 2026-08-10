@@ -89,6 +89,10 @@ type Props = {
   }) => void;
   onPayWithCard: () => void;
   onConfirmed: (result: BookConfirmed) => void;
+  /** Stripe detector result from contact step; null = still unknown. */
+  applePayPrefetch: boolean | null;
+  prefersApplePay: boolean;
+  onApplePayResolved?: (available: boolean) => void;
 };
 
 /**
@@ -110,10 +114,15 @@ export default function BookReviewPay({
   onCreateError,
   onPayWithCard,
   onConfirmed,
+  applePayPrefetch,
+  prefersApplePay,
+  onApplePayResolved,
 }: Props) {
   const stripe = useStripe();
   const elements = useElements();
-  const [applePayAvailable, setApplePayAvailable] = useState(false);
+  const [applePayAvailable, setApplePayAvailable] = useState(
+    applePayPrefetch === true
+  );
   const [expressReady, setExpressReady] = useState(false);
 
   const analyticsService = analyticsServiceLabel(serviceTitle);
@@ -139,10 +148,15 @@ export default function BookReviewPay({
     []
   );
 
-  const onReady = useCallback((event: StripeExpressCheckoutElementReadyEvent) => {
-    setExpressReady(true);
-    setApplePayAvailable(Boolean(event.availablePaymentMethods?.applePay));
-  }, []);
+  const onReady = useCallback(
+    (event: StripeExpressCheckoutElementReadyEvent) => {
+      const available = Boolean(event.availablePaymentMethods?.applePay);
+      setExpressReady(true);
+      setApplePayAvailable(available);
+      onApplePayResolved?.(available);
+    },
+    [onApplePayResolved]
+  );
 
   const onClick = useCallback(
     (event: StripeExpressCheckoutElementClickEvent) => {
@@ -349,43 +363,89 @@ export default function BookReviewPay({
   );
 
   const showApplePay = expressReady && applePayAvailable;
+  // On Apple Pay devices, never flash "Continue to checkout" while Stripe loads.
+  // Prefer the known Stripe result; fall back to ApplePaySession until ready.
+  const preferWallet =
+    applePayPrefetch === true ||
+    (applePayPrefetch !== false && prefersApplePay);
+  const showCardPrimary = !showApplePay && !preferWallet;
+  const showApplePaySlot = showApplePay || preferWallet;
 
   return (
     <footer className={`${styles.footer} ${styles.footerStack}`}>
       <div className={styles.footerTotal}>
         <span className={styles.footerPrice}>{priceLabel}</span>
         <span className={styles.footerHint}>
-          {showApplePay
+          {showApplePaySlot
             ? 'No charge today — Apple Pay saves your card'
             : 'Then secure checkout'}
         </span>
       </div>
 
-      <div
-        className={styles.expressCheckout}
-        style={{
-          visibility: showApplePay ? 'visible' : 'hidden',
-          minHeight: showApplePay || !expressReady ? 48 : 0,
-          height: showApplePay || !expressReady ? undefined : 0,
-          overflow: 'hidden',
-          pointerEvents: showApplePay && !submitting ? 'auto' : 'none',
-          opacity: submitting ? 0.5 : 1,
-        }}
-      >
-        <ExpressCheckoutElement
-          options={expressOptions}
-          onReady={onReady}
-          onClick={onClick}
-          onConfirm={onConfirm}
-          onLoadError={() => {
-            setExpressReady(true);
-            setApplePayAvailable(false);
+      {showApplePaySlot ? (
+        <div
+          className={styles.expressCheckout}
+          style={{
+            pointerEvents: showApplePay && !submitting ? 'auto' : 'none',
+            opacity: submitting ? 0.5 : showApplePay ? 1 : 0.92,
           }}
-          onCancel={() => onSubmittingChange(false)}
-        />
-      </div>
+        >
+          {!showApplePay ? (
+            <div className={styles.applePayPlaceholder} aria-hidden="true">
+              <span>&nbsp;Pay</span>
+            </div>
+          ) : null}
+          <div
+            style={{
+              // Keep mounted under the placeholder so ready paints in place.
+              position: showApplePay ? 'relative' : 'absolute',
+              inset: showApplePay ? undefined : 0,
+              visibility: showApplePay ? 'visible' : 'hidden',
+            }}
+          >
+            <ExpressCheckoutElement
+              options={expressOptions}
+              onReady={onReady}
+              onClick={onClick}
+              onConfirm={onConfirm}
+              onLoadError={() => {
+                setExpressReady(true);
+                setApplePayAvailable(false);
+                onApplePayResolved?.(false);
+              }}
+              onCancel={() => onSubmittingChange(false)}
+            />
+          </div>
+        </div>
+      ) : (
+        <div
+          className={styles.expressCheckout}
+          style={{
+            position: 'absolute',
+            width: 1,
+            height: 1,
+            overflow: 'hidden',
+            opacity: 0,
+            pointerEvents: 'none',
+          }}
+          aria-hidden="true"
+        >
+          <ExpressCheckoutElement
+            options={expressOptions}
+            onReady={onReady}
+            onClick={onClick}
+            onConfirm={onConfirm}
+            onLoadError={() => {
+              setExpressReady(true);
+              setApplePayAvailable(false);
+              onApplePayResolved?.(false);
+            }}
+            onCancel={() => onSubmittingChange(false)}
+          />
+        </div>
+      )}
 
-      {showApplePay ? (
+      {showApplePaySlot ? (
         <button
           type="button"
           className={styles.textLinkBtn}
@@ -394,7 +454,9 @@ export default function BookReviewPay({
         >
           Pay with card instead
         </button>
-      ) : (
+      ) : null}
+
+      {showCardPrimary ? (
         <button
           type="button"
           className={styles.primaryBtn}
@@ -403,7 +465,7 @@ export default function BookReviewPay({
         >
           {submitting ? 'Holding your time…' : 'Continue to checkout'}
         </button>
-      )}
+      ) : null}
     </footer>
   );
 }
