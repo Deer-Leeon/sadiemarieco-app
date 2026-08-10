@@ -1,9 +1,8 @@
 # Apple Pay (phone booker)
 
-Apple Pay is the primary secure-hold CTA on the phone `/book` **review**
-screen when the device supports it (bottom-left). Card checkout stays on
-the bottom-right (`Pay with card` → `/checkout`). Time and contact steps
-only show the normal Continue footer — no Stripe wallet UI.
+Apple Pay is the primary secure-hold CTA on the phone `/book` review
+screen when the device supports it. Manual card entry still uses
+`/checkout`.
 
 ## Stripe Dashboard (required)
 
