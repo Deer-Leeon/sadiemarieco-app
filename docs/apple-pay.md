@@ -28,3 +28,5 @@ staging after domain registration.
    Payment Element (unchanged).
 
 Still vault-only (`SetupIntent`, `usage: off_session`) — no charge today.
+Apple Pay uses Express Checkout in setup mode (no deferred merchant-token
+options on this surface).

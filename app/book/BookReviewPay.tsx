@@ -18,7 +18,6 @@ import {
   analyticsServiceLabel,
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
-import { STUDIO_TIMEZONE } from '@/lib/cal-config';
 
 import styles from './book.module.css';
 
@@ -77,6 +76,7 @@ export type BookConfirmed = {
 type Props = {
   priceLabel: string;
   serviceTitle: string;
+  /** Kept for API symmetry / future MIT options; unused in setup-mode vault. */
   servicePriceCents: number;
   selectedStart: string;
   createPayload: Omit<BookCreatePayload, 'source'>;
@@ -91,44 +91,18 @@ type Props = {
   onConfirmed: (result: BookConfirmed) => void;
 };
 
-function buildApplePayOptions(
-  serviceTitle: string,
-  priceCents: number,
-  selectedStart: string
-): NonNullable<StripeExpressCheckoutElementOptions['applePay']> {
-  const start = new Date(selectedStart);
-  const deferredDate = Number.isNaN(start.getTime())
-    ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-    : start;
-  const freeCancel = new Date(deferredDate.getTime() - 24 * 60 * 60 * 1000);
-  const amount = Math.max(0, priceCents);
-
-  return {
-    deferredPaymentRequest: {
-      paymentDescription: 'Sadie Marie — card on file for your appointment',
-      managementURL: 'https://www.sadiemarie.co/manage',
-      billingAgreement:
-        'No charge today. Your card may be charged for late cancellations or no-shows per studio policy.',
-      deferredBilling: {
-        label: serviceTitle.slice(0, 64) || 'Appointment',
-        amount,
-        deferredPaymentDate: deferredDate,
-      },
-      freeCancellationDate: freeCancel,
-      freeCancellationDateTimeZone: STUDIO_TIMEZONE,
-    },
-  };
-}
-
 /**
  * Review-step payment footer: Apple Pay (Express Checkout) when available,
  * otherwise Continue to checkout / Pay with card.
+ *
+ * SetupIntent vault only — do not attach Apple Pay deferred/recurring
+ * merchant-token options here; those assume a payment amount and have
+ * crashed the review step in Safari/Chrome when free-cancel dates are
+ * in the past or amount is 0.
  */
 export default function BookReviewPay({
   priceLabel,
   serviceTitle,
-  servicePriceCents,
-  selectedStart,
   createPayload,
   submitting,
   onSubmittingChange,
@@ -144,11 +118,6 @@ export default function BookReviewPay({
 
   const analyticsService = analyticsServiceLabel(serviceTitle);
 
-  const applePayOptions = useMemo(
-    () => buildApplePayOptions(serviceTitle, servicePriceCents, selectedStart),
-    [serviceTitle, servicePriceCents, selectedStart]
-  );
-
   const expressOptions: StripeExpressCheckoutElementOptions = useMemo(
     () => ({
       buttonType: { applePay: 'book' },
@@ -162,13 +131,12 @@ export default function BookReviewPay({
         amazonPay: 'never',
         klarna: 'never',
       },
-      applePay: applePayOptions,
       emailRequired: false,
       phoneNumberRequired: false,
       billingAddressRequired: true,
       business: { name: 'Sadie Marie' },
     }),
-    [applePayOptions]
+    []
   );
 
   const onReady = useCallback((event: StripeExpressCheckoutElementReadyEvent) => {
@@ -178,9 +146,10 @@ export default function BookReviewPay({
 
   const onClick = useCallback(
     (event: StripeExpressCheckoutElementClickEvent) => {
-      event.resolve({ applePay: applePayOptions });
+      // Resolve promptly — required within ~1s of the click event.
+      event.resolve({});
     },
-    [applePayOptions]
+    []
   );
 
   const createHold = useCallback(
@@ -392,12 +361,10 @@ export default function BookReviewPay({
         </span>
       </div>
 
-      {/* Keep mounted so onReady can detect Apple Pay; hide when unavailable. */}
       <div
         className={styles.expressCheckout}
         style={{
           visibility: showApplePay ? 'visible' : 'hidden',
-          // Reserve space until ready so Stripe can detect wallets; collapse if unavailable.
           minHeight: showApplePay || !expressReady ? 48 : 0,
           height: showApplePay || !expressReady ? undefined : 0,
           overflow: 'hidden',
