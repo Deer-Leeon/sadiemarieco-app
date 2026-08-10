@@ -593,14 +593,18 @@ export default function BookClient() {
   return (
     <div className={styles.shell}>
       <header className={styles.topBar}>
-        <button
-          type="button"
-          className={styles.iconBtn}
-          onClick={goBack}
-          aria-label={step === 'service' ? 'Close' : 'Back'}
-        >
-          {step === 'service' ? '✕' : '←'}
-        </button>
+        {step === 'service' ? (
+          <span className={styles.iconBtn} aria-hidden="true" />
+        ) : (
+          <button
+            type="button"
+            className={styles.iconBtn}
+            onClick={goBack}
+            aria-label="Back"
+          >
+            ←
+          </button>
+        )}
         <p className={styles.brand}>Sadie Marie</p>
         <Link href="/" className={styles.iconBtn} aria-label="Home">
           ✕
