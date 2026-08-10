@@ -17,6 +17,7 @@ import { formatAppointmentWhen } from '@/lib/format-booking-time';
 import { STUDIO_TIMEZONE } from '@/lib/cal-config';
 import { stripePromise } from '@/lib/stripe-browser';
 
+import BookPayErrorBoundary from './BookPayErrorBoundary';
 import BookReviewPay, { type BookConfirmed } from './BookReviewPay';
 import styles from './book.module.css';
 
@@ -880,21 +881,27 @@ export default function BookClient() {
         !showReachPanel && (
         <>
           {step === 'review' && selected && selectedStart && stripePromise ? (
-            <Elements stripe={stripePromise} options={elementsOptions}>
-              <BookReviewPay
-                priceLabel={selected.priceLabel}
-                serviceTitle={selected.title}
-                servicePriceCents={selected.priceCents || 0}
-                selectedStart={selectedStart}
-                createPayload={createPayload}
-                submitting={submitting}
-                onSubmittingChange={setSubmitting}
-                onError={setSubmitError}
-                onCreateError={handleCreateError}
-                onPayWithCard={() => void submitBooking()}
-                onConfirmed={setConfirmed}
-              />
-            </Elements>
+            <BookPayErrorBoundary
+              priceLabel={selected.priceLabel}
+              submitting={submitting}
+              onPayWithCard={() => void submitBooking()}
+            >
+              <Elements stripe={stripePromise} options={elementsOptions}>
+                <BookReviewPay
+                  priceLabel={selected.priceLabel}
+                  serviceTitle={selected.title}
+                  servicePriceCents={selected.priceCents || 0}
+                  selectedStart={selectedStart}
+                  createPayload={createPayload}
+                  submitting={submitting}
+                  onSubmittingChange={setSubmitting}
+                  onError={setSubmitError}
+                  onCreateError={handleCreateError}
+                  onPayWithCard={() => void submitBooking()}
+                  onConfirmed={setConfirmed}
+                />
+              </Elements>
+            </BookPayErrorBoundary>
           ) : (
             <footer className={styles.footer}>
               {selected && (
