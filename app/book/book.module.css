@@ -235,14 +235,24 @@
 
 .nameRow {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.nameRow .field {
+  min-width: 0;
+  width: 100%;
 }
 
 .field input {
   appearance: none;
   border: 1px solid #c8cdd6;
   background: #fff;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   padding: 14px 12px;
   font-family: 'DM Sans', system-ui, sans-serif;
   font-size: 16px;
@@ -497,6 +507,22 @@
 .expressCheckout {
   width: 100%;
   min-height: 48px;
+  position: relative;
+}
+
+.applePayPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 48px;
+  border-radius: 4px;
+  background: #000;
+  color: #fff;
+  font-family: -apple-system, 'SF Pro Text', 'DM Sans', system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
 .textLinkBtn {

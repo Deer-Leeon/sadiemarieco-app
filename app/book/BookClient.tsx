@@ -18,6 +18,7 @@ import { STUDIO_TIMEZONE } from '@/lib/cal-config';
 import { stripePromise } from '@/lib/stripe-browser';
 
 import BookPayErrorBoundary from './BookPayErrorBoundary';
+import ApplePayDetector, { prefersApplePayDevice } from './ApplePayDetector';
 import BookReviewPay, { type BookConfirmed } from './BookReviewPay';
 import styles from './book.module.css';
 
@@ -121,6 +122,14 @@ export default function BookClient() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<BookConfirmed | null>(null);
+  const [applePayPrefetch, setApplePayPrefetch] = useState<boolean | null>(
+    null
+  );
+  const [prefersApplePay, setPrefersApplePay] = useState(false);
+
+  const onApplePayPrefetch = useCallback((available: boolean) => {
+    setApplePayPrefetch(available);
+  }, []);
 
   const elementsOptions: StripeElementsOptions = useMemo(
     () => ({
@@ -143,6 +152,7 @@ export default function BookClient() {
       return;
     }
     setReady(true);
+    setPrefersApplePay(prefersApplePayDevice());
   }, []);
 
   useEffect(() => {
@@ -880,28 +890,57 @@ export default function BookClient() {
       {(step === 'when' || step === 'contact' || step === 'review') &&
         !showReachPanel && (
         <>
-          {step === 'review' && selected && selectedStart && stripePromise ? (
-            <BookPayErrorBoundary
-              priceLabel={selected.priceLabel}
-              submitting={submitting}
-              onPayWithCard={() => void submitBooking()}
-            >
-              <Elements stripe={stripePromise} options={elementsOptions}>
-                <BookReviewPay
+          {stripePromise && (step === 'contact' || step === 'review') ? (
+            <Elements stripe={stripePromise} options={elementsOptions}>
+              {/* Warm Apple Pay during contact so review does not flash Continue. */}
+              {step === 'contact' ? (
+                <ApplePayDetector onResult={onApplePayPrefetch} />
+              ) : null}
+              {step === 'review' && selected && selectedStart ? (
+                <BookPayErrorBoundary
                   priceLabel={selected.priceLabel}
-                  serviceTitle={selected.title}
-                  servicePriceCents={selected.priceCents || 0}
-                  selectedStart={selectedStart}
-                  createPayload={createPayload}
                   submitting={submitting}
-                  onSubmittingChange={setSubmitting}
-                  onError={setSubmitError}
-                  onCreateError={handleCreateError}
                   onPayWithCard={() => void submitBooking()}
-                  onConfirmed={setConfirmed}
-                />
-              </Elements>
-            </BookPayErrorBoundary>
+                >
+                  <BookReviewPay
+                    priceLabel={selected.priceLabel}
+                    serviceTitle={selected.title}
+                    servicePriceCents={selected.priceCents || 0}
+                    selectedStart={selectedStart}
+                    createPayload={createPayload}
+                    submitting={submitting}
+                    onSubmittingChange={setSubmitting}
+                    onError={setSubmitError}
+                    onCreateError={handleCreateError}
+                    onPayWithCard={() => void submitBooking()}
+                    onConfirmed={setConfirmed}
+                    applePayPrefetch={applePayPrefetch}
+                    prefersApplePay={prefersApplePay}
+                    onApplePayResolved={onApplePayPrefetch}
+                  />
+                </BookPayErrorBoundary>
+              ) : (
+                <footer className={styles.footer}>
+                  {selected && (
+                    <div className={styles.footerTotal}>
+                      <span className={styles.footerPrice}>
+                        {selected.priceLabel}
+                      </span>
+                      <span className={styles.footerHint}>{selected.title}</span>
+                    </div>
+                  )}
+                  {step === 'contact' && (
+                    <button
+                      type="button"
+                      className={styles.primaryBtn}
+                      onClick={continueFromContact}
+                    >
+                      Continue
+                    </button>
+                  )}
+                </footer>
+              )}
+            </Elements>
           ) : (
             <footer className={styles.footer}>
               {selected && (
