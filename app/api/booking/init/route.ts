@@ -77,6 +77,32 @@ function splitName(fullName: string): { first: string; last: string } {
   return { first: parts[0] || '', last: parts.slice(1).join(' ') || '' };
 }
 
+/** Best-effort QStash schedule — never throws; used on init failure paths. */
+async function scheduleReleaseBestEffort(
+  calBookingUid: string,
+  context: string
+): Promise<void> {
+  try {
+    const releaseJob = await scheduleAbandonedHoldRelease(calBookingUid);
+    if (!releaseJob.scheduled) {
+      console.warn(
+        '[api/booking/init] abandoned-hold release not scheduled',
+        {
+          calBookingUid,
+          context,
+          reason: releaseJob.reason,
+        }
+      );
+    }
+  } catch (err) {
+    console.warn('[api/booking/init] abandoned-hold schedule threw', {
+      calBookingUid,
+      context,
+      error: errorMessage(err),
+    });
+  }
+}
+
 function parseInitBody(input: unknown): ParsedInit | { error: string } {
   if (!input || typeof input !== 'object') {
     return { error: 'invalid_body' };
@@ -264,6 +290,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       smsOptIn: data.smsOptIn,
     })
   ) {
+    // Cal booking already exists (embed / webhook). Schedule release so the
+    // slot is not held forever when init cannot write the local row.
+    await scheduleReleaseBestEffort(
+      data.calBookingUid,
+      'contact_required'
+    );
     return NextResponse.json(
       {
         error: 'contact_required',
@@ -284,6 +316,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const normPhone = normaliseClientPhoneForStorage(data.phone);
 
   if (!normPhone) {
+    await scheduleReleaseBestEffort(data.calBookingUid, 'no_phone');
     return NextResponse.json(
       {
         error: 'no_phone',
@@ -298,6 +331,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     requireSmsCapable: smsOptIn,
   });
   if (!phoneLookup.ok) {
+    await scheduleReleaseBestEffort(
+      data.calBookingUid,
+      phoneLookup.error === 'not_sms_capable'
+        ? 'phone_not_sms_capable'
+        : 'phone_invalid'
+    );
     return NextResponse.json(
       {
         error:

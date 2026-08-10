@@ -6,7 +6,8 @@
  * flips the row to `canceled_by_system`.
  *
  * Primary release path is still the per-booking QStash delay from
- * `/api/booking/init` plus the checkout-page `/api/booking/release-hold`
+ * `/api/booking/init`, the Cal webhook (public pending upserts), and
+ * `/api/book/create`, plus the checkout-page `/api/booking/release-hold`
  * call when the countdown hits zero. This cron catches closed tabs and
  * failed QStash publishes.
  *

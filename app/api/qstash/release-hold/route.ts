@@ -1,9 +1,10 @@
 /**
  * POST /api/qstash/release-hold
  *
- * QStash delayed callback scheduled by `/api/booking/init` when a pending
- * checkout hold is created. After CHECKOUT_HOLD_MINUTES, verifies the
- * Upstash signature and releases the Cal slot + local row if still pending.
+ * QStash delayed callback scheduled when a pending checkout hold is
+ * created (`/api/booking/init`, Cal webhook, `/api/book/create`). After
+ * CHECKOUT_HOLD_MINUTES, verifies the Upstash signature and releases the
+ * Cal slot + local row if still pending.
  *
  * Always returns 200 on logical skips (already confirmed / canceled) so
  * QStash does not retry. Returns 5xx only for misconfiguration or
