@@ -1,6 +1,18 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+/**
+ * Single persistent Express Checkout for /book.
+ * Mounted while picking a time / entering contact, then revealed on review
+ * without remounting — that remount was the Apple Pay button flash.
+ */
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { track } from '@vercel/analytics';
 import {
   ExpressCheckoutElement,
@@ -20,6 +32,21 @@ import {
 } from '@/lib/booking-analytics';
 
 import styles from './book.module.css';
+
+export function prefersApplePayDevice(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const AP = (
+      window as Window & {
+        ApplePaySession?: { canMakePayments?: () => boolean };
+      }
+    ).ApplePaySession;
+    if (!AP || typeof AP.canMakePayments !== 'function') return false;
+    return AP.canMakePayments();
+  } catch {
+    return false;
+  }
+}
 
 function trackBook(
   name: string,
@@ -46,10 +73,7 @@ async function fetchWithTimeout(
   }
 }
 
-function friendlyStripeError(error: {
-  message?: string;
-  code?: string;
-}): string {
+function friendlyStripeError(error: { message?: string }): string {
   const msg = (error.message || '').trim();
   if (msg) return msg;
   return 'Apple Pay could not save your card. Please try again or pay with card.';
@@ -74,37 +98,40 @@ export type BookConfirmed = {
 };
 
 type Props = {
+  /** When false, keep Express Checkout mounted off-screen (warming). */
+  reviewVisible: boolean;
   priceLabel: string;
   serviceTitle: string;
-  /** Kept for API symmetry / future MIT options; unused in setup-mode vault. */
-  servicePriceCents: number;
-  selectedStart: string;
   createPayload: Omit<BookCreatePayload, 'source'>;
   submitting: boolean;
   onSubmittingChange: (v: boolean) => void;
   onError: (message: string | null) => void;
-  onCreateError: (data: {
-    error?: string;
-    message?: string;
-  }) => void;
+  onCreateError: (data: { error?: string; message?: string }) => void;
   onPayWithCard: () => void;
   onConfirmed: (result: BookConfirmed) => void;
-  /** Stripe detector result from contact step; null = still unknown. */
-  applePayPrefetch: boolean | null;
-  prefersApplePay: boolean;
-  onApplePayResolved?: (available: boolean) => void;
+  onApplePayResolved: (available: boolean) => void;
 };
 
-/**
- * Review-step payment footer: Apple Pay (Express Checkout) when available,
- * otherwise Continue to checkout / Pay with card.
- *
- * SetupIntent vault only — do not attach Apple Pay deferred/recurring
- * merchant-token options here; those assume a payment amount and have
- * crashed the review step in Safari/Chrome when free-cancel dates are
- * in the past or amount is 0.
- */
-export default function BookReviewPay({
+const EXPRESS_OPTIONS: StripeExpressCheckoutElementOptions = {
+  buttonType: { applePay: 'book' },
+  buttonTheme: { applePay: 'black' },
+  buttonHeight: 48,
+  paymentMethods: {
+    applePay: 'auto',
+    googlePay: 'never',
+    link: 'never',
+    paypal: 'never',
+    amazonPay: 'never',
+    klarna: 'never',
+  },
+  emailRequired: false,
+  phoneNumberRequired: false,
+  billingAddressRequired: true,
+  business: { name: 'Sadie Marie' },
+};
+
+export default function BookApplePayHost({
+  reviewVisible,
   priceLabel,
   serviceTitle,
   createPayload,
@@ -114,53 +141,35 @@ export default function BookReviewPay({
   onCreateError,
   onPayWithCard,
   onConfirmed,
-  applePayPrefetch,
-  prefersApplePay,
   onApplePayResolved,
 }: Props) {
   const stripe = useStripe();
   const elements = useElements();
-  const [applePayAvailable, setApplePayAvailable] = useState(
-    applePayPrefetch === true
-  );
+  const prefersApplePay = useMemo(() => prefersApplePayDevice(), []);
+  const [applePayAvailable, setApplePayAvailable] = useState(false);
   const [expressReady, setExpressReady] = useState(false);
 
-  const analyticsService = analyticsServiceLabel(serviceTitle);
-
-  const expressOptions: StripeExpressCheckoutElementOptions = useMemo(
-    () => ({
-      buttonType: { applePay: 'book' },
-      buttonTheme: { applePay: 'black' },
-      buttonHeight: 48,
-      paymentMethods: {
-        applePay: 'auto',
-        googlePay: 'never',
-        link: 'never',
-        paypal: 'never',
-        amazonPay: 'never',
-        klarna: 'never',
-      },
-      emailRequired: false,
-      phoneNumberRequired: false,
-      billingAddressRequired: true,
-      business: { name: 'Sadie Marie' },
-    }),
-    []
-  );
+  const payloadRef = useRef(createPayload);
+  payloadRef.current = createPayload;
+  const serviceTitleRef = useRef(serviceTitle);
+  serviceTitleRef.current = serviceTitle;
 
   const onReady = useCallback(
     (event: StripeExpressCheckoutElementReadyEvent) => {
       const available = Boolean(event.availablePaymentMethods?.applePay);
       setExpressReady(true);
       setApplePayAvailable(available);
-      onApplePayResolved?.(available);
+      onApplePayResolved(available);
     },
     [onApplePayResolved]
   );
 
+  useEffect(() => {
+    if (!prefersApplePay) onApplePayResolved(false);
+  }, [prefersApplePay, onApplePayResolved]);
+
   const onClick = useCallback(
     (event: StripeExpressCheckoutElementClickEvent) => {
-      // Resolve promptly — required within ~1s of the click event.
       event.resolve({});
     },
     []
@@ -168,6 +177,7 @@ export default function BookReviewPay({
 
   const createHold = useCallback(
     async (source: BookCreatePayload['source']) => {
+      const payload = payloadRef.current;
       const res = await fetchWithTimeout(
         '/api/book/create',
         {
@@ -176,7 +186,7 @@ export default function BookReviewPay({
             Accept: 'application/json',
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ ...createPayload, source }),
+          body: JSON.stringify({ ...payload, source }),
         },
         45_000
       );
@@ -198,7 +208,7 @@ export default function BookReviewPay({
         email?: string;
       };
     },
-    [createPayload, onCreateError]
+    [onCreateError]
   );
 
   const onConfirm = useCallback(
@@ -207,6 +217,9 @@ export default function BookReviewPay({
         event.paymentFailed({ reason: 'fail' });
         return;
       }
+
+      const payload = payloadRef.current;
+      const analyticsService = analyticsServiceLabel(serviceTitleRef.current);
 
       onError(null);
       onSubmittingChange(true);
@@ -224,8 +237,8 @@ export default function BookReviewPay({
         }
 
         const hold = await createHold('phone_booker_apple_pay');
-        const bookingName = hold.name || createPayload.name;
-        const bookingEmail = hold.email || createPayload.email || '';
+        const bookingName = hold.name || payload.name;
+        const bookingEmail = hold.email || payload.email || '';
 
         const siRes = await fetchWithTimeout(
           '/api/stripe/create-setup-intent',
@@ -261,9 +274,7 @@ export default function BookReviewPay({
         const { error, setupIntent } = await stripe.confirmSetup({
           elements,
           clientSecret: siPayload.clientSecret,
-          confirmParams: {
-            return_url: returnUrl.toString(),
-          },
+          confirmParams: { return_url: returnUrl.toString() },
           redirect: 'if_required',
         });
 
@@ -338,11 +349,11 @@ export default function BookReviewPay({
           },
         });
       } catch (err) {
-        const message =
+        onError(
           err instanceof Error
             ? err.message
-            : 'Something went wrong with Apple Pay. Try card instead.';
-        onError(message);
+            : 'Something went wrong with Apple Pay. Try card instead.'
+        );
         event.paymentFailed({ reason: 'fail' });
       } finally {
         onSubmittingChange(false);
@@ -354,118 +365,100 @@ export default function BookReviewPay({
       submitting,
       onError,
       onSubmittingChange,
-      analyticsService,
       createHold,
-      createPayload.name,
-      createPayload.email,
       onConfirmed,
     ]
   );
 
   const showApplePay = expressReady && applePayAvailable;
-  // On Apple Pay devices, never flash "Continue to checkout" while Stripe loads.
-  // Prefer the known Stripe result; fall back to ApplePaySession until ready.
-  const preferWallet =
-    applePayPrefetch === true ||
-    (applePayPrefetch !== false && prefersApplePay);
-  const showCardPrimary = !showApplePay && !preferWallet;
-  const showApplePaySlot = showApplePay || preferWallet;
+  const showWalletChrome =
+    reviewVisible && (showApplePay || (prefersApplePay && !expressReady));
+  const showCardPrimary = reviewVisible && expressReady && !applePayAvailable;
 
+  // Stable DOM: chrome nodes always present; host is warm vs live via CSS only.
   return (
-    <footer className={`${styles.footer} ${styles.footerStack}`}>
-      <div className={styles.footerTotal}>
-        <span className={styles.footerPrice}>{priceLabel}</span>
-        <span className={styles.footerHint}>
-          {showApplePaySlot
-            ? 'No charge today — Apple Pay saves your card'
-            : 'Then secure checkout'}
-        </span>
-      </div>
+    <>
+      <div
+        className={`${styles.footer} ${styles.footerStack} ${
+          showWalletChrome ? styles.expressHostLive : styles.expressHostWarm
+        }`}
+        aria-hidden={!showWalletChrome}
+      >
+        <div
+          className={styles.footerTotal}
+          style={{ visibility: showWalletChrome ? 'visible' : 'hidden' }}
+        >
+          <span className={styles.footerPrice}>{priceLabel || '$0'}</span>
+          <span className={styles.footerHint}>
+            No charge today — Apple Pay saves your card
+          </span>
+        </div>
 
-      {showApplePaySlot ? (
         <div
           className={styles.expressCheckout}
           style={{
-            pointerEvents: showApplePay && !submitting ? 'auto' : 'none',
-            opacity: submitting ? 0.5 : showApplePay ? 1 : 0.92,
+            pointerEvents:
+              showWalletChrome && showApplePay && !submitting ? 'auto' : 'none',
+            opacity: submitting ? 0.5 : 1,
           }}
         >
-          {!showApplePay ? (
-            <div className={styles.applePayPlaceholder} aria-hidden="true">
-              <span>&nbsp;Pay</span>
-            </div>
-          ) : null}
           <div
+            className={styles.applePaySlot}
             style={{
-              // Keep mounted under the placeholder so ready paints in place.
-              position: showApplePay ? 'relative' : 'absolute',
-              inset: showApplePay ? undefined : 0,
-              visibility: showApplePay ? 'visible' : 'hidden',
+              display: showWalletChrome && !showApplePay ? 'block' : 'none',
             }}
+            aria-hidden="true"
+          />
+          <div
+            className={
+              !reviewVisible || showApplePay
+                ? styles.expressPainted
+                : styles.expressUnderSlot
+            }
           >
             <ExpressCheckoutElement
-              options={expressOptions}
+              options={EXPRESS_OPTIONS}
               onReady={onReady}
               onClick={onClick}
               onConfirm={onConfirm}
               onLoadError={() => {
                 setExpressReady(true);
                 setApplePayAvailable(false);
-                onApplePayResolved?.(false);
+                onApplePayResolved(false);
               }}
               onCancel={() => onSubmittingChange(false)}
             />
           </div>
         </div>
-      ) : (
-        <div
-          className={styles.expressCheckout}
-          style={{
-            position: 'absolute',
-            width: 1,
-            height: 1,
-            overflow: 'hidden',
-            opacity: 0,
-            pointerEvents: 'none',
-          }}
-          aria-hidden="true"
-        >
-          <ExpressCheckoutElement
-            options={expressOptions}
-            onReady={onReady}
-            onClick={onClick}
-            onConfirm={onConfirm}
-            onLoadError={() => {
-              setExpressReady(true);
-              setApplePayAvailable(false);
-              onApplePayResolved?.(false);
-            }}
-            onCancel={() => onSubmittingChange(false)}
-          />
-        </div>
-      )}
 
-      {showApplePaySlot ? (
         <button
           type="button"
           className={styles.textLinkBtn}
-          disabled={submitting}
+          disabled={submitting || !showWalletChrome}
           onClick={onPayWithCard}
+          style={{ visibility: showWalletChrome ? 'visible' : 'hidden' }}
+          tabIndex={showWalletChrome ? 0 : -1}
         >
           Pay with card instead
         </button>
-      ) : null}
+      </div>
 
       {showCardPrimary ? (
-        <button
-          type="button"
-          className={styles.primaryBtn}
-          disabled={submitting}
-          onClick={onPayWithCard}
-        >
-          {submitting ? 'Holding your time…' : 'Continue to checkout'}
-        </button>
+        <footer className={`${styles.footer} ${styles.footerStack}`}>
+          <div className={styles.footerTotal}>
+            <span className={styles.footerPrice}>{priceLabel}</span>
+            <span className={styles.footerHint}>Then secure checkout</span>
+          </div>
+          <button
+            type="button"
+            className={styles.primaryBtn}
+            disabled={submitting}
+            onClick={onPayWithCard}
+          >
+            {submitting ? 'Holding your time…' : 'Continue to checkout'}
+          </button>
+        </footer>
       ) : null}
-    </footer>
+    </>
   );
 }
