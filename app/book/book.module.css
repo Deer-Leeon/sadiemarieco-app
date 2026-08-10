@@ -68,10 +68,21 @@
   box-sizing: border-box;
 }
 
-/* Review / pay: fill viewport so the dock sits on the bottom edge. */
+/* Review / pay: fill the column between header and docked footer. */
 .mainReview {
   flex: 1 1 auto;
-  padding: 12px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 16px 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.titleReview {
+  margin: 0 0 10px;
+  font-size: clamp(24px, 6vw, 30px);
+  flex-shrink: 0;
 }
 
 .title {
@@ -81,11 +92,6 @@
   font-weight: 600;
   letter-spacing: -0.02em;
   color: #0d1b2a;
-}
-
-.titleReview {
-  margin: 0 0 12px;
-  font-size: clamp(24px, 6vw, 30px);
 }
 
 .section {
@@ -301,13 +307,26 @@
 }
 
 .reviewSection {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  min-height: 0;
 }
 
 .reviewSheet {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   background: #fff;
   border: 1px solid #dde0e6;
-  padding: 14px 16px;
+  padding: 18px 18px 20px;
+}
+
+/* Anchor cancellation at the bottom of the expanded sheet. */
+.reviewSheet > .reviewRule:last-of-type {
+  margin-top: auto;
 }
 
 .reviewBlock + .reviewBlock {
@@ -354,11 +373,11 @@
 }
 
 .reviewTotal {
-  margin: 10px 0 0;
+  margin: 12px 0 0;
   display: flex;
   justify-content: space-between;
   font-family: 'Bodoni Moda', Georgia, serif;
-  font-size: 17px;
+  font-size: 18px;
   color: #0d1b2a;
 }
 
@@ -730,12 +749,15 @@
 }
 
 .payOptions {
-  margin: 14px 0 0;
+  margin: 16px 0 0;
   padding: 0;
   border: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  justify-content: center;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .payOption {
@@ -743,7 +765,7 @@
   align-items: flex-start;
   gap: 12px;
   margin: 0;
-  padding: 14px 14px;
+  padding: 16px 16px;
   border: 1px solid #dde0e6;
   background: #fff;
   cursor: pointer;
