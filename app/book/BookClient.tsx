@@ -893,7 +893,7 @@ export default function BookClient() {
                   <span>{selected.priceLabel}</span>
                 </p>
                 <p className={styles.reviewNote}>
-                  Next you&apos;ll choose pay now or pay at studio later.
+                  Next you&apos;ll choose pay now or pay later in studio.
                 </p>
               </div>
 
@@ -945,9 +945,7 @@ export default function BookClient() {
                 <p className={styles.reviewEyebrow}>Due today</p>
                 <p className={styles.reviewTotal}>
                   <span>
-                    {paymentTiming === 'pay_now'
-                      ? 'Pay now'
-                      : 'Pay at studio later'}
+                    {paymentTiming === 'pay_now' ? 'Pay now' : 'Pay later'}
                   </span>
                   <span>
                     {paymentTiming === 'pay_now'
@@ -973,7 +971,7 @@ export default function BookClient() {
                   />
                   <span className={styles.payOptionBody}>
                     <span className={styles.payOptionTitle}>
-                      Pay at studio later
+                      Pay later in studio
                     </span>
                     <span className={styles.payOptionHint}>
                       Card saved to hold — pay at your visit
