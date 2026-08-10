@@ -135,40 +135,52 @@ export default function BookClient() {
   const [paymentTiming, setPaymentTiming] =
     useState<BookingPaymentTiming>('pay_later');
 
-  const onApplePayPrefetch = useCallback((_available: boolean) => {
-    /* availability drives Apple Pay host chrome only */
+  const [applePayAvailable, setApplePayAvailable] = useState<boolean | null>(
+    null
+  );
+  const [applePayReady, setApplePayReady] = useState(false);
+
+  const onApplePayResolved = useCallback((available: boolean) => {
+    setApplePayReady(true);
+    setApplePayAvailable((prev) => (prev === true ? true : available));
   }, []);
 
-  const elementsOptions: StripeElementsOptions = useMemo(() => {
-    const appearance = {
+  const elementsAppearance = useMemo(
+    () => ({
       theme: 'flat' as const,
       variables: {
         colorPrimary: '#0d1b2a',
         borderRadius: '0px',
       },
-    };
-    // Must match Intent `payment_method_types: ['card']` — otherwise Apple Pay
-    // confirm fails with "collected through … automatic payment methods".
-    if (paymentTiming === 'pay_now') {
-      const amount =
-        selected?.priceCents && selected.priceCents > 0
-          ? selected.priceCents
-          : 50;
-      return {
-        mode: 'payment',
-        amount,
-        currency: 'usd',
-        paymentMethodTypes: ['card'],
-        appearance,
-      };
-    }
-    return {
+    }),
+    []
+  );
+
+  // Dual Elements (setup + payment) stay mounted across review → pay and
+  // radio switches so Apple Pay never remounts / reanimates.
+  const setupElementsOptions: StripeElementsOptions = useMemo(
+    () => ({
       mode: 'setup',
       currency: 'usd',
       paymentMethodTypes: ['card'],
-      appearance,
+      appearance: elementsAppearance,
+    }),
+    [elementsAppearance]
+  );
+
+  const paymentElementsOptions: StripeElementsOptions = useMemo(() => {
+    const amount =
+      selected?.priceCents && selected.priceCents > 0
+        ? selected.priceCents
+        : 50;
+    return {
+      mode: 'payment',
+      amount,
+      currency: 'usd',
+      paymentMethodTypes: ['card'],
+      appearance: elementsAppearance,
     };
-  }, [paymentTiming, selected?.priceCents]);
+  }, [elementsAppearance, selected?.priceCents]);
 
   useEffect(() => {
     if (!isPhoneViewport()) {
@@ -1115,37 +1127,99 @@ export default function BookClient() {
         </footer>
       )}
 
-      {step === 'pay' &&
+      {/* Warm Apple Pay on review; same instances become the pay dock. */}
+      {stripePromise &&
         selected &&
         selectedStart &&
-        !showReachPanel &&
-        stripePromise && (
-          <Elements
-            key={paymentTiming}
-            stripe={stripePromise}
-            options={elementsOptions}
+        (step === 'review' || step === 'pay') &&
+        !showReachPanel && (
+          <div
+            className={
+              step === 'pay'
+                ? `${styles.footer} ${styles.footerStack}`
+                : styles.payWarmShell
+            }
+            aria-hidden={step !== 'pay'}
           >
-            <BookPayErrorBoundary
-              priceLabel={selected.priceLabel}
-              submitting={submitting}
-              onPayWithCard={() => void submitBooking()}
-            >
-              <BookApplePayHost
-                payVisible
-                paymentTiming={paymentTiming}
+            {step === 'pay' ? (
+              <div className={styles.footerTotal}>
+                <span className={styles.footerPrice}>
+                  {paymentTiming === 'pay_now' ? selected.priceLabel : '$0'}
+                </span>
+                <span className={styles.footerHint}>
+                  {paymentTiming === 'pay_now'
+                    ? 'Charged now — card also saved for your appointment'
+                    : 'No charge today — Apple Pay saves your card'}
+                </span>
+              </div>
+            ) : null}
+
+            <div className={styles.expressCheckout}>
+              <BookPayErrorBoundary
                 priceLabel={selected.priceLabel}
-                serviceTitle={selected.title}
-                createPayload={createPayload}
                 submitting={submitting}
-                onSubmittingChange={setSubmitting}
-                onError={setSubmitError}
-                onCreateError={handleCreateError}
                 onPayWithCard={() => void submitBooking()}
-                onConfirmed={setConfirmed}
-                onApplePayResolved={onApplePayPrefetch}
-              />
-            </BookPayErrorBoundary>
-          </Elements>
+              >
+                <Elements stripe={stripePromise} options={setupElementsOptions}>
+                  <BookApplePayHost
+                    active={step === 'pay' && paymentTiming === 'pay_later'}
+                    paymentTiming="pay_later"
+                    serviceTitle={selected.title}
+                    createPayload={createPayload}
+                    submitting={submitting}
+                    onSubmittingChange={setSubmitting}
+                    onError={setSubmitError}
+                    onCreateError={handleCreateError}
+                    onConfirmed={setConfirmed}
+                    onApplePayResolved={onApplePayResolved}
+                  />
+                </Elements>
+                <Elements
+                  stripe={stripePromise}
+                  options={paymentElementsOptions}
+                >
+                  <BookApplePayHost
+                    active={step === 'pay' && paymentTiming === 'pay_now'}
+                    paymentTiming="pay_now"
+                    serviceTitle={selected.title}
+                    createPayload={createPayload}
+                    submitting={submitting}
+                    onSubmittingChange={setSubmitting}
+                    onError={setSubmitError}
+                    onCreateError={handleCreateError}
+                    onConfirmed={setConfirmed}
+                    onApplePayResolved={onApplePayResolved}
+                  />
+                </Elements>
+              </BookPayErrorBoundary>
+            </div>
+
+            {step === 'pay' && applePayAvailable !== false ? (
+              <button
+                type="button"
+                className={styles.textLinkBtn}
+                disabled={submitting}
+                onClick={() => void submitBooking()}
+              >
+                Pay with card instead
+              </button>
+            ) : null}
+
+            {step === 'pay' && applePayReady && applePayAvailable === false ? (
+              <button
+                type="button"
+                className={styles.primaryBtn}
+                disabled={submitting}
+                onClick={() => void submitBooking()}
+              >
+                {submitting
+                  ? 'Holding your time…'
+                  : paymentTiming === 'pay_now'
+                    ? 'Pay with card'
+                    : 'Continue to checkout'}
+              </button>
+            ) : null}
+          </div>
         )}
 
       {step === 'pay' &&

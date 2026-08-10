@@ -1,5 +1,6 @@
 .shell {
   min-height: 100dvh;
+  min-height: 100svh;
   display: flex;
   flex-direction: column;
   background: #f5f3f0;
@@ -67,9 +68,9 @@
   box-sizing: border-box;
 }
 
-/* Review: keep CTA under the summary (no orphan void above a sticky footer). */
+/* Review / pay: fill viewport so the dock sits on the bottom edge. */
 .mainReview {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   padding: 12px 20px 16px;
 }
 
@@ -507,15 +508,11 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
-  background: rgba(245, 243, 240, 0.96);
+  margin-top: auto;
+  padding: 14px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: #f5f3f0;
   border-top: 1px solid #dde0e6;
-  backdrop-filter: blur(8px);
-}
-
-/* Sit the pay CTA directly under the summary — no mid-page void. */
-.shell:has(.mainReview) .footer {
-  position: relative;
+  flex-shrink: 0;
 }
 
 .footerStack {
@@ -523,7 +520,7 @@
   align-items: stretch;
   gap: 8px;
   padding-top: 12px;
-  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
 }
 
 .footerStack .footerTotal {
@@ -544,35 +541,37 @@
   position: relative;
 }
 
+.expressLayer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+}
+
+.expressLayer:only-child,
+.expressCheckout > .expressLayer:first-child:last-child {
+  position: relative;
+}
+
 /*
- * Off-screen warm mount — same Express Checkout DOM, not remounted on review.
- * Must NOT use bottom:0 / opacity:0 alone: Stripe iframes still paint and
- * land on top of the sticky Continue footer on the time/contact steps.
+ * Off-screen warm mount while still on review — same Express Checkout
+ * instances promote into the pay dock without remounting.
  */
-.expressHostWarm {
+.payWarmShell {
   position: fixed !important;
   left: -10000px !important;
   top: 0 !important;
-  right: auto !important;
-  bottom: auto !important;
   width: 360px !important;
-  height: 48px !important;
-  max-height: 48px !important;
+  height: 56px !important;
   overflow: hidden !important;
   opacity: 0 !important;
   visibility: hidden !important;
   pointer-events: none !important;
-  clip-path: inset(50%) !important;
   z-index: -1 !important;
-  margin: 0 !important;
-  border: 0 !important;
-  padding: 0 !important;
-  background: transparent !important;
-  backdrop-filter: none !important;
 }
 
-.expressHostLive {
+.payWarmShell .expressCheckout {
   position: relative;
+  min-height: 48px;
 }
 
 .applePaySlot {
