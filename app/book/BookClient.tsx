@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { track } from '@vercel/analytics';
 import { Elements } from '@stripe/react-stripe-js';
 import type { StripeElementsOptions } from '@stripe/stripe-js';
@@ -100,6 +100,95 @@ function isPhoneViewport(): boolean {
 }
 
 const STEPS: Step[] = ['service', 'when', 'contact', 'review', 'pay'];
+
+function BookDayScroller({
+  dayOptions,
+  slotsByDay,
+  selectedDay,
+  onSelectDay,
+}: {
+  dayOptions: string[];
+  slotsByDay: Record<string, string[]>;
+  selectedDay: string;
+  onSelectDay: (ymd: string) => void;
+}) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const [hasScrolled, setHasScrolled] = useState(false);
+
+  const updateFades = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    const left = el.scrollLeft;
+    setCanScrollLeft(left > 4);
+    setCanScrollRight(maxScroll > 4 && left < maxScroll - 4);
+    if (left > 8) setHasScrolled(true);
+  }, []);
+
+  useEffect(() => {
+    updateFades();
+    const el = scrollerRef.current;
+    if (!el) return;
+    const onScroll = () => updateFades();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    const ro = new ResizeObserver(() => updateFades());
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+    };
+  }, [updateFades, dayOptions.length, selectedDay]);
+
+  return (
+    <div className={styles.dayScrollerWrap}>
+      {!hasScrolled && canScrollRight ? (
+        <p className={styles.dayScrollHint}>Swipe for more dates →</p>
+      ) : (
+        <p className={styles.dayScrollHint}>Pick a date</p>
+      )}
+      <div
+        className={`${styles.dayScrollerFadeLeft} ${
+          canScrollLeft ? styles.dayScrollerFadeOn : ''
+        }`}
+        aria-hidden="true"
+      />
+      <div
+        className={`${styles.dayScrollerFadeRight} ${
+          canScrollRight ? styles.dayScrollerFadeOn : ''
+        }`}
+        aria-hidden="true"
+      />
+      <div
+        ref={scrollerRef}
+        className={styles.dayScroller}
+        role="listbox"
+        aria-label="Available dates. Swipe horizontally for more."
+      >
+        {dayOptions.map((ymd) => {
+          const chip = formatDayChip(ymd);
+          const count = slotsByDay[ymd]?.length ?? 0;
+          const active = ymd === selectedDay;
+          return (
+            <button
+              key={ymd}
+              type="button"
+              role="option"
+              aria-selected={active}
+              disabled={count === 0}
+              className={`${styles.dayChip} ${active ? styles.dayChipOn : ''}`}
+              onClick={() => onSelectDay(ymd)}
+            >
+              <span>{chip.weekday}</span>
+              <span>{chip.monthDay}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function BookClient() {
   const router = useRouter();
@@ -789,28 +878,15 @@ export default function BookClient() {
             {slotsError && <p className={styles.error}>{slotsError}</p>}
             {!slotsLoading && !slotsError && (
               <>
-                <div className={styles.dayScroller}>
-                  {dayOptions.map((ymd) => {
-                    const chip = formatDayChip(ymd);
-                    const count = slotsByDay[ymd]?.length ?? 0;
-                    const active = ymd === selectedDay;
-                    return (
-                      <button
-                        key={ymd}
-                        type="button"
-                        disabled={count === 0}
-                        className={`${styles.dayChip} ${active ? styles.dayChipOn : ''}`}
-                        onClick={() => {
-                          setSelectedDay(ymd);
-                          setSelectedStart(null);
-                        }}
-                      >
-                        <span>{chip.weekday}</span>
-                        <span>{chip.monthDay}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <BookDayScroller
+                  dayOptions={dayOptions}
+                  slotsByDay={slotsByDay}
+                  selectedDay={selectedDay}
+                  onSelectDay={(ymd) => {
+                    setSelectedDay(ymd);
+                    setSelectedStart(null);
+                  }}
+                />
                 <div className={styles.slotGrid}>
                   {daySlots.length === 0 ? (
                     <p className={styles.muted}>No openings this day.</p>
