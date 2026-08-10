@@ -538,26 +538,66 @@
   text-align: center;
 }
 
+.footerActions {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+}
+
+.footerActions .expressCheckout {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.footerActions .primaryBtn {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 7.5rem;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+.footerActionsSolo {
+  display: flex;
+  width: 100%;
+}
+
+.footerActionsSolo .primaryBtn {
+  width: 100%;
+  text-align: center;
+}
+
 .expressCheckout {
   width: 100%;
   min-height: 48px;
   position: relative;
 }
 
-/* Off-screen warm mount — same Express Checkout DOM, not remounted on review. */
+/*
+ * Park Express Checkout off-screen on review while Stripe reports availability.
+ * Must not use bottom:0 — Stripe iframes ignore opacity and would cover CTAs.
+ */
 .expressHostWarm {
-  position: absolute !important;
+  position: fixed !important;
+  left: -10000px !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
   width: 360px !important;
   height: 48px !important;
+  max-height: 48px !important;
   overflow: hidden !important;
   opacity: 0 !important;
+  visibility: hidden !important;
   pointer-events: none !important;
-  left: 0 !important;
-  bottom: 0 !important;
-  z-index: -1;
+  clip-path: inset(50%) !important;
+  z-index: -1 !important;
   margin: 0 !important;
   border: 0 !important;
   padding: 0 !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
 }
 
 .expressHostLive {
