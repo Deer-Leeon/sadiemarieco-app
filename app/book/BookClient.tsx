@@ -18,8 +18,7 @@ import { STUDIO_TIMEZONE } from '@/lib/cal-config';
 import { stripePromise } from '@/lib/stripe-browser';
 
 import BookPayErrorBoundary from './BookPayErrorBoundary';
-import ApplePayDetector, { prefersApplePayDevice } from './ApplePayDetector';
-import BookReviewPay, { type BookConfirmed } from './BookReviewPay';
+import BookApplePayHost, { type BookConfirmed } from './BookApplePayHost';
 import styles from './book.module.css';
 
 type Step = 'service' | 'when' | 'contact' | 'review';
@@ -125,7 +124,6 @@ export default function BookClient() {
   const [applePayPrefetch, setApplePayPrefetch] = useState<boolean | null>(
     null
   );
-  const [prefersApplePay, setPrefersApplePay] = useState(false);
 
   const onApplePayPrefetch = useCallback((available: boolean) => {
     setApplePayPrefetch(available);
@@ -152,7 +150,6 @@ export default function BookClient() {
       return;
     }
     setReady(true);
-    setPrefersApplePay(prefersApplePayDevice());
   }, []);
 
   useEffect(() => {
@@ -902,36 +899,30 @@ export default function BookClient() {
       {(step === 'when' || step === 'contact' || step === 'review') &&
         !showReachPanel && (
         <>
-          {stripePromise && (step === 'contact' || step === 'review') ? (
+          {stripePromise &&
+          (step === 'when' || step === 'contact' || step === 'review') ? (
             <Elements stripe={stripePromise} options={elementsOptions}>
-              {/* Warm Apple Pay during contact so review does not flash Continue. */}
-              {step === 'contact' ? (
-                <ApplePayDetector onResult={onApplePayPrefetch} />
-              ) : null}
-              {step === 'review' && selected && selectedStart ? (
-                <BookPayErrorBoundary
-                  priceLabel={selected.priceLabel}
+              {/* Persistent Apple Pay host — warms from time-picker onward. */}
+              <BookPayErrorBoundary
+                priceLabel={selected?.priceLabel || ''}
+                submitting={submitting}
+                onPayWithCard={() => void submitBooking()}
+              >
+                <BookApplePayHost
+                  reviewVisible={step === 'review' && !!selected && !!selectedStart}
+                  priceLabel={selected?.priceLabel || ''}
+                  serviceTitle={selected?.title || ''}
+                  createPayload={createPayload}
                   submitting={submitting}
+                  onSubmittingChange={setSubmitting}
+                  onError={setSubmitError}
+                  onCreateError={handleCreateError}
                   onPayWithCard={() => void submitBooking()}
-                >
-                  <BookReviewPay
-                    priceLabel={selected.priceLabel}
-                    serviceTitle={selected.title}
-                    servicePriceCents={selected.priceCents || 0}
-                    selectedStart={selectedStart}
-                    createPayload={createPayload}
-                    submitting={submitting}
-                    onSubmittingChange={setSubmitting}
-                    onError={setSubmitError}
-                    onCreateError={handleCreateError}
-                    onPayWithCard={() => void submitBooking()}
-                    onConfirmed={setConfirmed}
-                    applePayPrefetch={applePayPrefetch}
-                    prefersApplePay={prefersApplePay}
-                    onApplePayResolved={onApplePayPrefetch}
-                  />
-                </BookPayErrorBoundary>
-              ) : (
+                  onConfirmed={setConfirmed}
+                  onApplePayResolved={onApplePayPrefetch}
+                />
+              </BookPayErrorBoundary>
+              {step !== 'review' ? (
                 <footer className={styles.footer}>
                   {selected && (
                     <div className={styles.footerTotal}>
@@ -940,6 +931,16 @@ export default function BookClient() {
                       </span>
                       <span className={styles.footerHint}>{selected.title}</span>
                     </div>
+                  )}
+                  {step === 'when' && (
+                    <button
+                      type="button"
+                      className={styles.primaryBtn}
+                      disabled={!selectedStart}
+                      onClick={continueFromWhen}
+                    >
+                      Continue
+                    </button>
                   )}
                   {step === 'contact' && (
                     <button
@@ -951,7 +952,7 @@ export default function BookClient() {
                     </button>
                   )}
                 </footer>
-              )}
+              ) : null}
             </Elements>
           ) : (
             <footer className={styles.footer}>
