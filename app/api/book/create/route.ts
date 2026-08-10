@@ -59,6 +59,7 @@ interface CreateBody {
   phone?: unknown;
   email?: unknown;
   smsOptIn?: unknown;
+  source?: unknown;
 }
 
 function splitName(fullName: string): { first: string; last: string } {
@@ -154,6 +155,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ? normalizeClientEmailForStorage(body.email)
       : null;
   const smsOptIn = body.smsOptIn === true;
+  const sourceRaw = typeof body.source === 'string' ? body.source.trim() : '';
+  const analyticsSource =
+    sourceRaw === 'phone_booker_apple_pay'
+      ? 'phone_booker_apple_pay'
+      : 'phone_booker';
 
   if (!slug) {
     return NextResponse.json(
@@ -398,7 +404,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.DETAILS_SUBMITTED, {
     service: analyticsServiceLabel(service.title),
-    source: 'phone_booker',
+    source: analyticsSource,
   });
 
   return NextResponse.json({

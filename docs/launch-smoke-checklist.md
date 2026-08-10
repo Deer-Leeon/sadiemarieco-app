@@ -16,6 +16,11 @@ Run after staging deploy, then again on production.
 - [ ] `/checkout` countdown visible; card form loads
 - [ ] Confirm with card → success; admin calendar shows **confirmed**
 - [ ] Cal.com dashboard shows booking accepted
+- [ ] Phone `/book` on iPhone (Safari): Apple Pay button on review when
+      domains are registered (see [`docs/apple-pay.md`](apple-pay.md));
+      “Pay with card instead” still opens `/checkout`
+- [ ] Stripe Dashboard: `www.sadiemarie.co` + `staging.sadiemarie.co`
+      registered for Apple Pay
 
 ## Hold release
 - [ ] Start another booking to checkout, wait until 00:00 (or 10+ min)

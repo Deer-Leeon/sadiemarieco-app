@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { track } from '@vercel/analytics';
+import { Elements } from '@stripe/react-stripe-js';
+import type { StripeElementsOptions } from '@stripe/stripe-js';
 
 import {
   analyticsServiceLabel,
@@ -13,7 +15,9 @@ import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-public';
 import { STUDIO_SMS_CONSENT_LABEL } from '@/lib/cal-event-studio-defaults';
 import { formatAppointmentWhen } from '@/lib/format-booking-time';
 import { STUDIO_TIMEZONE } from '@/lib/cal-config';
+import { stripePromise } from '@/lib/stripe-browser';
 
+import BookReviewPay, { type BookConfirmed } from './BookReviewPay';
 import styles from './book.module.css';
 
 type Step = 'service' | 'when' | 'contact' | 'review';
@@ -24,6 +28,7 @@ interface BookService {
   category: string;
   description: string | null;
   priceLabel: string;
+  priceCents: number;
   durationMins: number;
   durationLabel: string;
 }
@@ -114,6 +119,22 @@ export default function BookClient() {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState<BookConfirmed | null>(null);
+
+  const elementsOptions: StripeElementsOptions = useMemo(
+    () => ({
+      mode: 'setup',
+      currency: 'usd',
+      appearance: {
+        theme: 'flat',
+        variables: {
+          colorPrimary: '#0d1b2a',
+          borderRadius: '0px',
+        },
+      },
+    }),
+    []
+  );
 
   useEffect(() => {
     if (!isPhoneViewport()) {
@@ -140,7 +161,13 @@ export default function BookClient() {
           setServicesError(data?.message || 'Could not load services.');
           return;
         }
-        const list = data?.services ?? [];
+        const list = (data?.services ?? []).map((s) => ({
+          ...s,
+          priceCents:
+            typeof s.priceCents === 'number' && Number.isFinite(s.priceCents)
+              ? s.priceCents
+              : 0,
+        }));
         setServices(list);
         if (presetSlug) {
           const match = list.find((s) => s.slug === presetSlug);
@@ -233,6 +260,90 @@ export default function BookClient() {
     [firstName, lastName]
   );
 
+  // Rare Apple Pay / wallet 3DS redirect return onto /book.
+  useEffect(() => {
+    if (!ready || confirmed) return;
+    const redirectStatus = searchParams.get('redirect_status');
+    const setupIntentId = searchParams.get('setup_intent')?.trim() ?? '';
+    const uid = searchParams.get('uid')?.trim() ?? '';
+    const resumeName = searchParams.get('name')?.trim() ?? '';
+    const resumeEmail = searchParams.get('email')?.trim() ?? '';
+    if (
+      redirectStatus !== 'succeeded' ||
+      !setupIntentId.startsWith('seti_') ||
+      !uid
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setSubmitting(true);
+      setSubmitError(null);
+      try {
+        const res = await fetch('/api/booking/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            setupIntentId,
+            calBookingUid: uid,
+            ...(resumeName ? { name: resumeName } : {}),
+            ...(resumeEmail ? { email: resumeEmail } : {}),
+          }),
+        });
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          cal_accept_error?: string | null;
+          contact?: { sms?: boolean; email?: boolean };
+          message?: string;
+          error?: string;
+        } | null;
+        if (cancelled) return;
+        if (!res.ok || data?.ok === false) {
+          setSubmitError(
+            data?.message ||
+              data?.error ||
+              'Your card was saved but we could not confirm the appointment.'
+          );
+          return;
+        }
+        trackBook(BOOKING_ANALYTICS_EVENTS.BOOKING_CONFIRMED, {
+          source: 'phone_booker_apple_pay',
+        });
+        setConfirmed({
+          name: resumeName || fullName,
+          calWarning: data?.cal_accept_error ?? null,
+          contact: {
+            sms: Boolean(data?.contact?.sms),
+            email: Boolean(data?.contact?.email),
+          },
+        });
+        const url = new URL(window.location.href);
+        url.searchParams.delete('setup_intent');
+        url.searchParams.delete('setup_intent_client_secret');
+        url.searchParams.delete('redirect_status');
+        const qs = url.searchParams.toString();
+        window.history.replaceState(
+          {},
+          '',
+          qs ? `${url.pathname}?${qs}` : url.pathname
+        );
+      } catch {
+        if (!cancelled) {
+          setSubmitError(
+            'Your card was saved but we could not confirm the appointment.'
+          );
+        }
+      } finally {
+        if (!cancelled) setSubmitting(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, confirmed, searchParams, fullName]);
+
   const stepIndex = STEPS.indexOf(step);
 
   const goBack = () => {
@@ -312,7 +423,7 @@ export default function BookClient() {
   };
 
   const submitBooking = async () => {
-    if (!selected || !selectedStart || submitting) return;
+    if (!selected || !selectedStart || submitting || confirmed) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -331,6 +442,7 @@ export default function BookClient() {
           phone: phone.trim(),
           email: email.trim() || undefined,
           smsOptIn,
+          source: 'phone_booker',
         }),
       });
       const data = (await res.json().catch(() => null)) as {
@@ -342,25 +454,7 @@ export default function BookClient() {
       } | null;
 
       if (!res.ok || !data?.calBookingUid) {
-        if (data?.error === 'phone_not_sms_capable') {
-          setSmsOptIn(false);
-          setStep('contact');
-          setShowReachPanel(true);
-          setShowEmailInReach(true);
-          setReachError(
-            data.message ||
-              'That number may not receive texts. Add an email instead.'
-          );
-          return;
-        }
-        if (data?.error === 'contact_required') {
-          setStep('contact');
-          setShowReachPanel(true);
-          setShowEmailInReach(false);
-          setReachError(data.message || 'Add email or text opt-in.');
-          return;
-        }
-        setSubmitError(data?.message || 'Could not hold that time. Try again.');
+        handleCreateError(data);
         return;
       }
 
@@ -375,6 +469,54 @@ export default function BookClient() {
     }
   };
 
+  const handleCreateError = (data: {
+    error?: string;
+    message?: string;
+  } | null) => {
+    if (data?.error === 'phone_not_sms_capable') {
+      setSmsOptIn(false);
+      setStep('contact');
+      setShowReachPanel(true);
+      setShowEmailInReach(true);
+      setReachError(
+        data.message ||
+          'That number may not receive texts. Add an email instead.'
+      );
+      return;
+    }
+    if (data?.error === 'contact_required') {
+      setStep('contact');
+      setShowReachPanel(true);
+      setShowEmailInReach(false);
+      setReachError(data.message || 'Add email or text opt-in.');
+      return;
+    }
+    setSubmitError(data?.message || 'Could not hold that time. Try again.');
+  };
+
+  const createPayload = useMemo(
+    () => ({
+      slug: selected?.slug ?? '',
+      start: selectedStart ?? '',
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      name: fullName,
+      phone: phone.trim(),
+      email: email.trim() || undefined,
+      smsOptIn,
+    }),
+    [
+      selected?.slug,
+      selectedStart,
+      firstName,
+      lastName,
+      fullName,
+      phone,
+      email,
+      smsOptIn,
+    ]
+  );
+
   if (!ready) {
     return (
       <div className={styles.shell}>
@@ -384,13 +526,58 @@ export default function BookClient() {
   }
 
   const stepTitle =
-    step === 'service'
-      ? 'Select a service'
-      : step === 'when'
-        ? 'Pick a time'
-        : step === 'contact'
-          ? 'Your details'
-          : 'Review and continue';
+    confirmed
+      ? "You're booked"
+      : step === 'service'
+        ? 'Select a service'
+        : step === 'when'
+          ? 'Pick a time'
+          : step === 'contact'
+            ? 'Your details'
+            : 'Review and continue';
+
+  if (confirmed) {
+    const first = (confirmed.name || '').trim().split(/\s+/)[0] || '';
+    const channel =
+      confirmed.contact.sms && confirmed.contact.email
+        ? 'texts and email'
+        : confirmed.contact.sms
+          ? 'texts'
+          : confirmed.contact.email
+            ? 'email'
+            : 'messages';
+    return (
+      <div className={styles.shell}>
+        <header className={styles.topBar}>
+          <span className={styles.iconBtn} aria-hidden="true" />
+          <p className={styles.brand}>Sadie Marie</p>
+          <Link href="/" className={styles.iconBtn} aria-label="Home">
+            ✕
+          </Link>
+        </header>
+        <main className={styles.main}>
+          <div className={styles.successCard}>
+            <h1 className={styles.successTitle}>
+              {first ? `Thank you, ${first}.` : "You're all set."}
+            </h1>
+            <p className={styles.successBody}>
+              Your appointment is confirmed. Check your {channel} for the
+              details and a link to manage your booking.
+            </p>
+            {confirmed.calWarning ? (
+              <div className={styles.successWarn}>
+                Your card is saved, but we couldn&apos;t finalise the calendar
+                invite automatically. The studio will confirm with you shortly.
+              </div>
+            ) : null}
+            <Link href="/" className={styles.primaryBtn} style={{ marginTop: 24, display: 'inline-block' }}>
+              Back to home
+            </Link>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.shell}>
@@ -691,45 +878,65 @@ export default function BookClient() {
       )}
       {(step === 'when' || step === 'contact' || step === 'review') &&
         !showReachPanel && (
-        <footer className={styles.footer}>
-          {selected && (
-            <div className={styles.footerTotal}>
-              <span className={styles.footerPrice}>{selected.priceLabel}</span>
-              <span className={styles.footerHint}>
-                {step === 'review' ? 'Then secure checkout' : selected.title}
-              </span>
-            </div>
+        <>
+          {step === 'review' && selected && selectedStart && stripePromise ? (
+            <Elements stripe={stripePromise} options={elementsOptions}>
+              <BookReviewPay
+                priceLabel={selected.priceLabel}
+                serviceTitle={selected.title}
+                servicePriceCents={selected.priceCents || 0}
+                selectedStart={selectedStart}
+                createPayload={createPayload}
+                submitting={submitting}
+                onSubmittingChange={setSubmitting}
+                onError={setSubmitError}
+                onCreateError={handleCreateError}
+                onPayWithCard={() => void submitBooking()}
+                onConfirmed={setConfirmed}
+              />
+            </Elements>
+          ) : (
+            <footer className={styles.footer}>
+              {selected && (
+                <div className={styles.footerTotal}>
+                  <span className={styles.footerPrice}>{selected.priceLabel}</span>
+                  <span className={styles.footerHint}>
+                    {step === 'review' ? 'Then secure checkout' : selected.title}
+                  </span>
+                </div>
+              )}
+              {step === 'when' && (
+                <button
+                  type="button"
+                  className={styles.primaryBtn}
+                  disabled={!selectedStart}
+                  onClick={continueFromWhen}
+                >
+                  Continue
+                </button>
+              )}
+              {step === 'contact' && (
+                <button
+                  type="button"
+                  className={styles.primaryBtn}
+                  onClick={continueFromContact}
+                >
+                  Continue
+                </button>
+              )}
+              {step === 'review' && (
+                <button
+                  type="button"
+                  className={styles.primaryBtn}
+                  disabled={submitting}
+                  onClick={() => void submitBooking()}
+                >
+                  {submitting ? 'Holding your time…' : 'Continue to checkout'}
+                </button>
+              )}
+            </footer>
           )}
-          {step === 'when' && (
-            <button
-              type="button"
-              className={styles.primaryBtn}
-              disabled={!selectedStart}
-              onClick={continueFromWhen}
-            >
-              Continue
-            </button>
-          )}
-          {step === 'contact' && (
-            <button
-              type="button"
-              className={styles.primaryBtn}
-              onClick={continueFromContact}
-            >
-              Continue
-            </button>
-          )}
-          {step === 'review' && (
-            <button
-              type="button"
-              className={styles.primaryBtn}
-              disabled={submitting}
-              onClick={() => void submitBooking()}
-            >
-              {submitting ? 'Holding your time…' : 'Continue to checkout'}
-            </button>
-          )}
-        </footer>
+        </>
       )}
     </div>
   );

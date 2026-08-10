@@ -476,6 +476,81 @@
   backdrop-filter: blur(8px);
 }
 
+.footerStack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.footerStack .footerTotal {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.footerStack .primaryBtn {
+  width: 100%;
+  text-align: center;
+}
+
+.expressCheckout {
+  width: 100%;
+  min-height: 48px;
+}
+
+.textLinkBtn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #2a4460;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 4px 0 2px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.textLinkBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.successCard {
+  margin-top: 12px;
+  padding: 28px 22px;
+  background: #fff;
+  border: 1px solid #dde0e6;
+  text-align: center;
+}
+
+.successTitle {
+  margin: 0;
+  font-family: 'Bodoni Moda', Georgia, serif;
+  font-size: 28px;
+  color: #0d1b2a;
+}
+
+.successBody {
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #586574;
+}
+
+.successWarn {
+  margin: 16px 0 0;
+  padding: 12px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #78350f;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+}
+
 .footerTotal {
   display: flex;
   flex-direction: column;
