@@ -180,17 +180,68 @@
   color: #586574;
 }
 
+.dayScrollerWrap {
+  position: relative;
+  margin: 0 -4px;
+}
+
+.dayScrollHint {
+  margin: 0 4px 8px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a93a0;
+}
+
 .dayScroller {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding-bottom: 4px;
+  padding: 2px 4px 10px;
   -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+  scrollbar-color: #c8cdd6 transparent;
+}
+
+.dayScroller::-webkit-scrollbar {
+  height: 3px;
+}
+
+.dayScroller::-webkit-scrollbar-thumb {
+  background: #c8cdd6;
+  border-radius: 999px;
+}
+
+.dayScrollerFadeLeft,
+.dayScrollerFadeRight {
+  position: absolute;
+  top: 22px;
+  bottom: 10px;
+  width: 28px;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.dayScrollerFadeLeft {
+  left: 0;
+  background: linear-gradient(to right, #f5f3f0 15%, transparent);
+}
+
+.dayScrollerFadeRight {
+  right: 0;
+  background: linear-gradient(to left, #f5f3f0 15%, transparent);
+}
+
+.dayScrollerFadeOn {
+  opacity: 1;
 }
 
 .dayChip {
   flex: 0 0 auto;
-  min-width: 72px;
+  min-width: 76px;
   padding: 10px 12px;
   border: 1px solid #c8cdd6;
   background: #fff;
@@ -201,6 +252,7 @@
   align-items: center;
   font-size: 12px;
   cursor: pointer;
+  scroll-snap-align: start;
 }
 
 .dayChip:disabled {
@@ -215,16 +267,20 @@
 }
 
 .slotGrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
 .slotChip {
-  padding: 12px 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 16px;
   border: 1px solid #c8cdd6;
   background: #fff;
-  font-size: 13px;
+  font-size: 15px;
+  font-family: 'Bodoni Moda', Georgia, serif;
+  text-align: center;
   cursor: pointer;
   color: #0d1b2a;
 }
