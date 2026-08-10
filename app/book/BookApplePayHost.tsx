@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * Single persistent Express Checkout for /book.
- * Mounted while picking a time / entering contact, then revealed on review
- * without remounting — that remount was the Apple Pay button flash.
+ * Express Checkout for /book pay step.
+ * Mounted on the pay step only (after pay-now vs pay-later is chosen) so
+ * Elements mode matches: setup for vault, payment for charge.
  */
 
 import {
@@ -30,6 +30,7 @@ import {
   analyticsServiceLabel,
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
+import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
 
 import styles from './book.module.css';
 
@@ -76,7 +77,7 @@ async function fetchWithTimeout(
 function friendlyStripeError(error: { message?: string }): string {
   const msg = (error.message || '').trim();
   if (msg) return msg;
-  return 'Apple Pay could not save your card. Please try again or pay with card.';
+  return 'Apple Pay could not complete. Please try again or pay with card.';
 }
 
 export type BookCreatePayload = {
@@ -99,7 +100,8 @@ export type BookConfirmed = {
 
 type Props = {
   /** When false, keep Express Checkout mounted off-screen (warming). */
-  reviewVisible: boolean;
+  payVisible: boolean;
+  paymentTiming: BookingPaymentTiming;
   priceLabel: string;
   serviceTitle: string;
   createPayload: Omit<BookCreatePayload, 'source'>;
@@ -131,7 +133,8 @@ const EXPRESS_OPTIONS: StripeExpressCheckoutElementOptions = {
 };
 
 export default function BookApplePayHost({
-  reviewVisible,
+  payVisible,
+  paymentTiming,
   priceLabel,
   serviceTitle,
   createPayload,
@@ -153,6 +156,8 @@ export default function BookApplePayHost({
   payloadRef.current = createPayload;
   const serviceTitleRef = useRef(serviceTitle);
   serviceTitleRef.current = serviceTitle;
+  const paymentTimingRef = useRef(paymentTiming);
+  paymentTimingRef.current = paymentTiming;
 
   const onReady = useCallback(
     (event: StripeExpressCheckoutElementReadyEvent) => {
@@ -167,6 +172,11 @@ export default function BookApplePayHost({
   useEffect(() => {
     if (!prefersApplePay) onApplePayResolved(false);
   }, [prefersApplePay, onApplePayResolved]);
+
+  useEffect(() => {
+    setExpressReady(false);
+    setApplePayAvailable(false);
+  }, [paymentTiming]);
 
   const onClick = useCallback(
     (event: StripeExpressCheckoutElementClickEvent) => {
@@ -199,7 +209,9 @@ export default function BookApplePayHost({
       } | null;
 
       if (!res.ok || !data?.calBookingUid) {
-        onCreateError(data ?? { message: 'Could not hold that time. Try again.' });
+        onCreateError(
+          data ?? { message: 'Could not hold that time. Try again.' }
+        );
         throw new Error(data?.message || 'Could not hold that time.');
       }
       return data as {
@@ -219,6 +231,7 @@ export default function BookApplePayHost({
       }
 
       const payload = payloadRef.current;
+      const timing = paymentTimingRef.current;
       const analyticsService = analyticsServiceLabel(serviceTitleRef.current);
 
       onError(null);
@@ -226,6 +239,7 @@ export default function BookApplePayHost({
       trackBook(BOOKING_ANALYTICS_EVENTS.CHECKOUT_PAYMENT_ATTEMPT, {
         service: analyticsService,
         source: 'phone_booker_apple_pay',
+        payment_timing: timing,
       });
 
       try {
@@ -240,8 +254,12 @@ export default function BookApplePayHost({
         const bookingName = hold.name || payload.name;
         const bookingEmail = hold.email || payload.email || '';
 
+        const intentPath =
+          timing === 'pay_now'
+            ? '/api/stripe/create-booking-payment-intent'
+            : '/api/stripe/create-setup-intent';
         const siRes = await fetchWithTimeout(
-          '/api/stripe/create-setup-intent',
+          intentPath,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -268,41 +286,75 @@ export default function BookApplePayHost({
 
         const returnUrl = new URL('/book', window.location.origin);
         returnUrl.searchParams.set('uid', hold.calBookingUid);
+        returnUrl.searchParams.set('payTiming', timing);
         if (bookingName) returnUrl.searchParams.set('name', bookingName);
         if (bookingEmail) returnUrl.searchParams.set('email', bookingEmail);
 
-        const { error, setupIntent } = await stripe.confirmSetup({
-          elements,
-          clientSecret: siPayload.clientSecret,
-          confirmParams: { return_url: returnUrl.toString() },
-          redirect: 'if_required',
-        });
-
-        if (error) {
-          onError(friendlyStripeError(error));
-          event.paymentFailed({ reason: 'fail' });
-          return;
-        }
-
-        let finalIntent = setupIntent;
-        if (finalIntent?.status === 'requires_action') {
-          const next = await stripe.handleNextAction({
+        let confirmId: string | null = null;
+        if (timing === 'pay_now') {
+          const { error, paymentIntent } = await stripe.confirmPayment({
+            elements,
             clientSecret: siPayload.clientSecret,
+            confirmParams: { return_url: returnUrl.toString() },
+            redirect: 'if_required',
           });
-          if (next.error) {
-            onError(friendlyStripeError(next.error));
+          if (error) {
+            onError(friendlyStripeError(error));
             event.paymentFailed({ reason: 'fail' });
             return;
           }
-          finalIntent = next.setupIntent ?? finalIntent;
-        }
-
-        if (!finalIntent || finalIntent.status !== 'succeeded') {
-          onError(
-            'Your card could not be confirmed. Please try again or pay with card.'
-          );
-          event.paymentFailed({ reason: 'fail' });
-          return;
+          let finalPi = paymentIntent;
+          if (finalPi?.status === 'requires_action') {
+            const next = await stripe.handleNextAction({
+              clientSecret: siPayload.clientSecret,
+            });
+            if (next.error) {
+              onError(friendlyStripeError(next.error));
+              event.paymentFailed({ reason: 'fail' });
+              return;
+            }
+            finalPi = next.paymentIntent ?? finalPi;
+          }
+          if (!finalPi || finalPi.status !== 'succeeded') {
+            onError(
+              'Your payment could not be confirmed. Please try again or pay with card.'
+            );
+            event.paymentFailed({ reason: 'fail' });
+            return;
+          }
+          confirmId = finalPi.id;
+        } else {
+          const { error, setupIntent } = await stripe.confirmSetup({
+            elements,
+            clientSecret: siPayload.clientSecret,
+            confirmParams: { return_url: returnUrl.toString() },
+            redirect: 'if_required',
+          });
+          if (error) {
+            onError(friendlyStripeError(error));
+            event.paymentFailed({ reason: 'fail' });
+            return;
+          }
+          let finalIntent = setupIntent;
+          if (finalIntent?.status === 'requires_action') {
+            const next = await stripe.handleNextAction({
+              clientSecret: siPayload.clientSecret,
+            });
+            if (next.error) {
+              onError(friendlyStripeError(next.error));
+              event.paymentFailed({ reason: 'fail' });
+              return;
+            }
+            finalIntent = next.setupIntent ?? finalIntent;
+          }
+          if (!finalIntent || finalIntent.status !== 'succeeded') {
+            onError(
+              'Your card could not be confirmed. Please try again or pay with card.'
+            );
+            event.paymentFailed({ reason: 'fail' });
+            return;
+          }
+          confirmId = finalIntent.id;
         }
 
         const confirmRes = await fetchWithTimeout(
@@ -311,7 +363,9 @@ export default function BookApplePayHost({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              setupIntentId: finalIntent.id,
+              ...(timing === 'pay_now'
+                ? { paymentIntentId: confirmId }
+                : { setupIntentId: confirmId }),
               calBookingUid: hold.calBookingUid,
               ...(bookingName ? { name: bookingName } : {}),
               ...(bookingEmail ? { email: bookingEmail } : {}),
@@ -320,40 +374,38 @@ export default function BookApplePayHost({
           45_000
         );
         const confirmPayload = (await confirmRes.json().catch(() => null)) as {
-          ok?: boolean;
-          cal_accept_error?: string | null;
+          calWarning?: string | null;
           contact?: { sms?: boolean; email?: boolean };
           message?: string;
           error?: string;
         } | null;
-
-        if (!confirmRes.ok || confirmPayload?.ok === false) {
+        if (!confirmRes.ok) {
           throw new Error(
             confirmPayload?.message ||
               confirmPayload?.error ||
-              'Card saved but appointment could not be confirmed.'
+              'Could not confirm your booking.'
           );
         }
 
         trackBook(BOOKING_ANALYTICS_EVENTS.BOOKING_CONFIRMED, {
           service: analyticsService,
           source: 'phone_booker_apple_pay',
+          payment_timing: timing,
         });
-
         onConfirmed({
           name: bookingName,
-          calWarning: confirmPayload?.cal_accept_error ?? null,
+          calWarning: confirmPayload?.calWarning ?? null,
           contact: {
             sms: Boolean(confirmPayload?.contact?.sms),
             email: Boolean(confirmPayload?.contact?.email),
           },
         });
       } catch (err) {
-        onError(
+        const message =
           err instanceof Error
             ? err.message
-            : 'Something went wrong with Apple Pay. Try card instead.'
-        );
+            : 'Something went wrong with Apple Pay. Try card instead.';
+        onError(message);
         event.paymentFailed({ reason: 'fail' });
       } finally {
         onSubmittingChange(false);
@@ -372,10 +424,14 @@ export default function BookApplePayHost({
 
   const showApplePay = expressReady && applePayAvailable;
   const showWalletChrome =
-    reviewVisible && (showApplePay || (prefersApplePay && !expressReady));
-  const showCardPrimary = reviewVisible && expressReady && !applePayAvailable;
+    payVisible && (showApplePay || (prefersApplePay && !expressReady));
+  const showCardPrimary = payVisible && expressReady && !applePayAvailable;
 
-  // Stable DOM: chrome nodes always present; host is warm vs live via CSS only.
+  const footerHint =
+    paymentTiming === 'pay_now'
+      ? 'Charged now — card also saved for your appointment'
+      : 'No charge today — Apple Pay saves your card';
+
   return (
     <>
       <div
@@ -390,10 +446,10 @@ export default function BookApplePayHost({
           className={styles.footerTotal}
           style={{ visibility: showWalletChrome ? 'visible' : 'hidden' }}
         >
-          <span className={styles.footerPrice}>{priceLabel || '$0'}</span>
-          <span className={styles.footerHint}>
-            No charge today — Apple Pay saves your card
+          <span className={styles.footerPrice}>
+            {paymentTiming === 'pay_now' ? priceLabel || '$0' : '$0'}
           </span>
+          <span className={styles.footerHint}>{footerHint}</span>
         </div>
 
         <div
@@ -413,7 +469,7 @@ export default function BookApplePayHost({
           />
           <div
             className={
-              !reviewVisible || showApplePay
+              !payVisible || showApplePay
                 ? styles.expressPainted
                 : styles.expressUnderSlot
             }
@@ -448,8 +504,14 @@ export default function BookApplePayHost({
       {showCardPrimary ? (
         <footer className={`${styles.footer} ${styles.footerStack}`}>
           <div className={styles.footerTotal}>
-            <span className={styles.footerPrice}>{priceLabel}</span>
-            <span className={styles.footerHint}>Then secure checkout</span>
+            <span className={styles.footerPrice}>
+              {paymentTiming === 'pay_now' ? priceLabel : '$0'}
+            </span>
+            <span className={styles.footerHint}>
+              {paymentTiming === 'pay_now'
+                ? 'Pay now in full'
+                : 'Then secure checkout'}
+            </span>
           </div>
           <button
             type="button"
@@ -457,7 +519,11 @@ export default function BookApplePayHost({
             disabled={submitting}
             onClick={onPayWithCard}
           >
-            {submitting ? 'Holding your time…' : 'Continue to checkout'}
+            {submitting
+              ? 'Holding your time…'
+              : paymentTiming === 'pay_now'
+                ? 'Pay with card'
+                : 'Continue to checkout'}
           </button>
         </footer>
       ) : null}

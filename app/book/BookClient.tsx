@@ -17,11 +17,13 @@ import { formatAppointmentWhen } from '@/lib/format-booking-time';
 import { STUDIO_TIMEZONE } from '@/lib/cal-config';
 import { stripePromise } from '@/lib/stripe-browser';
 
+import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
+
 import BookPayErrorBoundary from './BookPayErrorBoundary';
 import BookApplePayHost, { type BookConfirmed } from './BookApplePayHost';
 import styles from './book.module.css';
 
-type Step = 'service' | 'when' | 'contact' | 'review';
+type Step = 'service' | 'when' | 'contact' | 'review' | 'pay';
 
 /** Phone /book date strip (inclusive of today). */
 const BOOK_AVAILABILITY_DAYS = 90;
@@ -97,7 +99,7 @@ function isPhoneViewport(): boolean {
   return window.matchMedia(`(max-width: ${BOOK_PHONE_MAX_WIDTH_PX}px)`).matches;
 }
 
-const STEPS: Step[] = ['service', 'when', 'contact', 'review'];
+const STEPS: Step[] = ['service', 'when', 'contact', 'review', 'pay'];
 
 export default function BookClient() {
   const router = useRouter();
@@ -130,32 +132,43 @@ export default function BookClient() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<BookConfirmed | null>(null);
-  const [applePayPrefetch, setApplePayPrefetch] = useState<boolean | null>(
-    null
-  );
+  const [paymentTiming, setPaymentTiming] =
+    useState<BookingPaymentTiming>('pay_later');
 
-  const onApplePayPrefetch = useCallback((available: boolean) => {
-    setApplePayPrefetch(available);
+  const onApplePayPrefetch = useCallback((_available: boolean) => {
+    /* availability drives Apple Pay host chrome only */
   }, []);
 
-  const elementsOptions: StripeElementsOptions = useMemo(
-    () => ({
+  const elementsOptions: StripeElementsOptions = useMemo(() => {
+    const appearance = {
+      theme: 'flat' as const,
+      variables: {
+        colorPrimary: '#0d1b2a',
+        borderRadius: '0px',
+      },
+    };
+    // Must match Intent `payment_method_types: ['card']` — otherwise Apple Pay
+    // confirm fails with "collected through … automatic payment methods".
+    if (paymentTiming === 'pay_now') {
+      const amount =
+        selected?.priceCents && selected.priceCents > 0
+          ? selected.priceCents
+          : 50;
+      return {
+        mode: 'payment',
+        amount,
+        currency: 'usd',
+        paymentMethodTypes: ['card'],
+        appearance,
+      };
+    }
+    return {
       mode: 'setup',
       currency: 'usd',
-      // Must match SetupIntent `payment_method_types: ['card']` from
-      // /api/stripe/create-setup-intent — otherwise Apple Pay confirm fails with
-      // "collected through … automatic payment methods".
       paymentMethodTypes: ['card'],
-      appearance: {
-        theme: 'flat',
-        variables: {
-          colorPrimary: '#0d1b2a',
-          borderRadius: '0px',
-        },
-      },
-    }),
-    []
-  );
+      appearance,
+    };
+  }, [paymentTiming, selected?.priceCents]);
 
   useEffect(() => {
     if (!isPhoneViewport()) {
@@ -332,12 +345,15 @@ export default function BookClient() {
     if (!ready || confirmed) return;
     const redirectStatus = searchParams.get('redirect_status');
     const setupIntentId = searchParams.get('setup_intent')?.trim() ?? '';
+    const paymentIntentId = searchParams.get('payment_intent')?.trim() ?? '';
     const uid = searchParams.get('uid')?.trim() ?? '';
     const resumeName = searchParams.get('name')?.trim() ?? '';
     const resumeEmail = searchParams.get('email')?.trim() ?? '';
+    const hasSetup = setupIntentId.startsWith('seti_');
+    const hasPayment = paymentIntentId.startsWith('pi_');
     if (
       redirectStatus !== 'succeeded' ||
-      !setupIntentId.startsWith('seti_') ||
+      hasSetup === hasPayment ||
       !uid
     ) {
       return;
@@ -352,7 +368,9 @@ export default function BookClient() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            setupIntentId,
+            ...(hasPayment
+              ? { paymentIntentId }
+              : { setupIntentId }),
             calBookingUid: uid,
             ...(resumeName ? { name: resumeName } : {}),
             ...(resumeEmail ? { email: resumeEmail } : {}),
@@ -370,12 +388,15 @@ export default function BookClient() {
           setSubmitError(
             data?.message ||
               data?.error ||
-              'Your card was saved but we could not confirm the appointment.'
+              (hasPayment
+                ? 'Your payment went through but we could not confirm the appointment.'
+                : 'Your card was saved but we could not confirm the appointment.')
           );
           return;
         }
         trackBook(BOOKING_ANALYTICS_EVENTS.BOOKING_CONFIRMED, {
           source: 'phone_booker_apple_pay',
+          payment_timing: hasPayment ? 'pay_now' : 'pay_later',
         });
         setConfirmed({
           name: resumeName || fullName,
@@ -388,7 +409,10 @@ export default function BookClient() {
         const url = new URL(window.location.href);
         url.searchParams.delete('setup_intent');
         url.searchParams.delete('setup_intent_client_secret');
+        url.searchParams.delete('payment_intent');
+        url.searchParams.delete('payment_intent_client_secret');
         url.searchParams.delete('redirect_status');
+        url.searchParams.delete('payTiming');
         const qs = url.searchParams.toString();
         window.history.replaceState(
           {},
@@ -398,7 +422,9 @@ export default function BookClient() {
       } catch {
         if (!cancelled) {
           setSubmitError(
-            'Your card was saved but we could not confirm the appointment.'
+            hasPayment
+              ? 'Your payment went through but we could not confirm the appointment.'
+              : 'Your card was saved but we could not confirm the appointment.'
           );
         }
       } finally {
@@ -489,6 +515,11 @@ export default function BookClient() {
     setReachError('Add an email so we can reach you about your booking.');
   };
 
+  const continueFromReview = () => {
+    setSubmitError(null);
+    setStep('pay');
+  };
+
   const submitBooking = async () => {
     if (!selected || !selectedStart || submitting || confirmed) return;
     setSubmitting(true);
@@ -528,6 +559,7 @@ export default function BookClient() {
       const params = new URLSearchParams({ uid: data.calBookingUid });
       if (data.name) params.set('name', data.name);
       if (data.email) params.set('email', data.email);
+      if (paymentTiming === 'pay_now') params.set('payMode', 'now');
       window.location.assign(`/checkout?${params.toString()}`);
     } catch {
       setSubmitError('Something went wrong. Please try again.');
@@ -601,7 +633,9 @@ export default function BookClient() {
           ? 'Pick a time'
           : step === 'contact'
             ? 'Your details'
-            : 'Review and continue';
+            : step === 'pay'
+              ? 'Payment'
+              : 'Review and continue';
 
   if (confirmed) {
     const first = (confirmed.name || '').trim().split(/\s+/)[0] || '';
@@ -633,8 +667,9 @@ export default function BookClient() {
             </p>
             {confirmed.calWarning ? (
               <div className={styles.successWarn}>
-                Your card is saved, but we couldn&apos;t finalise the calendar
-                invite automatically. The studio will confirm with you shortly.
+                Your booking is recorded, but we couldn&apos;t finalise the
+                calendar invite automatically. The studio will confirm with you
+                shortly.
               </div>
             ) : null}
             <Link href="/" className={styles.primaryBtn} style={{ marginTop: 24, display: 'inline-block' }}>
@@ -677,10 +712,14 @@ export default function BookClient() {
       </div>
 
       <main
-        className={`${styles.main} ${step === 'review' ? styles.mainReview : ''}`}
+        className={`${styles.main} ${
+          step === 'review' || step === 'pay' ? styles.mainReview : ''
+        }`}
       >
         <h1
-          className={`${styles.title} ${step === 'review' ? styles.titleReview : ''}`}
+          className={`${styles.title} ${
+            step === 'review' || step === 'pay' ? styles.titleReview : ''
+          }`}
         >
           {stepTitle}
         </h1>
@@ -854,7 +893,7 @@ export default function BookClient() {
                   <span>{selected.priceLabel}</span>
                 </p>
                 <p className={styles.reviewNote}>
-                  No charge today — a card is saved to hold your appointment.
+                  Next you&apos;ll choose pay now or pay at studio later.
                 </p>
               </div>
 
@@ -892,6 +931,87 @@ export default function BookClient() {
                   24+ hours notice to cancel or reschedule. Inside 24 hours may
                   be charged up to 50%; no-shows (or cancels within 2 hours) may
                   be charged 100%.
+                </p>
+              </div>
+            </div>
+            {submitError && <p className={styles.error}>{submitError}</p>}
+          </section>
+        )}
+
+        {step === 'pay' && selected && selectedStart && (
+          <section className={`${styles.section} ${styles.reviewSection}`}>
+            <div className={styles.reviewSheet}>
+              <div className={styles.reviewBlock}>
+                <p className={styles.reviewEyebrow}>Due today</p>
+                <p className={styles.reviewTotal}>
+                  <span>
+                    {paymentTiming === 'pay_now'
+                      ? 'Pay now'
+                      : 'Pay at studio later'}
+                  </span>
+                  <span>
+                    {paymentTiming === 'pay_now'
+                      ? selected.priceLabel
+                      : '$0'}
+                  </span>
+                </p>
+              </div>
+
+              <fieldset className={styles.payOptions}>
+                <legend className={styles.srOnly}>Payment timing</legend>
+                <label
+                  className={`${styles.payOption} ${
+                    paymentTiming === 'pay_later' ? styles.payOptionOn : ''
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="paymentTiming"
+                    value="pay_later"
+                    checked={paymentTiming === 'pay_later'}
+                    onChange={() => setPaymentTiming('pay_later')}
+                  />
+                  <span className={styles.payOptionBody}>
+                    <span className={styles.payOptionTitle}>
+                      Pay at studio later
+                    </span>
+                    <span className={styles.payOptionHint}>
+                      Card saved to hold — pay at your visit
+                    </span>
+                  </span>
+                </label>
+                <label
+                  className={`${styles.payOption} ${
+                    paymentTiming === 'pay_now' ? styles.payOptionOn : ''
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="paymentTiming"
+                    value="pay_now"
+                    checked={paymentTiming === 'pay_now'}
+                    onChange={() => setPaymentTiming('pay_now')}
+                  />
+                  <span className={styles.payOptionBody}>
+                    <span className={styles.payOptionTitle}>
+                      Pay now in full
+                    </span>
+                    <span className={styles.payOptionHint}>
+                      Save time at your appointment — charged{' '}
+                      {selected.priceLabel} now
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
+
+              <hr className={styles.reviewRule} />
+
+              <div className={styles.reviewBlock}>
+                <p className={styles.policyTitle}>Cancellation</p>
+                <p className={styles.policyCopy}>
+                  24+ hours notice to cancel or reschedule. Inside 24 hours may
+                  be charged up to 50%; no-shows (or cancels within 2 hours) may
+                  be charged 100%. A card on file is required either way.
                 </p>
               </div>
             </div>
@@ -957,105 +1077,109 @@ export default function BookClient() {
       )}
       {(step === 'when' || step === 'contact' || step === 'review') &&
         !showReachPanel && (
-        <>
-          {stripePromise &&
-          (step === 'when' || step === 'contact' || step === 'review') ? (
-            <Elements stripe={stripePromise} options={elementsOptions}>
-              {/* Persistent Apple Pay host — warms from time-picker onward. */}
-              <BookPayErrorBoundary
-                priceLabel={selected?.priceLabel || ''}
-                submitting={submitting}
-                onPayWithCard={() => void submitBooking()}
-              >
-                <BookApplePayHost
-                  reviewVisible={step === 'review' && !!selected && !!selectedStart}
-                  priceLabel={selected?.priceLabel || ''}
-                  serviceTitle={selected?.title || ''}
-                  createPayload={createPayload}
-                  submitting={submitting}
-                  onSubmittingChange={setSubmitting}
-                  onError={setSubmitError}
-                  onCreateError={handleCreateError}
-                  onPayWithCard={() => void submitBooking()}
-                  onConfirmed={setConfirmed}
-                  onApplePayResolved={onApplePayPrefetch}
-                />
-              </BookPayErrorBoundary>
-              {step !== 'review' ? (
-                <footer className={styles.footer}>
-                  {selected && (
-                    <div className={styles.footerTotal}>
-                      <span className={styles.footerPrice}>
-                        {selected.priceLabel}
-                      </span>
-                      <span className={styles.footerHint}>{selected.title}</span>
-                    </div>
-                  )}
-                  {step === 'when' && (
-                    <button
-                      type="button"
-                      className={styles.primaryBtn}
-                      disabled={!selectedStart}
-                      onClick={continueFromWhen}
-                    >
-                      Continue
-                    </button>
-                  )}
-                  {step === 'contact' && (
-                    <button
-                      type="button"
-                      className={styles.primaryBtn}
-                      onClick={continueFromContact}
-                    >
-                      Continue
-                    </button>
-                  )}
-                </footer>
-              ) : null}
-            </Elements>
-          ) : (
-            <footer className={styles.footer}>
-              {selected && (
-                <div className={styles.footerTotal}>
-                  <span className={styles.footerPrice}>{selected.priceLabel}</span>
-                  <span className={styles.footerHint}>
-                    {step === 'review' ? 'Then secure checkout' : selected.title}
-                  </span>
-                </div>
-              )}
-              {step === 'when' && (
-                <button
-                  type="button"
-                  className={styles.primaryBtn}
-                  disabled={!selectedStart}
-                  onClick={continueFromWhen}
-                >
-                  Continue
-                </button>
-              )}
-              {step === 'contact' && (
-                <button
-                  type="button"
-                  className={styles.primaryBtn}
-                  onClick={continueFromContact}
-                >
-                  Continue
-                </button>
-              )}
-              {step === 'review' && (
-                <button
-                  type="button"
-                  className={styles.primaryBtn}
-                  disabled={submitting}
-                  onClick={() => void submitBooking()}
-                >
-                  {submitting ? 'Holding your time…' : 'Continue to checkout'}
-                </button>
-              )}
-            </footer>
+        <footer className={styles.footer}>
+          {selected && (
+            <div className={styles.footerTotal}>
+              <span className={styles.footerPrice}>{selected.priceLabel}</span>
+              <span className={styles.footerHint}>
+                {step === 'review' ? 'Continue to payment' : selected.title}
+              </span>
+            </div>
           )}
-        </>
+          {step === 'when' && (
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              disabled={!selectedStart}
+              onClick={continueFromWhen}
+            >
+              Continue
+            </button>
+          )}
+          {step === 'contact' && (
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              onClick={continueFromContact}
+            >
+              Continue
+            </button>
+          )}
+          {step === 'review' && (
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              onClick={continueFromReview}
+            >
+              Continue
+            </button>
+          )}
+        </footer>
       )}
+
+      {step === 'pay' &&
+        selected &&
+        selectedStart &&
+        !showReachPanel &&
+        stripePromise && (
+          <Elements
+            key={paymentTiming}
+            stripe={stripePromise}
+            options={elementsOptions}
+          >
+            <BookPayErrorBoundary
+              priceLabel={selected.priceLabel}
+              submitting={submitting}
+              onPayWithCard={() => void submitBooking()}
+            >
+              <BookApplePayHost
+                payVisible
+                paymentTiming={paymentTiming}
+                priceLabel={selected.priceLabel}
+                serviceTitle={selected.title}
+                createPayload={createPayload}
+                submitting={submitting}
+                onSubmittingChange={setSubmitting}
+                onError={setSubmitError}
+                onCreateError={handleCreateError}
+                onPayWithCard={() => void submitBooking()}
+                onConfirmed={setConfirmed}
+                onApplePayResolved={onApplePayPrefetch}
+              />
+            </BookPayErrorBoundary>
+          </Elements>
+        )}
+
+      {step === 'pay' &&
+        selected &&
+        selectedStart &&
+        !showReachPanel &&
+        !stripePromise && (
+          <footer className={`${styles.footer} ${styles.footerStack}`}>
+            <div className={styles.footerTotal}>
+              <span className={styles.footerPrice}>
+                {paymentTiming === 'pay_now' ? selected.priceLabel : '$0'}
+              </span>
+              <span className={styles.footerHint}>
+                {paymentTiming === 'pay_now'
+                  ? 'Pay now in full'
+                  : 'Then secure checkout'}
+              </span>
+            </div>
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              disabled={submitting}
+              onClick={() => void submitBooking()}
+            >
+              {submitting
+                ? 'Holding your time…'
+                : paymentTiming === 'pay_now'
+                  ? 'Pay with card'
+                  : 'Continue to checkout'}
+            </button>
+          </footer>
+        )}
     </div>
   );
 }

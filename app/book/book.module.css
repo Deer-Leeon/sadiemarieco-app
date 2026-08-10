@@ -717,3 +717,64 @@
   padding: 48px 20px;
   text-align: center;
 }
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.payOptions {
+  margin: 14px 0 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.payOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0;
+  padding: 14px 14px;
+  border: 1px solid #dde0e6;
+  background: #fff;
+  cursor: pointer;
+}
+
+.payOptionOn {
+  border-color: #0d1b2a;
+  background: #f7f8fa;
+}
+
+.payOption input {
+  margin-top: 3px;
+  accent-color: #0d1b2a;
+}
+
+.payOptionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.payOptionTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: #0d1b2a;
+}
+
+.payOptionHint {
+  font-size: 13px;
+  line-height: 1.35;
+  color: #586574;
+}

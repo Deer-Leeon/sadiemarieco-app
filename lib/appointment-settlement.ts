@@ -142,6 +142,58 @@ export function isSettlementUniqueConflict(err: unknown): boolean {
   );
 }
 
+/** Online prepaid (Apple Pay / card at /book pay-now). No Terminal reader. */
+export async function insertOnlinePrepaidSettlement(args: {
+  appointmentId: string;
+  calBookingUid: string | null;
+  stripePaymentIntentId: string;
+  baseAmountCents: number;
+}): Promise<TerminalPaymentSummary> {
+  const tipAmountCents = 0;
+  const totalAmountCents = args.baseAmountCents + tipAmountCents;
+  const { rows } = await sql.query(
+    `INSERT INTO appointment_payments (
+       appointment_id,
+       cal_booking_uid,
+       payment_kind,
+       stripe_payment_intent_id,
+       currency,
+       base_amount_cents,
+       tip_amount_cents,
+       total_amount_cents,
+       status,
+       note,
+       paid_at
+     )
+     VALUES (
+       $1, $2, 'service_payment', $3, 'usd', $4, $5, $6, 'succeeded',
+       'Paid online at booking', NOW()
+     )
+     RETURNING ${PAYMENT_SELECT}`,
+    [
+      args.appointmentId,
+      args.calBookingUid,
+      args.stripePaymentIntentId,
+      args.baseAmountCents,
+      tipAmountCents,
+      totalAmountCents,
+    ]
+  );
+  return paymentRowToSummary(rows[0] as AppointmentPaymentRow);
+}
+
+export function isOnlinePrepaidSettlement(
+  payment: TerminalPaymentSummary | null | undefined
+): boolean {
+  return Boolean(
+    payment &&
+      payment.status === 'succeeded' &&
+      payment.payment_kind === 'service_payment' &&
+      !payment.reader_id &&
+      payment.payment_intent_id
+  );
+}
+
 export async function insertManualSettlement(args: {
   appointmentId: string;
   calBookingUid: string | null;

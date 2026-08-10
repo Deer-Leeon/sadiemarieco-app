@@ -51,6 +51,10 @@ import {
   getAppointmentStripeByCalUid,
   STRIPE_CUSTOMER_ID_RE,
 } from '@/lib/appointment-stripe';
+import {
+  insertOnlinePrepaidSettlement,
+  isSettlementUniqueConflict,
+} from '@/lib/appointment-settlement';
 import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
 import { notifyBookingConfirmed } from '@/lib/booking-notifications';
 import { stripeCardCheckRejection } from '@/lib/stripe-card-checks';
@@ -82,13 +86,16 @@ const CAL_V1_BASE = 'https://api.cal.com/v1';
 const CAL_V2_BASE = 'https://api.cal.com/v2';
 interface ConfirmBody {
   setupIntentId?: unknown;
+  paymentIntentId?: unknown;
   email?: unknown;
   name?: unknown;
   calBookingUid?: unknown;
 }
 
 interface ParsedBody {
-  setupIntentId: string;
+  setupIntentId: string | null;
+  paymentIntentId: string | null;
+  paymentTiming: 'pay_later' | 'pay_now';
   /**
    * Email if the client supplied one (URL param or PaymentElement
    * billing details surfaced by the browser); empty string otherwise.
@@ -113,26 +120,35 @@ function parseBody(input: unknown): ParsedBody | { error: string } {
   const body = input as ConfirmBody;
   const setupIntentId =
     typeof body.setupIntentId === 'string' ? body.setupIntentId.trim() : '';
+  const paymentIntentId =
+    typeof body.paymentIntentId === 'string'
+      ? body.paymentIntentId.trim()
+      : '';
   const rawEmail = typeof body.email === 'string' ? body.email.trim() : '';
   const rawName = typeof body.name === 'string' ? body.name.trim() : '';
   const calBookingUid =
     typeof body.calBookingUid === 'string' ? body.calBookingUid.trim() : '';
 
-  if (!setupIntentId.startsWith('seti_')) {
-    return { error: 'invalid_setup_intent_id' };
+  const hasSetup = setupIntentId.startsWith('seti_');
+  const hasPayment = paymentIntentId.startsWith('pi_');
+  if (hasSetup === hasPayment) {
+    return { error: 'invalid_intent_id' };
   }
   if (!calBookingUid || calBookingUid.length > 200) {
     return { error: 'invalid_cal_booking_uid' };
   }
 
-  // name + email are OPTIONAL in the request. We pass through only
-  // values that pass a loose sanity check — anything obviously broken
-  // gets dropped so the PaymentMethod's billing_details (which the
-  // visitor just typed into the card form) can take over.
   const email = isValidEmail(rawEmail) ? rawEmail.trim().toLowerCase() : '';
   const name = rawName.length > 0 && rawName.length <= 200 ? rawName : '';
 
-  return { setupIntentId, email, name, calBookingUid };
+  return {
+    setupIntentId: hasSetup ? setupIntentId : null,
+    paymentIntentId: hasPayment ? paymentIntentId : null,
+    paymentTiming: hasPayment ? 'pay_now' : 'pay_later',
+    email,
+    name,
+    calBookingUid,
+  };
 }
 
 function calErrorMessage(payload: unknown, status: number): string {
@@ -308,7 +324,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const { setupIntentId, email, name, calBookingUid } = parsed;
+  const { setupIntentId, paymentIntentId, paymentTiming, email, name, calBookingUid } =
+    parsed;
 
   // ── 0. HOLD GATE — require a local pending hold; never confirm without one ─
   // Init is fire-and-forget before /checkout navigation. If that failed (or
@@ -378,103 +395,169 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // ── 1. STRIPE: verify SetupIntent succeeded ────────────────────────
-  // We expand `payment_method` so the SDK returns the full
-  // PaymentMethod object (including `billing_details`) instead of just
-  // its id. That extra fetch is free vs a follow-up
-  // `paymentMethods.retrieve` call and lets us derive name + email
-  // when the URL didn't carry them (Cal.com's `bookingSuccessful`
-  // payload doesn't always include attendee info — older embed.js
-  // versions omit `attendees` entirely, and a Cal account on the
-  // free tier can't customise what's emitted).
+  // ── 1. STRIPE: verify SetupIntent or PaymentIntent succeeded ─────
   let paymentMethodId: string;
   let pmBilling: {
     name: string | null;
     email: string | null;
   } = { name: null, email: null };
-  let setupIntent: Awaited<
-    ReturnType<NonNullable<typeof stripe>['setupIntents']['retrieve']>
-  >;
+  let intentCustomer: string | null = null;
+  let payNowAmountCents: number | null = null;
+
   try {
-    setupIntent = await stripe.setupIntents.retrieve(setupIntentId, {
-      expand: ['payment_method', 'customer'],
-    });
-    if (setupIntent.status !== 'succeeded') {
-      return NextResponse.json(
-        {
-          error: 'setup_intent_not_succeeded',
-          status: setupIntent.status,
-        },
-        { status: 400 }
+    if (paymentIntentId) {
+      const paymentIntent = await stripe.paymentIntents.retrieve(
+        paymentIntentId,
+        { expand: ['payment_method', 'customer'] }
       );
-    }
-
-    // Bind SetupIntent → this Cal booking. Without this, a succeeded
-    // seti_ from booking A can be POSTed against booking B's uid.
-    const metaUid = (setupIntent.metadata?.cal_booking_uid ?? '').trim();
-    if (!metaUid || metaUid !== calBookingUid) {
-      console.warn('[api/booking/confirm] setup intent booking mismatch', {
-        calBookingUid,
-        metaUid: metaUid || null,
-        setupIntentId,
+      if (paymentIntent.status !== 'succeeded') {
+        return NextResponse.json(
+          {
+            error: 'payment_intent_not_succeeded',
+            status: paymentIntent.status,
+          },
+          { status: 400 }
+        );
+      }
+      const metaUid = (paymentIntent.metadata?.cal_booking_uid ?? '').trim();
+      if (!metaUid || metaUid !== calBookingUid) {
+        return NextResponse.json(
+          {
+            error: 'payment_intent_booking_mismatch',
+            message:
+              'This payment does not match the booking. Please try again.',
+          },
+          { status: 400 }
+        );
+      }
+      const linkedPi = (existingStripe?.stripe_payment_intent_id ?? '').trim();
+      if (linkedPi && linkedPi !== paymentIntentId) {
+        return NextResponse.json(
+          {
+            error: 'payment_intent_stale',
+            message: 'This payment session is out of date. Please try again.',
+          },
+          { status: 400 }
+        );
+      }
+      payNowAmountCents = paymentIntent.amount;
+      intentCustomer =
+        typeof paymentIntent.customer === 'string'
+          ? paymentIntent.customer
+          : paymentIntent.customer &&
+              typeof paymentIntent.customer === 'object' &&
+              'id' in paymentIntent.customer &&
+              typeof paymentIntent.customer.id === 'string'
+            ? paymentIntent.customer.id
+            : null;
+      const pm = paymentIntent.payment_method;
+      if (typeof pm === 'string') {
+        paymentMethodId = pm;
+      } else if (pm && typeof pm === 'object') {
+        paymentMethodId = pm.id;
+        pmBilling = {
+          name: pm.billing_details?.name ?? null,
+          email: pm.billing_details?.email ?? null,
+        };
+      } else {
+        paymentMethodId = '';
+      }
+    } else if (setupIntentId) {
+      const setupIntent = await stripe.setupIntents.retrieve(setupIntentId, {
+        expand: ['payment_method', 'customer'],
       });
-      return NextResponse.json(
-        {
-          error: 'setup_intent_booking_mismatch',
-          message:
-            'This card session does not match the booking. Please try checkout again.',
-        },
-        { status: 400 }
-      );
-    }
+      if (setupIntent.status !== 'succeeded') {
+        return NextResponse.json(
+          {
+            error: 'setup_intent_not_succeeded',
+            status: setupIntent.status,
+          },
+          { status: 400 }
+        );
+      }
 
-    const linkedSetupIntentId = (
-      existingStripe?.stripe_setup_intent_id ?? ''
-    ).trim();
-    if (linkedSetupIntentId && linkedSetupIntentId !== setupIntentId) {
-      console.warn('[api/booking/confirm] setup intent not current for booking', {
-        calBookingUid,
-        setupIntentId,
-        linkedSetupIntentId,
-      });
-      return NextResponse.json(
-        {
-          error: 'setup_intent_stale',
-          message:
-            'This card session is out of date. Please try checkout again.',
-        },
-        { status: 400 }
-      );
-    }
+      const metaUid = (setupIntent.metadata?.cal_booking_uid ?? '').trim();
+      if (!metaUid || metaUid !== calBookingUid) {
+        console.warn('[api/booking/confirm] setup intent booking mismatch', {
+          calBookingUid,
+          metaUid: metaUid || null,
+          setupIntentId,
+        });
+        return NextResponse.json(
+          {
+            error: 'setup_intent_booking_mismatch',
+            message:
+              'This card session does not match the booking. Please try checkout again.',
+          },
+          { status: 400 }
+        );
+      }
 
-    // After expansion, `payment_method` is the full object. Type guard
-    // both shapes so a future refactor that drops the expand call
-    // doesn't silently break the billing-details fallback.
-    const pm = setupIntent.payment_method;
-    if (typeof pm === 'string') {
-      paymentMethodId = pm;
-    } else if (pm && typeof pm === 'object') {
-      paymentMethodId = pm.id;
-      pmBilling = {
-        name: pm.billing_details?.name ?? null,
-        email: pm.billing_details?.email ?? null,
-      };
+      const linkedSetupIntentId = (
+        existingStripe?.stripe_setup_intent_id ?? ''
+      ).trim();
+      if (linkedSetupIntentId && linkedSetupIntentId !== setupIntentId) {
+        console.warn(
+          '[api/booking/confirm] setup intent not current for booking',
+          {
+            calBookingUid,
+            setupIntentId,
+            linkedSetupIntentId,
+          }
+        );
+        return NextResponse.json(
+          {
+            error: 'setup_intent_stale',
+            message:
+              'This card session is out of date. Please try checkout again.',
+          },
+          { status: 400 }
+        );
+      }
+
+      intentCustomer =
+        typeof setupIntent.customer === 'string'
+          ? setupIntent.customer
+          : setupIntent.customer &&
+              typeof setupIntent.customer === 'object' &&
+              'id' in setupIntent.customer &&
+              typeof setupIntent.customer.id === 'string'
+            ? setupIntent.customer.id
+            : null;
+
+      const pm = setupIntent.payment_method;
+      if (typeof pm === 'string') {
+        paymentMethodId = pm;
+      } else if (pm && typeof pm === 'object') {
+        paymentMethodId = pm.id;
+        pmBilling = {
+          name: pm.billing_details?.name ?? null,
+          email: pm.billing_details?.email ?? null,
+        };
+      } else {
+        paymentMethodId = '';
+      }
     } else {
-      paymentMethodId = '';
+      return NextResponse.json(
+        { error: 'invalid_intent_id' },
+        { status: 400 }
+      );
     }
+
     if (!paymentMethodId) {
       return NextResponse.json(
-        { error: 'no_payment_method_on_setup_intent' },
+        { error: 'no_payment_method_on_intent' },
         { status: 400 }
       );
     }
 
-    // Banks may still approve SetupIntent when CVC/ZIP is wrong.
-    // Reject hard fails so we don't vault a card we can't charge later.
-    const pmFull =
-      typeof pm === 'object' && pm
-        ? pm
-        : await stripe.paymentMethods.retrieve(paymentMethodId);
+    const pmFull = await stripe.paymentMethods.retrieve(paymentMethodId);
+    if (!pmBilling.name && pmFull.billing_details?.name) {
+      pmBilling.name = pmFull.billing_details.name;
+    }
+    if (!pmBilling.email && pmFull.billing_details?.email) {
+      pmBilling.email = pmFull.billing_details.email;
+    }
     const checkReject = stripeCardCheckRejection(
       pmFull.card?.checks ?? null
     );
@@ -499,7 +582,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   } catch (err) {
     const msg = errorMessage(err);
-    console.error('[api/booking/confirm] setupIntents.retrieve failed:', msg);
+    console.error('[api/booking/confirm] stripe intent retrieve failed:', msg);
     return NextResponse.json(
       { error: 'stripe_retrieve_failed', message: msg },
       { status: 502 }
@@ -525,19 +608,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       : '');
 
   // ── 2. STRIPE: attach PaymentMethod to vault Customer ─────────────
-  const customerFromIntent =
-    typeof setupIntent.customer === 'string'
-      ? setupIntent.customer
-      : setupIntent.customer &&
-          typeof setupIntent.customer === 'object' &&
-          'id' in setupIntent.customer &&
-          typeof setupIntent.customer.id === 'string'
-        ? setupIntent.customer.id
-        : null;
-
   let stripeCustomerId =
-    (customerFromIntent && STRIPE_CUSTOMER_ID_RE.test(customerFromIntent)
-      ? customerFromIntent
+    (intentCustomer && STRIPE_CUSTOMER_ID_RE.test(intentCustomer)
+      ? intentCustomer
       : null) ||
     (existingStripe?.stripe_customer_id &&
     STRIPE_CUSTOMER_ID_RE.test(existingStripe.stripe_customer_id)
@@ -614,20 +687,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // rather than fail outright. The webhook handler can backfill
   // by stripe_customer_id later via metadata lookup if needed.
   let dbLinked = false;
+  let appointmentId: string | null = existingStripe?.id ?? null;
   try {
-    const { rowCount } = await sql`
+    const { rows, rowCount } = await sql<{ id: string }>`
       UPDATE appointments
       SET stripe_customer_id = ${stripeCustomerId},
+          payment_timing = ${paymentTiming},
+          stripe_payment_intent_id = COALESCE(
+            ${paymentIntentId},
+            stripe_payment_intent_id
+          ),
           status = CASE
             WHEN status IS NULL OR status = 'pending' THEN 'confirmed'
             ELSE status
           END
       WHERE cal_event_id = ${calBookingUid}
+      RETURNING id::text AS id
     `;
     dbLinked = (rowCount ?? 0) > 0;
+    appointmentId = rows[0]?.id ?? appointmentId;
     if (!dbLinked) {
-      // Hold gate required a row earlier — disappearance mid-request is
-      // unexpected; do not pretend the booking was confirmed locally.
       console.error(
         '[api/booking/confirm] appointments row missing after hold gate',
         { calBookingUid, stripeCustomerId }
@@ -649,13 +728,44 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       {
         error: 'db_update_failed',
         message: msg,
-        // Surface the Stripe Customer id so the admin can manually
-        // reconcile if needed — we don't want to silently lose a
-        // valid vault behind a DB error.
         stripeCustomerId,
       },
       { status: 500 }
     );
+  }
+
+  if (
+    paymentTiming === 'pay_now' &&
+    paymentIntentId &&
+    appointmentId &&
+    payNowAmountCents != null &&
+    payNowAmountCents >= 50
+  ) {
+    try {
+      await insertOnlinePrepaidSettlement({
+        appointmentId,
+        calBookingUid,
+        stripePaymentIntentId: paymentIntentId,
+        baseAmountCents: payNowAmountCents,
+      });
+    } catch (err) {
+      if (!isSettlementUniqueConflict(err)) {
+        console.error(
+          '[api/booking/confirm] online prepaid ledger insert failed',
+          errorMessage(err)
+        );
+        return NextResponse.json(
+          {
+            error: 'prepaid_ledger_failed',
+            message:
+              'Payment succeeded but we could not record the settlement. Please contact the studio.',
+            stripeCustomerId,
+            paymentIntentId,
+          },
+          { status: 500 }
+        );
+      }
+    }
   }
 
   // ── 4. CAL.COM: accept the pending booking ─────────────────────────

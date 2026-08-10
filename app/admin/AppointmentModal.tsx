@@ -886,6 +886,15 @@ function settlementLabel(kind: AppointmentPaymentKind | null | undefined): strin
   return 'Paid in person';
 }
 
+function isOnlinePrepaidPayment(payment: TerminalPaymentSummary): boolean {
+  return (
+    payment.status === 'succeeded' &&
+    payment.payment_kind === 'service_payment' &&
+    !payment.reader_id &&
+    Boolean(payment.payment_intent_id)
+  );
+}
+
 function PaymentBox({
   payment,
   onUndo,
@@ -897,6 +906,7 @@ function PaymentBox({
 }) {
   const isComp = payment.payment_kind === 'complimentary';
   const isCash = payment.payment_kind === 'cash';
+  const isOnlinePrepaid = isOnlinePrepaidPayment(payment);
 
   return (
     <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4">
@@ -907,18 +917,22 @@ function PaymentBox({
           </span>
           <div>
             <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-emerald-700">
-              {settlementLabel(payment.payment_kind)}
+              {isOnlinePrepaid
+                ? 'Paid online'
+                : settlementLabel(payment.payment_kind)}
             </p>
             <p className="text-sm text-emerald-950">
               {isComp
                 ? 'No charge · settled without payment'
-                : `Service ${formatCentsUsd(payment.base_amount_cents)}${
-                    payment.tip_amount_cents > 0
-                      ? ` + ${formatCentsUsd(payment.tip_amount_cents)} tip`
-                      : isCash
-                        ? ' · Cash'
-                        : ' · No tip'
-                  }`}
+                : isOnlinePrepaid
+                  ? `Service ${formatCentsUsd(payment.base_amount_cents)} · Card at booking`
+                  : `Service ${formatCentsUsd(payment.base_amount_cents)}${
+                      payment.tip_amount_cents > 0
+                        ? ` + ${formatCentsUsd(payment.tip_amount_cents)} tip`
+                        : isCash
+                          ? ' · Cash'
+                          : ' · No tip'
+                    }`}
             </p>
             {payment.note ? (
               <p className="mt-1 text-xs text-emerald-800/80">{payment.note}</p>
@@ -929,7 +943,7 @@ function PaymentBox({
           {isComp ? 'Comp' : formatCentsUsd(payment.total_amount_cents)}
         </p>
       </div>
-      {onUndo ? (
+      {onUndo && !isOnlinePrepaid ? (
         <button
           type="button"
           onClick={onUndo}
