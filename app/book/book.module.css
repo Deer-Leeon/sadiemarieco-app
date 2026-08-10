@@ -67,6 +67,12 @@
   box-sizing: border-box;
 }
 
+/* Review: keep CTA under the summary (no orphan void above a sticky footer). */
+.mainReview {
+  flex: 0 1 auto;
+  padding: 12px 20px 16px;
+}
+
 .title {
   margin: 0 0 20px;
   font-family: 'Bodoni Moda', Georgia, serif;
@@ -74,6 +80,11 @@
   font-weight: 600;
   letter-spacing: -0.02em;
   color: #0d1b2a;
+}
+
+.titleReview {
+  margin: 0 0 12px;
+  font-size: clamp(24px, 6vw, 30px);
 }
 
 .section {
@@ -288,6 +299,20 @@
   cursor: pointer;
 }
 
+.reviewSection {
+  gap: 12px;
+}
+
+.reviewSheet {
+  background: #fff;
+  border: 1px solid #dde0e6;
+  padding: 14px 16px;
+}
+
+.reviewBlock + .reviewBlock {
+  margin: 0;
+}
+
 .reviewCard,
 .policyBox {
   background: #fff;
@@ -296,7 +321,7 @@
 }
 
 .reviewEyebrow {
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   font-size: 10px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
@@ -306,41 +331,43 @@
 .reviewService {
   margin: 0;
   font-family: 'Bodoni Moda', Georgia, serif;
-  font-size: 22px;
+  font-size: 20px;
   color: #0d1b2a;
 }
 
 .reviewMeta,
 .reviewWhen,
 .reviewNote,
-.policyBox p {
-  margin: 8px 0 0;
-  font-size: 14px;
-  line-height: 1.45;
+.policyBox p,
+.policyCopy {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
   color: #586574;
 }
 
 .reviewRule {
   border: 0;
   border-top: 1px solid #dde0e6;
-  margin: 16px 0;
+  margin: 12px 0;
 }
 
 .reviewTotal {
-  margin: 0;
+  margin: 10px 0 0;
   display: flex;
   justify-content: space-between;
   font-family: 'Bodoni Moda', Georgia, serif;
-  font-size: 18px;
+  font-size: 17px;
   color: #0d1b2a;
 }
 
 .policyTitle {
-  margin: 0 0 6px !important;
-  font-size: 12px !important;
-  letter-spacing: 0.14em;
+  margin: 0 0 4px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: #0d1b2a !important;
+  color: #586574 !important;
+  font-weight: 500;
 }
 
 .contactCard {
@@ -361,7 +388,7 @@
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .contactDl div {
@@ -381,7 +408,7 @@
 
 .contactDl dd {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   color: #0d1b2a;
   font-family: 'Bodoni Moda', Georgia, serif;
   word-break: break-word;
@@ -486,10 +513,17 @@
   backdrop-filter: blur(8px);
 }
 
+/* Sit the pay CTA directly under the summary — no mid-page void. */
+.shell:has(.mainReview) .footer {
+  position: relative;
+}
+
 .footerStack {
   flex-direction: column;
   align-items: stretch;
-  gap: 10px;
+  gap: 8px;
+  padding-top: 12px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
 }
 
 .footerStack .footerTotal {
