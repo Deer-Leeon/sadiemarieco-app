@@ -124,6 +124,13 @@ export default function BookClient() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<BookConfirmed | null>(null);
+  const [applePayPrefetch, setApplePayPrefetch] = useState<boolean | null>(
+    null
+  );
+
+  const onApplePayPrefetch = useCallback((available: boolean) => {
+    setApplePayPrefetch(available);
+  }, []);
 
   const elementsOptions: StripeElementsOptions = useMemo(
     () => ({
@@ -898,16 +905,19 @@ export default function BookClient() {
       {(step === 'when' || step === 'contact' || step === 'review') &&
         !showReachPanel && (
         <>
-          {step === 'review' && stripePromise && selected && selectedStart ? (
+          {stripePromise &&
+          (step === 'when' || step === 'contact' || step === 'review') ? (
             <Elements stripe={stripePromise} options={elementsOptions}>
+              {/* Persistent Apple Pay host — warms from time-picker onward. */}
               <BookPayErrorBoundary
-                priceLabel={selected.priceLabel}
+                priceLabel={selected?.priceLabel || ''}
                 submitting={submitting}
                 onPayWithCard={() => void submitBooking()}
               >
                 <BookApplePayHost
-                  priceLabel={selected.priceLabel}
-                  serviceTitle={selected.title}
+                  reviewVisible={step === 'review' && !!selected && !!selectedStart}
+                  priceLabel={selected?.priceLabel || ''}
+                  serviceTitle={selected?.title || ''}
                   createPayload={createPayload}
                   submitting={submitting}
                   onSubmittingChange={setSubmitting}
@@ -915,8 +925,40 @@ export default function BookClient() {
                   onCreateError={handleCreateError}
                   onPayWithCard={() => void submitBooking()}
                   onConfirmed={setConfirmed}
+                  onApplePayResolved={onApplePayPrefetch}
                 />
               </BookPayErrorBoundary>
+              {step !== 'review' ? (
+                <footer className={styles.footer}>
+                  {selected && (
+                    <div className={styles.footerTotal}>
+                      <span className={styles.footerPrice}>
+                        {selected.priceLabel}
+                      </span>
+                      <span className={styles.footerHint}>{selected.title}</span>
+                    </div>
+                  )}
+                  {step === 'when' && (
+                    <button
+                      type="button"
+                      className={styles.primaryBtn}
+                      disabled={!selectedStart}
+                      onClick={continueFromWhen}
+                    >
+                      Continue
+                    </button>
+                  )}
+                  {step === 'contact' && (
+                    <button
+                      type="button"
+                      className={styles.primaryBtn}
+                      onClick={continueFromContact}
+                    >
+                      Continue
+                    </button>
+                  )}
+                </footer>
+              ) : null}
             </Elements>
           ) : (
             <footer className={styles.footer}>
