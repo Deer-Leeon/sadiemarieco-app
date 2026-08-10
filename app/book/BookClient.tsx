@@ -23,8 +23,14 @@ import styles from './book.module.css';
 
 type Step = 'service' | 'when' | 'contact' | 'review';
 
-/** Phone /book date strip + Cal slots fetch (inclusive of today). */
+/** Phone /book date strip (inclusive of today). */
 const BOOK_AVAILABILITY_DAYS = 90;
+/** First paint: load this many days before filling the rest in the background. */
+const BOOK_SLOTS_INITIAL_DAYS = 21;
+/** Cal range chunk size for background fills. */
+const BOOK_SLOTS_CHUNK_DAYS = 21;
+/** Abort a hung slots request so the UI never spins forever. */
+const BOOK_SLOTS_FETCH_TIMEOUT_MS = 12_000;
 
 interface BookService {
   slug: string;
@@ -204,8 +210,6 @@ export default function BookClient() {
     setSlotsLoading(true);
     setSlotsError(null);
     const start = studioTodayYmd();
-    // Inclusive horizon: today through today + 89 (= 90 calendar days).
-    const end = addDaysYmd(start, BOOK_AVAILABILITY_DAYS - 1);
     const days: string[] = [];
     for (let i = 0; i < BOOK_AVAILABILITY_DAYS; i += 1) {
       days.push(addDaysYmd(start, i));
@@ -213,32 +217,77 @@ export default function BookClient() {
     setDayOptions(days);
     setSelectedDay(start);
     setSelectedStart(null);
+    setSlotsByDay({});
 
-    try {
+    const fetchRange = async (
+      rangeStart: string,
+      rangeEnd: string
+    ): Promise<Record<string, string[]>> => {
       const params = new URLSearchParams({
         slug,
-        date: start,
-        end,
+        date: rangeStart,
+        end: rangeEnd,
       });
-      const res = await fetch(`/api/book/slots?${params}`, {
-        headers: { Accept: 'application/json' },
-      });
-      const data = (await res.json().catch(() => null)) as {
-        slots?: Record<string, string[]>;
-        message?: string;
-      } | null;
-      if (!res.ok) {
-        setSlotsByDay({});
-        setSlotsError(data?.message || 'Could not load times.');
-        return;
+      const controller = new AbortController();
+      const timer = window.setTimeout(
+        () => controller.abort(),
+        BOOK_SLOTS_FETCH_TIMEOUT_MS
+      );
+      try {
+        const res = await fetch(`/api/book/slots?${params}`, {
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        });
+        const data = (await res.json().catch(() => null)) as {
+          slots?: Record<string, string[]>;
+          message?: string;
+        } | null;
+        if (!res.ok) {
+          throw new Error(data?.message || 'Could not load times.');
+        }
+        return data?.slots ?? {};
+      } finally {
+        window.clearTimeout(timer);
       }
-      setSlotsByDay(data?.slots ?? {});
-      const firstWithSlots = days.find((d) => (data?.slots?.[d]?.length ?? 0) > 0);
+    };
+
+    try {
+      const initialEnd = addDaysYmd(
+        start,
+        Math.min(BOOK_SLOTS_INITIAL_DAYS, BOOK_AVAILABILITY_DAYS) - 1
+      );
+      const initialSlots = await fetchRange(start, initialEnd);
+      setSlotsByDay(initialSlots);
+      const firstWithSlots = days.find(
+        (d) => (initialSlots[d]?.length ?? 0) > 0
+      );
       if (firstWithSlots) setSelectedDay(firstWithSlots);
-    } catch {
-      setSlotsError('Could not load times.');
+      setSlotsLoading(false);
+
+      // Fill the rest of the 90-day strip without blocking the time picker.
+      for (
+        let offset = BOOK_SLOTS_INITIAL_DAYS;
+        offset < BOOK_AVAILABILITY_DAYS;
+        offset += BOOK_SLOTS_CHUNK_DAYS
+      ) {
+        const rangeStart = addDaysYmd(start, offset);
+        const rangeEnd = addDaysYmd(
+          start,
+          Math.min(offset + BOOK_SLOTS_CHUNK_DAYS, BOOK_AVAILABILITY_DAYS) - 1
+        );
+        try {
+          const more = await fetchRange(rangeStart, rangeEnd);
+          setSlotsByDay((prev) => ({ ...prev, ...more }));
+        } catch {
+          // Keep what we have; later days stay disabled until a retry.
+          break;
+        }
+      }
+    } catch (err) {
+      setSlotsError(
+        err instanceof Error ? err.message : 'Could not load times.'
+      );
       setSlotsByDay({});
-    } finally {
       setSlotsLoading(false);
     }
   }, []);
