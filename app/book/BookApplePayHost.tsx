@@ -2,8 +2,8 @@
 
 /**
  * Express Checkout for /book pay step.
- * Mounted on the pay step only (after pay-now vs pay-later is chosen) so
- * Elements mode matches: setup for vault, payment for charge.
+ * Parent owns footer chrome and dual-mounts setup + payment hosts so
+ * switching pay-later / pay-now only toggles visibility (no remount).
  */
 
 import {
@@ -99,17 +99,15 @@ export type BookConfirmed = {
 };
 
 type Props = {
-  /** When false, keep Express Checkout mounted off-screen (warming). */
-  payVisible: boolean;
+  /** This host is the interactive Apple Pay button for the current choice. */
+  active: boolean;
   paymentTiming: BookingPaymentTiming;
-  priceLabel: string;
   serviceTitle: string;
   createPayload: Omit<BookCreatePayload, 'source'>;
   submitting: boolean;
   onSubmittingChange: (v: boolean) => void;
   onError: (message: string | null) => void;
   onCreateError: (data: { error?: string; message?: string }) => void;
-  onPayWithCard: () => void;
   onConfirmed: (result: BookConfirmed) => void;
   onApplePayResolved: (available: boolean) => void;
 };
@@ -133,16 +131,14 @@ const EXPRESS_OPTIONS: StripeExpressCheckoutElementOptions = {
 };
 
 export default function BookApplePayHost({
-  payVisible,
+  active,
   paymentTiming,
-  priceLabel,
   serviceTitle,
   createPayload,
   submitting,
   onSubmittingChange,
   onError,
   onCreateError,
-  onPayWithCard,
   onConfirmed,
   onApplePayResolved,
 }: Props) {
@@ -172,11 +168,6 @@ export default function BookApplePayHost({
   useEffect(() => {
     if (!prefersApplePay) onApplePayResolved(false);
   }, [prefersApplePay, onApplePayResolved]);
-
-  useEffect(() => {
-    setExpressReady(false);
-    setApplePayAvailable(false);
-  }, [paymentTiming]);
 
   const onClick = useCallback(
     (event: StripeExpressCheckoutElementClickEvent) => {
@@ -225,7 +216,7 @@ export default function BookApplePayHost({
 
   const onConfirm = useCallback(
     async (event: StripeExpressCheckoutElementConfirmEvent) => {
-      if (!stripe || !elements || submitting) {
+      if (!stripe || !elements || submitting || !active) {
         event.paymentFailed({ reason: 'fail' });
         return;
       }
@@ -415,6 +406,7 @@ export default function BookApplePayHost({
       stripe,
       elements,
       submitting,
+      active,
       onError,
       onSubmittingChange,
       createHold,
@@ -423,110 +415,43 @@ export default function BookApplePayHost({
   );
 
   const showApplePay = expressReady && applePayAvailable;
-  const showWalletChrome =
-    payVisible && (showApplePay || (prefersApplePay && !expressReady));
-  const showCardPrimary = payVisible && expressReady && !applePayAvailable;
-
-  const footerHint =
-    paymentTiming === 'pay_now'
-      ? 'Charged now — card also saved for your appointment'
-      : 'No charge today — Apple Pay saves your card';
+  const interactive = active && showApplePay && !submitting;
 
   return (
-    <>
+    <div
+      className={styles.expressLayer}
+      aria-hidden={!interactive}
+      style={{
+        pointerEvents: interactive ? 'auto' : 'none',
+        // Keep inactive host mounted in-place (opacity 0) so radio switches
+        // never remount Express Checkout.
+        opacity: active ? (submitting ? 0.5 : 1) : 0,
+        zIndex: active ? 1 : 0,
+      }}
+    >
+      {active && prefersApplePay && !showApplePay ? (
+        <div className={styles.applePaySlot} aria-hidden="true" />
+      ) : null}
       <div
         className={
-          showWalletChrome
-            ? `${styles.footer} ${styles.footerStack} ${styles.expressHostLive}`
-            : styles.expressHostWarm
+          active && prefersApplePay && !showApplePay
+            ? styles.expressUnderSlot
+            : styles.expressPainted
         }
-        aria-hidden={!showWalletChrome}
       >
-        <div
-          className={styles.footerTotal}
-          style={{ visibility: showWalletChrome ? 'visible' : 'hidden' }}
-        >
-          <span className={styles.footerPrice}>
-            {paymentTiming === 'pay_now' ? priceLabel || '$0' : '$0'}
-          </span>
-          <span className={styles.footerHint}>{footerHint}</span>
-        </div>
-
-        <div
-          className={styles.expressCheckout}
-          style={{
-            pointerEvents:
-              showWalletChrome && showApplePay && !submitting ? 'auto' : 'none',
-            opacity: submitting ? 0.5 : 1,
+        <ExpressCheckoutElement
+          options={EXPRESS_OPTIONS}
+          onReady={onReady}
+          onClick={onClick}
+          onConfirm={onConfirm}
+          onLoadError={() => {
+            setExpressReady(true);
+            setApplePayAvailable(false);
+            onApplePayResolved(false);
           }}
-        >
-          <div
-            className={styles.applePaySlot}
-            style={{
-              display: showWalletChrome && !showApplePay ? 'block' : 'none',
-            }}
-            aria-hidden="true"
-          />
-          <div
-            className={
-              !payVisible || showApplePay
-                ? styles.expressPainted
-                : styles.expressUnderSlot
-            }
-          >
-            <ExpressCheckoutElement
-              options={EXPRESS_OPTIONS}
-              onReady={onReady}
-              onClick={onClick}
-              onConfirm={onConfirm}
-              onLoadError={() => {
-                setExpressReady(true);
-                setApplePayAvailable(false);
-                onApplePayResolved(false);
-              }}
-              onCancel={() => onSubmittingChange(false)}
-            />
-          </div>
-        </div>
-
-        <button
-          type="button"
-          className={styles.textLinkBtn}
-          disabled={submitting || !showWalletChrome}
-          onClick={onPayWithCard}
-          style={{ visibility: showWalletChrome ? 'visible' : 'hidden' }}
-          tabIndex={showWalletChrome ? 0 : -1}
-        >
-          Pay with card instead
-        </button>
+          onCancel={() => onSubmittingChange(false)}
+        />
       </div>
-
-      {showCardPrimary ? (
-        <footer className={`${styles.footer} ${styles.footerStack}`}>
-          <div className={styles.footerTotal}>
-            <span className={styles.footerPrice}>
-              {paymentTiming === 'pay_now' ? priceLabel : '$0'}
-            </span>
-            <span className={styles.footerHint}>
-              {paymentTiming === 'pay_now'
-                ? 'Pay now in full'
-                : 'Then secure checkout'}
-            </span>
-          </div>
-          <button
-            type="button"
-            className={styles.primaryBtn}
-            disabled={submitting}
-            onClick={onPayWithCard}
-          >
-            {submitting
-              ? 'Holding your time…'
-              : paymentTiming === 'pay_now'
-                ? 'Pay with card'
-                : 'Continue to checkout'}
-          </button>
-        </footer>
-      ) : null}
-    </>
+    </div>
   );
 }
