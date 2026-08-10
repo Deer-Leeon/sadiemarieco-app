@@ -379,9 +379,11 @@ export default function BookApplePayHost({
   return (
     <>
       <div
-        className={`${styles.footer} ${styles.footerStack} ${
-          showWalletChrome ? styles.expressHostLive : styles.expressHostWarm
-        }`}
+        className={
+          showWalletChrome
+            ? `${styles.footer} ${styles.footerStack} ${styles.expressHostLive}`
+            : styles.expressHostWarm
+        }
         aria-hidden={!showWalletChrome}
       >
         <div

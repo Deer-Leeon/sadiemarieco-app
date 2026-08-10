@@ -544,20 +544,31 @@
   position: relative;
 }
 
-/* Off-screen warm mount — same Express Checkout DOM, not remounted on review. */
+/*
+ * Off-screen warm mount — same Express Checkout DOM, not remounted on review.
+ * Must NOT use bottom:0 / opacity:0 alone: Stripe iframes still paint and
+ * land on top of the sticky Continue footer on the time/contact steps.
+ */
 .expressHostWarm {
-  position: absolute !important;
+  position: fixed !important;
+  left: -10000px !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
   width: 360px !important;
   height: 48px !important;
+  max-height: 48px !important;
   overflow: hidden !important;
   opacity: 0 !important;
+  visibility: hidden !important;
   pointer-events: none !important;
-  left: 0 !important;
-  bottom: 0 !important;
-  z-index: -1;
+  clip-path: inset(50%) !important;
+  z-index: -1 !important;
   margin: 0 !important;
   border: 0 !important;
   padding: 0 !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
 }
 
 .expressHostLive {
