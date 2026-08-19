@@ -390,14 +390,17 @@ export default function CheckoutClient({
   // Cal phone-only bookings pass <digits>@sms.cal.com — never prefill Stripe Link with that.
   const emailRaw = params.get('email')?.trim() ?? '';
   const email = isValidEmail(emailRaw) ? emailRaw.trim().toLowerCase() : '';
-  const urlPayNow = params.get('payMode')?.trim() === 'now';
+  const urlPayMode = params.get('payMode')?.trim() ?? '';
+  const urlPayNow = urlPayMode === 'now';
+  const skipChoose = urlPayMode === 'now' || urlPayMode === 'later';
+  const embedInDrawer = params.get('embed')?.trim() === 'drawer';
   const [paymentTiming, setPaymentTiming] = useState<BookingPaymentTiming>(
     urlPayNow ? 'pay_now' : 'pay_later'
   );
-  // Desktop Cal embed lands here without payMode → choose first.
-  // Mobile "pay with card" already picked timing and sends payMode=now.
+  // Drawer already showed pay-later / pay-now. payMode skips that step
+  // and opens the card form. Bare /checkout?uid= still shows choose.
   const [payPhase, setPayPhase] = useState<'choose' | 'card'>(
-    urlPayNow ? 'card' : 'choose'
+    skipChoose ? 'card' : 'choose'
   );
   const [confirmed, setConfirmed] = useState<CheckoutConfirmed | null>(null);
   const [mountApplePay, setMountApplePay] = useState(false);
@@ -443,6 +446,35 @@ export default function CheckoutClient({
   const onApplePayResolved = useCallback((available: boolean) => {
     setApplePayAvailable((prev) => (prev === true ? true : available));
   }, []);
+
+  const navigateToCardCheckout = useCallback(
+    (timing: BookingPaymentTiming) => {
+      const url = new URL('/checkout', window.location.origin);
+      url.searchParams.set('uid', uid);
+      url.searchParams.set(
+        'payMode',
+        timing === 'pay_now' ? 'now' : 'later'
+      );
+      if (name) url.searchParams.set('name', name);
+      else url.searchParams.delete('name');
+      if (email) url.searchParams.set('email', email);
+      else url.searchParams.delete('email');
+      const target =
+        window.top && window.top !== window ? window.top : window;
+      target.location.replace(url.toString());
+    },
+    [uid, name, email]
+  );
+
+  // 3DS / Apple Pay return_url is the full checkout page. If that lands
+  // inside the drawer iframe, promote it to the top window.
+  useEffect(() => {
+    if (embedInDrawer) return;
+    if (typeof window === 'undefined') return;
+    if (window.top && window.top !== window) {
+      window.top.location.replace(window.location.href);
+    }
+  }, [embedInDrawer]);
 
   const markConfirmed = useCallback(
     (result: CheckoutApplePayConfirmed | CheckoutConfirmed) => {
@@ -744,10 +776,20 @@ export default function CheckoutClient({
   }, [payNow, quotedServicePriceCents]);
 
   return (
-    <main className="flex min-h-screen w-full flex-col items-center bg-[#FAF9F6] px-4 py-12 font-sans sm:py-16">
-      <BrandHeader />
+    <main
+      className={
+        embedInDrawer
+          ? 'flex min-h-full w-full flex-col items-center bg-[#F5F3F0] px-4 py-5 font-sans'
+          : 'flex min-h-screen w-full flex-col items-center bg-[#FAF9F6] px-4 py-12 font-sans sm:py-16'
+      }
+    >
+      {embedInDrawer ? null : <BrandHeader />}
 
-      <section className="mt-10 w-full max-w-md">
+      <section
+        className={
+          embedInDrawer ? 'w-full max-w-md' : 'mt-10 w-full max-w-md'
+        }
+      >
         {holdExpired ? (
           <ExpiredHoldCard releaseState={holdReleaseState} />
         ) : threeDsPaymentIntentId ? (
@@ -793,6 +835,7 @@ export default function CheckoutClient({
                   setApplePayError(null);
                 }}
                 quotedServicePriceCents={quotedServicePriceCents}
+                compact={embedInDrawer}
                 mountApplePay={mountApplePay}
                 applePayAvailable={applePayAvailable}
                 applePaySubmitting={applePaySubmitting}
@@ -805,6 +848,10 @@ export default function CheckoutClient({
                 onConfirmed={markConfirmed}
                 onPayWithCard={() => {
                   setApplePayError(null);
+                  if (embedInDrawer) {
+                    navigateToCardCheckout(paymentTiming);
+                    return;
+                  }
                   setPayPhase('card');
                 }}
               />
@@ -833,7 +880,7 @@ export default function CheckoutClient({
         )}
       </section>
 
-      <Footnote />
+      {embedInDrawer ? null : <Footnote />}
     </main>
   );
 }
@@ -849,6 +896,7 @@ function CheckoutPayChoice({
   paymentTiming,
   onPaymentTimingChange,
   quotedServicePriceCents,
+  compact = false,
   mountApplePay,
   applePayAvailable,
   applePaySubmitting,
@@ -868,6 +916,7 @@ function CheckoutPayChoice({
   paymentTiming: BookingPaymentTiming;
   onPaymentTimingChange: (next: BookingPaymentTiming) => void;
   quotedServicePriceCents: number | null;
+  compact?: boolean;
   mountApplePay: boolean;
   applePayAvailable: boolean | null;
   applePaySubmitting: boolean;
@@ -886,7 +935,13 @@ function CheckoutPayChoice({
   const showPrimaryCard = !mountApplePay || applePayAvailable === false;
 
   return (
-    <div className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm shadow-stone-900/[0.03] sm:p-10">
+    <div
+      className={
+        compact
+          ? 'rounded-2xl border border-stone-200 bg-white p-5 shadow-sm shadow-stone-900/[0.03]'
+          : 'rounded-2xl border border-stone-200 bg-white p-8 shadow-sm shadow-stone-900/[0.03] sm:p-10'
+      }
+    >
       <h2 className="font-serif text-2xl text-stone-900">
         How would you like to pay?
       </h2>
@@ -1646,6 +1701,7 @@ function ExpiredHoldCard({
       {canReturn ? (
         <Link
           href="/?cal_refresh=1#services"
+          target="_top"
           className="mt-8 inline-flex w-full items-center justify-center rounded-md bg-stone-900 px-5 py-3 text-sm font-medium tracking-wide text-stone-50 transition-colors hover:bg-stone-800"
         >
           Return to booking calendar
