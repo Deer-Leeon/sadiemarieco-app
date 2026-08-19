@@ -79,10 +79,33 @@
   box-sizing: border-box;
 }
 
-.titleReview {
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.titleRowReview {
   margin: 0 0 10px;
-  font-size: clamp(24px, 6vw, 30px);
   flex-shrink: 0;
+}
+
+.titleRowReview .title,
+.titleRowReview .titleReview {
+  margin: 0;
+}
+
+.holdTimer {
+  margin: 0;
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  tabular-nums: true;
+  font-variant-numeric: tabular-nums;
+  color: #0d1b2a;
 }
 
 .title {
@@ -92,6 +115,12 @@
   font-weight: 600;
   letter-spacing: -0.02em;
   color: #0d1b2a;
+}
+
+.titleReview {
+  margin: 0 0 10px;
+  font-size: clamp(24px, 6vw, 30px);
+  flex-shrink: 0;
 }
 
 .section {

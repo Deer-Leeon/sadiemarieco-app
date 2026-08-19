@@ -92,6 +92,8 @@ type Props = {
   paymentTiming: BookingPaymentTiming;
   serviceTitle: string;
   createPayload: Omit<BookCreatePayload, 'source'>;
+  /** Already-created hold from the Payment step; skip a second Cal create. */
+  calBookingUid?: string | null;
   submitting: boolean;
   onSubmittingChange: (v: boolean) => void;
   onError: (message: string | null) => void;
@@ -123,6 +125,7 @@ export default function BookApplePayHost({
   paymentTiming,
   serviceTitle,
   createPayload,
+  calBookingUid,
   submitting,
   onSubmittingChange,
   onError,
@@ -141,11 +144,13 @@ export default function BookApplePayHost({
   const payloadRef = useRef(createPayload);
   const serviceTitleRef = useRef(serviceTitle);
   const paymentTimingRef = useRef(paymentTiming);
+  const holdUidRef = useRef(calBookingUid);
   useEffect(() => {
     payloadRef.current = createPayload;
     serviceTitleRef.current = serviceTitle;
     paymentTimingRef.current = paymentTiming;
-  }, [createPayload, serviceTitle, paymentTiming]);
+    holdUidRef.current = calBookingUid;
+  }, [createPayload, serviceTitle, paymentTiming, calBookingUid]);
 
   const onReady = useCallback(
     (event: StripeExpressCheckoutElementReadyEvent) => {
@@ -170,6 +175,15 @@ export default function BookApplePayHost({
 
   const createHold = useCallback(
     async (source: BookCreatePayload['source']) => {
+      const existingUid = holdUidRef.current?.trim();
+      if (existingUid) {
+        const payload = payloadRef.current;
+        return {
+          calBookingUid: existingUid,
+          name: payload.name,
+          email: payload.email || '',
+        };
+      }
       const payload = payloadRef.current;
       const res = await fetchWithTimeout(
         '/api/book/create',

@@ -40,6 +40,7 @@ import {
   parseClientPhone,
   sqlPhoneVariants,
 } from '@/lib/client-identity';
+import { getAppointmentHoldByCalUid } from '@/lib/appointment-hold';
 import { isHoldExpired } from '@/lib/booking-hold';
 import { lookupBookingPhone } from '@/lib/phone-lookup';
 import {
@@ -132,6 +133,7 @@ async function findExistingHoldForPhone(params: {
       bookingTime: string | null;
       endTime: string | null;
       serviceName: string | null;
+      createdAt: string | null;
     }
   | { kind: 'conflict'; bookingTime: string | null; endTime: string | null }
   | null
@@ -204,6 +206,7 @@ async function findExistingHoldForPhone(params: {
           bookingTime,
           endTime,
           serviceName: row.service_name,
+          createdAt: serialize(row.created_at),
         };
       }
       return { kind: 'conflict', bookingTime, endTime };
@@ -420,6 +423,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         serviceName: existing.serviceName || service.title,
         bookingTime: existing.bookingTime || startUtc.toISOString(),
         endTime: existing.endTime,
+        createdAt: existing.createdAt,
       });
     }
   } catch (err) {
@@ -572,6 +576,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     source: analyticsSource,
   });
 
+  const hold = await getAppointmentHoldByCalUid(extracted.uid);
   return NextResponse.json({
     ok: true,
     calBookingUid: extracted.uid,
@@ -580,5 +585,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     serviceName: service.title,
     bookingTime: extracted.start || startUtc.toISOString(),
     endTime: extracted.end,
+    createdAt: hold?.created_at ?? new Date().toISOString(),
   });
 }
