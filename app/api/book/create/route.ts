@@ -40,7 +40,6 @@ import {
   parseClientPhone,
   sqlPhoneVariants,
 } from '@/lib/client-identity';
-import { formatAppointmentWhen } from '@/lib/format-booking-time';
 import { isHoldExpired } from '@/lib/booking-hold';
 import { lookupBookingPhone } from '@/lib/phone-lookup';
 import {
@@ -114,10 +113,10 @@ function extractBooking(payload: unknown): {
 const CAL_SLOT_CONFLICT_RE =
   /already has booking at this time|not available|already booked|no longer available|overlapping|conflict/i;
 
-function friendlySlotConflictMessage(existingWhen?: string | null): string {
-  if (existingWhen) {
-    return `You already have an appointment at ${existingWhen}. That time is taken, so payment did not go through. Pick a slot after it ends.`;
-  }
+// Deliberately does NOT echo the existing appointment's date/time: this
+// endpoint is unauthenticated, so a specific time would let anyone who
+// knows a client's phone number probe for their appointment schedule.
+function friendlySlotConflictMessage(): string {
   return 'That time is no longer available — you may already have an appointment then. Payment did not go through. Pick another time.';
 }
 
@@ -125,6 +124,7 @@ async function findExistingHoldForPhone(params: {
   phoneDigits: string;
   startUtc: Date;
   durationMins: number;
+  serviceTitle: string;
 }): Promise<
   | {
       kind: 'reuse_pending';
@@ -158,7 +158,7 @@ async function findExistingHoldForPhone(params: {
       created_at,
       service_name
     FROM appointments
-    WHERE regexp_replace(COALESCE(client_phone, ''), '\D', '', 'g') IN (
+    WHERE regexp_replace(COALESCE(client_phone, ''), '\\D', '', 'g') IN (
         ${phoneV0},
         ${phoneV1}
       )
@@ -191,7 +191,13 @@ async function findExistingHoldForPhone(params: {
 
     if (status === 'pending') {
       if (isHoldExpired(row.created_at)) continue;
-      if (sameStart && uid) {
+      // Reuse only when it is genuinely the SAME booking retried: same
+      // start AND same service. A different service at the same start
+      // would hand back a hold priced/booked for the old service.
+      const sameService =
+        (row.service_name ?? '').trim().toLowerCase() ===
+        params.serviceTitle.trim().toLowerCase();
+      if (sameStart && sameService && uid) {
         return {
           kind: 'reuse_pending',
           calBookingUid: uid,
@@ -220,7 +226,7 @@ async function mapCalCreateFailure(response: NextResponse): Promise<NextResponse
     return NextResponse.json(
       {
         error: 'slot_unavailable',
-        message: friendlySlotConflictMessage(null),
+        message: friendlySlotConflictMessage(),
       },
       { status: 409 }
     );
@@ -390,18 +396,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       phoneDigits: phoneLookup.digits,
       startUtc,
       durationMins: service.durationMins,
+      serviceTitle: service.title,
     });
     if (existing?.kind === 'conflict') {
-      const when = existing.bookingTime
-        ? formatAppointmentWhen(existing.bookingTime, existing.endTime)
-        : null;
-      const whenLabel = when
-        ? `${when.date}, ${when.timeRange}`
-        : null;
       return NextResponse.json(
         {
           error: 'slot_unavailable',
-          message: friendlySlotConflictMessage(whenLabel),
+          message: friendlySlotConflictMessage(),
         },
         { status: 409 }
       );

@@ -16,6 +16,8 @@ import {
   STRIPE_CUSTOMER_ID_RE,
   STRIPE_SETUP_INTENT_ID_RE,
 } from '@/lib/appointment-stripe';
+import { getAppointmentHoldByCalUid } from '@/lib/appointment-hold';
+import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
 import { isValidEmail } from '@/lib/client-identity';
 import {
   clientIpFromRequest,
@@ -139,6 +141,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             'This booking can no longer be confirmed. Please pick a new time on the calendar.',
         },
         { status: 409 }
+      );
+    }
+
+    // Same hold-window gate as create-booking-payment-intent: don't vault
+    // cards against a hold that has already expired (confirm would reject
+    // it anyway).
+    const hold = await getAppointmentHoldByCalUid(calBookingUid);
+    if (hold && isHoldExpired(hold.created_at)) {
+      return NextResponse.json(
+        { error: 'cart_hold_expired', message: HOLD_EXPIRED_MESSAGE },
+        { status: 400 }
       );
     }
 

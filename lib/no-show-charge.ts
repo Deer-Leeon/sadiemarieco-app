@@ -74,27 +74,35 @@ export async function chargeNoShowPenalty(params: {
       };
     }
 
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: amountCents,
-      currency: 'usd',
-      customer: params.stripeCustomerId,
-      payment_method: paymentMethod.id,
-      off_session: true,
-      confirm: true,
-      ...stripeCardStatementFields,
-      description: `No-show fee (${Math.round(NO_SHOW_PENALTY_FRACTION * 100)}%) — ${params.serviceLabel}`.slice(
-        0,
-        500
-      ),
-      metadata: {
-        appointment_id: String(params.appointmentId),
-        ...(params.calBookingUid
-          ? { cal_booking_uid: params.calBookingUid }
-          : {}),
-        fee_type: 'no_show_penalty',
-        penalty_fraction: String(NO_SHOW_PENALTY_FRACTION),
+    // Stable idempotency key so a timeout misread as failure replays the
+    // original charge on retry instead of double-charging. A new card or
+    // changed amount produces a fresh key, keeping deliberate retries alive.
+    const idempotencyKey = `fee:no_show_penalty:${params.appointmentId}:${paymentMethod.id}:${amountCents}`;
+
+    const paymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: amountCents,
+        currency: 'usd',
+        customer: params.stripeCustomerId,
+        payment_method: paymentMethod.id,
+        off_session: true,
+        confirm: true,
+        ...stripeCardStatementFields,
+        description: `No-show fee (${Math.round(NO_SHOW_PENALTY_FRACTION * 100)}%) — ${params.serviceLabel}`.slice(
+          0,
+          500
+        ),
+        metadata: {
+          appointment_id: String(params.appointmentId),
+          ...(params.calBookingUid
+            ? { cal_booking_uid: params.calBookingUid }
+            : {}),
+          fee_type: 'no_show_penalty',
+          penalty_fraction: String(NO_SHOW_PENALTY_FRACTION),
+        },
       },
-    });
+      { idempotencyKey }
+    );
 
     if (paymentIntent.status !== 'succeeded') {
       return {
