@@ -14,6 +14,11 @@ import {
 import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-public';
 import { STUDIO_SMS_CONSENT_LABEL } from '@/lib/cal-event-studio-defaults';
 import { formatAppointmentWhen } from '@/lib/format-booking-time';
+import {
+  clientPhoneValidationMessage,
+  formatUsPhoneAsYouType,
+  parseClientPhone,
+} from '@/lib/client-identity';
 import { STUDIO_TIMEZONE } from '@/lib/cal-config';
 import { stripePromise } from '@/lib/stripe-browser';
 
@@ -589,6 +594,10 @@ export default function BookClient() {
       setContactError('Enter your phone number.');
       return;
     }
+    if (!parseClientPhone(phone)) {
+      setContactError(clientPhoneValidationMessage());
+      return;
+    }
     if (smsOptIn || email.trim()) {
       setShowReachPanel(false);
       setStep('review');
@@ -943,11 +952,13 @@ export default function BookClient() {
                 Phone number <abbr className={styles.req} title="required">*</abbr>
               </span>
               <input
+                type="tel"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => setPhone(formatUsPhoneAsYouType(e.target.value))}
                 autoComplete="tel"
-                inputMode="tel"
-                placeholder="+1 555 123 4567"
+                inputMode="numeric"
+                maxLength={14}
+                placeholder="(555) 123-4567"
                 required
               />
             </label>

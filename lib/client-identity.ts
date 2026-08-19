@@ -79,6 +79,24 @@ export function formatPhoneInputDisplay(raw: string): string {
   return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`;
 }
 
+/**
+ * Live US phone mask for public booking: 8015551234 → (801) 555-1234.
+ * Strips a leading country-code 1 so paste of +1801… still formats nationally.
+ */
+export function formatUsPhoneAsYouType(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  const national = (
+    digits.startsWith('1') ? digits.slice(1) : digits
+  ).slice(0, 10);
+  if (!national) return '';
+  if (national.length < 3) return `(${national}`;
+  if (national.length === 3) return `(${national})`;
+  if (national.length <= 6) {
+    return `(${national.slice(0, 3)}) ${national.slice(3)}`;
+  }
+  return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`;
+}
+
 /** Trim + lowercase; empty / invalid / Cal placeholder → null. */
 export function parseOptionalClientEmail(raw: unknown): string | null {
   return normalizeClientEmailForStorage(raw);
