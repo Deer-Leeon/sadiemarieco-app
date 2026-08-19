@@ -295,6 +295,61 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
     if (status === 'canceled_by_system' || isHoldExpired(hold.created_at)) {
+      // Pay-now can land here with money already captured client-side just
+      // as the window closed. Refund deterministically instead of leaving
+      // the outcome to a race between the QStash release (refund) and the
+      // Stripe webhook recovery (which would promote the expired hold). The
+      // pending-only flip is the atomic arbiter: if it loses, recovery
+      // already promoted the paid booking, so honor it.
+      if (paymentIntentId) {
+        try {
+          const expiredPi =
+            await stripe.paymentIntents.retrieve(paymentIntentId);
+          const piUid = (expiredPi.metadata?.cal_booking_uid ?? '').trim();
+          if (expiredPi.status === 'succeeded' && piUid === calBookingUid) {
+            const { rowCount } = await sql`
+              UPDATE appointments
+              SET status = 'canceled_by_system'
+              WHERE cal_event_id = ${calBookingUid}
+                AND status = 'pending'
+            `;
+            if ((rowCount ?? 0) > 0) {
+              await stripe.refunds.create({ payment_intent: paymentIntentId });
+              console.error(
+                '[api/booking/confirm] hold expired after payment — refunded',
+                { calBookingUid, paymentIntentId }
+              );
+              return NextResponse.json(
+                {
+                  error: 'cart_hold_expired',
+                  message:
+                    'Your checkout window expired, so the charge has been refunded to your card. Please pick a time again.',
+                },
+                { status: 400 }
+              );
+            }
+            const latest = await getAppointmentStripeByCalUid(calBookingUid);
+            const latestStatus = (latest?.status ?? '').toLowerCase();
+            const latestPi = (latest?.stripe_payment_intent_id ?? '').trim();
+            if (latestStatus === 'confirmed' && latestPi === paymentIntentId) {
+              return NextResponse.json({
+                ok: true,
+                alreadyConfirmed: true,
+                stripeCustomerId: latest?.stripe_customer_id ?? null,
+                dbLinked: true,
+                cal_accept_error: null,
+                notifications: null,
+                contact: { sms: false, email: hasRealBookingEmail(email) },
+              });
+            }
+          }
+        } catch (expiredErr) {
+          console.error(
+            '[api/booking/confirm] expired-hold refund attempt failed — needs manual review',
+            { calBookingUid, paymentIntentId, error: errorMessage(expiredErr) }
+          );
+        }
+      }
       return NextResponse.json(
         {
           error: 'cart_hold_expired',
@@ -356,6 +411,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
       const linkedPi = (existingStripe?.stripe_payment_intent_id ?? '').trim();
       if (linkedPi && linkedPi !== paymentIntentId) {
+        // This PI already succeeded (checked above) and matches this booking,
+        // but a newer payment session superseded it. Nothing else will ever
+        // refund it — the recovery webhook only handles the linked intent —
+        // so give the money back right here.
+        try {
+          await stripe.refunds.create({ payment_intent: paymentIntentId });
+          console.error(
+            '[api/booking/confirm] superseded payment refunded',
+            { calBookingUid, paymentIntentId, linkedPi }
+          );
+          return NextResponse.json(
+            {
+              error: 'payment_intent_stale_refunded',
+              message:
+                'This payment session was out of date, so that charge has been refunded to your card. Please try again.',
+            },
+            { status: 400 }
+          );
+        } catch (staleErr) {
+          const staleMsg = errorMessage(staleErr);
+          if (!/already.*refunded/i.test(staleMsg)) {
+            console.error(
+              '[api/booking/confirm] superseded payment refund FAILED — needs manual review',
+              { calBookingUid, paymentIntentId, error: staleMsg }
+            );
+          }
+        }
         return NextResponse.json(
           {
             error: 'payment_intent_stale',
@@ -516,9 +598,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!pmBilling.email && pmFull.billing_details?.email) {
       pmBilling.email = pmFull.billing_details.email;
     }
-    const checkReject = stripeCardCheckRejection(
-      pmFull.card?.checks ?? null
-    );
+    // Card checks only gate pay-later ($0 setup, nothing cleared yet). For
+    // pay-now the PaymentIntent already SUCCEEDED — the issuer approved the
+    // charge — so rejecting here would keep captured money while showing the
+    // client a verification failure.
+    const checkReject = paymentIntentId
+      ? null
+      : stripeCardCheckRejection(pmFull.card?.checks ?? null);
     if (checkReject) {
       try {
         if (pmFull.customer) {

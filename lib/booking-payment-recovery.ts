@@ -77,6 +77,30 @@ export async function reconcileSucceededBookingPayment(
 
   const status = (row.status || '').toLowerCase();
 
+  // A newer payment session superseded this PI (a retry minted a fresh
+  // intent and re-linked the row before this webhook landed). This charge
+  // will never be attached to the booking, so refund it — regardless of
+  // row status; this check must run BEFORE the status guards below or a
+  // superseded charge against an already-confirmed row is silently kept.
+  const linkedPi = (row.stripe_payment_intent_id ?? '').trim();
+  if (linkedPi && linkedPi !== intent.id) {
+    try {
+      await stripe.refunds.create({ payment_intent: intent.id });
+      console.error(
+        '[booking-payment-recovery] refunded superseded payment',
+        { calBookingUid, paymentIntentId: intent.id, linkedPi }
+      );
+    } catch (err) {
+      const msg = errorMessage(err);
+      if (/already.*refunded/i.test(msg)) return;
+      console.error(
+        '[booking-payment-recovery] superseded-payment refund FAILED — needs manual review',
+        { calBookingUid, paymentIntentId: intent.id, error: msg }
+      );
+    }
+    return;
+  }
+
   // Hold-release beat the payment — the slot is gone; give the money back.
   if (status === 'canceled_by_system') {
     try {
@@ -97,13 +121,6 @@ export async function reconcileSucceededBookingPayment(
   }
 
   if (status && status !== 'pending') return;
-
-  const linkedPi = (row.stripe_payment_intent_id ?? '').trim();
-  if (linkedPi && linkedPi !== intent.id) {
-    // A newer payment session superseded this PI; the confirm route's
-    // duplicate handling owns that case.
-    return;
-  }
 
   const stripeCustomerId = intentCustomerId(intent);
 
