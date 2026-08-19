@@ -12,8 +12,9 @@
  * failed QStash publishes.
  *
  * Auth: CRON_SECRET via Bearer / X-Cron-Secret / ?cron_secret=
- * (see `lib/cron-auth.ts`). Scheduled daily via `vercel.json` (Hobby plan
- * limit); also safe to call manually when clearing stuck holds.
+ * (see `lib/cron-auth.ts`). QStash runs this once at midnight America/Denver;
+ * Vercel Cron is a daily UTC backstop. Also safe to call manually when
+ * clearing stuck holds.
  */
 
 import { NextRequest, NextResponse } from 'next/server';

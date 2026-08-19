@@ -1209,7 +1209,7 @@ async function checkJobFreshness(): Promise<HealthCheckResult[]> {
       warnAfterMs: 2 * 60 * 60 * 1000,
       failAfterMs: 30 * 60 * 60 * 1000,
       whatBreaks:
-        'Stale checkout holds can block calendar slots. Scheduled every 15 min via QStash + daily via Vercel Cron.',
+        'Stale checkout holds can block calendar slots. Scheduled once at midnight MT via QStash + a daily Vercel Cron backstop.',
     },
     {
       id: 'job-health-alert',
@@ -1218,7 +1218,7 @@ async function checkJobFreshness(): Promise<HealthCheckResult[]> {
       warnAfterMs: 2 * 60 * 60 * 1000,
       failAfterMs: 12 * 60 * 60 * 1000,
       whatBreaks:
-        'Nobody is notified when a dependency goes down. Scheduled every 30 min via QStash.',
+        'Nobody is notified when a dependency goes down. Scheduled hourly via QStash.',
     },
     {
       id: 'job-sync-reviews',
