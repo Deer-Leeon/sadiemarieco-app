@@ -8,6 +8,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { sql } from '@vercel/postgres';
+
 import {
   CONTACT_CHANNEL_REQUIRED_MESSAGE,
   hasBookingContactChannel,
@@ -36,7 +38,10 @@ import {
   isValidEmail,
   normalizeClientEmailForStorage,
   parseClientPhone,
+  sqlPhoneVariants,
 } from '@/lib/client-identity';
+import { formatAppointmentWhen } from '@/lib/format-booking-time';
+import { isHoldExpired } from '@/lib/booking-hold';
 import { lookupBookingPhone } from '@/lib/phone-lookup';
 import {
   clientIpFromRequest,
@@ -104,6 +109,123 @@ function extractBooking(payload: unknown): {
         ? booking.eventTitle
         : null;
   return { uid, start, end, title };
+}
+
+const CAL_SLOT_CONFLICT_RE =
+  /already has booking at this time|not available|already booked|no longer available|overlapping|conflict/i;
+
+function friendlySlotConflictMessage(existingWhen?: string | null): string {
+  if (existingWhen) {
+    return `You already have an appointment at ${existingWhen}. That time is taken, so payment did not go through. Pick a slot after it ends.`;
+  }
+  return 'That time is no longer available — you may already have an appointment then. Payment did not go through. Pick another time.';
+}
+
+async function findExistingHoldForPhone(params: {
+  phoneDigits: string;
+  startUtc: Date;
+  durationMins: number;
+}): Promise<
+  | {
+      kind: 'reuse_pending';
+      calBookingUid: string;
+      bookingTime: string | null;
+      endTime: string | null;
+      serviceName: string | null;
+    }
+  | { kind: 'conflict'; bookingTime: string | null; endTime: string | null }
+  | null
+> {
+  const [phoneV0, phoneV1] = sqlPhoneVariants(params.phoneDigits);
+  const startIso = params.startUtc.toISOString();
+  const endUtc = new Date(
+    params.startUtc.getTime() + params.durationMins * 60_000
+  );
+
+  const { rows } = await sql<{
+    cal_event_id: string | null;
+    status: string | null;
+    booking_time: Date | string | null;
+    end_time: Date | string | null;
+    created_at: Date | string | null;
+    service_name: string | null;
+  }>`
+    SELECT
+      cal_event_id,
+      status,
+      booking_time,
+      end_time,
+      created_at,
+      service_name
+    FROM appointments
+    WHERE regexp_replace(COALESCE(client_phone, ''), '\D', '', 'g') IN (
+        ${phoneV0},
+        ${phoneV1}
+      )
+      AND booking_time IS NOT NULL
+      AND LOWER(COALESCE(status, 'pending')) IN ('pending', 'confirmed', 'accepted')
+      AND booking_time < ${endUtc.toISOString()}
+      AND COALESCE(
+        end_time,
+        booking_time + make_interval(mins => ${params.durationMins})
+      ) > ${startIso}
+    ORDER BY created_at DESC NULLS LAST
+    LIMIT 8
+  `;
+
+  const serialize = (value: Date | string | null): string | null => {
+    if (!value) return null;
+    const d = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  };
+
+  for (const row of rows) {
+    const bookingTime = serialize(row.booking_time);
+    const endTime = serialize(row.end_time);
+    const status = (row.status || 'pending').toLowerCase();
+    const uid = typeof row.cal_event_id === 'string' ? row.cal_event_id.trim() : '';
+    const startMs = bookingTime ? new Date(bookingTime).getTime() : NaN;
+    const sameStart =
+      Number.isFinite(startMs) &&
+      Math.abs(startMs - params.startUtc.getTime()) < 60_000;
+
+    if (status === 'pending') {
+      if (isHoldExpired(row.created_at)) continue;
+      if (sameStart && uid) {
+        return {
+          kind: 'reuse_pending',
+          calBookingUid: uid,
+          bookingTime,
+          endTime,
+          serviceName: row.service_name,
+        };
+      }
+      return { kind: 'conflict', bookingTime, endTime };
+    }
+
+    if (status === 'confirmed' || status === 'accepted') {
+      return { kind: 'conflict', bookingTime, endTime };
+    }
+  }
+
+  return null;
+}
+
+async function mapCalCreateFailure(response: NextResponse): Promise<NextResponse> {
+  const payload = (await response.clone().json().catch(() => null)) as {
+    message?: string;
+  } | null;
+  const raw = typeof payload?.message === 'string' ? payload.message : '';
+  if (CAL_SLOT_CONFLICT_RE.test(raw)) {
+    return NextResponse.json(
+      {
+        error: 'slot_unavailable',
+        message: friendlySlotConflictMessage(null),
+      },
+      { status: 409 }
+    );
+  }
+  return response;
 }
 
 async function cancelCalBooking(uid: string): Promise<void> {
@@ -263,6 +385,48 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     emailRaw
   );
 
+  try {
+    const existing = await findExistingHoldForPhone({
+      phoneDigits: phoneLookup.digits,
+      startUtc,
+      durationMins: service.durationMins,
+    });
+    if (existing?.kind === 'conflict') {
+      const when = existing.bookingTime
+        ? formatAppointmentWhen(existing.bookingTime, existing.endTime)
+        : null;
+      const whenLabel = when
+        ? `${when.date}, ${when.timeRange}`
+        : null;
+      return NextResponse.json(
+        {
+          error: 'slot_unavailable',
+          message: friendlySlotConflictMessage(whenLabel),
+        },
+        { status: 409 }
+      );
+    }
+    if (existing?.kind === 'reuse_pending') {
+      await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.DETAILS_SUBMITTED, {
+        service: analyticsServiceLabel(service.title),
+        source: analyticsSource,
+      });
+      return NextResponse.json({
+        ok: true,
+        calBookingUid: existing.calBookingUid,
+        name,
+        email: emailRaw || '',
+        serviceName: existing.serviceName || service.title,
+        bookingTime: existing.bookingTime || startUtc.toISOString(),
+        endTime: existing.endTime,
+      });
+    }
+  } catch (err) {
+    console.warn('[api/book/create] existing-hold lookup failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   const calPayload: Record<string, unknown> = {
     eventTypeId: service.calEventId,
     start: startUtc.toISOString(),
@@ -294,7 +458,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     calPayload,
     CAL_BOOKINGS_API_VERSION
   );
-  if (!createResult.ok) return createResult.response;
+  if (!createResult.ok) return mapCalCreateFailure(createResult.response);
 
   const extracted = extractBooking(createResult.data);
   if (!extracted.uid) {
