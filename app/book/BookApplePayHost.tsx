@@ -365,7 +365,7 @@ export default function BookApplePayHost({
           45_000
         );
         const confirmPayload = (await confirmRes.json().catch(() => null)) as {
-          calWarning?: string | null;
+          cal_accept_error?: string | null;
           contact?: { sms?: boolean; email?: boolean };
           message?: string;
           error?: string;
@@ -385,7 +385,7 @@ export default function BookApplePayHost({
         });
         onConfirmed({
           name: bookingName,
-          calWarning: confirmPayload?.calWarning ?? null,
+          calWarning: confirmPayload?.cal_accept_error ?? null,
           contact: {
             sms: Boolean(confirmPayload?.contact?.sms),
             email: Boolean(confirmPayload?.contact?.email),

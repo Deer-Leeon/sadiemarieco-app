@@ -371,8 +371,16 @@ export async function POST(
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
 
+    // Locked only once the stamped PDF exists. A submission whose stamping
+    // step failed (submitted_at set, stamped_pdf_url NULL) must stay
+    // re-submittable — otherwise a transient Blob/template error permanently
+    // locks the client out of their own intake form.
     const existing = await loadIntake(clientId);
-    if (existing?.submitted_at || client.has_consented) {
+    const fullySubmitted = Boolean(
+      client.has_consented ||
+        (existing?.submitted_at && existing?.stamped_pdf_url)
+    );
+    if (fullySubmitted) {
       return NextResponse.json(
         { error: 'already_submitted', message: 'This intake form has already been submitted.' },
         { status: 409 }
@@ -396,6 +404,7 @@ export async function POST(
         submitted_at = NOW(),
         stamped_pdf_url = NULL
       WHERE client_intake_forms.submitted_at IS NULL
+         OR client_intake_forms.stamped_pdf_url IS NULL
       RETURNING id
     `;
 
