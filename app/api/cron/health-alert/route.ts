@@ -13,7 +13,8 @@
  *     (optional env, E.164) via Twilio.
  *   • Cooldown via ops_state: the same set of failing checks re-alerts at
  *     most every 6 h; a CHANGED set alerts immediately.
- *   • Sends an all-clear once things recover after an alert.
+ *   • GET ?simulate=1 (still requires CRON_SECRET) sends a one-shot TEST
+ *     email + SMS without changing Health page status or cooldown state.
  *
  * Auth: CRON_SECRET via Bearer / X-Cron-Secret / ?cron_secret=
  * (excluded from the Clerk proxy matcher like the other cron routes).
@@ -142,9 +143,24 @@ async function sendAlertSms(body: string): Promise<{
   }
 }
 
+function isSimulateRequest(req: NextRequest): boolean {
+  const raw = req.nextUrl.searchParams.get('simulate')?.trim().toLowerCase();
+  return raw === '1' || raw === 'true';
+}
+
+const SIMULATED_FAILURE: HealthCheckResult = {
+  id: 'simulate-alert',
+  name: 'Simulated health check (test)',
+  category: 'Test',
+  status: 'unhealthy',
+  message: 'Nothing is actually broken — this is a manual test of owner alerts.',
+};
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const gate = rejectUnlessCronAuthorized(req, 'api/cron/health-alert');
   if (gate) return gate;
+
+  const simulate = isSimulateRequest(req);
 
   let report: HealthReport;
   try {
@@ -163,6 +179,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const liveOverall = report.overall;
+
+  if (simulate) {
+    report = {
+      ...report,
+      checks: [...report.checks, SIMULATED_FAILURE],
+      overall: 'unhealthy',
+    };
+  }
+
   const bad = failing(report);
   const fingerprint = fingerprintOf(bad);
   const prior = await getOpsState(ALERT_STATE_KEY);
@@ -179,7 +205,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   let email: { ok: boolean; error?: string } | null = null;
   let sms: { ok: boolean; skipped?: string; error?: string } | null = null;
 
-  if (bad.length > 0) {
+  if (simulate) {
+    // One-shot drill: send the same owner SMS/email path without writing
+    // cooldown state, so the next scheduled run does not send an all-clear
+    // for a fake outage. The Health page is unchanged.
+    action = 'alerted';
+    const names = bad.map((c) => c.name).join(', ');
+    email = await sendAlertEmail(
+      `TEST: Sadie Marie site issue: ${names.slice(0, 110)}`,
+      alertEmailHtml(report)
+    );
+    sms = await sendAlertSms(
+      `TEST: Sadie Marie site ALERT: ${names.slice(0, 220)}. Nothing is actually broken. Details: sadiemarie.co/admin/health`
+    );
+    console.log('[api/cron/health-alert] simulated ALERT sent', {
+      failing: bad.map((c) => c.id),
+      email,
+      sms,
+    });
+  } else if (bad.length > 0) {
     const sameFailureSet = fingerprint === priorFingerprint;
     const withinCooldown =
       Number.isFinite(priorAlertedAt) &&
@@ -221,12 +265,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   await recordJobHeartbeat(JOB_HEARTBEAT_KEYS.healthAlert, {
-    overall: report.overall,
-    failing: bad.map((c) => c.id),
+    overall: liveOverall,
+    failing: simulate ? [] : bad.map((c) => c.id),
+    simulated: simulate || undefined,
   });
 
   return NextResponse.json({
     ok: true,
+    simulated: simulate || undefined,
     overall: report.overall,
     failing: bad.map((c) => ({ id: c.id, message: c.message })),
     degraded: degradedList(report).map((c) => c.id),
