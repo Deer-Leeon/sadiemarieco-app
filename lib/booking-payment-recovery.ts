@@ -279,7 +279,7 @@ export async function reconcileSucceededBookingPayment(
       clientId: appt.client_id,
       clientEmail: appt.client_email,
       skipIfAlreadySent: true,
-      smsOptIn: appt.sms_opt_in === true,
+      smsOptIn,
     });
   } catch (err) {
     console.error(

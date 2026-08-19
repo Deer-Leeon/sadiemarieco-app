@@ -70,6 +70,25 @@ async function claimReminderEmailSend(idempotencyKey: string): Promise<boolean> 
   }
 }
 
+/**
+ * Undo a claim whose send failed, so a QStash retry (or manual re-trigger)
+ * can attempt delivery again. Without this, a transient Resend outage
+ * consumes the idempotency key and the client permanently misses the email.
+ */
+async function releaseReminderEmailClaim(idempotencyKey: string): Promise<void> {
+  try {
+    await sql`
+      DELETE FROM webhook_events
+      WHERE booking_uid = ${idempotencyKey}
+    `;
+  } catch (err) {
+    console.error('[appointment-reminder-email] claim release failed', {
+      idempotencyKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export async function sendAppointmentReminderEmail(args: {
   bookingUid: string;
   clientEmail: string;
@@ -134,21 +153,36 @@ export async function sendAppointmentReminderEmail(args: {
   });
 
   const resend = new Resend(apiKey);
-  const { data, error } = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: clientEmail,
-    subject: reminderEmailSubject(displayName),
-    html,
-  });
-
-  if (error) {
-    console.error('[appointment-reminder-email] Resend send failed', {
+  let data: { id: string } | null = null;
+  try {
+    const sent = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: clientEmail,
+      subject: reminderEmailSubject(displayName),
+      html,
+    });
+    if (sent.error) {
+      console.error('[appointment-reminder-email] Resend send failed', {
+        bookingUid: args.bookingUid,
+        timing: args.timing,
+        to: maskEmail(clientEmail),
+        error: sent.error,
+      });
+      // Free the idempotency key so a QStash retry can re-attempt delivery.
+      await releaseReminderEmailClaim(idempotencyKey);
+      return { ok: false, error: sent.error.message };
+    }
+    data = sent.data;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[appointment-reminder-email] Resend send threw', {
       bookingUid: args.bookingUid,
       timing: args.timing,
       to: maskEmail(clientEmail),
-      error,
+      error: message,
     });
-    return { ok: false, error: error.message };
+    await releaseReminderEmailClaim(idempotencyKey);
+    return { ok: false, error: message };
   }
 
   console.log('[appointment-reminder-email] sent', {
