@@ -58,8 +58,9 @@ for (const { destination, cron } of wanted) {
     console.log(`  deleted old schedule ${dupe.scheduleId} for ${destination}`);
   }
 
+  // QStash expects the raw destination URL in the path (not URL-encoded).
   const created = await api(
-    `/v2/schedules/${encodeURIComponent(destination)}`,
+    `/v2/schedules/${destination}`,
     {
       method: 'POST',
       headers: {
