@@ -258,11 +258,10 @@ export default function BookClient() {
     [elementsAppearance]
   );
 
+  const selectedPriceCents = selected?.priceCents ?? null;
   const paymentElementsOptions: StripeElementsOptions = useMemo(() => {
     const amount =
-      selected?.priceCents && selected.priceCents > 0
-        ? selected.priceCents
-        : 50;
+      selectedPriceCents && selectedPriceCents > 0 ? selectedPriceCents : 50;
     return {
       mode: 'payment',
       amount,
@@ -272,7 +271,7 @@ export default function BookClient() {
       setupFutureUsage: 'off_session',
       appearance: elementsAppearance,
     };
-  }, [elementsAppearance, selected?.priceCents]);
+  }, [elementsAppearance, selectedPriceCents]);
 
   useEffect(() => {
     if (!isPhoneViewport()) {
