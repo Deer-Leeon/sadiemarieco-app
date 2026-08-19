@@ -44,6 +44,24 @@ const nextConfig = {
   // table, and returns the modified HTML. Adding a `/` → `/index.html`
   // rewrite would take precedence over the route handler and serve the
   // raw (pre-substitution) HTML.
+  // ── Frame protection ───────────────────────────────────────────────────
+  // frame-ancestors 'self' blocks third-party sites from iframing any page
+  // (clickjacking, especially /admin) while still allowing the marketing
+  // page's same-origin /checkout pay-choice iframe in the booking drawer.
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: "frame-ancestors 'self'",
+          },
+        ],
+      },
+    ];
+  },
+
   async rewrites() {
     return [
       { source: '/manage', destination: '/manage.html' },

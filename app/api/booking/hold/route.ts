@@ -14,6 +14,11 @@ import {
   holdDeadlineMs,
   isHoldExpired,
 } from '@/lib/booking-hold';
+import {
+  clientIpFromRequest,
+  RATE_LIMITS,
+  rejectUnlessRateAllowed,
+} from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,6 +33,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!uid || uid.length > 200) {
     return NextResponse.json({ error: 'invalid_cal_booking_uid' }, { status: 400 });
   }
+
+  const rateRejection = await rejectUnlessRateAllowed({
+    key: `booking-hold:${clientIpFromRequest(req)}`,
+    ...RATE_LIMITS.bookingHoldRead,
+  });
+  if (rateRejection) return rateRejection;
 
   try {
     const row = await getAppointmentHoldByCalUid(uid);

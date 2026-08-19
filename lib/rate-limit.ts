@@ -7,13 +7,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 export function clientIpFromRequest(req: NextRequest): string {
-  const forwarded = req.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first.slice(0, 128);
-  }
+  // Prefer headers Vercel sets itself. The first x-forwarded-for hop is
+  // client-supplied (Vercel appends, it doesn't replace), so trusting it
+  // would let an attacker mint a fresh rate-limit bucket per request.
+  const vercelIp = req.headers
+    .get('x-vercel-forwarded-for')
+    ?.split(',')[0]
+    ?.trim();
+  if (vercelIp) return vercelIp.slice(0, 128);
   const realIp = req.headers.get('x-real-ip')?.trim();
   if (realIp) return realIp.slice(0, 128);
+  const forwarded = req.headers.get('x-forwarded-for');
+  if (forwarded) {
+    // Only the last hop was appended by our own edge; earlier entries are
+    // forgeable by the client.
+    const parts = forwarded.split(',');
+    const last = parts[parts.length - 1]?.trim();
+    if (last) return last.slice(0, 128);
+  }
   const cf = req.headers.get('cf-connecting-ip')?.trim();
   if (cf) return cf.slice(0, 128);
   return 'unknown';
@@ -74,6 +85,7 @@ export async function rejectUnlessRateAllowed(options: {
 export const RATE_LIMITS = {
   bookingInit: { limit: 30, windowMs: 60_000 },
   bookingConfirm: { limit: 30, windowMs: 60_000 },
+  bookingHoldRead: { limit: 120, windowMs: 60_000 },
   bookingReleaseHold: { limit: 30, windowMs: 60_000 },
   stripeSetupIntent: { limit: 20, windowMs: 60_000 },
   bookServices: { limit: 60, windowMs: 60_000 },
