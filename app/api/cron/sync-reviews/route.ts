@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { rejectUnlessCronAuthorized } from '@/lib/cron-auth';
+import { JOB_HEARTBEAT_KEYS, recordJobHeartbeat } from '@/lib/ops-state';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -217,6 +218,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       { status: 500 }
     );
   }
+
+  await recordJobHeartbeat(JOB_HEARTBEAT_KEYS.syncReviews, {
+    addedCount,
+    updatedCount,
+    removedCount,
+  });
 
   return NextResponse.json({
     success: true,

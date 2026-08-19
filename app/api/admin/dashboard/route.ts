@@ -24,8 +24,10 @@
  * Auth model:
  *   - Bearer token (Clerk session JWT) in `Authorization`. Clerk's
  *     `auth()` helper automatically resolves it on the App Router.
- *   - Admin gate: `sessionClaims.publicMetadata.role === 'admin'`.
- *     The iOS app sets this via Clerk publicMetadata on the user.
+ *   - Admin gate: the same email allowlist as every other admin
+ *     surface (`requireAdminUser` → lib/admin-allowlist.ts) — this
+ *     route previously trusted `publicMetadata.role === 'admin'`,
+ *     which was a softer, divergent gate.
  *   - 401 if unauthenticated, 403 if signed in but not an admin.
  *
  * Schema note — `site_services.price`:
@@ -42,8 +44,9 @@
  *   other place in the codebase that needs to price an appointment.
  */
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { sql } from '@vercel/postgres';
+
+import { requireAdminUser } from '@/app/admin/auth';
 
 /**
  * Pinned to Node so `@vercel/postgres` (which depends on
@@ -115,46 +118,13 @@ function toFiniteNumber(value: number | string | null): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/**
- * Best-effort role lookup off the Clerk session claims. We tolerate
- * either `publicMetadata.role` (the project's convention) or a
- * top-level `role` claim, since some Clerk JWT templates flatten
- * `public_metadata` into the root.
- */
-function isAdminClaims(claims: Record<string, unknown> | null): boolean {
-  if (!claims) return false;
-  const direct = claims.role;
-  if (typeof direct === 'string' && direct === 'admin') return true;
-  const meta = claims.publicMetadata ?? claims.public_metadata;
-  if (
-    meta &&
-    typeof meta === 'object' &&
-    !Array.isArray(meta) &&
-    (meta as Record<string, unknown>).role === 'admin'
-  ) {
-    return true;
-  }
-  return false;
-}
-
 export async function GET(): Promise<NextResponse> {
-  // ── Auth ─────────────────────────────────────────────────────────
-  const { userId, sessionClaims } = await auth();
-  if (!userId) {
-    return NextResponse.json(
-      { error: 'Authentication required.' },
-      { status: 401 }
-    );
-  }
-  if (
-    !isAdminClaims(
-      (sessionClaims as Record<string, unknown> | null | undefined) ?? null
-    )
-  ) {
-    return NextResponse.json(
-      { error: 'Admin role required.' },
-      { status: 403 }
-    );
+  // ── Auth — same email allowlist as every other /api/admin route ───
+  const access = await requireAdminUser();
+  if (!access.ok) {
+    return access.reason === 'unauthenticated'
+      ? NextResponse.json({ error: 'Authentication required.' }, { status: 401 })
+      : NextResponse.json({ error: 'Admin access required.' }, { status: 403 });
   }
 
   // ── Data ────────────────────────────────────────────────────────

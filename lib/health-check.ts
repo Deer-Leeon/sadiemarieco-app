@@ -8,6 +8,7 @@ import { sql } from '@vercel/postgres';
 
 import { ALLOWED_ADMIN_EMAILS } from '@/app/admin/auth';
 import { CHECKOUT_HOLD_SECONDS } from '@/lib/booking-hold';
+import { getJobHeartbeatAge, JOB_HEARTBEAT_KEYS } from '@/lib/ops-state';
 import { getQStashBaseUrl, getQStashToken } from '@/lib/qstash-client';
 import {
   getCalComApiKey,
@@ -30,6 +31,12 @@ export interface HealthCheckResult {
   message: string;
   detail?: string;
   latencyMs?: number;
+  /**
+   * Tolerated degradation — shown on its own row but excluded from the
+   * overall roll-up and from proactive alerts. Used for the Stripe Terminal
+   * reader, which is routinely powered off between appointments.
+   */
+  soft?: boolean;
 }
 
 export interface HealthReport {
@@ -74,9 +81,15 @@ function summarize(checks: HealthCheckResult[]): HealthReport['summary'] {
   return summary;
 }
 
-function overallFromSummary(summary: HealthReport['summary']): HealthStatus {
-  if (summary.unhealthy > 0) return 'unhealthy';
-  if (summary.degraded > 0) return 'degraded';
+/**
+ * Overall status ignores `soft` checks — an offline Terminal reader is
+ * routine (it sleeps between appointments) and must not turn the whole
+ * dashboard amber or fire alerts.
+ */
+function overallFromChecks(checks: HealthCheckResult[]): HealthStatus {
+  const counted = checks.filter((c) => !c.soft);
+  if (counted.some((c) => c.status === 'unhealthy')) return 'unhealthy';
+  if (counted.some((c) => c.status === 'degraded')) return 'degraded';
   return 'healthy';
 }
 
@@ -880,9 +893,13 @@ async function checkStripe(): Promise<HealthCheckResult[]> {
               : !modeMatches || !locationMatches
                 ? 'unhealthy'
                 : 'degraded',
+          // Offline reader is routine (it sleeps between appointments) —
+          // soft so it never flips the overall status or fires alerts.
+          // Mode/location mismatch stays hard (real misconfiguration).
+          soft: modeMatches && locationMatches && !online,
           message: online
             ? `${reader.label || reader.id} online (${readerMode} mode)`
-            : `${reader.label || reader.id} is ${reader.status || 'offline'}`,
+            : `${reader.label || reader.id} is ${reader.status || 'offline'} — normal when powered down; does not affect overall status`,
           detail: [
             `reader=${reader.id}`,
             `device=${reader.device_type}`,
@@ -924,50 +941,105 @@ async function checkStripe(): Promise<HealthCheckResult[]> {
   return checks;
 }
 
+/** Production base used to validate QStash schedules + Cal webhook targets. */
+const PRODUCTION_BASE = 'https://www.sadiemarie.co';
+
 async function checkQStash(): Promise<HealthCheckResult[]> {
   const checks: HealthCheckResult[] = [];
   const token = getQStashToken();
   const currentKey = process.env.QSTASH_CURRENT_SIGNING_KEY?.trim();
   const nextKey = process.env.QSTASH_NEXT_SIGNING_KEY?.trim();
-  const publicBase = process.env.PUBLIC_BASE_URL?.trim() || '';
+  const publicBase = (process.env.PUBLIC_BASE_URL?.trim() || '').replace(
+    /\/$/,
+    ''
+  );
   const qstashUrl = getQStashBaseUrl();
-  const qstashUrlFromEnv = Boolean(process.env.QSTASH_URL?.trim());
 
   if (!token) {
     checks.push(
       result({
-        id: 'qstash-token',
-        name: 'QStash publish token',
+        id: 'qstash-api',
+        name: 'QStash API',
         category: 'Scheduled jobs (QStash)',
         status: 'unhealthy',
         message: 'QSTASH_TOKEN missing — reminder/feedback SMS and abandoned-hold release will not be scheduled',
       })
     );
   } else {
-    checks.push(
-      result({
-        id: 'qstash-token',
-        name: 'QStash publish token',
-        category: 'Scheduled jobs (QStash)',
-        message: 'QSTASH_TOKEN configured',
-        detail: 'Schedules POST /api/remind, /api/feedback, and delayed /api/qstash/release-hold',
-      })
-    );
-  }
+    // Live probe: an env-only check shows green while a wrong-region
+    // QSTASH_URL 404s every publish. Listing schedules exercises token +
+    // region and returns the recurring schedules for validation.
+    try {
+      const { value: schedules, latencyMs } = await timed(async () => {
+        const res = await fetch(`${qstashUrl}/v2/schedules`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body: unknown = await res.json().catch(() => []);
+        return Array.isArray(body)
+          ? (body as Array<{ destination?: string; cron?: string }>)
+          : [];
+      });
 
-  checks.push(
-    result({
-      id: 'qstash-url',
-      name: 'QStash regional endpoint',
-      category: 'Scheduled jobs (QStash)',
-      status: qstashUrlFromEnv ? 'healthy' : 'degraded',
-      message: qstashUrlFromEnv
-        ? `QSTASH_URL = ${qstashUrl}`
-        : `QSTASH_URL unset — using ${qstashUrl}`,
-      detail:
-        'Must match the region of your Upstash QStash token (US: https://qstash-us-east-1.upstash.io). Wrong region → every publish 404s and holds never auto-release.',
-    })
-  );
+      checks.push(
+        result(
+          {
+            id: 'qstash-api',
+            name: 'QStash API',
+            category: 'Scheduled jobs (QStash)',
+            message: `Connected (${qstashUrl}) — ${schedules.length} recurring schedule(s)`,
+            detail:
+              'Publishes reminder/feedback SMS, reminder emails, and delayed hold release',
+          },
+          latencyMs
+        )
+      );
+
+      // Recurring schedules should exist on production for the safety
+      // sweeps. Only meaningful against the production destination.
+      if (!publicBase || publicBase === PRODUCTION_BASE) {
+        const destinations = schedules
+          .map((s) => (s.destination || '').replace(/\/$/, ''))
+          .filter(Boolean);
+        const expected: Array<[string, string]> = [
+          [`${PRODUCTION_BASE}/api/cron/cleanup-abandoned`, 'abandoned-hold sweep'],
+          [`${PRODUCTION_BASE}/api/cron/health-alert`, 'health alert'],
+          [`${PRODUCTION_BASE}/api/cron/sync-reviews`, 'reviews sync'],
+        ];
+        const missing = expected
+          .filter(([url]) => !destinations.includes(url))
+          .map(([, label]) => label);
+        checks.push(
+          result({
+            id: 'qstash-recurring-schedules',
+            name: 'Recurring QStash schedules',
+            category: 'Scheduled jobs (QStash)',
+            status: missing.length === 0 ? 'healthy' : 'degraded',
+            message:
+              missing.length === 0
+                ? 'Hold sweep, health alert, and reviews sync are scheduled'
+                : `Missing schedule(s): ${missing.join(', ')}`,
+            detail:
+              missing.length > 0
+                ? 'Run: node --env-file=.env.local scripts/setup-qstash-schedules.mjs'
+                : undefined,
+          })
+        );
+      }
+    } catch (err) {
+      checks.push(
+        result({
+          id: 'qstash-api',
+          name: 'QStash API',
+          category: 'Scheduled jobs (QStash)',
+          status: 'unhealthy',
+          message: 'QStash API request failed — reminders and hold release will not schedule',
+          detail: `${qstashUrl} — ${err instanceof Error ? err.message : String(err)}. Check QSTASH_TOKEN and that QSTASH_URL matches your Upstash region.`,
+        })
+      );
+    }
+  }
 
   checks.push(
     result({
@@ -990,8 +1062,8 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
         name: 'QStash callback URLs',
         category: 'Scheduled jobs (QStash)',
         status: 'healthy',
-        message: 'Reminder, feedback, and abandoned-hold release endpoints',
-        detail: `${publicBase.replace(/\/$/, '')}/api/remind · ${publicBase.replace(/\/$/, '')}/api/feedback · ${publicBase.replace(/\/$/, '')}/api/qstash/release-hold`,
+        message: 'Reminder, feedback, reminder-email, and hold-release endpoints',
+        detail: `${publicBase}/api/remind · ${publicBase}/api/feedback · ${publicBase}/api/remind-email · ${publicBase}/api/qstash/release-hold`,
       })
     );
   }
@@ -1000,32 +1072,202 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
 }
 
 async function checkWebhooks(): Promise<HealthCheckResult[]> {
-  const publicBase = (
-    process.env.PUBLIC_BASE_URL?.trim() || 'https://www.sadiemarie.co'
-  ).replace(/\/$/, '');
+  const apiKey = getCalComApiKey();
+  const expectedUrl = `${PRODUCTION_BASE}/api/webhook`;
 
-  return [
-    result({
-      id: 'webhook-primary',
-      name: 'Primary Cal webhook',
-      category: 'Webhooks',
-      status: 'healthy',
-      message: 'POST /api/webhook — booking lifecycle (SMS, email, DB, QStash)',
-      detail: `Configure in Cal.com: ${publicBase}/api/webhook`,
-    }),
-    result({
-      id: 'webhook-idempotency',
-      name: 'Webhook deduplication table',
-      category: 'Webhooks',
-      status: 'healthy',
-      message: 'webhook_events table prevents duplicate SMS and emails',
-    }),
+  if (!apiKey) {
+    return [
+      result({
+        id: 'webhook-cal-registered',
+        name: 'Cal.com webhook registration',
+        category: 'Webhooks',
+        status: 'unhealthy',
+        message: 'Cannot verify — Cal API key missing',
+      }),
+    ];
+  }
+
+  // Live probe: CAL_WEBHOOK_SECRET being set does not prove Cal actually has
+  // a webhook pointing at this app. If someone deletes/disables it in the
+  // Cal dashboard, every booking silently loses SMS/email/DB lifecycle.
+  try {
+    const { value: hooks, latencyMs } = await timed(async () => {
+      const res = await fetch(
+        `https://api.cal.com/v1/webhooks?apiKey=${encodeURIComponent(apiKey)}`,
+        { headers: { Accept: 'application/json' }, cache: 'no-store' }
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json().catch(() => null)) as {
+        webhooks?: Array<{
+          subscriberUrl?: string;
+          active?: boolean;
+          eventTriggers?: string[];
+        }>;
+      } | null;
+      return Array.isArray(body?.webhooks) ? body.webhooks : [];
+    });
+
+    const match = hooks.find(
+      (h) => (h.subscriberUrl || '').replace(/\/$/, '') === expectedUrl
+    );
+    if (!match) {
+      return [
+        result(
+          {
+            id: 'webhook-cal-registered',
+            name: 'Cal.com webhook registration',
+            category: 'Webhooks',
+            status: 'unhealthy',
+            message: `No Cal webhook targets ${expectedUrl} — booking SMS, emails, and cancel fees will not fire`,
+            detail: `Cal has ${hooks.length} webhook(s): ${hooks.map((h) => h.subscriberUrl).join(', ') || 'none'}`,
+          },
+          latencyMs
+        ),
+      ];
+    }
+    if (match.active === false) {
+      return [
+        result(
+          {
+            id: 'webhook-cal-registered',
+            name: 'Cal.com webhook registration',
+            category: 'Webhooks',
+            status: 'unhealthy',
+            message: 'Cal webhook exists but is DISABLED — enable it in the Cal.com dashboard',
+            detail: expectedUrl,
+          },
+          latencyMs
+        ),
+      ];
+    }
+
+    const triggers = match.eventTriggers ?? [];
+    const wanted = ['BOOKING_CREATED', 'BOOKING_CANCELLED', 'BOOKING_RESCHEDULED'];
+    const missingTriggers = wanted.filter((t) => !triggers.includes(t));
+    return [
+      result(
+        {
+          id: 'webhook-cal-registered',
+          name: 'Cal.com webhook registration',
+          category: 'Webhooks',
+          status: missingTriggers.length === 0 ? 'healthy' : 'degraded',
+          message:
+            missingTriggers.length === 0
+              ? `Active Cal webhook → ${expectedUrl}`
+              : `Webhook active but missing trigger(s): ${missingTriggers.join(', ')}`,
+          detail: triggers.length ? `triggers: ${triggers.join(', ')}` : undefined,
+        },
+        latencyMs
+      ),
+    ];
+  } catch (err) {
+    return [
+      result({
+        id: 'webhook-cal-registered',
+        name: 'Cal.com webhook registration',
+        category: 'Webhooks',
+        status: 'degraded',
+        message: 'Could not verify Cal webhook registration',
+        detail: err instanceof Error ? err.message : String(err),
+      }),
+    ];
+  }
+}
+
+function humanizeAge(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+/**
+ * A dead scheduler produces no errors anywhere — the only detectable signal
+ * is that its heartbeat stops advancing. Each job writes `ops_state` on a
+ * successful run (lib/ops-state.ts).
+ */
+async function checkJobFreshness(): Promise<HealthCheckResult[]> {
+  const jobs: Array<{
+    id: string;
+    name: string;
+    key: string;
+    /** ms after which the job counts as stale (degraded). */
+    warnAfterMs: number;
+    /** ms after which the job counts as dead (unhealthy). Optional. */
+    failAfterMs?: number;
+    whatBreaks: string;
+  }> = [
+    {
+      id: 'job-cleanup-abandoned',
+      name: 'Abandoned hold sweep (last run)',
+      key: JOB_HEARTBEAT_KEYS.cleanupAbandoned,
+      warnAfterMs: 2 * 60 * 60 * 1000,
+      failAfterMs: 30 * 60 * 60 * 1000,
+      whatBreaks:
+        'Stale checkout holds can block calendar slots. Scheduled every 15 min via QStash + daily via Vercel Cron.',
+    },
+    {
+      id: 'job-health-alert',
+      name: 'Health alert monitor (last run)',
+      key: JOB_HEARTBEAT_KEYS.healthAlert,
+      warnAfterMs: 2 * 60 * 60 * 1000,
+      failAfterMs: 12 * 60 * 60 * 1000,
+      whatBreaks:
+        'Nobody is notified when a dependency goes down. Scheduled every 30 min via QStash.',
+    },
+    {
+      id: 'job-sync-reviews',
+      name: 'Google reviews sync (last run)',
+      key: JOB_HEARTBEAT_KEYS.syncReviews,
+      warnAfterMs: 30 * 60 * 60 * 1000,
+      whatBreaks:
+        'Homepage review carousel goes stale. Scheduled daily via QStash.',
+    },
   ];
+
+  const checks: HealthCheckResult[] = [];
+  for (const job of jobs) {
+    const { ageMs, lastRunAt } = await getJobHeartbeatAge(job.key);
+    if (ageMs == null) {
+      checks.push(
+        result({
+          id: job.id,
+          name: job.name,
+          category: 'Cron jobs',
+          status: 'degraded',
+          message: 'Never run (no heartbeat recorded yet)',
+          detail: `${job.whatBreaks} Set up schedules with scripts/setup-qstash-schedules.mjs.`,
+        })
+      );
+      continue;
+    }
+    const status =
+      job.failAfterMs != null && ageMs > job.failAfterMs
+        ? 'unhealthy'
+        : ageMs > job.warnAfterMs
+          ? 'degraded'
+          : 'healthy';
+    checks.push(
+      result({
+        id: job.id,
+        name: job.name,
+        category: 'Cron jobs',
+        status,
+        message:
+          status === 'healthy'
+            ? `Last ran ${humanizeAge(ageMs)}`
+            : `STALE — last ran ${humanizeAge(ageMs)} (${lastRunAt?.toISOString() ?? 'unknown'})`,
+        detail: status === 'healthy' ? undefined : job.whatBreaks,
+      })
+    );
+  }
+  return checks;
 }
 
 async function checkCron(): Promise<HealthCheckResult[]> {
   const publicBase = (
-    process.env.PUBLIC_BASE_URL?.trim() || 'https://www.sadiemarie.co'
+    process.env.PUBLIC_BASE_URL?.trim() || PRODUCTION_BASE
   ).replace(/\/$/, '');
   const cronSecret = process.env.CRON_SECRET?.trim();
 
@@ -1044,31 +1286,12 @@ async function checkCron(): Promise<HealthCheckResult[]> {
       name: 'Abandoned checkout release',
       category: 'Scheduled jobs (QStash)',
       status: process.env.QSTASH_TOKEN?.trim() ? 'healthy' : 'degraded',
-      message: `Delayed QStash + checkout timer + cron sweep (${CHECKOUT_HOLD_SECONDS}s hold)`,
+      message: `Delayed QStash + checkout timer + recurring sweep (${CHECKOUT_HOLD_SECONDS}s hold)`,
       detail: `${publicBase}/api/qstash/release-hold · ${publicBase}/api/booking/release-hold · ${publicBase}/api/cron/cleanup-abandoned`,
     }),
-    result({
-      id: 'cron-cleanup-abandoned',
-      name: 'Abandoned hold safety sweep',
-      category: 'Cron jobs',
-      status: cronSecret ? 'healthy' : 'degraded',
-      message: 'GET /api/cron/cleanup-abandoned — clears stale pending holds if QStash missed them',
-      detail: `${publicBase}/api/cron/cleanup-abandoned`,
-    }),
-    result({
-      id: 'cron-sync-reviews',
-      name: 'Google reviews sync',
-      category: 'Cron jobs',
-      status:
-        cronSecret && envPresent('GOOGLE_PLACES_API_KEY')
-          ? 'healthy'
-          : cronSecret
-            ? 'degraded'
-            : 'degraded',
-      message: 'GET /api/cron/sync-reviews — mirrors Google Places reviews to Postgres',
-      detail: `${publicBase}/api/cron/sync-reviews`,
-    }),
   ];
+
+  checks.push(...(await checkJobFreshness()));
 
   return checks;
 }
@@ -1087,16 +1310,37 @@ async function checkBlob(): Promise<HealthCheckResult[]> {
     ];
   }
 
-  return [
-    result({
-      id: 'blob-token',
-      name: 'Vercel Blob storage',
-      category: 'Storage',
-      status: 'healthy',
-      message: 'Blob token configured',
-      detail: 'Used for consent PDF stamping, client photos, and website CMS images',
-    }),
-  ];
+  // Live probe: a present-but-revoked token would otherwise show green while
+  // consent-PDF stamping and CMS uploads fail at runtime.
+  try {
+    const { list } = await import('@vercel/blob');
+    const { latencyMs } = await timed(async () => {
+      await list({ limit: 1, token });
+    });
+    return [
+      result(
+        {
+          id: 'blob-api',
+          name: 'Vercel Blob storage',
+          category: 'Storage',
+          message: 'Blob API reachable with the configured token',
+          detail: 'Used for consent PDF stamping, client photos, and website CMS images',
+        },
+        latencyMs
+      ),
+    ];
+  } catch (err) {
+    return [
+      result({
+        id: 'blob-api',
+        name: 'Vercel Blob storage',
+        category: 'Storage',
+        status: 'unhealthy',
+        message: 'Blob API check failed — consent PDFs and CMS uploads will fail',
+        detail: err instanceof Error ? err.message : String(err),
+      }),
+    ];
+  }
 }
 
 async function checkGoogleReviews(): Promise<HealthCheckResult[]> {
@@ -1288,7 +1532,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
   return {
     checkedAt: new Date().toISOString(),
     summary,
-    overall: overallFromSummary(summary),
+    overall: overallFromChecks(checks),
     checks,
   };
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 
+import { reconcileSucceededBookingPayment } from '@/lib/booking-payment-recovery';
 import { stripe } from '@/lib/stripe';
 import { syncTerminalPaymentFromStripe } from '@/lib/stripe-terminal';
 
@@ -69,6 +70,12 @@ export async function POST(req: Request): Promise<NextResponse> {
         expand: ['latest_charge'],
       });
       await syncTerminalPaymentFromStripe(intent);
+      // Online pay-now bookings: promote paid-but-unconfirmed holds (or
+      // refund payments whose hold already released). No-op for Terminal
+      // PIs — they carry no cal_booking_uid metadata.
+      if (event.type === 'payment_intent.succeeded') {
+        await reconcileSucceededBookingPayment(intent);
+      }
     } else if (TERMINAL_READER_EVENTS.has(event.type)) {
       const reader = event.data.object as Stripe.Terminal.Reader;
       const paymentIntentId = readerPaymentIntentId(reader);

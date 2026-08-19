@@ -132,7 +132,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
     const status = (hold.status || '').toLowerCase();
-    if (status === 'canceled_by_system' || isHoldExpired(hold.created_at)) {
+    if (status === 'confirmed') {
+      // Already paid/confirmed — never mint another PaymentIntent for this
+      // booking (double-charge guard: back button / refresh inside the hold
+      // window used to reach this route again).
+      return NextResponse.json(
+        {
+          error: 'already_confirmed',
+          message:
+            'This booking is already confirmed. You have not been charged again.',
+        },
+        { status: 409 }
+      );
+    }
+    if (
+      (status && status !== 'pending') ||
+      isHoldExpired(hold.created_at)
+    ) {
       return NextResponse.json(
         { error: 'cart_hold_expired', message: HOLD_EXPIRED_MESSAGE },
         { status: 400 }
@@ -217,9 +233,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
 
     if (!dbLinked) {
+      // Row is no longer pending (confirmed/canceled raced us). Cancel the
+      // fresh unconfirmed PI and refuse — returning a clientSecret here is
+      // how double charges happen.
       console.warn(
-        '[api/stripe/create-booking-payment-intent] no pending row to link PI',
+        '[api/stripe/create-booking-payment-intent] no pending row to link PI — canceling intent',
         { calBookingUid, paymentIntentId: paymentIntent.id }
+      );
+      try {
+        await stripe.paymentIntents.cancel(paymentIntent.id);
+      } catch (cancelErr) {
+        console.warn(
+          '[api/stripe/create-booking-payment-intent] PI cancel failed',
+          errorMessage(cancelErr)
+        );
+      }
+      return NextResponse.json(
+        {
+          error: 'booking_not_payable',
+          message:
+            'This booking can no longer be paid online. If you already paid, you are all set.',
+        },
+        { status: 409 }
       );
     }
 

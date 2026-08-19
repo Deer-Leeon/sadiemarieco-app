@@ -21,6 +21,7 @@ import { sql } from '@vercel/postgres';
 
 import { CHECKOUT_HOLD_SECONDS } from '@/lib/booking-hold';
 import { rejectUnlessCronAuthorized } from '@/lib/cron-auth';
+import { JOB_HEARTBEAT_KEYS, recordJobHeartbeat } from '@/lib/ops-state';
 import { releaseAbandonedHoldByCalUid } from '@/lib/release-abandoned-hold';
 
 export const runtime = 'nodejs';
@@ -96,6 +97,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (result.released) released += 1;
     else skipped += 1;
   }
+
+  await recordJobHeartbeat(JOB_HEARTBEAT_KEYS.cleanupAbandoned, {
+    scanned: rows.length,
+    released,
+  });
 
   return NextResponse.json({
     ok: true,

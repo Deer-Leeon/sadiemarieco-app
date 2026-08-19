@@ -119,6 +119,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const existing = await getAppointmentStripeByCalUid(calBookingUid);
 
+    // Only mint intents for live pending holds. A confirmed booking already
+    // has its card vaulted; canceled/expired holds must restart the flow.
+    const existingStatus = (existing?.status || '').toLowerCase();
+    if (existingStatus === 'confirmed') {
+      return NextResponse.json(
+        {
+          error: 'already_confirmed',
+          message: 'This booking is already confirmed — your card is on file.',
+        },
+        { status: 409 }
+      );
+    }
+    if (existingStatus && existingStatus !== 'pending') {
+      return NextResponse.json(
+        {
+          error: 'booking_not_payable',
+          message:
+            'This booking can no longer be confirmed. Please pick a new time on the calendar.',
+        },
+        { status: 409 }
+      );
+    }
+
     let stripeCustomerId =
       existing?.stripe_customer_id &&
       STRIPE_CUSTOMER_ID_RE.test(existing.stripe_customer_id)
