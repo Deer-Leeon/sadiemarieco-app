@@ -51,6 +51,7 @@ const isClerkExcludedApi = createRouteMatcher([
   '/api/webhooks(.*)',
   '/api/cron(.*)',
   '/api/remind(.*)',
+  '/api/remind-email(.*)',
   '/api/feedback(.*)',
   '/api/qstash(.*)',
   '/api/reviews(.*)',
