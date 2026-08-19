@@ -926,12 +926,14 @@ export default function ServiceManager({ initialServices }: Props) {
     if (!payload) return;
 
     setIsSubmitting(true);
+    const abort = AbortSignal.timeout(20_000);
     try {
       if (mode.kind === 'create') {
         const res = await fetch('/api/admin/services', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
+          signal: abort,
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || data.error || 'Request failed');
@@ -948,6 +950,7 @@ export default function ServiceManager({ initialServices }: Props) {
             db_id: mode.service.id,
             cal_event_id: mode.service.cal_event_id,
           }),
+          signal: abort,
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || data.error || 'Request failed');
@@ -958,7 +961,14 @@ export default function ServiceManager({ initialServices }: Props) {
         closeForm();
       }
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : String(err));
+      const name = err instanceof Error ? err.name : '';
+      if (name === 'TimeoutError' || name === 'AbortError') {
+        setSubmitError(
+          'Cal.com took too long to respond. The service may or may not have been created — refresh this page, and check Cal.com if you see a duplicate.'
+        );
+      } else {
+        setSubmitError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setIsSubmitting(false);
     }

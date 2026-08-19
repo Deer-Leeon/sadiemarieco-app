@@ -43,17 +43,11 @@ export default async function ServicesPage() {
   const displayName = user?.firstName || access.emails[0] || 'Admin';
 
   // ── RECONCILE WITH CAL ─────────────────────────────────────────────────
-  // Soft-delete any local row whose Cal.com event-type was removed
-  // directly from the Cal dashboard before we paint the list. `force:
-  // true` bypasses the public-facing TTL — the editor expects "I
-  // deleted in Cal, refresh shows it" to be immediate. Errors inside
-  // the reconciler are warn-logged but never thrown, so a Cal outage
-  // can't take down the admin page.
-  //
-  // This call ALSO closes the loop for the public homepage on the
-  // next render — both paths read `site_services` directly, and once
-  // an orphan is is_active=FALSE here it stays gone for everyone.
-  await reconcileWithCal({ force: true });
+  // Soft-delete local rows whose Cal event-type was removed in the
+  // Cal dashboard. Do NOT await: a Cal hang used to freeze this entire
+  // tab (and the Services nav click) until Vercel killed the function.
+  // Errors inside the reconciler are warn-logged and never thrown.
+  void reconcileWithCal({ force: true });
 
   // ── DATA FETCH ─────────────────────────────────────────────────────────
   // We fetch on the server so the editor sees the list painted on first

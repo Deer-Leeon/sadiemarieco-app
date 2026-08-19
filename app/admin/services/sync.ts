@@ -89,25 +89,42 @@ export class CalApiError extends Error {
  *   • Returns parsed JSON when available, an empty object otherwise
  *     (Cal.com's PATCH/DELETE responses are sometimes 204 No Content).
  */
+/** Hard cap so a Cal hang cannot freeze /admin/services or "Creating…". */
+const CAL_FETCH_TIMEOUT_MS = 12_000;
+
 export async function callCal<T = unknown>(
   path: string,
   apiKey: string,
   init: RequestInit
 ): Promise<T> {
-  const res = await fetch(`${CAL_API_BASE}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-      'cal-api-version': CAL_API_VERSION,
-      ...(init.headers ?? {}),
-    },
-    // Cal.com responses shouldn't be cached by anything in the chain —
-    // even a brief stale read could mislead the editor about whether
-    // a write actually landed.
-    cache: 'no-store',
-  });
+  const timeout = AbortSignal.timeout(CAL_FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${CAL_API_BASE}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'cal-api-version': CAL_API_VERSION,
+        ...(init.headers ?? {}),
+      },
+      // Cal.com responses shouldn't be cached by anything in the chain —
+      // even a brief stale read could mislead the editor about whether
+      // a write actually landed.
+      cache: 'no-store',
+      signal: init.signal ?? timeout,
+    });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      throw new CalApiError(
+        504,
+        `Cal.com request timed out after ${CAL_FETCH_TIMEOUT_MS / 1000}s (${path})`
+      );
+    }
+    throw err;
+  }
 
   const raw = await res.text();
   let parsed: unknown = null;
