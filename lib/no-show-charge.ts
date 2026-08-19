@@ -6,6 +6,7 @@ import {
   penaltyAmountCents,
 } from '@/lib/no-show-penalty';
 import { stripe } from '@/lib/stripe';
+import { stripeCardStatementFields } from '@/lib/stripe-statement-descriptor';
 
 export { NO_SHOW_PENALTY_FRACTION, penaltyAmountCents };
 
@@ -80,6 +81,7 @@ export async function chargeNoShowPenalty(params: {
       payment_method: paymentMethod.id,
       off_session: true,
       confirm: true,
+      ...stripeCardStatementFields,
       description: `No-show fee (${Math.round(NO_SHOW_PENALTY_FRACTION * 100)}%) — ${params.serviceLabel}`.slice(
         0,
         500

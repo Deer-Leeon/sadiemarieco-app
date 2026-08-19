@@ -30,6 +30,7 @@ import {
   stripeModeMismatchMessage,
 } from '@/lib/stripe-mode';
 import { stripe } from '@/lib/stripe';
+import { stripeCardStatementFields } from '@/lib/stripe-statement-descriptor';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -201,6 +202,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       customer: stripeCustomerId,
       payment_method_types: ['card'],
       setup_future_usage: 'off_session',
+      ...stripeCardStatementFields,
       payment_method_options: {
         card: {
           request_three_d_secure: 'automatic',
