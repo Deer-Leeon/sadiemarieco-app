@@ -295,7 +295,8 @@
 
   const slugFromCalLink = (link) => {
     if (!link) return '';
-    const parts = String(link).split('/').filter(Boolean);
+    const withoutQuery = String(link).split('?')[0];
+    const parts = withoutQuery.split('/').filter(Boolean);
     return parts[parts.length - 1] || '';
   };
 
@@ -352,6 +353,48 @@
   const payLoadingEl = document.getElementById('drawer-pay-loading');
   let drawerHoldUid = '';
   let drawerHoldConfirmed = false;
+  let drawerCalendarDate = '';
+  let drawerSlotIso = '';
+
+  const studioYmdFromIso = (iso) => {
+    if (!iso || typeof iso !== 'string') return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Denver',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(d);
+  };
+
+  const slotAppearsInList = (times, iso) => {
+    if (!Array.isArray(times) || !iso) return false;
+    const ms = new Date(iso).getTime();
+    if (Number.isNaN(ms)) return times.includes(iso);
+    return times.some((t) => new Date(t).getTime() === ms);
+  };
+
+  const waitUntilSlotVisible = async (slug, ymd, iso) => {
+    if (!slug || !ymd || !iso) return false;
+    const deadline = Date.now() + 5000;
+    const params = new URLSearchParams({ slug, date: ymd, end: ymd });
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`/api/book/slots?${params}`, {
+          cache: 'no-store',
+          headers: { Accept: 'application/json' }
+        });
+        const data = await res.json().catch(() => null);
+        const times = data && data.slots ? data.slots[ymd] : null;
+        if (slotAppearsInList(times, iso)) return true;
+      } catch {
+        /* retry until deadline */
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    return false;
+  };
 
   const abandonDrawerHold = (uid) => {
     const holdUid = uid || drawerHoldUid;
@@ -416,6 +459,9 @@
     if (drawerBackButton) drawerBackButton.hidden = false;
     drawerHoldUid = booking.uid;
     drawerHoldConfirmed = false;
+    drawerCalendarDate = studioYmdFromIso(booking.bookingTime);
+    drawerSlotIso =
+      typeof booking.bookingTime === 'string' ? booking.bookingTime : '';
     if (drawerSubtitleEl) drawerSubtitleEl.textContent = 'Choose how to pay';
   };
 
@@ -798,7 +844,7 @@
     });
   };
 
-  const createCalMount = (link) => {
+  const createCalMount = (link, dateYmd) => {
     if (!drawerContainer) return null;
     const idx = linkIndices.get(link);
     const instanceCount = (instanceCountByLink.get(link) || 0) + 1;
@@ -816,13 +862,18 @@
       window.Cal('init', namespace, { origin: 'https://cal.com' });
       const nsApi = window.Cal.ns && window.Cal.ns[namespace];
       if (nsApi) {
+        const month = dateYmd ? String(dateYmd).slice(0, 7) : '';
+        const calLink = dateYmd
+          ? `${link}${link.includes('?') ? '&' : '?'}date=${encodeURIComponent(dateYmd)}&month=${encodeURIComponent(month)}`
+          : link;
         nsApi('inline', {
           elementOrSelector: `#${mount.id}`,
-          calLink: link,
+          calLink,
           config: {
             theme: 'light',
             layout: 'month_view',
-            'ui.autoscroll': 'false'
+            'ui.autoscroll': 'false',
+            ...(dateYmd ? { date: dateYmd, month } : {})
           }
         });
         registerDrawerEmbedUi(nsApi, link);
@@ -861,7 +912,7 @@
     }
     mountCreatedAt.delete(link);
     staleLinks.delete(link);
-    createCalMount(link);
+    createCalMount(link, drawerCalendarDate);
   };
 
   // Called every time a drawer is about to be shown. Rebuilds the iframe
@@ -939,9 +990,13 @@
     backdrop.classList.remove('drawer-open');
   };
 
-  const returnDrawerToCalendar = () => {
+  const returnDrawerToCalendar = async () => {
     const uid = drawerHoldUid;
-    abandonDrawerHold();
+    const confirmed = drawerHoldConfirmed;
+    const dateYmd = drawerCalendarDate;
+    const slotIso = drawerSlotIso;
+    drawerHoldUid = '';
+    drawerHoldConfirmed = false;
     if (uid) checkoutRedirectedUids.delete(uid);
     hideDrawerPayChoice();
     hideContactWarning();
@@ -949,7 +1004,34 @@
     const activeLink = [...mountsByLink.entries()].find(([, mount]) =>
       mount.classList.contains('active')
     )?.[0];
-    if (activeLink) ensureFreshMount(activeLink);
+    // Tear down Cal's confirmation screen immediately so we don't sit on
+    // "booking requested" while the hold cancel finishes.
+    if (activeLink) {
+      const oldMount = mountsByLink.get(activeLink);
+      if (oldMount) {
+        teardownDrawerEmbedFrame(oldMount);
+        oldMount.remove();
+        mountsByLink.delete(activeLink);
+      }
+      mountCreatedAt.delete(activeLink);
+      staleLinks.delete(activeLink);
+    }
+    if (uid && !confirmed) {
+      try {
+        await fetch('/api/booking/abandon-hold', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ calBookingUid: uid }),
+          keepalive: true
+        });
+      } catch {
+        /* Cal cancel is best-effort; rebuild anyway */
+      }
+    }
+    if (activeLink && slotIso && dateYmd) {
+      await waitUntilSlotVisible(slugFromCalLink(activeLink), dateYmd, slotIso);
+    }
+    if (activeLink) rebuildMount(activeLink);
   };
 
   // If the drawer was open and the visitor uses in-page nav (Portfolio,
