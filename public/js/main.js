@@ -347,11 +347,49 @@
   // bookingSuccessful event fire for the same booking.
   const checkoutRedirectedUids = new Set();
 
-  const showCheckoutHandoff = () => {
-    if (drawer) drawer.classList.remove('drawer-open');
-    if (backdrop) backdrop.classList.remove('drawer-open');
+  const payFrame = document.getElementById('drawer-pay-frame');
+  const payLoadingEl = document.getElementById('drawer-pay-loading');
+
+  const hideCheckoutHandoff = () => {
     const handoff = document.getElementById('checkout-handoff');
-    if (handoff) handoff.classList.add('is-active');
+    if (handoff) handoff.classList.remove('is-active');
+  };
+
+  const keepDrawerOpen = () => {
+    if (drawer && !drawer.classList.contains('drawer-open')) {
+      drawer.classList.add('drawer-open');
+    }
+    if (backdrop && !backdrop.classList.contains('drawer-open')) {
+      backdrop.classList.add('drawer-open');
+    }
+  };
+
+  const hideDrawerPayChoice = () => {
+    if (drawer) drawer.classList.remove('is-pay-choice');
+    if (payLoadingEl) payLoadingEl.hidden = true;
+    if (payFrame) payFrame.removeAttribute('src');
+  };
+
+  const showDrawerPayLoading = () => {
+    hideCheckoutHandoff();
+    keepDrawerOpen();
+    if (payLoadingEl) payLoadingEl.hidden = false;
+  };
+
+  const showDrawerPayChoice = (booking, email) => {
+    hideCheckoutHandoff();
+    hideContactWarning();
+    if (payLoadingEl) payLoadingEl.hidden = true;
+    const search = new URLSearchParams({
+      uid: booking.uid,
+      embed: 'drawer'
+    });
+    if (booking.name) search.set('name', booking.name);
+    if (emailLooksReal(email)) search.set('email', email);
+    if (payFrame) payFrame.src = `/checkout?${search.toString()}`;
+    keepDrawerOpen();
+    if (drawer) drawer.classList.add('is-pay-choice');
+    if (drawerSubtitleEl) drawerSubtitleEl.textContent = 'Choose how to pay';
   };
 
   /** Cal v2 puts uid/title/startTime on `data`; legacy nests under `data.booking`. */
@@ -447,11 +485,6 @@
   const contactContinueBtn = document.getElementById('booking-contact-continue');
   let pendingContactBooking = null;
 
-  const hideCheckoutHandoff = () => {
-    const handoff = document.getElementById('checkout-handoff');
-    if (handoff) handoff.classList.remove('is-active');
-  };
-
   const hideContactWarning = () => {
     if (contactWarningEl) contactWarningEl.hidden = true;
     if (contactEmailWrap) contactEmailWrap.hidden = true;
@@ -486,6 +519,7 @@
   const showContactCapture = (booking) => {
     pendingContactBooking = booking;
     hideCheckoutHandoff();
+    if (payLoadingEl) payLoadingEl.hidden = true;
     const api = bookingAnalytics();
     const events = (api && api.events) || {};
     trackBooking(events.CONTACT_CAPTURE || 'Booking Contact Capture', {
@@ -506,13 +540,6 @@
     window.setTimeout(() => {
       if (contactSmsInput) contactSmsInput.focus();
     }, 30);
-  };
-
-  const goToCheckout = (booking, email) => {
-    const search = new URLSearchParams({ uid: booking.uid });
-    if (booking.name) search.set('name', booking.name);
-    if (emailLooksReal(email)) search.set('email', email);
-    window.location.replace(`/checkout?${search.toString()}`);
   };
 
   const initBookingHold = async (booking, email, smsOptIn) => {
@@ -606,8 +633,7 @@
           }
           hideContactWarning();
           pendingContactBooking = null;
-          showCheckoutHandoff();
-          goToCheckout(booking, hasEmail ? email : '');
+          showDrawerPayChoice(booking, hasEmail ? email : '');
         } catch (err) {
           console.warn('[booking] contact continue failed', err);
           setContactError('Something went wrong. Please try again.');
@@ -680,8 +706,7 @@
               // Cal had SMS opt-in even though the embed payload omitted it.
               hideContactWarning();
               pendingContactBooking = null;
-              showCheckoutHandoff();
-              goToCheckout(booking, '');
+              showDrawerPayChoice(booking, '');
               return;
             }
             if (isPhoneLookupError(data && data.error)) {
@@ -693,7 +718,7 @@
           return;
         }
 
-        showCheckoutHandoff();
+        showDrawerPayLoading();
         try {
           const { res, data } = await initBookingHold(
             booking,
@@ -701,7 +726,7 @@
             hasSms
           );
           if (!res.ok) {
-            hideCheckoutHandoff();
+            if (payLoadingEl) payLoadingEl.hidden = true;
             checkoutRedirectedUids.delete(uid);
             if (isPhoneLookupError(data && data.error)) {
               showPhoneLookupIssue(booking, data);
@@ -718,10 +743,10 @@
             );
             return;
           }
-          goToCheckout(booking, hasEmail ? email : '');
+          showDrawerPayChoice(booking, hasEmail ? email : '');
         } catch (initErr) {
           console.warn('[booking] /api/booking/init failed', initErr);
-          hideCheckoutHandoff();
+          if (payLoadingEl) payLoadingEl.hidden = true;
           checkoutRedirectedUids.delete(uid);
           showContactCapture(booking);
           setContactError('Something went wrong. Please try again.');
@@ -843,6 +868,8 @@
 
   const openDrawer = (link, meta) => {
     if (!drawer || !backdrop || !link) return;
+    hideDrawerPayChoice();
+    hideContactWarning();
 
     if (drawerTitleEl) drawerTitleEl.textContent = (meta && meta.name) || '';
     if (drawerSubtitleEl) {
@@ -878,6 +905,7 @@
   const closeDrawer = () => {
     if (!drawer || !backdrop) return;
     hideContactWarning();
+    hideDrawerPayChoice();
     pendingContactBooking = null;
     drawer.classList.remove('drawer-open');
     backdrop.classList.remove('drawer-open');

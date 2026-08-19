@@ -809,8 +809,8 @@ a.service-item:focus-visible .service-action {
 }
 
 /* ── BOOKING DRAWER (Slide-out off-canvas) ── */
-/* Covers the Cal embed the instant a slot is confirmed so the "booking
-   submitted" screen never flashes before /checkout loads. */
+/* Full-page cover kept as a fallback; the live booking flow now keeps
+   the drawer open and shows pay-choice in-panel after Cal confirms. */
 #checkout-handoff {
   position: fixed;
   inset: 0;
@@ -888,7 +888,7 @@ a.service-item:focus-visible .service-action {
 }
 .drawer-header {
   flex-shrink: 0;
-  z-index: 10;
+  z-index: 16;
   background: var(--off-white);
   border-bottom: 1px solid rgba(13, 27, 42, 0.1);
   padding: 26px 28px 22px;
@@ -1094,6 +1094,42 @@ a.service-item:focus-visible .service-action {
 }
 .booking-contact-email-toggle[hidden] {
   display: none !important;
+}
+
+.drawer-pay-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--off-white);
+  pointer-events: all;
+}
+.drawer-pay-loading:not([hidden]) {
+  display: flex;
+}
+#drawer-pay-choice {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--off-white);
+}
+#booking-drawer.is-pay-choice #drawer-pay-choice {
+  display: flex;
+}
+#booking-drawer.is-pay-choice #drawer-cal-container {
+  display: none;
+}
+#drawer-pay-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: transparent;
 }
 
 #drawer-cal-container {
