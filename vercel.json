@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/cleanup-abandoned",
-      "schedule": "0 12 * * *"
+      "schedule": "0 6 * * *"
     },
     {
       "path": "/api/cron/health-alert",

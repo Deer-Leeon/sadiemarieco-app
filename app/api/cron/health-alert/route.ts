@@ -2,7 +2,7 @@
  * GET /api/cron/health-alert
  *
  * Proactive monitoring: runs the same checks as the admin Health page on a
- * schedule (QStash, every 30 min) and NOTIFIES the owners when something is
+ * schedule (QStash, hourly, America/Denver) and NOTIFIES the owners when something is
  * actually broken — the green banner is only trustworthy if someone looks
  * at it, and nobody stares at a dashboard all day.
  *

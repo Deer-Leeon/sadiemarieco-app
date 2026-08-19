@@ -1,13 +1,13 @@
 // One-shot (idempotent) setup of the recurring QStash schedules that keep
 // production self-healing and monitored:
 //
-//   */15 * * * *  → /api/cron/cleanup-abandoned  (stale hold sweep)
-//   */30 * * * *  → /api/cron/health-alert       (owner alerting)
-//   0 12 * * *    → /api/cron/sync-reviews       (Google reviews, 6am MT)
+//   0 0 * * *  America/Denver  → /api/cron/cleanup-abandoned  (midnight MT)
+//   0 * * * *  America/Denver  → /api/cron/health-alert       (hourly, MT)
+//   0 6 * * *  America/Denver  → /api/cron/sync-reviews       (6am MT)
 //
 // Existing schedules for the same destination are replaced, so re-running
-// is safe. Vercel Cron (vercel.json) keeps daily backstops for the first
-// two in case QStash itself has an outage.
+// is safe. Vercel Cron (vercel.json) keeps daily/hourly backstops in UTC
+// for the first two in case QStash itself has an outage.
 //
 // Usage:
 //   node --env-file=.env.local scripts/setup-qstash-schedules.mjs
@@ -26,9 +26,18 @@ if (!QSTASH_TOKEN || !CRON_SECRET) {
 }
 
 const wanted = [
-  { destination: `${BASE}/api/cron/cleanup-abandoned`, cron: '*/15 * * * *' },
-  { destination: `${BASE}/api/cron/health-alert`, cron: '*/30 * * * *' },
-  { destination: `${BASE}/api/cron/sync-reviews`, cron: '0 12 * * *' },
+  {
+    destination: `${BASE}/api/cron/cleanup-abandoned`,
+    cron: 'CRON_TZ=America/Denver 0 0 * * *',
+  },
+  {
+    destination: `${BASE}/api/cron/health-alert`,
+    cron: 'CRON_TZ=America/Denver 0 * * * *',
+  },
+  {
+    destination: `${BASE}/api/cron/sync-reviews`,
+    cron: 'CRON_TZ=America/Denver 0 6 * * *',
+  },
 ];
 
 async function api(path, init = {}) {
