@@ -1,18 +1,17 @@
 'use client';
 
 /**
- * Express Checkout for /book pay step.
- * Parent owns footer chrome and dual-mounts setup + payment hosts so
- * switching pay-later / pay-now only toggles visibility (no remount).
+ * Express Checkout (Apple Pay) for desktop /checkout.
+ * The booking hold already exists (Cal uid in the URL) — unlike /book,
+ * this host does not create a new hold. Parent dual-mounts setup +
+ * payment Elements so pay-later / pay-now switches stay smooth.
+ *
+ * Apple Pay is only offered when the browser reports it (typically
+ * Safari/Chrome on a Mac with a card in Wallet). Windows has no
+ * ApplePaySession, so the parent never mounts this host there.
  */
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { track } from '@vercel/analytics';
 import {
   ExpressCheckoutElement,
@@ -20,10 +19,10 @@ import {
   useStripe,
 } from '@stripe/react-stripe-js';
 import type {
-  StripeExpressCheckoutElementConfirmEvent,
   StripeExpressCheckoutElementClickEvent,
-  StripeExpressCheckoutElementReadyEvent,
+  StripeExpressCheckoutElementConfirmEvent,
   StripeExpressCheckoutElementOptions,
+  StripeExpressCheckoutElementReadyEvent,
 } from '@stripe/stripe-js';
 
 import {
@@ -32,21 +31,6 @@ import {
 } from '@/lib/booking-analytics';
 import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
 import { prefersApplePayDevice } from '@/lib/prefers-apple-pay';
-
-import styles from './book.module.css';
-
-export { prefersApplePayDevice };
-
-function trackBook(
-  name: string,
-  data?: Record<string, string | number | boolean | null>
-) {
-  try {
-    track(name, data);
-  } catch {
-    /* ignore */
-  }
-}
 
 async function fetchWithTimeout(
   input: RequestInfo | URL,
@@ -68,35 +52,23 @@ function friendlyStripeError(error: { message?: string }): string {
   return 'Apple Pay could not complete. Please try again or pay with card.';
 }
 
-export type BookCreatePayload = {
-  slug: string;
-  start: string;
-  firstName: string;
-  lastName: string;
-  name: string;
-  phone: string;
-  email?: string;
-  smsOptIn: boolean;
-  source: 'phone_booker' | 'phone_booker_apple_pay';
-};
-
-export type BookConfirmed = {
+export type CheckoutApplePayConfirmed = {
   name: string;
   calWarning: string | null;
   contact: { sms: boolean; email: boolean };
 };
 
 type Props = {
-  /** This host is the interactive Apple Pay button for the current choice. */
   active: boolean;
   paymentTiming: BookingPaymentTiming;
+  uid: string;
+  name: string;
+  email: string;
   serviceTitle: string;
-  createPayload: Omit<BookCreatePayload, 'source'>;
   submitting: boolean;
   onSubmittingChange: (v: boolean) => void;
   onError: (message: string | null) => void;
-  onCreateError: (data: { error?: string; message?: string }) => void;
-  onConfirmed: (result: BookConfirmed) => void;
+  onConfirmed: (result: CheckoutApplePayConfirmed) => void;
   onApplePayResolved: (available: boolean) => void;
 };
 
@@ -118,15 +90,16 @@ const EXPRESS_OPTIONS: StripeExpressCheckoutElementOptions = {
   business: { name: 'Sadie Marie' },
 };
 
-export default function BookApplePayHost({
+export default function CheckoutApplePayHost({
   active,
   paymentTiming,
+  uid,
+  name,
+  email,
   serviceTitle,
-  createPayload,
   submitting,
   onSubmittingChange,
   onError,
-  onCreateError,
   onConfirmed,
   onApplePayResolved,
 }: Props) {
@@ -136,8 +109,12 @@ export default function BookApplePayHost({
   const [applePayAvailable, setApplePayAvailable] = useState(false);
   const [expressReady, setExpressReady] = useState(false);
 
-  const payloadRef = useRef(createPayload);
-  payloadRef.current = createPayload;
+  const uidRef = useRef(uid);
+  uidRef.current = uid;
+  const nameRef = useRef(name);
+  nameRef.current = name;
+  const emailRef = useRef(email);
+  emailRef.current = email;
   const serviceTitleRef = useRef(serviceTitle);
   serviceTitleRef.current = serviceTitle;
   const paymentTimingRef = useRef(paymentTiming);
@@ -164,44 +141,6 @@ export default function BookApplePayHost({
     []
   );
 
-  const createHold = useCallback(
-    async (source: BookCreatePayload['source']) => {
-      const payload = payloadRef.current;
-      const res = await fetchWithTimeout(
-        '/api/book/create',
-        {
-          method: 'POST',
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ ...payload, source }),
-        },
-        45_000
-      );
-      const data = (await res.json().catch(() => null)) as {
-        calBookingUid?: string;
-        name?: string;
-        email?: string;
-        error?: string;
-        message?: string;
-      } | null;
-
-      if (!res.ok || !data?.calBookingUid) {
-        onCreateError(
-          data ?? { message: 'Could not hold that time. Try again.' }
-        );
-        throw new Error(data?.message || 'Could not hold that time.');
-      }
-      return data as {
-        calBookingUid: string;
-        name?: string;
-        email?: string;
-      };
-    },
-    [onCreateError]
-  );
-
   const onConfirm = useCallback(
     async (event: StripeExpressCheckoutElementConfirmEvent) => {
       if (!stripe || !elements || submitting || !active) {
@@ -209,17 +148,23 @@ export default function BookApplePayHost({
         return;
       }
 
-      const payload = payloadRef.current;
       const timing = paymentTimingRef.current;
+      const calBookingUid = uidRef.current;
+      const bookingName = nameRef.current;
+      const bookingEmail = emailRef.current;
       const analyticsService = analyticsServiceLabel(serviceTitleRef.current);
 
       onError(null);
       onSubmittingChange(true);
-      trackBook(BOOKING_ANALYTICS_EVENTS.CHECKOUT_PAYMENT_ATTEMPT, {
-        service: analyticsService,
-        source: 'phone_booker_apple_pay',
-        payment_timing: timing,
-      });
+      try {
+        track(BOOKING_ANALYTICS_EVENTS.CHECKOUT_PAYMENT_ATTEMPT, {
+          service: analyticsService,
+          source: 'checkout_apple_pay',
+          payment_timing: timing,
+        });
+      } catch {
+        /* analytics must never break checkout */
+      }
 
       try {
         const { error: submitError } = await elements.submit();
@@ -228,10 +173,6 @@ export default function BookApplePayHost({
           event.paymentFailed({ reason: 'fail' });
           return;
         }
-
-        const hold = await createHold('phone_booker_apple_pay');
-        const bookingName = hold.name || payload.name;
-        const bookingEmail = hold.email || payload.email || '';
 
         const intentPath =
           timing === 'pay_now'
@@ -243,7 +184,7 @@ export default function BookApplePayHost({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              calBookingUid: hold.calBookingUid,
+              calBookingUid,
               ...(bookingName ? { name: bookingName } : {}),
               ...(bookingEmail ? { email: bookingEmail } : {}),
             }),
@@ -263,9 +204,9 @@ export default function BookApplePayHost({
           );
         }
 
-        const returnUrl = new URL('/book', window.location.origin);
-        returnUrl.searchParams.set('uid', hold.calBookingUid);
-        returnUrl.searchParams.set('payTiming', timing);
+        const returnUrl = new URL('/checkout', window.location.origin);
+        returnUrl.searchParams.set('uid', calBookingUid);
+        if (timing === 'pay_now') returnUrl.searchParams.set('payMode', 'now');
         if (bookingName) returnUrl.searchParams.set('name', bookingName);
         if (bookingEmail) returnUrl.searchParams.set('email', bookingEmail);
 
@@ -345,7 +286,7 @@ export default function BookApplePayHost({
               ...(timing === 'pay_now'
                 ? { paymentIntentId: confirmId }
                 : { setupIntentId: confirmId }),
-              calBookingUid: hold.calBookingUid,
+              calBookingUid,
               ...(bookingName ? { name: bookingName } : {}),
               ...(bookingEmail ? { email: bookingEmail } : {}),
             }),
@@ -366,11 +307,15 @@ export default function BookApplePayHost({
           );
         }
 
-        trackBook(BOOKING_ANALYTICS_EVENTS.BOOKING_CONFIRMED, {
-          service: analyticsService,
-          source: 'phone_booker_apple_pay',
-          payment_timing: timing,
-        });
+        try {
+          track(BOOKING_ANALYTICS_EVENTS.BOOKING_CONFIRMED, {
+            service: analyticsService,
+            source: 'checkout_apple_pay',
+            payment_timing: timing,
+          });
+        } catch {
+          /* ignore */
+        }
         onConfirmed({
           name: bookingName,
           calWarning: confirmPayload?.cal_accept_error ?? null,
@@ -390,16 +335,7 @@ export default function BookApplePayHost({
         onSubmittingChange(false);
       }
     },
-    [
-      stripe,
-      elements,
-      submitting,
-      active,
-      onError,
-      onSubmittingChange,
-      createHold,
-      onConfirmed,
-    ]
+    [stripe, elements, submitting, active, onError, onSubmittingChange, onConfirmed]
   );
 
   const showApplePay = expressReady && applePayAvailable;
@@ -407,24 +343,22 @@ export default function BookApplePayHost({
 
   return (
     <div
-      className={styles.expressLayer}
+      className="absolute inset-0 w-full"
       aria-hidden={!interactive}
       style={{
         pointerEvents: interactive ? 'auto' : 'none',
-        // Keep inactive host mounted in-place (opacity 0) so radio switches
-        // never remount Express Checkout.
         opacity: active ? (submitting ? 0.5 : 1) : 0,
         zIndex: active ? 1 : 0,
       }}
     >
       {active && prefersApplePay && !showApplePay ? (
-        <div className={styles.applePaySlot} aria-hidden="true" />
+        <div className="h-12 w-full rounded bg-black" aria-hidden="true" />
       ) : null}
       <div
         className={
           active && prefersApplePay && !showApplePay
-            ? styles.expressUnderSlot
-            : styles.expressPainted
+            ? 'absolute inset-0 opacity-0'
+            : 'relative'
         }
       >
         <ExpressCheckoutElement

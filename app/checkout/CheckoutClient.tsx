@@ -19,6 +19,8 @@ import {
   formatAppointmentWhen,
   formatServiceTitleForDisplay,
 } from '@/lib/format-booking-time';
+import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
+import { prefersApplePayDevice } from '@/lib/prefers-apple-pay';
 import { type StripeElementsOptions } from '@stripe/stripe-js';
 import {
   Elements,
@@ -28,6 +30,9 @@ import {
 } from '@stripe/react-stripe-js';
 import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
 import { stripePromise } from '@/lib/stripe-browser';
+import CheckoutApplePayHost, {
+  type CheckoutApplePayConfirmed,
+} from './CheckoutApplePayHost';
 
 function trackCheckoutEvent(
   name: string,
@@ -272,6 +277,20 @@ function friendlyStripeSetupError(error: {
   return 'We could not save your card. Please check the details and try again.';
 }
 
+function formatUsdFromCents(cents: number | null): string {
+  if (!cents || cents <= 0) return '';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+  }).format(cents / 100);
+}
+
+type CheckoutConfirmed = {
+  name: string;
+  calWarning: string | null;
+  contact: { sms: boolean; email: boolean };
+};
+
 const STRIPE_APPEARANCE: StripeElementsOptions['appearance'] = {
   theme: 'flat',
   variables: {
@@ -371,7 +390,22 @@ export default function CheckoutClient({
   // Cal phone-only bookings pass <digits>@sms.cal.com — never prefill Stripe Link with that.
   const emailRaw = params.get('email')?.trim() ?? '';
   const email = isValidEmail(emailRaw) ? emailRaw.trim().toLowerCase() : '';
-  const payNow = params.get('payMode')?.trim() === 'now';
+  const urlPayNow = params.get('payMode')?.trim() === 'now';
+  const [paymentTiming, setPaymentTiming] = useState<BookingPaymentTiming>(
+    urlPayNow ? 'pay_now' : 'pay_later'
+  );
+  // Desktop Cal embed lands here without payMode → choose first.
+  // Mobile "pay with card" already picked timing and sends payMode=now.
+  const [payPhase, setPayPhase] = useState<'choose' | 'card'>(
+    urlPayNow ? 'card' : 'choose'
+  );
+  const [confirmed, setConfirmed] = useState<CheckoutConfirmed | null>(null);
+  const [mountApplePay, setMountApplePay] = useState(false);
+  const [applePayAvailable, setApplePayAvailable] = useState<boolean | null>(
+    null
+  );
+  const [applePaySubmitting, setApplePaySubmitting] = useState(false);
+  const [applePayError, setApplePayError] = useState<string | null>(null);
   const threeDsSetupIntentId = useMemo(
     () => readThreeDsSetupIntentId(params),
     [params]
@@ -401,8 +435,25 @@ export default function CheckoutClient({
   const [holdReleaseState, setHoldReleaseState] = useState<
     'idle' | 'releasing' | 'released' | 'failed'
   >('idle');
-  /** Hide appointment/countdown once checkout succeeds (thank-you card). */
-  const [checkoutComplete, setCheckoutComplete] = useState(false);
+
+  useEffect(() => {
+    setMountApplePay(prefersApplePayDevice());
+  }, []);
+
+  const onApplePayResolved = useCallback((available: boolean) => {
+    setApplePayAvailable((prev) => (prev === true ? true : available));
+  }, []);
+
+  const markConfirmed = useCallback(
+    (result: CheckoutApplePayConfirmed | CheckoutConfirmed) => {
+      setConfirmed({
+        name: result.name || name,
+        calWarning: result.calWarning,
+        contact: result.contact,
+      });
+    },
+    [name]
+  );
 
   const appointmentWhen = useMemo(
     () => (bookingTime ? formatAppointmentWhen(bookingTime, endTime) : null),
@@ -644,7 +695,33 @@ export default function CheckoutClient({
     }
   }, [uid, holdExpired, threeDsSetupIntentId]);
 
-  const elementsOptions: StripeElementsOptions = useMemo(() => {
+  const payNow = paymentTiming === 'pay_now';
+
+  const setupApplePayOptions: StripeElementsOptions = useMemo(
+    () => ({
+      mode: 'setup',
+      currency: 'usd',
+      paymentMethodTypes: ['card'],
+      appearance: STRIPE_APPEARANCE,
+    }),
+    []
+  );
+
+  const paymentApplePayOptions: StripeElementsOptions = useMemo(() => {
+    const amount =
+      quotedServicePriceCents && quotedServicePriceCents > 0
+        ? quotedServicePriceCents
+        : 50;
+    return {
+      mode: 'payment',
+      amount,
+      currency: 'usd',
+      paymentMethodTypes: ['card'],
+      appearance: STRIPE_APPEARANCE,
+    };
+  }, [quotedServicePriceCents]);
+
+  const cardElementsOptions: StripeElementsOptions = useMemo(() => {
     if (payNow) {
       const amount =
         quotedServicePriceCents && quotedServicePriceCents > 0
@@ -691,31 +768,67 @@ export default function CheckoutClient({
           <ErrorCard message={bootstrapError} />
         ) : !stripePromise || !uid ? (
           <LoadingCard />
+        ) : confirmed ? (
+          <SuccessCard
+            name={confirmed.name}
+            calWarning={confirmed.calWarning}
+            contact={confirmed.contact}
+          />
         ) : (
           <>
-            {!checkoutComplete && (
-              <CheckoutHoldSummary
-                appointmentWhen={appointmentWhen}
-                serviceLabel={serviceLabel}
-                countdownLabel={countdownLabel}
-              />
-            )}
-            <Elements
-              key={payNow ? 'payment' : 'setup'}
-              stripe={stripePromise}
-              options={elementsOptions}
-            >
-              <CheckoutForm
+            <CheckoutHoldSummary
+              appointmentWhen={appointmentWhen}
+              serviceLabel={serviceLabel}
+              countdownLabel={countdownLabel}
+            />
+            {payPhase === 'choose' ? (
+              <CheckoutPayChoice
                 uid={uid}
                 name={name}
                 email={email}
-                holdExpired={holdExpired}
-                service={analyticsService}
-                payNow={payNow}
+                serviceTitle={serviceLabel || analyticsService}
+                paymentTiming={paymentTiming}
+                onPaymentTimingChange={(next) => {
+                  setPaymentTiming(next);
+                  setApplePayError(null);
+                }}
                 quotedServicePriceCents={quotedServicePriceCents}
-                onConfirmed={() => setCheckoutComplete(true)}
+                mountApplePay={mountApplePay}
+                applePayAvailable={applePayAvailable}
+                applePaySubmitting={applePaySubmitting}
+                applePayError={applePayError}
+                setupApplePayOptions={setupApplePayOptions}
+                paymentApplePayOptions={paymentApplePayOptions}
+                onApplePayResolved={onApplePayResolved}
+                onApplePaySubmittingChange={setApplePaySubmitting}
+                onApplePayError={setApplePayError}
+                onConfirmed={markConfirmed}
+                onPayWithCard={() => {
+                  setApplePayError(null);
+                  setPayPhase('card');
+                }}
               />
-            </Elements>
+            ) : (
+              <Elements
+                key={payNow ? 'card-payment' : 'card-setup'}
+                stripe={stripePromise}
+                options={cardElementsOptions}
+              >
+                <CheckoutForm
+                  uid={uid}
+                  name={name}
+                  email={email}
+                  holdExpired={holdExpired}
+                  service={analyticsService}
+                  payNow={payNow}
+                  quotedServicePriceCents={quotedServicePriceCents}
+                  onBack={() => setPayPhase('choose')}
+                  onConfirmed={(result) =>
+                    markConfirmed({ ...result, name })
+                  }
+                />
+              </Elements>
+            )}
           </>
         )}
       </section>
@@ -728,6 +841,206 @@ export default function CheckoutClient({
 // ──────────────────────────────────────────────────────────────────────────
 // Header / footer chrome
 // ──────────────────────────────────────────────────────────────────────────
+function CheckoutPayChoice({
+  uid,
+  name,
+  email,
+  serviceTitle,
+  paymentTiming,
+  onPaymentTimingChange,
+  quotedServicePriceCents,
+  mountApplePay,
+  applePayAvailable,
+  applePaySubmitting,
+  applePayError,
+  setupApplePayOptions,
+  paymentApplePayOptions,
+  onApplePayResolved,
+  onApplePaySubmittingChange,
+  onApplePayError,
+  onConfirmed,
+  onPayWithCard,
+}: {
+  uid: string;
+  name: string;
+  email: string;
+  serviceTitle: string;
+  paymentTiming: BookingPaymentTiming;
+  onPaymentTimingChange: (next: BookingPaymentTiming) => void;
+  quotedServicePriceCents: number | null;
+  mountApplePay: boolean;
+  applePayAvailable: boolean | null;
+  applePaySubmitting: boolean;
+  applePayError: string | null;
+  setupApplePayOptions: StripeElementsOptions;
+  paymentApplePayOptions: StripeElementsOptions;
+  onApplePayResolved: (available: boolean) => void;
+  onApplePaySubmittingChange: (v: boolean) => void;
+  onApplePayError: (message: string | null) => void;
+  onConfirmed: (result: CheckoutApplePayConfirmed) => void;
+  onPayWithCard: () => void;
+}) {
+  const payNow = paymentTiming === 'pay_now';
+  const priceLabel = formatUsdFromCents(quotedServicePriceCents);
+  const showApplePaySlot = mountApplePay && applePayAvailable !== false;
+  const showPrimaryCard = !mountApplePay || applePayAvailable === false;
+
+  return (
+    <div className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm shadow-stone-900/[0.03] sm:p-10">
+      <h2 className="font-serif text-2xl text-stone-900">
+        How would you like to pay?
+      </h2>
+      <p className="mt-2 text-sm leading-relaxed text-stone-500">
+        Choose now or later — a card on file is required either way.
+      </p>
+
+      <div className="mt-6 flex items-baseline justify-between border-b border-stone-100 pb-4">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+          Due today
+        </p>
+        <p className="font-serif text-2xl text-stone-900">
+          {payNow ? priceLabel || 'Pay now' : '$0'}
+        </p>
+      </div>
+
+      <fieldset disabled={applePaySubmitting} className="mt-5 space-y-2.5">
+        <legend className="sr-only">Payment timing</legend>
+        <label
+          className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-3.5 transition-colors ${
+            paymentTiming === 'pay_later'
+              ? 'border-stone-900 bg-stone-50'
+              : 'border-stone-200 bg-white hover:border-stone-300'
+          }`}
+        >
+          <input
+            type="radio"
+            name="checkoutPaymentTiming"
+            value="pay_later"
+            checked={paymentTiming === 'pay_later'}
+            onChange={() => onPaymentTimingChange('pay_later')}
+            className="mt-1"
+          />
+          <span>
+            <span className="block text-sm font-medium text-stone-900">
+              Pay later in studio
+            </span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-stone-500">
+              Card saved to hold — pay at your visit
+            </span>
+          </span>
+        </label>
+        <label
+          className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-3.5 transition-colors ${
+            paymentTiming === 'pay_now'
+              ? 'border-stone-900 bg-stone-50'
+              : 'border-stone-200 bg-white hover:border-stone-300'
+          }`}
+        >
+          <input
+            type="radio"
+            name="checkoutPaymentTiming"
+            value="pay_now"
+            checked={paymentTiming === 'pay_now'}
+            onChange={() => onPaymentTimingChange('pay_now')}
+            className="mt-1"
+          />
+          <span>
+            <span className="block text-sm font-medium text-stone-900">
+              Pay now in full
+            </span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-stone-500">
+              Save time at your appointment
+              {priceLabel ? ` — charged ${priceLabel} now` : ''}
+            </span>
+          </span>
+        </label>
+      </fieldset>
+
+      <p className="mt-5 text-xs leading-relaxed text-stone-400">
+        24+ hours notice to cancel or reschedule. Inside 24 hours may be
+        charged up to 50%; no-shows (or cancels within 2 hours) may be charged
+        100%. A card on file is required either way.
+      </p>
+
+      {showApplePaySlot && stripePromise ? (
+        <div className="relative mt-6 min-h-12 w-full">
+          <div className="absolute inset-0">
+            <Elements stripe={stripePromise} options={setupApplePayOptions}>
+              <CheckoutApplePayHost
+                active={paymentTiming === 'pay_later'}
+                paymentTiming="pay_later"
+                uid={uid}
+                name={name}
+                email={email}
+                serviceTitle={serviceTitle}
+                submitting={applePaySubmitting}
+                onSubmittingChange={onApplePaySubmittingChange}
+                onError={onApplePayError}
+                onConfirmed={onConfirmed}
+                onApplePayResolved={onApplePayResolved}
+              />
+            </Elements>
+          </div>
+          <div className="absolute inset-0">
+            <Elements stripe={stripePromise} options={paymentApplePayOptions}>
+              <CheckoutApplePayHost
+                active={paymentTiming === 'pay_now'}
+                paymentTiming="pay_now"
+                uid={uid}
+                name={name}
+                email={email}
+                serviceTitle={serviceTitle}
+                submitting={applePaySubmitting}
+                onSubmittingChange={onApplePaySubmittingChange}
+                onError={onApplePayError}
+                onConfirmed={onConfirmed}
+                onApplePayResolved={onApplePayResolved}
+              />
+            </Elements>
+          </div>
+        </div>
+      ) : null}
+
+      {applePayError ? (
+        <div
+          role="alert"
+          className="mt-5 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800"
+        >
+          {applePayError}
+        </div>
+      ) : null}
+
+      {showApplePaySlot ? (
+        <button
+          type="button"
+          disabled={applePaySubmitting}
+          onClick={onPayWithCard}
+          className="mt-4 w-full text-center text-sm font-medium text-stone-500 transition-colors hover:text-stone-800 disabled:opacity-50"
+        >
+          Pay with card instead
+        </button>
+      ) : null}
+
+      {showPrimaryCard ? (
+        <button
+          type="button"
+          disabled={applePaySubmitting}
+          onClick={onPayWithCard}
+          className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-5 py-3 text-sm font-medium tracking-wide text-stone-50 shadow-none transition-colors hover:bg-stone-800 active:bg-stone-900 disabled:cursor-not-allowed disabled:bg-stone-400"
+        >
+          {payNow ? 'Pay with card' : 'Continue with card'}
+        </button>
+      ) : null}
+
+      <p className="mt-4 text-center text-[11px] leading-relaxed text-stone-400">
+        {payNow
+          ? 'Paid in full online. Cancellation policy still applies to refunds.'
+          : 'Your card will only be charged for no-shows or late cancellations, per studio policy.'}
+      </p>
+    </div>
+  );
+}
+
 function BrandHeader() {
   return (
     <div className="text-center">
@@ -840,7 +1153,11 @@ interface FormProps {
   service: string;
   payNow: boolean;
   quotedServicePriceCents: number | null;
-  onConfirmed: () => void;
+  onBack?: () => void;
+  onConfirmed: (result: {
+    calWarning: string | null;
+    contact: { sms: boolean; email: boolean };
+  }) => void;
 }
 
 function CheckoutHoldSummary({
@@ -908,6 +1225,7 @@ function CheckoutForm({
   service,
   payNow,
   quotedServicePriceCents,
+  onBack,
   onConfirmed,
 }: FormProps) {
   const stripe = useStripe();
@@ -940,7 +1258,10 @@ function CheckoutForm({
           email,
         });
         clearStripeRedirectParams(uid, name, email);
-        onConfirmed();
+        onConfirmed({
+          calWarning: result.calWarning,
+          contact: result.contact,
+        });
         setConfirmed({
           calWarning: result.calWarning,
           contact: result.contact,
@@ -1136,13 +1457,7 @@ function CheckoutForm({
   }
 
   if (confirmed) {
-    return (
-      <SuccessCard
-        name={name}
-        calWarning={confirmed.calWarning}
-        contact={confirmed.contact}
-      />
-    );
+    return null;
   }
 
   return (
@@ -1150,6 +1465,16 @@ function CheckoutForm({
       onSubmit={handleSubmit}
       className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm shadow-stone-900/[0.03] sm:p-10"
     >
+      {onBack ? (
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={submitting}
+          className="mb-4 text-left text-xs font-medium tracking-wide text-stone-500 transition-colors hover:text-stone-800 disabled:opacity-50"
+        >
+          ← Back to payment options
+        </button>
+      ) : null}
       <h2 className="font-serif text-2xl text-stone-900">
         {payNow ? 'Pay for your appointment' : 'Secure your appointment'}
       </h2>
