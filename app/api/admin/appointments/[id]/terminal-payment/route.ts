@@ -29,6 +29,7 @@ import {
   terminalDiscountNote,
   type TerminalDiscountPercent,
 } from '@/lib/terminal-discount';
+import { stripeCardPresentStatementFields } from '@/lib/stripe-statement-descriptor';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -347,6 +348,7 @@ export async function POST(
         currency: 'usd',
         payment_method_types: ['card_present'],
         capture_method: 'automatic',
+        ...stripeCardPresentStatementFields,
         description: `${serviceLabel} — in-person appointment payment`,
         ...(appointment.client_email
           ? { receipt_email: appointment.client_email }
