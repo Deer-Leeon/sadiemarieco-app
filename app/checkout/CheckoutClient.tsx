@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { track } from '@vercel/analytics';
 import {
@@ -14,7 +14,7 @@ import {
   analyticsServiceLabel,
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
-import { isValidEmail } from '@/lib/client-identity';
+import { isValidEmail, formatUsPhoneAsYouType, clientPhoneValidationMessage, parseClientPhone } from '@/lib/client-identity';
 import {
   formatAppointmentWhen,
   formatServiceTitleForDisplay,
@@ -394,12 +394,18 @@ export default function CheckoutClient({
   const urlPayNow = urlPayMode === 'now';
   const skipChoose = urlPayMode === 'now' || urlPayMode === 'later';
   const embedInDrawer = params.get('embed')?.trim() === 'drawer';
+  const urlPhone = params.get('phone')?.trim() ?? '';
+  const [contactName, setContactName] = useState(name);
+  const [contactEmail, setContactEmail] = useState(email);
+  const [contactPhone, setContactPhone] = useState(
+    urlPhone ? formatUsPhoneAsYouType(urlPhone) : ''
+  );
   const [paymentTiming, setPaymentTiming] = useState<BookingPaymentTiming>(
     urlPayNow ? 'pay_now' : 'pay_later'
   );
   // Drawer already showed pay-later / pay-now. payMode skips that step
   // and opens the card form. Bare /checkout?uid= still shows choose.
-  const [payPhase, setPayPhase] = useState<'choose' | 'card'>(
+  const [payPhase, setPayPhase] = useState<'choose' | 'card' | 'details'>(
     skipChoose ? 'card' : 'choose'
   );
   const [confirmed, setConfirmed] = useState<CheckoutConfirmed | null>(null);
@@ -455,15 +461,15 @@ export default function CheckoutClient({
         'payMode',
         timing === 'pay_now' ? 'now' : 'later'
       );
-      if (name) url.searchParams.set('name', name);
+      if (contactName) url.searchParams.set('name', contactName);
       else url.searchParams.delete('name');
-      if (email) url.searchParams.set('email', email);
+      if (contactEmail) url.searchParams.set('email', contactEmail);
       else url.searchParams.delete('email');
       const target =
         window.top && window.top !== window ? window.top : window;
       target.location.replace(url.toString());
     },
-    [uid, name, email]
+    [uid, contactName, contactEmail]
   );
 
   // 3DS / Apple Pay return_url is the full checkout page. If that lands
@@ -479,13 +485,41 @@ export default function CheckoutClient({
   const markConfirmed = useCallback(
     (result: CheckoutApplePayConfirmed | CheckoutConfirmed) => {
       setConfirmed({
-        name: result.name || name,
+        name: result.name || contactName || name,
         calWarning: result.calWarning,
         contact: result.contact,
       });
+      if (embedInDrawer && window.parent && window.parent !== window) {
+        window.parent.postMessage(
+          { type: 'sadie-checkout:confirmed' },
+          window.location.origin
+        );
+      }
     },
-    [name]
+    [contactName, name, embedInDrawer]
   );
+
+  useEffect(() => {
+    if (!embedInDrawer) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== 'sadie-checkout:go-back') return;
+      if (payPhase === 'card') {
+        setPayPhase('choose');
+        return;
+      }
+      if (payPhase === 'choose') {
+        setPayPhase('details');
+        return;
+      }
+      window.parent.postMessage(
+        { type: 'sadie-checkout:back-to-calendar' },
+        window.location.origin
+      );
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [embedInDrawer, payPhase]);
 
   const appointmentWhen = useMemo(
     () => (bookingTime ? formatAppointmentWhen(bookingTime, endTime) : null),
@@ -827,11 +861,31 @@ export default function CheckoutClient({
               serviceLabel={serviceLabel}
               countdownLabel={countdownLabel}
             />
-            {payPhase === 'choose' ? (
+            {payPhase === 'details' ? (
+              <CheckoutDetailsForm
+                uid={uid}
+                name={contactName}
+                phone={contactPhone}
+                email={contactEmail}
+                compact={embedInDrawer}
+                onCancel={() => {
+                  window.parent.postMessage(
+                    { type: 'sadie-checkout:back-to-calendar' },
+                    window.location.origin
+                  );
+                }}
+                onSaved={(next) => {
+                  setContactName(next.name);
+                  setContactPhone(next.phone);
+                  setContactEmail(next.email);
+                  setPayPhase('choose');
+                }}
+              />
+            ) : payPhase === 'choose' ? (
               <CheckoutPayChoice
                 uid={uid}
-                name={name}
-                email={email}
+                name={contactName}
+                email={contactEmail}
                 serviceTitle={serviceLabel || analyticsService}
                 paymentTiming={paymentTiming}
                 onPaymentTimingChange={(next) => {
@@ -850,6 +904,9 @@ export default function CheckoutClient({
                 onApplePaySubmittingChange={setApplePaySubmitting}
                 onApplePayError={setApplePayError}
                 onConfirmed={markConfirmed}
+                onEditDetails={
+                  embedInDrawer ? () => setPayPhase('details') : undefined
+                }
                 onPayWithCard={() => {
                   setApplePayError(null);
                   if (embedInDrawer) {
@@ -867,15 +924,15 @@ export default function CheckoutClient({
               >
                 <CheckoutForm
                   uid={uid}
-                  name={name}
-                  email={email}
+                  name={contactName}
+                  email={contactEmail}
                   holdExpired={holdExpired}
                   service={analyticsService}
                   payNow={payNow}
                   quotedServicePriceCents={quotedServicePriceCents}
                   onBack={() => setPayPhase('choose')}
                   onConfirmed={(result) =>
-                    markConfirmed({ ...result, name })
+                    markConfirmed({ ...result, name: contactName })
                   }
                 />
               </Elements>
@@ -892,6 +949,169 @@ export default function CheckoutClient({
 // ──────────────────────────────────────────────────────────────────────────
 // Header / footer chrome
 // ──────────────────────────────────────────────────────────────────────────
+function CheckoutDetailsForm({
+  uid,
+  name,
+  phone,
+  email,
+  compact,
+  onCancel,
+  onSaved,
+}: {
+  uid: string;
+  name: string;
+  phone: string;
+  email: string;
+  compact: boolean;
+  onCancel: () => void;
+  onSaved: (next: { name: string; phone: string; email: string }) => void;
+}) {
+  const parts = name.trim().split(/\s+/);
+  const [firstName, setFirstName] = useState(parts[0] || '');
+  const [lastName, setLastName] = useState(
+    parts.length > 1 ? parts.slice(1).join(' ') : ''
+  );
+  const [phoneValue, setPhoneValue] = useState(
+    phone ? formatUsPhoneAsYouType(phone) : ''
+  );
+  const [emailValue, setEmailValue] = useState(email);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    if (!firstName.trim()) {
+      setError('Enter your first name.');
+      return;
+    }
+    if (!parseClientPhone(phoneValue)) {
+      setError(clientPhoneValidationMessage());
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/booking/update-contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          calBookingUid: uid,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          phone: phoneValue.trim(),
+          email: emailValue.trim() || undefined,
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        name?: string;
+        email?: string;
+        message?: string;
+      } | null;
+      if (!res.ok) {
+        setError(data?.message || 'Could not save your details.');
+        return;
+      }
+      onSaved({
+        name: data?.name || `${firstName.trim()} ${lastName.trim()}`.trim(),
+        phone: phoneValue,
+        email: data?.email || emailValue.trim(),
+      });
+    } catch {
+      setError('Could not save your details.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={(e) => void onSubmit(e)}
+      className={
+        compact
+          ? 'rounded-2xl border border-stone-200 bg-white p-5 shadow-sm'
+          : 'rounded-2xl border border-stone-200 bg-white p-8 shadow-sm'
+      }
+    >
+      <h2 className="font-serif text-2xl text-stone-900">Your details</h2>
+      <p className="mt-2 text-sm leading-relaxed text-stone-500">
+        Fix a name or number — your time slot stays held.
+      </p>
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+            First name
+          </span>
+          <input
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+            autoComplete="given-name"
+            required
+            className="w-full rounded-md border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none focus:border-stone-400"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+            Last name
+          </span>
+          <input
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+            autoComplete="family-name"
+            className="w-full rounded-md border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none focus:border-stone-400"
+          />
+        </label>
+      </div>
+      <label className="mt-3 block">
+        <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+          Phone
+        </span>
+        <input
+          type="tel"
+          inputMode="numeric"
+          value={phoneValue}
+          onChange={(e) => setPhoneValue(formatUsPhoneAsYouType(e.target.value))}
+          autoComplete="tel"
+          maxLength={14}
+          placeholder="(555) 123-4567"
+          required
+          className="w-full rounded-md border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none focus:border-stone-400"
+        />
+      </label>
+      <label className="mt-3 block">
+        <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+          Email <span className="normal-case tracking-normal text-stone-400">(optional)</span>
+        </span>
+        <input
+          type="email"
+          value={emailValue}
+          onChange={(e) => setEmailValue(e.target.value)}
+          autoComplete="email"
+          className="w-full rounded-md border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none focus:border-stone-400"
+        />
+      </label>
+      {error ? (
+        <p className="mt-3 text-sm text-rose-700" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <button
+        type="submit"
+        disabled={saving}
+        className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-stone-900 px-5 py-3 text-sm font-medium text-stone-50 hover:bg-stone-800 disabled:bg-stone-400"
+      >
+        {saving ? 'Saving…' : 'Continue to payment'}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="mt-3 w-full text-center text-sm text-stone-500 underline-offset-2 hover:underline"
+      >
+        Back to calendar
+      </button>
+    </form>
+  );
+}
+
 function CheckoutPayChoice({
   uid,
   name,
@@ -912,6 +1132,7 @@ function CheckoutPayChoice({
   onApplePayError,
   onConfirmed,
   onPayWithCard,
+  onEditDetails,
 }: {
   uid: string;
   name: string;
@@ -932,6 +1153,7 @@ function CheckoutPayChoice({
   onApplePayError: (message: string | null) => void;
   onConfirmed: (result: CheckoutApplePayConfirmed) => void;
   onPayWithCard: () => void;
+  onEditDetails?: () => void;
 }) {
   const payNow = paymentTiming === 'pay_now';
   const priceLabel = formatUsdFromCents(quotedServicePriceCents);
@@ -949,6 +1171,15 @@ function CheckoutPayChoice({
       <h2 className="font-serif text-2xl text-stone-900">
         How would you like to pay?
       </h2>
+      {onEditDetails ? (
+        <button
+          type="button"
+          onClick={onEditDetails}
+          className="mt-2 text-left text-sm text-stone-500 underline-offset-2 hover:underline"
+        >
+          Edit name or phone
+        </button>
+      ) : null}
       <p className="mt-2 text-sm leading-relaxed text-stone-500">
         Choose now or later — a card on file is required either way.
       </p>

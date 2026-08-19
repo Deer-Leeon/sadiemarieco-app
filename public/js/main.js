@@ -169,6 +169,7 @@
   const backdrop = document.getElementById('booking-backdrop');
   const drawerContainer = document.getElementById('drawer-cal-container');
   const closeButton = document.getElementById('close-drawer');
+  const drawerBackButton = document.getElementById('drawer-back');
   const drawerTitleEl = document.getElementById('drawer-title');
   const drawerSubtitleEl = drawer ? drawer.querySelector('.drawer-subtitle') : null;
 
@@ -349,6 +350,27 @@
 
   const payFrame = document.getElementById('drawer-pay-frame');
   const payLoadingEl = document.getElementById('drawer-pay-loading');
+  let drawerHoldUid = '';
+  let drawerHoldConfirmed = false;
+
+  const abandonDrawerHold = (uid) => {
+    const holdUid = uid || drawerHoldUid;
+    if (!holdUid || drawerHoldConfirmed) {
+      drawerHoldUid = '';
+      return;
+    }
+    drawerHoldUid = '';
+    try {
+      fetch('/api/booking/abandon-hold', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ calBookingUid: holdUid }),
+        keepalive: true
+      }).catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  };
 
   const hideCheckoutHandoff = () => {
     const handoff = document.getElementById('checkout-handoff');
@@ -368,6 +390,7 @@
     if (drawer) drawer.classList.remove('is-pay-choice');
     if (payLoadingEl) payLoadingEl.hidden = true;
     if (payFrame) payFrame.removeAttribute('src');
+    if (drawerBackButton) drawerBackButton.hidden = true;
   };
 
   const showDrawerPayLoading = () => {
@@ -386,9 +409,13 @@
     });
     if (booking.name) search.set('name', booking.name);
     if (emailLooksReal(email)) search.set('email', email);
+    if (booking.phone) search.set('phone', booking.phone);
     if (payFrame) payFrame.src = `/checkout?${search.toString()}`;
     keepDrawerOpen();
     if (drawer) drawer.classList.add('is-pay-choice');
+    if (drawerBackButton) drawerBackButton.hidden = false;
+    drawerHoldUid = booking.uid;
+    drawerHoldConfirmed = false;
     if (drawerSubtitleEl) drawerSubtitleEl.textContent = 'Choose how to pay';
   };
 
@@ -904,11 +931,25 @@
 
   const closeDrawer = () => {
     if (!drawer || !backdrop) return;
+    abandonDrawerHold();
     hideContactWarning();
     hideDrawerPayChoice();
     pendingContactBooking = null;
     drawer.classList.remove('drawer-open');
     backdrop.classList.remove('drawer-open');
+  };
+
+  const returnDrawerToCalendar = () => {
+    const uid = drawerHoldUid;
+    abandonDrawerHold();
+    if (uid) checkoutRedirectedUids.delete(uid);
+    hideDrawerPayChoice();
+    hideContactWarning();
+    keepDrawerOpen();
+    const activeLink = [...mountsByLink.entries()].find(([, mount]) =>
+      mount.classList.contains('active')
+    )?.[0];
+    if (activeLink) ensureFreshMount(activeLink);
   };
 
   // If the drawer was open and the visitor uses in-page nav (Portfolio,
@@ -963,6 +1004,29 @@
 
   if (backdrop) backdrop.addEventListener('click', closeDrawer);
   if (closeButton) closeButton.addEventListener('click', closeDrawer);
+  if (drawerBackButton) {
+    drawerBackButton.addEventListener('click', () => {
+      if (!payFrame || !payFrame.contentWindow) {
+        returnDrawerToCalendar();
+        return;
+      }
+      payFrame.contentWindow.postMessage(
+        { type: 'sadie-checkout:go-back' },
+        window.location.origin
+      );
+    });
+  }
+
+  window.addEventListener('message', (event) => {
+    if (event.origin !== window.location.origin) return;
+    const type = event.data && event.data.type;
+    if (type === 'sadie-checkout:back-to-calendar') {
+      returnDrawerToCalendar();
+    }
+    if (type === 'sadie-checkout:confirmed') {
+      drawerHoldConfirmed = true;
+    }
+  });
 
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && drawer && drawer.classList.contains('drawer-open')) {

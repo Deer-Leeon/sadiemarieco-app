@@ -15,6 +15,11 @@ import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-public';
 import { STUDIO_SMS_CONSENT_LABEL } from '@/lib/cal-event-studio-defaults';
 import { formatAppointmentWhen } from '@/lib/format-booking-time';
 import {
+  formatCountdownMmSs,
+  holdDeadlineMs,
+  isHoldExpired,
+} from '@/lib/booking-hold';
+import {
   clientPhoneValidationMessage,
   formatUsPhoneAsYouType,
   parseClientPhone,
@@ -228,6 +233,10 @@ export default function BookClient() {
   const [confirmed, setConfirmed] = useState<BookConfirmed | null>(null);
   const [paymentTiming, setPaymentTiming] =
     useState<BookingPaymentTiming>('pay_later');
+  const [holdUid, setHoldUid] = useState<string | null>(null);
+  const [holdCreatedAt, setHoldCreatedAt] = useState<string | null>(null);
+  const [holdCountdown, setHoldCountdown] = useState('');
+  const [holdExpired, setHoldExpired] = useState(false);
 
   const [applePayAvailable, setApplePayAvailable] = useState<boolean | null>(
     null
@@ -547,6 +556,66 @@ export default function BookClient() {
 
   const stepIndex = STEPS.indexOf(step);
 
+  const clearHoldState = useCallback(() => {
+    setHoldUid(null);
+    setHoldCreatedAt(null);
+    setHoldCountdown('');
+    setHoldExpired(false);
+  }, []);
+
+  const abandonHold = useCallback(
+    async (uid: string | null = holdUid) => {
+      if (!uid) {
+        clearHoldState();
+        return;
+      }
+      try {
+        await fetch('/api/booking/abandon-hold', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ calBookingUid: uid }),
+          keepalive: true,
+        });
+      } catch {
+        /* best-effort — QStash still releases at window end */
+      }
+      clearHoldState();
+    },
+    [holdUid, clearHoldState]
+  );
+
+  useEffect(() => {
+    if (!holdCreatedAt || holdExpired) {
+      setHoldCountdown('');
+      return;
+    }
+    const tick = () => {
+      const remaining = holdDeadlineMs(holdCreatedAt) - Date.now();
+      if (remaining <= 0) {
+        setHoldCountdown('00:00');
+        setHoldExpired(true);
+        return;
+      }
+      setHoldCountdown(formatCountdownMmSs(remaining));
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [holdCreatedAt, holdExpired]);
+
+  useEffect(() => {
+    if (!holdExpired || !holdUid) return;
+    const uid = holdUid;
+    void (async () => {
+      await abandonHold(uid);
+      setSelectedStart(null);
+      setStep('when');
+      setSubmitError(
+        'Your 10-minute hold expired. Please pick a time again.'
+      );
+    })();
+  }, [holdExpired, holdUid, abandonHold]);
+
   const goBack = () => {
     if (showReachPanel) {
       setShowReachPanel(false);
@@ -555,16 +624,21 @@ export default function BookClient() {
       return;
     }
     if (step === 'service') {
+      void abandonHold();
       router.push('/#services');
       return;
     }
     const prev = STEPS[Math.max(0, stepIndex - 1)];
+    if (prev === 'when' || prev === 'service') {
+      void abandonHold();
+    }
     setStep(prev);
     setSubmitError(null);
     setContactError(null);
   };
 
   const pickService = (service: BookService) => {
+    void abandonHold();
     setSelected(service);
     setSelectedStart(null);
     trackBook(BOOKING_ANALYTICS_EVENTS.SERVICE_OPENED, {
@@ -577,6 +651,31 @@ export default function BookClient() {
   const continueFromWhen = () => {
     if (!selectedStart) return;
     setStep('contact');
+  };
+
+  const handleCreateError = (data: {
+    error?: string;
+    message?: string;
+  } | null) => {
+    if (data?.error === 'phone_not_sms_capable') {
+      setSmsOptIn(false);
+      setStep('contact');
+      setShowReachPanel(true);
+      setShowEmailInReach(true);
+      setReachError(
+        data.message ||
+          'That number may not receive texts. Add an email instead.'
+      );
+      return;
+    }
+    if (data?.error === 'contact_required') {
+      setStep('contact');
+      setShowReachPanel(true);
+      setShowEmailInReach(false);
+      setReachError(data.message || 'Add email or text opt-in.');
+      return;
+    }
+    setSubmitError(data?.message || 'Could not hold that time. Try again.');
   };
 
   const continueFromContact = () => {
@@ -627,15 +726,30 @@ export default function BookClient() {
     setReachError('Add an email so we can reach you about your booking.');
   };
 
-  const continueFromReview = () => {
+  const continueFromReview = async () => {
     setSubmitError(null);
-    setStep('pay');
-  };
+    if (holdUid && holdCreatedAt && !isHoldExpired(holdCreatedAt)) {
+      try {
+        await fetch('/api/booking/update-contact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              calBookingUid: holdUid,
+              firstName: firstName.trim(),
+              lastName: lastName.trim(),
+              phone: phone.trim(),
+              email: email.trim() || undefined,
+            }),
+          });
+        } catch {
+          /* confirm still uses the latest name/phone from this page */
+        }
+      setStep('pay');
+      return;
+    }
 
-  const submitBooking = async () => {
-    if (!selected || !selectedStart || submitting || confirmed) return;
+    if (!selected || !selectedStart || submitting) return;
     setSubmitting(true);
-    setSubmitError(null);
     try {
       const res = await fetch('/api/book/create', {
         method: 'POST',
@@ -657,6 +771,7 @@ export default function BookClient() {
       });
       const data = (await res.json().catch(() => null)) as {
         calBookingUid?: string;
+        createdAt?: string;
         name?: string;
         email?: string;
         error?: string;
@@ -668,41 +783,36 @@ export default function BookClient() {
         return;
       }
 
-      const params = new URLSearchParams({ uid: data.calBookingUid });
-      if (data.name) params.set('name', data.name);
-      if (data.email) params.set('email', data.email);
-      if (paymentTiming === 'pay_now') params.set('payMode', 'now');
-      window.location.assign(`/checkout?${params.toString()}`);
+      setHoldUid(data.calBookingUid);
+      setHoldCreatedAt(data.createdAt || new Date().toISOString());
+      setHoldExpired(false);
+      setStep('pay');
     } catch {
-      setSubmitError('Something went wrong. Please try again.');
+      setSubmitError('Could not hold that time. Please try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleCreateError = (data: {
-    error?: string;
-    message?: string;
-  } | null) => {
-    if (data?.error === 'phone_not_sms_capable') {
-      setSmsOptIn(false);
-      setStep('contact');
-      setShowReachPanel(true);
-      setShowEmailInReach(true);
-      setReachError(
-        data.message ||
-          'That number may not receive texts. Add an email instead.'
-      );
+  const submitBooking = async () => {
+    if (!selected || !selectedStart || submitting || confirmed) return;
+    const uid = holdUid;
+    if (!uid) {
+      setSubmitError('Your time hold is missing. Go back and continue again.');
       return;
     }
-    if (data?.error === 'contact_required') {
-      setStep('contact');
-      setShowReachPanel(true);
-      setShowEmailInReach(false);
-      setReachError(data.message || 'Add email or text opt-in.');
-      return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const params = new URLSearchParams({ uid });
+      if (fullName) params.set('name', fullName);
+      if (email.trim()) params.set('email', email.trim());
+      if (paymentTiming === 'pay_now') params.set('payMode', 'now');
+      window.location.assign(`/checkout?${params.toString()}`);
+    } catch {
+      setSubmitError('Something went wrong. Please try again.');
+      setSubmitting(false);
     }
-    setSubmitError(data?.message || 'Could not hold that time. Try again.');
   };
 
   const createPayload = useMemo(
@@ -809,7 +919,14 @@ export default function BookClient() {
           </button>
         )}
         <p className={styles.brand}>Sadie Marie</p>
-        <Link href="/" className={styles.iconBtn} aria-label="Home">
+        <Link
+          href="/"
+          className={styles.iconBtn}
+          aria-label="Home"
+          onClick={() => {
+            void abandonHold();
+          }}
+        >
           ✕
         </Link>
       </header>
@@ -828,13 +945,28 @@ export default function BookClient() {
           step === 'review' || step === 'pay' ? styles.mainReview : ''
         }`}
       >
-        <h1
-          className={`${styles.title} ${
-            step === 'review' || step === 'pay' ? styles.titleReview : ''
+        <div
+          className={`${styles.titleRow} ${
+            step === 'review' || step === 'pay' ? styles.titleRowReview : ''
           }`}
         >
-          {stepTitle}
-        </h1>
+          <h1
+            className={`${styles.title} ${
+              step === 'review' || step === 'pay' ? styles.titleReview : ''
+            }`}
+          >
+            {stepTitle}
+          </h1>
+          {step === 'pay' && holdCountdown ? (
+            <p
+              className={styles.holdTimer}
+              aria-live="polite"
+              aria-label={`Time remaining ${holdCountdown}`}
+            >
+              {holdCountdown}
+            </p>
+          ) : null}
+        </div>
 
         {step === 'service' && (
           <section className={styles.section}>
@@ -1208,9 +1340,10 @@ export default function BookClient() {
             <button
               type="button"
               className={styles.primaryBtn}
-              onClick={continueFromReview}
+              disabled={submitting}
+              onClick={() => void continueFromReview()}
             >
-              Continue
+              {submitting ? 'Holding your time…' : 'Continue'}
             </button>
           )}
         </footer>
@@ -1255,6 +1388,7 @@ export default function BookClient() {
                     paymentTiming="pay_later"
                     serviceTitle={selected.title}
                     createPayload={createPayload}
+                    calBookingUid={holdUid}
                     submitting={submitting}
                     onSubmittingChange={setSubmitting}
                     onError={setSubmitError}
@@ -1272,6 +1406,7 @@ export default function BookClient() {
                     paymentTiming="pay_now"
                     serviceTitle={selected.title}
                     createPayload={createPayload}
+                    calBookingUid={holdUid}
                     submitting={submitting}
                     onSubmittingChange={setSubmitting}
                     onError={setSubmitError}
