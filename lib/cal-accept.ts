@@ -10,9 +10,9 @@
  * a 400. We treat that as success (card vault + local DB are what
  * matter for checkout).
  *
- * Tries v1 PATCH first (matches cleanup cron), then v2 confirm
- * (matches cancel-booking.js) because some accounts only honour
- * one of the two surfaces for uid-based bookings.
+ * Uses v2 confirm only — Cal decommissioned API v1 (HTTP 410,
+ * May 2026), so the historical v1-PATCH-first strategy would just
+ * burn a failed request on every booking.
  */
 
 import {
@@ -22,7 +22,6 @@ import {
   isCalBookingAlreadyConfirmed,
 } from '@/lib/cal-proxy';
 
-const CAL_V1_BASE = 'https://api.cal.com/v1';
 const CAL_V2_BASE = 'https://api.cal.com/v2';
 
 function errorMessage(err: unknown): string {
@@ -59,50 +58,6 @@ export async function acceptOnCal(calEventId: string): Promise<string | null> {
   if (!apiKey) {
     console.error('[cal-accept] CAL_API_KEY not set — skipping Cal accept');
     return 'CAL_API_KEY not configured on the server';
-  }
-
-  // ── v1: PATCH { status: 'ACCEPTED' } (cleanup cron pattern) ───────
-  try {
-    const v1 = await fetch(
-      `${CAL_V1_BASE}/bookings/${encodeURIComponent(calEventId)}?apiKey=${encodeURIComponent(apiKey)}`,
-      {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({ status: 'ACCEPTED' }),
-      }
-    );
-
-    if (v1.ok) {
-      console.log('[cal-accept] Cal v1 accept succeeded', { calEventId });
-      return null;
-    }
-
-    const v1Payload = await v1.json().catch(() => null);
-    const v1Message = calUpstreamErrorMessage(v1Payload, v1.status);
-    if (
-      await treatConfirmFailureAsSuccessIfAccepted(
-        calEventId,
-        apiKey,
-        v1Payload,
-        v1Message
-      )
-    ) {
-      return null;
-    }
-    console.warn('[cal-accept] Cal v1 PATCH failed — trying v2', {
-      calEventId,
-      status: v1.status,
-      message: v1Message,
-    });
-  } catch (err) {
-    console.warn('[cal-accept] Cal v1 PATCH network error — trying v2', {
-      calEventId,
-      error: errorMessage(err),
-    });
   }
 
   // ── v2: POST /bookings/:uid/confirm (cancel-booking.js pattern) ───

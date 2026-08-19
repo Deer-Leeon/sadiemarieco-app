@@ -1090,21 +1090,25 @@ async function checkWebhooks(): Promise<HealthCheckResult[]> {
   // Live probe: CAL_WEBHOOK_SECRET being set does not prove Cal actually has
   // a webhook pointing at this app. If someone deletes/disables it in the
   // Cal dashboard, every booking silently loses SMS/email/DB lifecycle.
+  // Uses API v2 — v1 was decommissioned (HTTP 410) in 2026.
   try {
     const { value: hooks, latencyMs } = await timed(async () => {
-      const res = await fetch(
-        `https://api.cal.com/v1/webhooks?apiKey=${encodeURIComponent(apiKey)}`,
-        { headers: { Accept: 'application/json' }, cache: 'no-store' }
-      );
+      const res = await fetch('https://api.cal.com/v2/webhooks', {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: 'application/json',
+        },
+        cache: 'no-store',
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json().catch(() => null)) as {
-        webhooks?: Array<{
+        data?: Array<{
           subscriberUrl?: string;
           active?: boolean;
-          eventTriggers?: string[];
+          triggers?: string[];
         }>;
       } | null;
-      return Array.isArray(body?.webhooks) ? body.webhooks : [];
+      return Array.isArray(body?.data) ? body.data : [];
     });
 
     const match = hooks.find(
@@ -1141,7 +1145,7 @@ async function checkWebhooks(): Promise<HealthCheckResult[]> {
       ];
     }
 
-    const triggers = match.eventTriggers ?? [];
+    const triggers = match.triggers ?? [];
     const wanted = ['BOOKING_CREATED', 'BOOKING_CANCELLED', 'BOOKING_RESCHEDULED'];
     const missingTriggers = wanted.filter((t) => !triggers.includes(t));
     return [
