@@ -252,6 +252,7 @@ export default function BookClient() {
       mode: 'setup',
       currency: 'usd',
       paymentMethodTypes: ['card'],
+      setupFutureUsage: 'off_session',
       appearance: elementsAppearance,
     }),
     [elementsAppearance]
@@ -267,6 +268,8 @@ export default function BookClient() {
       amount,
       currency: 'usd',
       paymentMethodTypes: ['card'],
+      // Must match PaymentIntent setup_future_usage or Apple Pay confirm fails.
+      setupFutureUsage: 'off_session',
       appearance: elementsAppearance,
     };
   }, [elementsAppearance, selected?.priceCents]);
