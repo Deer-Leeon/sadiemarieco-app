@@ -231,54 +231,52 @@ async function releasePendingRow(
     };
   }
 
-  const outcome = await cancelOnCal(row.cal_event_id, apiKey!);
+  // Flip the LOCAL row first. The pending-only UPDATE is the atomic arbiter
+  // of the race against /api/booking/confirm (whose promote is also
+  // pending-only): exactly one side wins. Cancelling on Cal before winning
+  // this flip could cancel a booking the client just paid for.
+  const flipped = await flipLocalStatus(row.id);
+  if (!flipped) {
+    console.warn(
+      '[release-abandoned-hold] row no longer pending — confirm raced us, Cal left untouched',
+      { appointmentId: row.id, calBookingUid: row.cal_event_id }
+    );
+    return {
+      ok: true,
+      released: false,
+      skipped: 'db_status_drifted',
+      appointmentId: row.id,
+    };
+  }
+
+  let outcome = await cancelOnCal(row.cal_event_id, apiKey!);
+  if (!outcome.ok) {
+    // One inline retry — the local row is already released, so a QStash-level
+    // retry would see non-pending and skip without ever reaching Cal.
+    outcome = await cancelOnCal(row.cal_event_id, apiKey!);
+  }
   if (!outcome.ok) {
     console.error(
-      '[release-abandoned-hold] Cal cancel failed — leaving row as pending',
+      '[release-abandoned-hold] Cal cancel FAILED after local release — the Cal booking still blocks the slot; cancel it manually',
       {
         appointmentId: row.id,
         calBookingUid: row.cal_event_id,
         reason: outcome.message,
       }
     );
-    return {
-      ok: false,
-      retryable: true,
-      reason: outcome.message ?? 'cal_cancel_failed',
-      appointmentId: row.id,
-    };
   }
 
-  const flipped = await flipLocalStatus(row.id);
-  if (flipped) {
-    await maybeNotifyAbandonedCheckout(row, sendAbandonedSms);
-    if (sendAbandonedSms) {
-      await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.HOLD_ABANDONED, {
-        service: analyticsServiceLabel(row.service_name),
-        source: 'cal_cancel',
-      });
-    }
-    return {
-      ok: true,
-      released: true,
-      appointmentId: row.id,
-      calBookingUid: row.cal_event_id,
-    };
+  await maybeNotifyAbandonedCheckout(row, sendAbandonedSms);
+  if (sendAbandonedSms) {
+    await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.HOLD_ABANDONED, {
+      service: analyticsServiceLabel(row.service_name),
+      source: 'cal_cancel',
+    });
   }
-
-  // Cal cancel succeeded but local row no longer pending (confirm raced us).
-  console.warn(
-    '[release-abandoned-hold] Cal cancelled but local row no longer pending',
-    {
-      appointmentId: row.id,
-      calBookingUid: row.cal_event_id,
-      alreadyGone: outcome.alreadyGone,
-    }
-  );
   return {
     ok: true,
-    released: false,
-    skipped: 'db_status_drifted',
+    released: true,
     appointmentId: row.id,
+    calBookingUid: row.cal_event_id,
   };
 }

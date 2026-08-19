@@ -109,16 +109,20 @@ export default function CheckoutApplePayHost({
   const [applePayAvailable, setApplePayAvailable] = useState(false);
   const [expressReady, setExpressReady] = useState(false);
 
+  // Latest props mirrored into refs (after render, per react-hooks/refs) so
+  // the Apple Pay onConfirm callback stays stable across re-renders.
   const uidRef = useRef(uid);
-  uidRef.current = uid;
   const nameRef = useRef(name);
-  nameRef.current = name;
   const emailRef = useRef(email);
-  emailRef.current = email;
   const serviceTitleRef = useRef(serviceTitle);
-  serviceTitleRef.current = serviceTitle;
   const paymentTimingRef = useRef(paymentTiming);
-  paymentTimingRef.current = paymentTiming;
+  useEffect(() => {
+    uidRef.current = uid;
+    nameRef.current = name;
+    emailRef.current = email;
+    serviceTitleRef.current = serviceTitle;
+    paymentTimingRef.current = paymentTiming;
+  }, [uid, name, email, serviceTitle, paymentTiming]);
 
   const onReady = useCallback(
     (event: StripeExpressCheckoutElementReadyEvent) => {
