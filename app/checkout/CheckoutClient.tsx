@@ -734,6 +734,7 @@ export default function CheckoutClient({
       mode: 'setup',
       currency: 'usd',
       paymentMethodTypes: ['card'],
+      setupFutureUsage: 'off_session',
       appearance: STRIPE_APPEARANCE,
     }),
     []
@@ -749,6 +750,7 @@ export default function CheckoutClient({
       amount,
       currency: 'usd',
       paymentMethodTypes: ['card'],
+      setupFutureUsage: 'off_session',
       appearance: STRIPE_APPEARANCE,
     };
   }, [quotedServicePriceCents]);
@@ -765,6 +767,7 @@ export default function CheckoutClient({
         currency: 'usd',
         appearance: STRIPE_APPEARANCE,
         paymentMethodTypes: ['card'],
+        setupFutureUsage: 'off_session',
       };
     }
     return {
@@ -772,6 +775,7 @@ export default function CheckoutClient({
       currency: 'usd',
       appearance: STRIPE_APPEARANCE,
       paymentMethodTypes: ['card'],
+      setupFutureUsage: 'off_session',
     };
   }, [payNow, quotedServicePriceCents]);
 
