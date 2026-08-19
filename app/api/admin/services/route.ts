@@ -180,12 +180,12 @@ export async function GET(): Promise<NextResponse> {
   const gate = await gateAdmin();
   if (gate) return gate;
 
-  // Reconcile orphans before we read the list. `force: true` bypasses
-  // the public-facing TTL — when the editor refetches services they
-  // expect "I deleted in Cal, refresh shows it" to be immediate, not
-  // "within the next minute". See app/admin/services/sync.ts for the
-  // full safeguard rationale.
-  await reconcileWithCal({ force: true });
+  // Best-effort orphan cleanup. Cap wait so a Cal hang cannot block
+  // the catalogue JSON the editor needs to paint the page.
+  await Promise.race([
+    reconcileWithCal({ force: true }),
+    new Promise<void>((resolve) => setTimeout(resolve, 8_000)),
+  ]);
 
   try {
     // ORDER BY category first then title gives the UI a stable section
