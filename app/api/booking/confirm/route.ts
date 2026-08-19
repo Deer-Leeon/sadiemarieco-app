@@ -58,12 +58,8 @@ import {
 import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
 import { notifyBookingConfirmed } from '@/lib/booking-notifications';
 import { stripeCardCheckRejection } from '@/lib/stripe-card-checks';
-import {
-  CAL_BOOKINGS_API_VERSION,
-  calUpstreamErrorMessage,
-  fetchCalBookingIsAccepted,
-  isCalBookingAlreadyConfirmed,
-} from '@/lib/cal-proxy';
+import { acceptOnCal } from '@/lib/cal-accept';
+import { CAL_BOOKINGS_API_VERSION } from '@/lib/cal-proxy';
 import { isValidEmail } from '@/lib/client-identity';
 import { hasRealBookingEmail } from '@/lib/booking-contact-channel';
 import {
@@ -82,7 +78,6 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const CAL_V1_BASE = 'https://api.cal.com/v1';
 const CAL_V2_BASE = 'https://api.cal.com/v2';
 interface ConfirmBody {
   setupIntentId?: unknown;
@@ -149,137 +144,6 @@ function parseBody(input: unknown): ParsedBody | { error: string } {
     name,
     calBookingUid,
   };
-}
-
-function calErrorMessage(payload: unknown, status: number): string {
-  return calUpstreamErrorMessage(payload, status);
-}
-
-async function treatConfirmFailureAsSuccessIfAccepted(
-  calEventId: string,
-  apiKey: string,
-  payload: unknown,
-  message: string
-): Promise<boolean> {
-  if (isCalBookingAlreadyConfirmed(payload, message)) {
-    console.log(
-      '[api/booking/confirm] booking already confirmed on Cal — treating as success',
-      { calEventId, message }
-    );
-    return true;
-  }
-  if (await fetchCalBookingIsAccepted(calEventId, apiKey, CAL_BOOKINGS_API_VERSION)) {
-    console.log(
-      '[api/booking/confirm] booking status is accepted on Cal — treating confirm as success',
-      { calEventId }
-    );
-    return true;
-  }
-  return false;
-}
-
-/**
- * Accept a pending booking on Cal.com so it leaves "Unconfirmed".
- * Returns null on success, or a human-readable error for the UI.
- *
- * When confirmation is disabled on the event type, Cal creates the
- * booking as already accepted — confirm/accept calls then fail with
- * a 400. We treat that as success (card vault + local DB are what
- * matter for checkout).
- *
- * Tries v1 PATCH first (matches cleanup cron), then v2 confirm
- * (matches cancel-booking.js) because some accounts only honour
- * one of the two surfaces for uid-based bookings.
- */
-async function acceptOnCal(calEventId: string): Promise<string | null> {
-  const apiKey = process.env.CAL_API_KEY;
-  if (!apiKey) {
-    console.error(
-      '[api/booking/confirm] CAL_API_KEY not set — skipping Cal accept'
-    );
-    return 'CAL_API_KEY not configured on the server';
-  }
-
-  // ── v1: PATCH { status: 'ACCEPTED' } (cleanup cron pattern) ───────
-  try {
-    const v1 = await fetch(
-      `${CAL_V1_BASE}/bookings/${encodeURIComponent(calEventId)}?apiKey=${encodeURIComponent(apiKey)}`,
-      {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({ status: 'ACCEPTED' }),
-      }
-    );
-
-    if (v1.ok) {
-      console.log('[api/booking/confirm] Cal v1 accept succeeded', {
-        calEventId,
-      });
-      return null;
-    }
-
-    const v1Payload = await v1.json().catch(() => null);
-    const v1Message = calErrorMessage(v1Payload, v1.status);
-    if (await treatConfirmFailureAsSuccessIfAccepted(calEventId, apiKey, v1Payload, v1Message)) {
-      return null;
-    }
-    console.warn('[api/booking/confirm] Cal v1 PATCH failed — trying v2', {
-      calEventId,
-      status: v1.status,
-      message: v1Message,
-    });
-  } catch (err) {
-    console.warn('[api/booking/confirm] Cal v1 PATCH network error — trying v2', {
-      calEventId,
-      error: errorMessage(err),
-    });
-  }
-
-  // ── v2: POST /bookings/:uid/confirm (cancel-booking.js pattern) ───
-  try {
-    const v2 = await fetch(
-      `${CAL_V2_BASE}/bookings/${encodeURIComponent(calEventId)}/confirm`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'cal-api-version': CAL_BOOKINGS_API_VERSION,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-      }
-    );
-
-    if (v2.ok) {
-      console.log('[api/booking/confirm] Cal v2 confirm succeeded', {
-        calEventId,
-      });
-      return null;
-    }
-
-    const v2Payload = await v2.json().catch(() => null);
-    const v2Message = calErrorMessage(v2Payload, v2.status);
-    if (await treatConfirmFailureAsSuccessIfAccepted(calEventId, apiKey, v2Payload, v2Message)) {
-      return null;
-    }
-    console.error('[api/booking/confirm] Cal v2 confirm failed', {
-      calEventId,
-      status: v2.status,
-      message: v2Message,
-    });
-    return `Cal.com rejected the confirmation (${v2Message})`;
-  } catch (err) {
-    const msg = errorMessage(err);
-    console.error('[api/booking/confirm] Cal v2 confirm network error', {
-      calEventId,
-      error: msg,
-    });
-    return `Could not reach Cal.com (${msg})`;
-  }
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -353,8 +217,83 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // Linked Stripe ids for this booking (SetupIntent id written at mint time).
+  // Fetched before the status gate so the 'confirmed' branch can tell an
+  // idempotent retry (same intent id) apart from a duplicate payment.
+  let existingStripe: Awaited<
+    ReturnType<typeof getAppointmentStripeByCalUid>
+  >;
+  try {
+    existingStripe = await getAppointmentStripeByCalUid(calBookingUid);
+  } catch (err) {
+    const msg = errorMessage(err);
+    console.error('[api/booking/confirm] stripe row lookup failed:', msg);
+    return NextResponse.json(
+      { error: 'hold_lookup_failed', message: msg },
+      { status: 500 }
+    );
+  }
+
   {
     const status = (hold.status || '').toLowerCase();
+    if (status === 'confirmed') {
+      // Retry of a confirm that already succeeded (page refresh, 3DS
+      // return, network retry): same intent id → report success again.
+      const matchesLinkedIntent = paymentIntentId
+        ? (existingStripe?.stripe_payment_intent_id ?? '').trim() ===
+          paymentIntentId
+        : (existingStripe?.stripe_setup_intent_id ?? '').trim() ===
+          setupIntentId;
+      if (matchesLinkedIntent) {
+        return NextResponse.json({
+          ok: true,
+          alreadyConfirmed: true,
+          stripeCustomerId: existingStripe?.stripe_customer_id ?? null,
+          dbLinked: true,
+          cal_accept_error: null,
+          notifications: null,
+          contact: { sms: false, email: hasRealBookingEmail(email) },
+        });
+      }
+
+      // A DIFFERENT intent against an already-confirmed booking. If it is a
+      // succeeded PaymentIntent for this uid the client was double-charged —
+      // refund it immediately.
+      if (paymentIntentId && stripe) {
+        try {
+          const dupPi = await stripe.paymentIntents.retrieve(paymentIntentId);
+          const dupUid = (dupPi.metadata?.cal_booking_uid ?? '').trim();
+          if (dupPi.status === 'succeeded' && dupUid === calBookingUid) {
+            await stripe.refunds.create({ payment_intent: paymentIntentId });
+            console.error(
+              '[api/booking/confirm] duplicate payment refunded on confirmed booking',
+              { calBookingUid, paymentIntentId }
+            );
+            return NextResponse.json(
+              {
+                error: 'duplicate_payment_refunded',
+                message:
+                  'This booking was already confirmed and paid. The extra charge has been refunded to your card.',
+              },
+              { status: 409 }
+            );
+          }
+        } catch (dupErr) {
+          console.error(
+            '[api/booking/confirm] duplicate-payment refund attempt failed',
+            { calBookingUid, paymentIntentId, error: errorMessage(dupErr) }
+          );
+        }
+      }
+      return NextResponse.json(
+        {
+          error: 'already_confirmed',
+          message:
+            'This booking is already confirmed. You have not been charged again.',
+        },
+        { status: 409 }
+      );
+    }
     if (status === 'canceled_by_system' || isHoldExpired(hold.created_at)) {
       return NextResponse.json(
         {
@@ -378,21 +317,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 409 }
       );
     }
-  }
-
-  // Linked Stripe ids for this booking (SetupIntent id written at mint time).
-  let existingStripe: Awaited<
-    ReturnType<typeof getAppointmentStripeByCalUid>
-  >;
-  try {
-    existingStripe = await getAppointmentStripeByCalUid(calBookingUid);
-  } catch (err) {
-    const msg = errorMessage(err);
-    console.error('[api/booking/confirm] stripe row lookup failed:', msg);
-    return NextResponse.json(
-      { error: 'hold_lookup_failed', message: msg },
-      { status: 500 }
-    );
   }
 
   // ── 1. STRIPE: verify SetupIntent or PaymentIntent succeeded ─────
@@ -438,6 +362,40 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             message: 'This payment session is out of date. Please try again.',
           },
           { status: 400 }
+        );
+      }
+      // Server-side amount check: the PI was minted from
+      // quoted_service_price_cents; any drift means a stale/incorrect
+      // payment session. Refund rather than record a wrong amount.
+      const quotedCents = Number(
+        existingStripe?.quoted_service_price_cents ?? 0
+      );
+      if (
+        Number.isFinite(quotedCents) &&
+        quotedCents >= 50 &&
+        paymentIntent.amount !== quotedCents
+      ) {
+        console.error('[api/booking/confirm] pay-now amount mismatch', {
+          calBookingUid,
+          paymentIntentId,
+          paymentAmount: paymentIntent.amount,
+          quotedCents,
+        });
+        try {
+          await stripe.refunds.create({ payment_intent: paymentIntentId });
+        } catch (refundErr) {
+          console.error(
+            '[api/booking/confirm] amount-mismatch refund failed',
+            { paymentIntentId, error: errorMessage(refundErr) }
+          );
+        }
+        return NextResponse.json(
+          {
+            error: 'payment_amount_mismatch',
+            message:
+              'The payment amount did not match the quoted service price, so it has been refunded. Please book again.',
+          },
+          { status: 409 }
         );
       }
       payNowAmountCents = paymentIntent.amount;
@@ -670,22 +628,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // statement so the calendar reflects the booking and the card
   // linkage atomically.
   //
-  // WHERE-clause guard: only promote rows that are currently 'pending'
-  // OR have no status yet (legacy rows that predate the state machine).
-  // This avoids two problem cases:
-  //   • A duplicate /checkout submission for the same uid clobbering
-  //     a row that's since transitioned to 'no-show' or 'canceled_*'.
-  //   • A late client finishing /checkout AFTER McKenna already
-  //     manually cancelled the booking — we don't want to silently
-  //     un-cancel it. The customer_id still updates (Stripe charged
-  //     them — the link is real) but the calendar status stays where
-  //     the admin put it.
-  //
-  // If the row doesn't exist yet (the webhook hasn't fired by the
-  // time the client finishes /checkout — race possible on slow
-  // networks), we still want to report "vaulted, not yet linked"
-  // rather than fail outright. The webhook handler can backfill
-  // by stripe_customer_id later via metadata lookup if needed.
+  // WHERE-clause guard: promote ONLY rows still 'pending' (or legacy NULL),
+  // atomically. This closes the confirm-vs-release race: if the QStash hold
+  // release (or an admin cancel) flipped the row between our gate check and
+  // this UPDATE, we match 0 rows — and for pay-now we REFUND the succeeded
+  // PaymentIntent instead of leaving money attached to a dead booking.
   let dbLinked = false;
   let appointmentId: string | null = existingStripe?.id ?? null;
   try {
@@ -697,28 +644,82 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             ${paymentIntentId},
             stripe_payment_intent_id
           ),
-          status = CASE
-            WHEN status IS NULL OR status = 'pending' THEN 'confirmed'
-            ELSE status
-          END
+          status = 'confirmed'
       WHERE cal_event_id = ${calBookingUid}
+        AND (status IS NULL OR status = 'pending')
       RETURNING id::text AS id
     `;
     dbLinked = (rowCount ?? 0) > 0;
     appointmentId = rows[0]?.id ?? appointmentId;
     if (!dbLinked) {
+      // Lost the race (release/cancel/another confirm won) or row vanished.
+      const current = await getAppointmentStripeByCalUid(calBookingUid);
+      const currentStatus = (current?.status || '').toLowerCase();
+
+      if (currentStatus === 'confirmed') {
+        const matchesLinkedIntent = paymentIntentId
+          ? (current?.stripe_payment_intent_id ?? '').trim() ===
+            paymentIntentId
+          : (current?.stripe_setup_intent_id ?? '').trim() === setupIntentId;
+        if (matchesLinkedIntent) {
+          // Concurrent duplicate of the same confirm — the other request
+          // completed the promote. Report success.
+          return NextResponse.json({
+            ok: true,
+            alreadyConfirmed: true,
+            stripeCustomerId,
+            dbLinked: true,
+            cal_accept_error: null,
+            notifications: null,
+            contact: { sms: false, email: hasRealBookingEmail(email) },
+          });
+        }
+      }
+
+      // Booking is gone/canceled and we hold a captured payment — refund it.
+      if (paymentIntentId) {
+        try {
+          await stripe.refunds.create({ payment_intent: paymentIntentId });
+          console.error(
+            '[api/booking/confirm] hold lost after payment — refunded',
+            { calBookingUid, paymentIntentId, currentStatus }
+          );
+          return NextResponse.json(
+            {
+              error: 'hold_lost_after_payment',
+              message:
+                'Your booking hold expired before we could confirm it, so your payment has been fully refunded. Please pick a new time.',
+            },
+            { status: 409 }
+          );
+        } catch (refundErr) {
+          console.error(
+            '[api/booking/confirm] hold-lost refund FAILED — needs manual review',
+            { calBookingUid, paymentIntentId, error: errorMessage(refundErr) }
+          );
+          return NextResponse.json(
+            {
+              error: 'hold_lost_after_payment',
+              message:
+                'Your booking hold expired before we could confirm it. Please contact the studio — your payment will be refunded.',
+            },
+            { status: 409 }
+          );
+        }
+      }
+
       console.error(
-        '[api/booking/confirm] appointments row missing after hold gate',
-        { calBookingUid, stripeCustomerId }
+        '[api/booking/confirm] appointments row not promotable after hold gate',
+        { calBookingUid, stripeCustomerId, currentStatus: currentStatus || null }
       );
       return NextResponse.json(
         {
-          error: 'appointment_not_found',
+          error: 'booking_not_confirmable',
           message:
-            'This booking hold was not found. Please pick a time on the calendar again.',
+            'This booking can no longer be confirmed. Please pick a new time on the calendar.',
           stripeCustomerId,
         },
-        { status: 404 }
+        { status: 409 }
       );
     }
   } catch (err) {
