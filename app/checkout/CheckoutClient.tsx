@@ -15,6 +15,7 @@ import {
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
 import { isValidEmail, formatUsPhoneAsYouType, clientPhoneValidationMessage, parseClientPhone } from '@/lib/client-identity';
+import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-public';
 import {
   formatAppointmentWhen,
   formatServiceTitleForDisplay,
@@ -285,6 +286,32 @@ function formatUsdFromCents(cents: number | null): string {
   }).format(cents / 100);
 }
 
+function prefersPhoneBooker(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia(`(max-width: ${BOOK_PHONE_MAX_WIDTH_PX}px)`).matches;
+}
+
+/** Full-page checkout (card form or pay choice) → homepage drawer or /book. */
+function checkoutResumeUrl(params: {
+  uid: string;
+  name: string;
+  email: string;
+  phone: string;
+  service: string;
+  time: string | null;
+}): string {
+  const phoneBooker = prefersPhoneBooker();
+  const url = new URL(phoneBooker ? '/book' : '/', window.location.origin);
+  url.searchParams.set('resume_checkout', params.uid);
+  if (params.name) url.searchParams.set('name', params.name);
+  if (params.email) url.searchParams.set('email', params.email);
+  if (params.phone) url.searchParams.set('phone', params.phone);
+  if (params.service) url.searchParams.set('service', params.service);
+  if (params.time) url.searchParams.set('time', params.time);
+  if (!phoneBooker) url.hash = 'services';
+  return url.toString();
+}
+
 type CheckoutConfirmed = {
   name: string;
   calWarning: string | null;
@@ -473,19 +500,41 @@ export default function CheckoutClient({
   );
 
   const goBackToPayChoice = useCallback(() => {
-    setPayPhase('choose');
     setApplePayError(null);
-    if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    if (!url.searchParams.has('payMode')) return;
-    url.searchParams.delete('payMode');
-    const search = url.searchParams.toString();
-    window.history.replaceState(
-      {},
-      '',
-      search ? `${url.pathname}?${search}` : url.pathname
-    );
-  }, []);
+    if (embedInDrawer) {
+      setPayPhase('choose');
+      if (typeof window === 'undefined') return;
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has('payMode')) return;
+      url.searchParams.delete('payMode');
+      const search = url.searchParams.toString();
+      window.history.replaceState(
+        {},
+        '',
+        search ? `${url.pathname}?${search}` : url.pathname
+      );
+      return;
+    }
+    const resume = checkoutResumeUrl({
+      uid,
+      name: contactName,
+      email: contactEmail,
+      phone: contactPhone,
+      service: formatServiceTitleForDisplay(serviceName),
+      time: bookingTime,
+    });
+    const target =
+      window.top && window.top !== window ? window.top : window;
+    target.location.assign(resume);
+  }, [
+    embedInDrawer,
+    uid,
+    contactName,
+    contactEmail,
+    contactPhone,
+    serviceName,
+    bookingTime,
+  ]);
 
   // 3DS / Apple Pay return_url is the full checkout page. If that lands
   // inside the drawer iframe, promote it to the top window.
@@ -935,6 +984,9 @@ export default function CheckoutClient({
                 onEditDetails={
                   embedInDrawer ? () => setPayPhase('details') : undefined
                 }
+                onReturnToDrawer={
+                  embedInDrawer ? undefined : goBackToPayChoice
+                }
                 onPayWithCard={() => {
                   setApplePayError(null);
                   if (embedInDrawer) {
@@ -1161,6 +1213,7 @@ function CheckoutPayChoice({
   onConfirmed,
   onPayWithCard,
   onEditDetails,
+  onReturnToDrawer,
 }: {
   uid: string;
   name: string;
@@ -1182,6 +1235,7 @@ function CheckoutPayChoice({
   onConfirmed: (result: CheckoutApplePayConfirmed) => void;
   onPayWithCard: () => void;
   onEditDetails?: () => void;
+  onReturnToDrawer?: () => void;
 }) {
   const payNow = paymentTiming === 'pay_now';
   const priceLabel = formatUsdFromCents(quotedServicePriceCents);
@@ -1388,6 +1442,19 @@ function CheckoutPayChoice({
           } inline-flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-5 text-sm font-medium tracking-wide text-stone-50 shadow-none transition-colors hover:bg-stone-800 active:bg-stone-900 disabled:cursor-not-allowed disabled:bg-stone-400`}
         >
           {payNow ? 'Pay with card' : 'Continue with card'}
+        </button>
+      ) : null}
+
+      {onReturnToDrawer ? (
+        <button
+          type="button"
+          disabled={applePaySubmitting}
+          onClick={onReturnToDrawer}
+          className={`${
+            compact ? 'mt-3 py-2.5' : 'mt-3 py-3'
+          } inline-flex w-full items-center justify-center rounded-md border border-stone-300 bg-white px-5 text-sm font-medium tracking-wide text-stone-700 transition-colors hover:border-stone-400 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50`}
+        >
+          Cancel transaction
         </button>
       ) : null}
 
