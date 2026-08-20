@@ -295,6 +295,11 @@
   color: #f5f3f0;
 }
 
+.dayChipOn:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
 .slotGrid {
   display: flex;
   flex-direction: column;

@@ -216,6 +216,19 @@ function BookDayScroller({
     };
   }, [updateFades, dayOptions.length, selectedDay]);
 
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || !selectedDay) return;
+    const chip = el.querySelector(`[data-day="${selectedDay}"]`);
+    if (!(chip instanceof HTMLElement)) return;
+    chip.scrollIntoView({
+      inline: 'center',
+      block: 'nearest',
+      behavior: 'auto',
+    });
+    updateFades();
+  }, [selectedDay, dayOptions.length, updateFades]);
+
   return (
     <div className={styles.dayScrollerWrap}>
       {!hasScrolled && canScrollRight ? (
@@ -250,8 +263,9 @@ function BookDayScroller({
               key={ymd}
               type="button"
               role="option"
+              data-day={ymd}
               aria-selected={active}
-              disabled={count === 0}
+              disabled={count === 0 && !active}
               className={`${styles.dayChip} ${active ? styles.dayChipOn : ''}`}
               onClick={() => onSelectDay(ymd)}
             >
@@ -752,6 +766,10 @@ export default function BookClient() {
       setSlotsLoadingLabel('Updating times…');
       setSlotsLoading(true);
       setSlotsByDay({});
+      if (releasedStart) {
+        const restoreDay = isoToStudioYmd(releasedStart);
+        if (restoreDay) setSelectedDay(restoreDay);
+      }
       await abandonHold(uid);
       setStep('when');
       if (selected?.slug) {
@@ -783,6 +801,10 @@ export default function BookClient() {
       const releasedStart = selectedStart;
       const slug = selected?.slug;
       if (prev === 'when') {
+        const restoreDay = releasedStart
+          ? isoToStudioYmd(releasedStart)
+          : null;
+        if (restoreDay) setSelectedDay(restoreDay);
         setSlotsLoadingLabel('Updating times…');
         setSlotsLoading(true);
         setSlotsByDay({});
@@ -1183,36 +1205,37 @@ export default function BookClient() {
             <p className={styles.selectedService}>
               {selected.title} · {selected.priceLabel} · {selected.durationLabel}
             </p>
-            {slotsLoading && <p className={styles.muted}>{slotsLoadingLabel}</p>}
             {slotsError && <p className={styles.error}>{slotsError}</p>}
+            {dayOptions.length > 0 ? (
+              <BookDayScroller
+                dayOptions={dayOptions}
+                slotsByDay={slotsByDay}
+                selectedDay={selectedDay}
+                onSelectDay={(ymd) => {
+                  if (slotsLoading) return;
+                  setSelectedDay(ymd);
+                  setSelectedStart(null);
+                }}
+              />
+            ) : null}
+            {slotsLoading && <p className={styles.muted}>{slotsLoadingLabel}</p>}
             {!slotsLoading && !slotsError && (
-              <>
-                <BookDayScroller
-                  dayOptions={dayOptions}
-                  slotsByDay={slotsByDay}
-                  selectedDay={selectedDay}
-                  onSelectDay={(ymd) => {
-                    setSelectedDay(ymd);
-                    setSelectedStart(null);
-                  }}
-                />
-                <div className={styles.slotGrid}>
-                  {daySlots.length === 0 ? (
-                    <p className={styles.muted}>No openings this day.</p>
-                  ) : (
-                    daySlots.map((iso) => (
-                      <button
-                        key={iso}
-                        type="button"
-                        className={`${styles.slotChip} ${selectedStart === iso ? styles.slotChipOn : ''}`}
-                        onClick={() => setSelectedStart(iso)}
-                      >
-                        {formatSlotTime(iso)}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </>
+              <div className={styles.slotGrid}>
+                {daySlots.length === 0 ? (
+                  <p className={styles.muted}>No openings this day.</p>
+                ) : (
+                  daySlots.map((iso) => (
+                    <button
+                      key={iso}
+                      type="button"
+                      className={`${styles.slotChip} ${selectedStart === iso ? styles.slotChipOn : ''}`}
+                      onClick={() => setSelectedStart(iso)}
+                    >
+                      {formatSlotTime(iso)}
+                    </button>
+                  ))
+                )}
+              </div>
             )}
           </section>
         )}
