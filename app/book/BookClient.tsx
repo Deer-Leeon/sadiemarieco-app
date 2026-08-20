@@ -31,6 +31,7 @@ import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
 
 import BookPayErrorBoundary from './BookPayErrorBoundary';
 import BookApplePayHost, { type BookConfirmed } from './BookApplePayHost';
+import { CheckoutForm } from '@/app/checkout/CheckoutClient';
 import styles from './book.module.css';
 
 type Step = 'service' | 'when' | 'contact' | 'review' | 'pay';
@@ -347,6 +348,7 @@ export default function BookClient() {
     null
   );
   const [applePayReady, setApplePayReady] = useState(false);
+  const [showCardCheckout, setShowCardCheckout] = useState(false);
   const resumeAppliedRef = useRef(false);
   const slotsLoadGenRef = useRef(0);
   const slotsAbortRef = useRef<AbortController | null>(null);
@@ -544,7 +546,7 @@ export default function BookClient() {
         slotsLoadGenRef.current === loadGen && !loadAbort.signal.aborted;
 
       setSlotsLoadingLabel(
-        waitForRestore ? 'Updating times…' : 'Finding the next opening…'
+        waitForRestore ? 'Refreshing the calendar…' : 'Checking the calendar…'
       );
       setSlotsLoading(!keepSelection);
       setSlotsError(null);
@@ -614,7 +616,7 @@ export default function BookClient() {
         if (day) setSelectedDay(day);
         if (startIso) setSelectedStart(startIso);
         setSlotsLoading(false);
-        setSlotsLoadingLabel('Finding the next opening…');
+        setSlotsLoadingLabel('Checking the calendar…');
       };
 
       try {
@@ -914,13 +916,9 @@ export default function BookClient() {
     const uid = holdUid;
     const releasedStart = selectedStart;
     void (async () => {
-      setSlotsLoadingLabel('Updating times…');
+      setSlotsLoadingLabel('Refreshing the calendar…');
       setSlotsLoading(true);
       setSlotsByDay({});
-      if (releasedStart) {
-        const restoreDay = isoToStudioYmd(releasedStart);
-        if (restoreDay) setSelectedDay(restoreDay);
-      }
       await abandonHold(uid);
       setStep('when');
       if (selected?.slug) {
@@ -936,6 +934,11 @@ export default function BookClient() {
   }, [holdExpired, holdUid, abandonHold, selected?.slug, selectedStart, loadSlots]);
 
   const goBack = () => {
+    if (showCardCheckout) {
+      setShowCardCheckout(false);
+      setSubmitError(null);
+      return;
+    }
     if (showReachPanel) {
       setShowReachPanel(false);
       setShowEmailInReach(false);
@@ -952,11 +955,7 @@ export default function BookClient() {
       const releasedStart = selectedStart;
       const slug = selected?.slug;
       if (prev === 'when') {
-        const restoreDay = releasedStart
-          ? isoToStudioYmd(releasedStart)
-          : null;
-        if (restoreDay) setSelectedDay(restoreDay);
-        setSlotsLoadingLabel('Updating times…');
+        setSlotsLoadingLabel('Refreshing the calendar…');
         setSlotsLoading(true);
         setSlotsByDay({});
       }
@@ -984,8 +983,9 @@ export default function BookClient() {
     setSelectedDay('');
     setSlotsByDay({});
     setSlotsLoading(true);
-    setSlotsLoadingLabel('Finding the next opening…');
+    setSlotsLoadingLabel('Checking the calendar…');
     setSlotsError(null);
+    setShowCardCheckout(false);
     trackBook(BOOKING_ANALYTICS_EVENTS.SERVICE_OPENED, {
       service: analyticsServiceLabel(service.title),
       source: 'phone_booker',
@@ -1146,19 +1146,17 @@ export default function BookClient() {
       setSubmitError('Your time hold is missing. Go back and continue again.');
       return;
     }
-    setSubmitting(true);
     setSubmitError(null);
-    try {
+    if (!stripePromise) {
       const params = new URLSearchParams({ uid });
       if (fullName) params.set('name', fullName);
       if (email.trim()) params.set('email', email.trim());
       if (phone.trim()) params.set('phone', phone.trim());
       params.set('payMode', paymentTiming === 'pay_now' ? 'now' : 'later');
       window.location.assign(`/checkout?${params.toString()}`);
-    } catch {
-      setSubmitError('Something went wrong. Please try again.');
-      setSubmitting(false);
+      return;
     }
+    setShowCardCheckout(true);
   };
 
   const createPayload = useMemo(
@@ -1364,22 +1362,32 @@ export default function BookClient() {
               {selected.title} · {selected.priceLabel} · {selected.durationLabel}
             </p>
             {slotsError && <p className={styles.error}>{slotsError}</p>}
-            {selectedDay && dayOptions.length > 0 ? (
+            {slotsLoading ? (
+              <div
+                className={styles.calendarStatus}
+                role="status"
+                aria-live="polite"
+              >
+                <p className={styles.calendarStatusTitle}>
+                  {slotsLoadingLabel}
+                </p>
+                <p className={styles.calendarStatusHint}>
+                  Open times will appear in a moment.
+                </p>
+              </div>
+            ) : null}
+            {!slotsLoading && selectedDay && dayOptions.length > 0 ? (
               <BookDayScroller
                 dayOptions={dayOptions}
                 slotsByDay={slotsByDay}
                 selectedDay={selectedDay}
                 onSelectDay={(ymd) => {
-                  if (slotsLoading) return;
                   setSelectedDay(ymd);
                   setSelectedStart(null);
                 }}
               />
             ) : null}
-            {slotsLoading && (
-              <p className={styles.muted}>{slotsLoadingLabel}</p>
-            )}
-            {!slotsLoading && !slotsError && (
+            {!slotsLoading && !slotsError && selectedDay && (
               <div className={styles.slotGrid}>
                 {daySlots.length === 0 ? (
                   <p className={styles.muted}>No openings this day.</p>
@@ -1520,7 +1528,43 @@ export default function BookClient() {
           </section>
         )}
 
-        {step === 'pay' && selected && selectedStart && (
+        {step === 'pay' && selected && selectedStart && showCardCheckout && holdUid ? (
+          <section className={`${styles.section} ${styles.reviewSection}`}>
+            <Elements
+              key={paymentTiming === 'pay_now' ? 'card-payment' : 'card-setup'}
+              stripe={stripePromise}
+              options={
+                paymentTiming === 'pay_now'
+                  ? paymentElementsOptions
+                  : setupElementsOptions
+              }
+            >
+              <CheckoutForm
+                uid={holdUid}
+                name={fullName}
+                email={email.trim()}
+                holdExpired={holdExpired}
+                service={analyticsServiceLabel(selected.title)}
+                payNow={paymentTiming === 'pay_now'}
+                quotedServicePriceCents={selected.priceCents}
+                returnPath="/book"
+                onBack={() => {
+                  setShowCardCheckout(false);
+                  setSubmitError(null);
+                }}
+                onConfirmed={(result) =>
+                  setConfirmed({
+                    name: fullName,
+                    calWarning: result.calWarning,
+                    contact: result.contact,
+                  })
+                }
+              />
+            </Elements>
+          </section>
+        ) : null}
+
+        {step === 'pay' && selected && selectedStart && !showCardCheckout && (
           <section className={`${styles.section} ${styles.reviewSection}`}>
             <div className={styles.reviewSheet}>
               <div className={styles.reviewBlock}>
@@ -1655,7 +1699,9 @@ export default function BookClient() {
           </div>
         </div>
       )}
-      {(step === 'when' || step === 'contact' || step === 'review') &&
+      {((step === 'when' && !slotsLoading) ||
+        step === 'contact' ||
+        step === 'review') &&
         !showReachPanel && (
         <footer className={styles.footer}>
           {selected && (
@@ -1670,7 +1716,7 @@ export default function BookClient() {
             <button
               type="button"
               className={styles.primaryBtn}
-              disabled={!selectedStart}
+              disabled={!selectedStart || slotsLoading}
               onClick={continueFromWhen}
             >
               Continue
@@ -1706,13 +1752,13 @@ export default function BookClient() {
         !showReachPanel && (
           <div
             className={
-              step === 'pay'
+              step === 'pay' && !showCardCheckout
                 ? `${styles.footer} ${styles.footerStack}`
                 : styles.payWarmShell
             }
-            aria-hidden={step !== 'pay'}
+            aria-hidden={step !== 'pay' || showCardCheckout}
           >
-            {step === 'pay' ? (
+            {step === 'pay' && !showCardCheckout ? (
               <div className={styles.footerTotal}>
                 <span className={styles.footerPrice}>
                   {paymentTiming === 'pay_now' ? selected.priceLabel : '$0'}
@@ -1767,7 +1813,9 @@ export default function BookClient() {
               </BookPayErrorBoundary>
             </div>
 
-            {step === 'pay' && applePayAvailable !== false ? (
+            {step === 'pay' &&
+            !showCardCheckout &&
+            applePayAvailable !== false ? (
               <button
                 type="button"
                 className={styles.textLinkBtn}
@@ -1778,7 +1826,10 @@ export default function BookClient() {
               </button>
             ) : null}
 
-            {step === 'pay' && applePayReady && applePayAvailable === false ? (
+            {step === 'pay' &&
+            !showCardCheckout &&
+            applePayReady &&
+            applePayAvailable === false ? (
               <button
                 type="button"
                 className={styles.primaryBtn}
