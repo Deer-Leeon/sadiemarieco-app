@@ -1133,6 +1133,12 @@ a.service-item:focus-visible .service-action {
 .drawer-pay-loading:not([hidden]) {
   display: flex;
 }
+#drawer-cal-loading {
+  z-index: 17;
+}
+#booking-drawer.is-updating-times .drawer-header {
+  z-index: 18;
+}
 #drawer-pay-choice {
   display: none;
   flex: 1;
