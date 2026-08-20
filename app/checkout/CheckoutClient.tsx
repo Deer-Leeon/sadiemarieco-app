@@ -472,6 +472,21 @@ export default function CheckoutClient({
     [uid, contactName, contactEmail]
   );
 
+  const goBackToPayChoice = useCallback(() => {
+    setPayPhase('choose');
+    setApplePayError(null);
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('payMode')) return;
+    url.searchParams.delete('payMode');
+    const search = url.searchParams.toString();
+    window.history.replaceState(
+      {},
+      '',
+      search ? `${url.pathname}?${search}` : url.pathname
+    );
+  }, []);
+
   // 3DS / Apple Pay return_url is the full checkout page. If that lands
   // inside the drawer iframe, promote it to the top window.
   useEffect(() => {
@@ -515,7 +530,7 @@ export default function CheckoutClient({
       if (event.origin !== window.location.origin) return;
       if (event.data?.type !== 'sadie-checkout:go-back') return;
       if (payPhase === 'card') {
-        setPayPhase('choose');
+        goBackToPayChoice();
         return;
       }
       if (payPhase === 'choose') {
@@ -529,7 +544,7 @@ export default function CheckoutClient({
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [embedInDrawer, payPhase]);
+  }, [embedInDrawer, payPhase, goBackToPayChoice]);
 
   const appointmentWhen = useMemo(
     () => (bookingTime ? formatAppointmentWhen(bookingTime, endTime) : null),
@@ -943,7 +958,7 @@ export default function CheckoutClient({
                   service={analyticsService}
                   payNow={payNow}
                   quotedServicePriceCents={quotedServicePriceCents}
-                  onBack={() => setPayPhase('choose')}
+                  onBack={goBackToPayChoice}
                   onConfirmed={(result) =>
                     markConfirmed({ ...result, name: contactName })
                   }
@@ -1969,6 +1984,17 @@ function CheckoutForm({
           </>
         )}
       </button>
+
+      {onBack ? (
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={submitting}
+          className="mt-3 inline-flex w-full items-center justify-center rounded-md border border-stone-300 bg-white px-5 py-3 text-sm font-medium tracking-wide text-stone-700 transition-colors hover:border-stone-400 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Cancel transaction
+        </button>
+      ) : null}
 
       <p className="mt-4 text-center text-[11px] leading-relaxed text-stone-400">
         {payNow
