@@ -174,6 +174,17 @@ function isPhoneViewport(): boolean {
   return window.matchMedia(`(max-width: ${BOOK_PHONE_MAX_WIDTH_PX}px)`).matches;
 }
 
+function splitPersonName(full: string): { first: string; last: string } {
+  const trimmed = full.trim();
+  if (!trimmed) return { first: '', last: '' };
+  const space = trimmed.indexOf(' ');
+  if (space < 0) return { first: trimmed, last: '' };
+  return {
+    first: trimmed.slice(0, space),
+    last: trimmed.slice(space + 1).trim(),
+  };
+}
+
 const STEPS: Step[] = ['service', 'when', 'contact', 'review', 'pay'];
 
 function BookDayScroller({
@@ -322,6 +333,7 @@ export default function BookClient() {
     null
   );
   const [applePayReady, setApplePayReady] = useState(false);
+  const resumeAppliedRef = useRef(false);
 
   const onApplePayResolved = useCallback((available: boolean) => {
     setApplePayReady(true);
@@ -400,7 +412,8 @@ export default function BookClient() {
               : 0,
         }));
         setServices(list);
-        if (presetSlug) {
+        const resumeUid = searchParams.get('resume_checkout')?.trim() ?? '';
+        if (presetSlug && !resumeUid) {
           const match = list.find((s) => s.slug === presetSlug);
           if (match) {
             setSelected(match);
@@ -418,7 +431,79 @@ export default function BookClient() {
     return () => {
       cancelled = true;
     };
-  }, [ready, presetSlug]);
+  }, [ready, presetSlug, searchParams]);
+
+  useEffect(() => {
+    if (!ready || resumeAppliedRef.current || services.length === 0) return;
+    const uid = searchParams.get('resume_checkout')?.trim() ?? '';
+    if (!uid) return;
+    resumeAppliedRef.current = true;
+
+    const urlName = searchParams.get('name')?.trim() ?? '';
+    const urlEmail = searchParams.get('email')?.trim() ?? '';
+    const urlPhone = searchParams.get('phone')?.trim() ?? '';
+    const urlService = searchParams.get('service')?.trim() ?? '';
+    const urlTime = searchParams.get('time')?.trim() ?? '';
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/booking/hold?uid=${encodeURIComponent(uid)}`
+        );
+        const data = (await res.json().catch(() => null)) as {
+          createdAt?: string | null;
+          expired?: boolean;
+          bookingTime?: string | null;
+          serviceName?: string | null;
+        } | null;
+        if (cancelled) return;
+        const bookingTime = (data?.bookingTime || urlTime || '').trim();
+        const serviceName = (data?.serviceName || urlService || '').trim();
+        const needle = serviceName.toLowerCase();
+        const match =
+          services.find((s) => s.title.toLowerCase() === needle) ||
+          services.find((s) => s.slug.toLowerCase() === needle) ||
+          services.find(
+            (s) => needle.length > 0 && s.title.toLowerCase().includes(needle)
+          ) ||
+          services[0] ||
+          null;
+        if (match) setSelected(match);
+        if (bookingTime) {
+          setSelectedStart(bookingTime);
+          const ymd = isoToStudioYmd(bookingTime);
+          if (ymd) setSelectedDay(ymd);
+        }
+        const parts = splitPersonName(urlName);
+        if (parts.first) setFirstName(parts.first);
+        if (parts.last) setLastName(parts.last);
+        if (urlPhone) setPhone(formatUsPhoneAsYouType(urlPhone));
+        if (urlEmail) setEmail(urlEmail);
+        setHoldUid(uid);
+        if (data?.createdAt) setHoldCreatedAt(data.createdAt);
+        if (data?.expired) setHoldExpired(true);
+        setStep('pay');
+
+        const url = new URL(window.location.href);
+        ['resume_checkout', 'name', 'email', 'phone', 'service', 'time'].forEach(
+          (key) => url.searchParams.delete(key)
+        );
+        const qs = url.searchParams.toString();
+        window.history.replaceState(
+          {},
+          '',
+          qs ? `${url.pathname}?${qs}` : url.pathname
+        );
+      } catch {
+        if (!cancelled) resumeAppliedRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, services, searchParams]);
 
   const loadSlots = useCallback(
     async (

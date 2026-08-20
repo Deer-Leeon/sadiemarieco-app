@@ -1141,6 +1141,88 @@
     });
   });
 
+  const resumeCheckoutFromUrl = () => {
+    let landingUrl;
+    try {
+      landingUrl = new URL(window.location.href);
+    } catch {
+      return;
+    }
+    const resumeUid = landingUrl.searchParams.get('resume_checkout')?.trim();
+    if (!resumeUid) return;
+
+    const name = landingUrl.searchParams.get('name') || '';
+    const email = landingUrl.searchParams.get('email') || '';
+    const phone = landingUrl.searchParams.get('phone') || '';
+    const service = (landingUrl.searchParams.get('service') || '').trim();
+    const bookingTime = landingUrl.searchParams.get('time') || '';
+
+    if (isPhoneBookerViewport()) {
+      const book = new URL('/book', window.location.origin);
+      book.searchParams.set('resume_checkout', resumeUid);
+      if (name) book.searchParams.set('name', name);
+      if (email) book.searchParams.set('email', email);
+      if (phone) book.searchParams.set('phone', phone);
+      if (service) book.searchParams.set('service', service);
+      if (bookingTime) book.searchParams.set('time', bookingTime);
+      window.location.replace(book.toString());
+      return;
+    }
+
+    ['resume_checkout', 'name', 'email', 'phone', 'service', 'time'].forEach(
+      (key) => landingUrl.searchParams.delete(key)
+    );
+    const next =
+      landingUrl.pathname +
+      (landingUrl.searchParams.toString()
+        ? `?${landingUrl.searchParams.toString()}`
+        : '') +
+      (landingUrl.hash || '#services');
+    window.history.replaceState(null, '', next);
+
+    const needle = service.toLowerCase();
+    let match = null;
+    serviceItems.forEach((item) => {
+      const itemName = readText(item, '.service-name').trim().toLowerCase();
+      if (
+        needle &&
+        itemName &&
+        (itemName === needle ||
+          itemName.includes(needle) ||
+          needle.includes(itemName))
+      ) {
+        match = item;
+      }
+    });
+    if (!match && serviceItems[0]) match = serviceItems[0];
+    const link = match ? match.getAttribute('data-cal-link') : '';
+    if (drawer && backdrop) {
+      drawerActiveLink = link || drawerActiveLink;
+      drawerServiceMeta = {
+        name: (match ? readText(match, '.service-name') : '') || service,
+        price: match ? readText(match, '.service-price') : '',
+        duration: match ? readText(match, '.service-duration') : ''
+      };
+      if (drawerTitleEl) drawerTitleEl.textContent = drawerServiceMeta.name;
+      drawer.classList.add('drawer-open');
+      backdrop.classList.add('drawer-open');
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
+    }
+    showDrawerPayChoice(
+      {
+        uid: resumeUid,
+        name,
+        phone,
+        bookingTime
+      },
+      email
+    );
+    scrollDrawerToTop();
+  };
+
+  resumeCheckoutFromUrl();
+
   if (backdrop) backdrop.addEventListener('click', closeDrawer);
   if (closeButton) closeButton.addEventListener('click', closeDrawer);
   if (drawerBackButton) {
