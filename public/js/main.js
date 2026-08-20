@@ -355,6 +355,8 @@
   let drawerHoldConfirmed = false;
   let drawerCalendarDate = '';
   let drawerSlotIso = '';
+  let drawerActiveLink = '';
+  let drawerServiceMeta = { name: '', price: '', duration: '' };
 
   const studioYmdFromIso = (iso) => {
     if (!iso || typeof iso !== 'string') return '';
@@ -862,18 +864,16 @@
       window.Cal('init', namespace, { origin: 'https://cal.com' });
       const nsApi = window.Cal.ns && window.Cal.ns[namespace];
       if (nsApi) {
-        const month = dateYmd ? String(dateYmd).slice(0, 7) : '';
-        const calLink = dateYmd
-          ? `${link}${link.includes('?') ? '&' : '?'}date=${encodeURIComponent(dateYmd)}&month=${encodeURIComponent(month)}`
-          : link;
         nsApi('inline', {
           elementOrSelector: `#${mount.id}`,
-          calLink,
+          calLink: link,
           config: {
             theme: 'light',
             layout: 'month_view',
             'ui.autoscroll': 'false',
-            ...(dateYmd ? { date: dateYmd, month } : {})
+            ...(dateYmd
+              ? { date: dateYmd, month: String(dateYmd).slice(0, 7) }
+              : {})
           }
         });
         registerDrawerEmbedUi(nsApi, link);
@@ -899,12 +899,19 @@
     }
   };
 
+  const showMount = (link) => {
+    mountsByLink.forEach((mount, mountLink) => {
+      mount.classList.toggle('active', mountLink === link);
+    });
+  };
+
   // Tear down + rebuild a single mount, regardless of why it's gone stale.
   // The Cal namespace is minted fresh each time inside `createCalMount`
   // (instanceCountByLink), so the new iframe never collides with the
   // previous one's registered handlers.
   const rebuildMount = (link) => {
     const oldMount = mountsByLink.get(link);
+    const wasActive = Boolean(oldMount && oldMount.classList.contains('active'));
     if (oldMount) {
       teardownDrawerEmbedFrame(oldMount);
       oldMount.remove();
@@ -913,6 +920,7 @@
     mountCreatedAt.delete(link);
     staleLinks.delete(link);
     createCalMount(link, drawerCalendarDate);
+    if (wasActive) showMount(link);
   };
 
   // Called every time a drawer is about to be shown. Rebuilds the iframe
@@ -938,20 +946,20 @@
     setTimeout(preloadAllCalendars, 200);
   }
 
-  const showMount = (link) => {
-    mountsByLink.forEach((mount, mountLink) => {
-      mount.classList.toggle('active', mountLink === link);
-    });
-  };
-
   const openDrawer = (link, meta) => {
     if (!drawer || !backdrop || !link) return;
     hideDrawerPayChoice();
     hideContactWarning();
+    drawerActiveLink = link;
+    drawerServiceMeta = {
+      name: (meta && meta.name) || '',
+      price: (meta && meta.price) || '',
+      duration: (meta && meta.duration) || ''
+    };
 
-    if (drawerTitleEl) drawerTitleEl.textContent = (meta && meta.name) || '';
+    if (drawerTitleEl) drawerTitleEl.textContent = drawerServiceMeta.name;
     if (drawerSubtitleEl) {
-      const parts = [meta && meta.price, meta && meta.duration].filter(Boolean);
+      const parts = [drawerServiceMeta.price, drawerServiceMeta.duration].filter(Boolean);
       drawerSubtitleEl.textContent = parts.join(' · ');
     }
 
@@ -994,32 +1002,45 @@
     document.body.style.overflow = '';
   };
 
+  const restoreCalendarHeader = () => {
+    if (drawerSubtitleEl) {
+      const parts = [drawerServiceMeta.price, drawerServiceMeta.duration].filter(
+        Boolean
+      );
+      drawerSubtitleEl.textContent = parts.join(' · ');
+    }
+  };
+
+  const showCalendarForLink = (link) => {
+    if (!link) return;
+    rebuildMount(link);
+    showMount(link);
+    const mount = mountsByLink.get(link);
+    if (mount) bindDrawerEmbedFrame(mount);
+  };
+
   const returnDrawerToCalendar = async () => {
     const uid = drawerHoldUid;
     const confirmed = drawerHoldConfirmed;
     const dateYmd = drawerCalendarDate;
     const slotIso = drawerSlotIso;
+    const link =
+      drawerActiveLink ||
+      [...mountsByLink.entries()].find(([, mount]) =>
+        mount.classList.contains('active')
+      )?.[0];
     drawerHoldUid = '';
     drawerHoldConfirmed = false;
     if (uid) checkoutRedirectedUids.delete(uid);
     hideDrawerPayChoice();
     hideContactWarning();
+    restoreCalendarHeader();
     keepDrawerOpen();
-    const activeLink = [...mountsByLink.entries()].find(([, mount]) =>
-      mount.classList.contains('active')
-    )?.[0];
-    // Tear down Cal's confirmation screen immediately so we don't sit on
-    // "booking requested" while the hold cancel finishes.
-    if (activeLink) {
-      const oldMount = mountsByLink.get(activeLink);
-      if (oldMount) {
-        teardownDrawerEmbedFrame(oldMount);
-        oldMount.remove();
-        mountsByLink.delete(activeLink);
-      }
-      mountCreatedAt.delete(activeLink);
-      staleLinks.delete(activeLink);
-    }
+    // Put a fresh calendar on screen immediately. Waiting to cancel the
+    // hold first left the panel empty (the old mount was already gone,
+    // and the replacement was never marked .active).
+    showCalendarForLink(link);
+
     if (uid && !confirmed) {
       try {
         await fetch('/api/booking/abandon-hold', {
@@ -1029,13 +1050,13 @@
           keepalive: true
         });
       } catch {
-        /* Cal cancel is best-effort; rebuild anyway */
+        /* Cal cancel is best-effort; calendar is already showing */
       }
     }
-    if (activeLink && slotIso && dateYmd) {
-      await waitUntilSlotVisible(slugFromCalLink(activeLink), dateYmd, slotIso);
+    if (link && slotIso && dateYmd) {
+      await waitUntilSlotVisible(slugFromCalLink(link), dateYmd, slotIso);
+      showCalendarForLink(link);
     }
-    if (activeLink) rebuildMount(activeLink);
   };
 
   // If the drawer was open and the visitor uses in-page nav (Portfolio,
