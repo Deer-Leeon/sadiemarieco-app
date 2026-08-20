@@ -309,9 +309,12 @@ export default function BookClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const presetSlug = searchParams.get('service')?.trim() ?? '';
+  const resumeUidParam = searchParams.get('resume_checkout')?.trim() ?? '';
 
   const [ready, setReady] = useState(false);
-  const [step, setStep] = useState<Step>('service');
+  const [step, setStep] = useState<Step>(() =>
+    resumeUidParam ? 'pay' : 'service'
+  );
   const [services, setServices] = useState<BookService[]>([]);
   const [servicesError, setServicesError] = useState<string | null>(null);
   const [selected, setSelected] = useState<BookService | null>(null);
@@ -350,8 +353,10 @@ export default function BookClient() {
   const [applePayReady, setApplePayReady] = useState(false);
   const [showCardCheckout, setShowCardCheckout] = useState(false);
   const resumeAppliedRef = useRef(false);
+  const holdUidRef = useRef<string | null>(null);
   const slotsLoadGenRef = useRef(0);
   const slotsAbortRef = useRef<AbortController | null>(null);
+  holdUidRef.current = holdUid;
 
   const onApplePayResolved = useCallback((available: boolean) => {
     setApplePayReady(true);
@@ -431,7 +436,12 @@ export default function BookClient() {
         }));
         setServices(list);
         const resumeUid = searchParams.get('resume_checkout')?.trim() ?? '';
-        if (presetSlug && !resumeUid) {
+        if (
+          presetSlug &&
+          !resumeUid &&
+          !holdUidRef.current &&
+          !resumeAppliedRef.current
+        ) {
           const match = list.find((s) => s.slug === presetSlug);
           if (match) {
             setSelected(match);
@@ -728,11 +738,12 @@ export default function BookClient() {
   const slotsLoadedForSlugRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (resumeUidParam) return;
     if (step !== 'when' || !selected?.slug) return;
     if (slotsLoadedForSlugRef.current === selected.slug) return;
     slotsLoadedForSlugRef.current = selected.slug;
     void loadSlots(selected.slug);
-  }, [step, selected?.slug, loadSlots]);
+  }, [step, selected?.slug, loadSlots, resumeUidParam]);
 
   useEffect(() => {
     return () => {
@@ -954,13 +965,15 @@ export default function BookClient() {
     if (prev === 'when' || prev === 'service') {
       const releasedStart = selectedStart;
       const slug = selected?.slug;
+      const uidToRelease = holdUid;
       if (prev === 'when') {
         setSlotsLoadingLabel('Refreshing the calendar…');
         setSlotsLoading(true);
         setSlotsByDay({});
       }
+      clearHoldState();
       void (async () => {
-        await abandonHold();
+        await abandonHold(uidToRelease);
         if (prev === 'when' && slug) {
           await loadSlots(slug, {
             restoreStart: releasedStart,
@@ -1185,7 +1198,9 @@ export default function BookClient() {
   if (!ready) {
     return (
       <div className={styles.shell}>
-        <p className={styles.loading}>Opening booking…</p>
+        <p className={styles.loading}>
+          {resumeUidParam ? 'Preparing checkout…' : 'Opening booking…'}
+        </p>
       </div>
     );
   }
@@ -1312,7 +1327,7 @@ export default function BookClient() {
           ) : null}
         </div>
 
-        {step === 'service' && (
+        {step === 'service' && !resumeUidParam && (
           <section className={styles.section}>
             {servicesError && <p className={styles.error}>{servicesError}</p>}
             {!servicesError && services.length === 0 && (
@@ -1356,7 +1371,7 @@ export default function BookClient() {
           </section>
         )}
 
-        {step === 'when' && selected && (
+        {step === 'when' && selected && !resumeUidParam && (
           <section className={styles.section}>
             <p className={styles.selectedService}>
               {selected.title} · {selected.priceLabel} · {selected.durationLabel}
@@ -1564,8 +1579,29 @@ export default function BookClient() {
           </section>
         ) : null}
 
-        {step === 'pay' && selected && selectedStart && !showCardCheckout && (
-          <section className={`${styles.section} ${styles.reviewSection}`}>
+        {step === 'pay' && (!selected || !selectedStart) ? (
+          <section className={styles.section}>
+            <div
+              className={styles.calendarStatus}
+              role="status"
+              aria-live="polite"
+            >
+              <p className={styles.calendarStatusTitle}>
+                Preparing checkout…
+              </p>
+              <p className={styles.calendarStatusHint}>
+                Your appointment hold is still in place.
+              </p>
+            </div>
+          </section>
+        ) : null}
+
+        {step === 'pay' && selected && selectedStart && (
+          <section
+            className={`${styles.section} ${styles.reviewSection}`}
+            hidden={showCardCheckout}
+            aria-hidden={showCardCheckout}
+          >
             <div className={styles.reviewSheet}>
               <div className={styles.reviewBlock}>
                 <p className={styles.reviewEyebrow}>Due today</p>
@@ -1699,7 +1735,7 @@ export default function BookClient() {
           </div>
         </div>
       )}
-      {((step === 'when' && !slotsLoading) ||
+      {((step === 'when' && !slotsLoading && !resumeUidParam) ||
         step === 'contact' ||
         step === 'review') &&
         !showReachPanel && (
