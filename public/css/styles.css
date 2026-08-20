@@ -859,6 +859,9 @@ a.service-item:focus-visible .service-action {
   opacity: 1;
   pointer-events: auto;
 }
+#booking-backdrop.drawer-instant {
+  transition: none;
+}
 #booking-drawer {
   position: fixed;
   top: 0;
@@ -885,6 +888,9 @@ a.service-item:focus-visible .service-action {
 }
 #booking-drawer.drawer-open {
   transform: translateX(0);
+}
+#booking-drawer.drawer-instant {
+  transition: none;
 }
 .drawer-header {
   flex-shrink: 0;

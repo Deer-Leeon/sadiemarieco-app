@@ -1106,7 +1106,15 @@
     if (event.persisted) closeDrawer();
   });
 
-  closeDrawer();
+  let resumeCheckoutUid = '';
+  try {
+    resumeCheckoutUid =
+      new URL(window.location.href).searchParams.get('resume_checkout')?.trim() ||
+      '';
+  } catch {
+    resumeCheckoutUid = '';
+  }
+  if (!resumeCheckoutUid) closeDrawer();
 
   const readText = (root, selector) => {
     const el = root.querySelector(selector);
@@ -1197,6 +1205,8 @@
     if (!match && serviceItems[0]) match = serviceItems[0];
     const link = match ? match.getAttribute('data-cal-link') : '';
     if (drawer && backdrop) {
+      drawer.classList.add('drawer-instant');
+      backdrop.classList.add('drawer-instant');
       drawerActiveLink = link || drawerActiveLink;
       drawerServiceMeta = {
         name: (match ? readText(match, '.service-name') : '') || service,
@@ -1204,8 +1214,6 @@
         duration: match ? readText(match, '.service-duration') : ''
       };
       if (drawerTitleEl) drawerTitleEl.textContent = drawerServiceMeta.name;
-      drawer.classList.add('drawer-open');
-      backdrop.classList.add('drawer-open');
       document.documentElement.style.overflow = 'hidden';
       document.body.style.overflow = 'hidden';
     }
@@ -1218,7 +1226,15 @@
       },
       email
     );
+    if (drawer) drawer.classList.add('drawer-open');
+    if (backdrop) backdrop.classList.add('drawer-open');
     scrollDrawerToTop();
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (drawer) drawer.classList.remove('drawer-instant');
+        if (backdrop) backdrop.classList.remove('drawer-instant');
+      });
+    });
   };
 
   resumeCheckoutFromUrl();
