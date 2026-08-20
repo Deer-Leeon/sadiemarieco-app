@@ -1080,7 +1080,8 @@ export default function BookClient() {
       const params = new URLSearchParams({ uid });
       if (fullName) params.set('name', fullName);
       if (email.trim()) params.set('email', email.trim());
-      if (paymentTiming === 'pay_now') params.set('payMode', 'now');
+      if (phone.trim()) params.set('phone', phone.trim());
+      params.set('payMode', paymentTiming === 'pay_now' ? 'now' : 'later');
       window.location.assign(`/checkout?${params.toString()}`);
     } catch {
       setSubmitError('Something went wrong. Please try again.');
@@ -1711,10 +1712,10 @@ export default function BookClient() {
                 onClick={() => void submitBooking()}
               >
                 {submitting
-                  ? 'Holding your time…'
+                  ? 'Opening card checkout…'
                   : paymentTiming === 'pay_now'
                     ? 'Pay with card'
-                    : 'Continue to checkout'}
+                    : 'Continue with card'}
               </button>
             ) : null}
           </div>
@@ -1743,10 +1744,10 @@ export default function BookClient() {
               onClick={() => void submitBooking()}
             >
               {submitting
-                ? 'Holding your time…'
+                ? 'Opening card checkout…'
                 : paymentTiming === 'pay_now'
                   ? 'Pay with card'
-                  : 'Continue to checkout'}
+                  : 'Continue with card'}
             </button>
           </footer>
         )}
