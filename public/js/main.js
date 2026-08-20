@@ -351,6 +351,7 @@
 
   const payFrame = document.getElementById('drawer-pay-frame');
   const payLoadingEl = document.getElementById('drawer-pay-loading');
+  const calLoadingEl = document.getElementById('drawer-cal-loading');
   let drawerHoldUid = '';
   let drawerHoldConfirmed = false;
   let drawerCalendarDate = '';
@@ -374,12 +375,17 @@
     if (!Array.isArray(times) || !iso) return false;
     const ms = new Date(iso).getTime();
     if (Number.isNaN(ms)) return times.includes(iso);
-    return times.some((t) => new Date(t).getTime() === ms);
+    const minute = Math.floor(ms / 60000);
+    return times.some((t) => {
+      const other = new Date(t).getTime();
+      if (Number.isNaN(other)) return t === iso;
+      return Math.floor(other / 60000) === minute;
+    });
   };
 
   const waitUntilSlotVisible = async (slug, ymd, iso) => {
     if (!slug || !ymd || !iso) return false;
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + 15000;
     const params = new URLSearchParams({ slug, date: ymd, end: ymd });
     while (Date.now() < deadline) {
       try {
@@ -389,13 +395,26 @@
         });
         const data = await res.json().catch(() => null);
         const times = data && data.slots ? data.slots[ymd] : null;
-        if (slotAppearsInList(times, iso)) return true;
+        if (slotAppearsInList(times, iso)) {
+          await new Promise((resolve) => setTimeout(resolve, 700));
+          return true;
+        }
       } catch {
         /* retry until deadline */
       }
       await new Promise((resolve) => setTimeout(resolve, 400));
     }
     return false;
+  };
+
+  const showDrawerUpdatingTimes = () => {
+    if (calLoadingEl) calLoadingEl.hidden = false;
+    if (drawer) drawer.classList.add('is-updating-times');
+  };
+
+  const hideDrawerUpdatingTimes = () => {
+    if (calLoadingEl) calLoadingEl.hidden = true;
+    if (drawer) drawer.classList.remove('is-updating-times');
   };
 
   const abandonDrawerHold = (uid) => {
@@ -440,6 +459,7 @@
 
   const showDrawerPayLoading = () => {
     hideCheckoutHandoff();
+    hideDrawerUpdatingTimes();
     keepDrawerOpen();
     if (payLoadingEl) payLoadingEl.hidden = false;
   };
@@ -949,6 +969,7 @@
   const openDrawer = (link, meta) => {
     if (!drawer || !backdrop || !link) return;
     hideDrawerPayChoice();
+    hideDrawerUpdatingTimes();
     hideContactWarning();
     drawerActiveLink = link;
     drawerServiceMeta = {
@@ -995,6 +1016,7 @@
     abandonDrawerHold();
     hideContactWarning();
     hideDrawerPayChoice();
+    hideDrawerUpdatingTimes();
     pendingContactBooking = null;
     drawer.classList.remove('drawer-open');
     backdrop.classList.remove('drawer-open');
@@ -1032,14 +1054,23 @@
     drawerHoldUid = '';
     drawerHoldConfirmed = false;
     if (uid) checkoutRedirectedUids.delete(uid);
+    // Cover pay / confirmation first so the panel never flashes empty
+    // or shows a stale calendar missing the just-released time.
+    showDrawerUpdatingTimes();
     hideDrawerPayChoice();
     hideContactWarning();
     restoreCalendarHeader();
     keepDrawerOpen();
-    // Put a fresh calendar on screen immediately. Waiting to cancel the
-    // hold first left the panel empty (the old mount was already gone,
-    // and the replacement was never marked .active).
-    showCalendarForLink(link);
+    if (link) {
+      const oldMount = mountsByLink.get(link);
+      if (oldMount) {
+        teardownDrawerEmbedFrame(oldMount);
+        oldMount.remove();
+        mountsByLink.delete(link);
+      }
+      mountCreatedAt.delete(link);
+      staleLinks.delete(link);
+    }
 
     if (uid && !confirmed) {
       try {
@@ -1050,13 +1081,14 @@
           keepalive: true
         });
       } catch {
-        /* Cal cancel is best-effort; calendar is already showing */
+        /* Cal cancel is best-effort; wait for availability anyway */
       }
     }
     if (link && slotIso && dateYmd) {
       await waitUntilSlotVisible(slugFromCalLink(link), dateYmd, slotIso);
-      showCalendarForLink(link);
     }
+    showCalendarForLink(link);
+    hideDrawerUpdatingTimes();
   };
 
   // If the drawer was open and the visitor uses in-page nav (Portfolio,

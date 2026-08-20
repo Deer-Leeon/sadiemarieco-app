@@ -43,6 +43,10 @@ const BOOK_SLOTS_INITIAL_DAYS = 21;
 const BOOK_SLOTS_CHUNK_DAYS = 21;
 /** Abort a hung slots request so the UI never spins forever. */
 const BOOK_SLOTS_FETCH_TIMEOUT_MS = 12_000;
+/** After releasing a hold, wait this long for Cal to return the slot. */
+const SLOT_RELEASE_WAIT_MS = 15_000;
+/** Extra beat after the slot reappears so Cal's embed cache can catch up. */
+const SLOT_RELEASE_SETTLE_MS = 700;
 
 interface BookService {
   slug: string;
@@ -86,6 +90,29 @@ function isoToStudioYmd(iso: string): string | null {
 function slotInstantMs(iso: string): number {
   const ms = new Date(iso).getTime();
   return Number.isNaN(ms) ? Number.NaN : ms;
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function slotsIncludeInstant(
+  slots: Record<string, string[]>,
+  iso: string
+): boolean {
+  const ymd = isoToStudioYmd(iso);
+  if (!ymd) return false;
+  const times = slots[ymd] ?? [];
+  const ms = slotInstantMs(iso);
+  if (Number.isNaN(ms)) return times.includes(iso);
+  const minute = Math.floor(ms / 60_000);
+  return times.some((t) => {
+    const other = slotInstantMs(t);
+    if (Number.isNaN(other)) return t === iso;
+    return Math.floor(other / 60_000) === minute;
+  });
 }
 
 function mergeSlotIntoDay(
@@ -253,6 +280,7 @@ export default function BookClient() {
   const [selectedDay, setSelectedDay] = useState<string>('');
   const [slotsByDay, setSlotsByDay] = useState<Record<string, string[]>>({});
   const [slotsLoading, setSlotsLoading] = useState(false);
+  const [slotsLoadingLabel, setSlotsLoadingLabel] = useState('Loading times…');
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [selectedStart, setSelectedStart] = useState<string | null>(null);
 
@@ -381,10 +409,19 @@ export default function BookClient() {
   const loadSlots = useCallback(
     async (
       slug: string,
-      options?: { keepSelection?: boolean; restoreStart?: string | null }
+      options?: {
+        keepSelection?: boolean;
+        restoreStart?: string | null;
+        waitForRestore?: boolean;
+      }
     ) => {
-      const keepSelection = Boolean(options?.keepSelection);
       const restoreStart = options?.restoreStart ?? null;
+      const waitForRestore = Boolean(options?.waitForRestore && restoreStart);
+      const keepSelection =
+        Boolean(options?.keepSelection) && !waitForRestore;
+      setSlotsLoadingLabel(
+        waitForRestore ? 'Updating times…' : 'Loading times…'
+      );
       setSlotsLoading(!keepSelection);
       setSlotsError(null);
       const start = studioTodayYmd();
@@ -394,8 +431,9 @@ export default function BookClient() {
       }
       setDayOptions(days);
       if (!keepSelection) {
-        setSelectedDay(start);
-        setSelectedStart(null);
+        const restoreDay = restoreStart ? isoToStudioYmd(restoreStart) : null;
+        setSelectedDay(restoreDay || start);
+        if (!restoreStart) setSelectedStart(null);
         setSlotsByDay({});
       }
 
@@ -438,11 +476,38 @@ export default function BookClient() {
       };
 
       try {
+        if (waitForRestore && restoreStart) {
+          const ymd = isoToStudioYmd(restoreStart);
+          const deadline = Date.now() + SLOT_RELEASE_WAIT_MS;
+          while (Date.now() < deadline) {
+            try {
+              const probe = ymd ? await fetchRange(ymd, ymd) : {};
+              if (slotsIncludeInstant(probe, restoreStart)) {
+                await sleepMs(SLOT_RELEASE_SETTLE_MS);
+                break;
+              }
+            } catch {
+              /* keep polling until Cal releases the hold */
+            }
+            await sleepMs(400);
+          }
+        }
+
         const initialEnd = addDaysYmd(
           start,
           Math.min(BOOK_SLOTS_INITIAL_DAYS, BOOK_AVAILABILITY_DAYS) - 1
         );
-        const initialSlots = applyRestore(await fetchRange(start, initialEnd));
+        let initialSlots = await fetchRange(start, initialEnd);
+        if (restoreStart) {
+          const ymd = isoToStudioYmd(restoreStart);
+          if (ymd && (ymd < start || ymd > initialEnd)) {
+            const extra = await fetchRange(ymd, ymd);
+            initialSlots = { ...initialSlots, ...extra };
+          }
+          if (!slotsIncludeInstant(initialSlots, restoreStart)) {
+            initialSlots = mergeSlotIntoDay(initialSlots, restoreStart);
+          }
+        }
         setSlotsByDay((prev) =>
           keepSelection ? applyRestore({ ...prev, ...initialSlots }) : initialSlots
         );
@@ -457,6 +522,7 @@ export default function BookClient() {
           if (firstWithSlots) setSelectedDay(firstWithSlots);
         }
         setSlotsLoading(false);
+        setSlotsLoadingLabel('Loading times…');
 
         for (
           let offset = BOOK_SLOTS_INITIAL_DAYS;
@@ -484,6 +550,7 @@ export default function BookClient() {
           if (ymd) setSelectedDay(ymd);
           setSelectedStart(restoreStart);
           setSlotsLoading(false);
+          setSlotsLoadingLabel('Loading times…');
           return;
         }
         setSlotsError(
@@ -491,6 +558,7 @@ export default function BookClient() {
         );
         setSlotsByDay({});
         setSlotsLoading(false);
+        setSlotsLoadingLabel('Loading times…');
       }
     },
     []
@@ -681,18 +749,15 @@ export default function BookClient() {
     const uid = holdUid;
     const releasedStart = selectedStart;
     void (async () => {
+      setSlotsLoadingLabel('Updating times…');
+      setSlotsLoading(true);
+      setSlotsByDay({});
       await abandonHold(uid);
-      if (releasedStart) {
-        setSlotsByDay((prevSlots) => mergeSlotIntoDay(prevSlots, releasedStart));
-        const ymd = isoToStudioYmd(releasedStart);
-        if (ymd) setSelectedDay(ymd);
-        setSelectedStart(releasedStart);
-      }
       setStep('when');
       if (selected?.slug) {
-        void loadSlots(selected.slug, {
-          keepSelection: true,
+        await loadSlots(selected.slug, {
           restoreStart: releasedStart,
+          waitForRestore: Boolean(releasedStart),
         });
       }
       setSubmitError(
@@ -717,18 +782,17 @@ export default function BookClient() {
     if (prev === 'when' || prev === 'service') {
       const releasedStart = selectedStart;
       const slug = selected?.slug;
-      if (prev === 'when' && releasedStart) {
-        setSlotsByDay((prevSlots) => mergeSlotIntoDay(prevSlots, releasedStart));
-        const ymd = isoToStudioYmd(releasedStart);
-        if (ymd) setSelectedDay(ymd);
-        setSelectedStart(releasedStart);
+      if (prev === 'when') {
+        setSlotsLoadingLabel('Updating times…');
+        setSlotsLoading(true);
+        setSlotsByDay({});
       }
       void (async () => {
         await abandonHold();
         if (prev === 'when' && slug) {
-          void loadSlots(slug, {
-            keepSelection: true,
+          await loadSlots(slug, {
             restoreStart: releasedStart,
+            waitForRestore: Boolean(releasedStart),
           });
         }
       })();
@@ -1119,7 +1183,7 @@ export default function BookClient() {
             <p className={styles.selectedService}>
               {selected.title} · {selected.priceLabel} · {selected.durationLabel}
             </p>
-            {slotsLoading && <p className={styles.muted}>Loading times…</p>}
+            {slotsLoading && <p className={styles.muted}>{slotsLoadingLabel}</p>}
             {slotsError && <p className={styles.error}>{slotsError}</p>}
             {!slotsLoading && !slotsError && (
               <>
