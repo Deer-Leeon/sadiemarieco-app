@@ -68,6 +68,14 @@
     color: var(--foreground);
     font-family: var(--font-sans);
   }
+  /* Drawer iframe: fill the panel and never grow a page scrollbar. */
+  html.checkout-embed,
+  html.checkout-embed body {
+    height: 100%;
+    max-height: 100%;
+    overflow: hidden;
+    background-color: #f5f3f0;
+  }
 }
 
 /* ──────────────────────────────────────────────────────────────────────

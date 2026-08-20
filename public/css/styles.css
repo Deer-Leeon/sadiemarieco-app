@@ -897,6 +897,16 @@ a.service-item:focus-visible .service-action {
   justify-content: space-between;
   gap: 18px;
 }
+#booking-drawer.is-pay-choice .drawer-header {
+  padding: 16px 22px 12px;
+}
+#booking-drawer.is-pay-choice .drawer-eyebrow {
+  margin-bottom: 6px;
+}
+#booking-drawer.is-pay-choice .drawer-title {
+  font-size: 1.35rem;
+  margin: 0 0 4px;
+}
 .drawer-titles {
   flex: 1;
   min-width: 0;
@@ -1142,6 +1152,7 @@ a.service-item:focus-visible .service-action {
   min-height: 0;
   border: 0;
   background: transparent;
+  overflow: hidden;
 }
 
 #drawer-cal-container {

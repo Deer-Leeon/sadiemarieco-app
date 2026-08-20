@@ -482,6 +482,16 @@ export default function CheckoutClient({
     }
   }, [embedInDrawer]);
 
+  useEffect(() => {
+    if (!embedInDrawer) return;
+    document.documentElement.classList.add('checkout-embed');
+    document.body.classList.add('checkout-embed');
+    return () => {
+      document.documentElement.classList.remove('checkout-embed');
+      document.body.classList.remove('checkout-embed');
+    };
+  }, [embedInDrawer]);
+
   const markConfirmed = useCallback(
     (result: CheckoutApplePayConfirmed | CheckoutConfirmed) => {
       setConfirmed({
@@ -817,7 +827,7 @@ export default function CheckoutClient({
     <main
       className={
         embedInDrawer
-          ? 'flex min-h-full w-full flex-col items-center bg-[#F5F3F0] px-4 py-5 font-sans'
+          ? 'flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#F5F3F0] px-4 py-3 font-sans'
           : 'flex min-h-screen w-full flex-col items-center bg-[#FAF9F6] px-4 py-12 font-sans sm:py-16'
       }
     >
@@ -825,7 +835,9 @@ export default function CheckoutClient({
 
       <section
         className={
-          embedInDrawer ? 'w-full max-w-md' : 'mt-10 w-full max-w-md'
+          embedInDrawer
+            ? 'flex min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden'
+            : 'mt-10 w-full max-w-md'
         }
       >
         {holdExpired ? (
@@ -860,6 +872,7 @@ export default function CheckoutClient({
               appointmentWhen={appointmentWhen}
               serviceLabel={serviceLabel}
               countdownLabel={countdownLabel}
+              compact={embedInDrawer}
             />
             {payPhase === 'details' ? (
               <CheckoutDetailsForm
@@ -1164,39 +1177,68 @@ function CheckoutPayChoice({
     <div
       className={
         compact
-          ? 'rounded-2xl border border-stone-200 bg-white p-5 shadow-sm shadow-stone-900/[0.03]'
+          ? 'flex min-h-0 flex-1 flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm shadow-stone-900/[0.03]'
           : 'rounded-2xl border border-stone-200 bg-white p-8 shadow-sm shadow-stone-900/[0.03] sm:p-10'
       }
     >
-      <h2 className="font-serif text-2xl text-stone-900">
+      <h2
+        className={
+          compact
+            ? 'font-serif text-xl text-stone-900'
+            : 'font-serif text-2xl text-stone-900'
+        }
+      >
         How would you like to pay?
       </h2>
       {onEditDetails ? (
         <button
           type="button"
           onClick={onEditDetails}
-          className="mt-2 text-left text-sm text-stone-500 underline-offset-2 hover:underline"
+          className={
+            compact
+              ? 'mt-1 text-left text-sm text-stone-500 underline-offset-2 hover:underline'
+              : 'mt-2 text-left text-sm text-stone-500 underline-offset-2 hover:underline'
+          }
         >
           Edit name or phone
         </button>
       ) : null}
-      <p className="mt-2 text-sm leading-relaxed text-stone-500">
-        Choose now or later — a card on file is required either way.
-      </p>
+      {compact ? null : (
+        <p className="mt-2 text-sm leading-relaxed text-stone-500">
+          Choose now or later — a card on file is required either way.
+        </p>
+      )}
 
-      <div className="mt-6 flex items-baseline justify-between border-b border-stone-100 pb-4">
+      <div
+        className={
+          compact
+            ? 'mt-3 flex items-baseline justify-between border-b border-stone-100 pb-3'
+            : 'mt-6 flex items-baseline justify-between border-b border-stone-100 pb-4'
+        }
+      >
         <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
           Due today
         </p>
-        <p className="font-serif text-2xl text-stone-900">
+        <p
+          className={
+            compact
+              ? 'font-serif text-xl text-stone-900'
+              : 'font-serif text-2xl text-stone-900'
+          }
+        >
           {payNow ? priceLabel || 'Pay now' : '$0'}
         </p>
       </div>
 
-      <fieldset disabled={applePaySubmitting} className="mt-5 space-y-2.5">
+      <fieldset
+        disabled={applePaySubmitting}
+        className={compact ? 'mt-3 space-y-2' : 'mt-5 space-y-2.5'}
+      >
         <legend className="sr-only">Payment timing</legend>
         <label
-          className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-3.5 transition-colors ${
+          className={`flex cursor-pointer items-start gap-3 rounded-xl border transition-colors ${
+            compact ? 'px-3 py-2.5' : 'px-4 py-3.5'
+          } ${
             paymentTiming === 'pay_later'
               ? 'border-stone-900 bg-stone-50'
               : 'border-stone-200 bg-white hover:border-stone-300'
@@ -1220,7 +1262,9 @@ function CheckoutPayChoice({
           </span>
         </label>
         <label
-          className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-3.5 transition-colors ${
+          className={`flex cursor-pointer items-start gap-3 rounded-xl border transition-colors ${
+            compact ? 'px-3 py-2.5' : 'px-4 py-3.5'
+          } ${
             paymentTiming === 'pay_now'
               ? 'border-stone-900 bg-stone-50'
               : 'border-stone-200 bg-white hover:border-stone-300'
@@ -1246,14 +1290,22 @@ function CheckoutPayChoice({
         </label>
       </fieldset>
 
-      <p className="mt-5 text-xs leading-relaxed text-stone-400">
+      <p
+        className={
+          compact
+            ? 'mt-3 text-[11px] leading-snug text-stone-400'
+            : 'mt-5 text-xs leading-relaxed text-stone-400'
+        }
+      >
         24+ hours notice to cancel or reschedule. Inside 24 hours may be
         charged up to 50%; no-shows (or cancels within 2 hours) may be charged
         100%. A card on file is required either way.
       </p>
 
       {showApplePaySlot && stripePromise ? (
-        <div className="relative mt-6 min-h-12 w-full">
+        <div
+          className={`relative w-full ${compact ? 'mt-4 min-h-11' : 'mt-6 min-h-12'}`}
+        >
           <div className="absolute inset-0">
             <Elements stripe={stripePromise} options={setupApplePayOptions}>
               <CheckoutApplePayHost
@@ -1316,13 +1368,21 @@ function CheckoutPayChoice({
           type="button"
           disabled={applePaySubmitting}
           onClick={onPayWithCard}
-          className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-5 py-3 text-sm font-medium tracking-wide text-stone-50 shadow-none transition-colors hover:bg-stone-800 active:bg-stone-900 disabled:cursor-not-allowed disabled:bg-stone-400"
+          className={`${
+            compact ? 'mt-4 py-2.5' : 'mt-6 py-3'
+          } inline-flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-5 text-sm font-medium tracking-wide text-stone-50 shadow-none transition-colors hover:bg-stone-800 active:bg-stone-900 disabled:cursor-not-allowed disabled:bg-stone-400`}
         >
           {payNow ? 'Pay with card' : 'Continue with card'}
         </button>
       ) : null}
 
-      <p className="mt-4 text-center text-[11px] leading-relaxed text-stone-400">
+      <p
+        className={
+          compact
+            ? 'mt-2.5 text-center text-[11px] leading-snug text-stone-400'
+            : 'mt-4 text-center text-[11px] leading-relaxed text-stone-400'
+        }
+      >
         {payNow
           ? 'Paid in full online. Cancellation policy still applies to refunds.'
           : 'Your card will only be charged for no-shows or late cancellations, per studio policy.'}
@@ -1454,12 +1514,57 @@ function CheckoutHoldSummary({
   appointmentWhen,
   serviceLabel,
   countdownLabel,
+  compact = false,
 }: {
   appointmentWhen: { date: string; timeRange: string } | null;
   serviceLabel: string | null;
   countdownLabel: string;
+  compact?: boolean;
 }) {
   if (!appointmentWhen && !countdownLabel) return null;
+
+  if (compact) {
+    return (
+      <div className="mb-3 shrink-0 rounded-md border border-stone-200 bg-white px-3 py-2.5 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          {appointmentWhen ? (
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+                Appointment
+              </p>
+              <p className="mt-1 font-serif text-lg leading-snug text-stone-900">
+                {appointmentWhen.date}
+              </p>
+              <p className="mt-0.5 text-sm font-medium tabular-nums text-stone-700">
+                {appointmentWhen.timeRange}
+              </p>
+              {serviceLabel ? (
+                <p className="mt-0.5 truncate text-xs text-stone-500">
+                  {serviceLabel}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {countdownLabel ? (
+            <div className="shrink-0 text-right" aria-live="polite">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                Time remaining
+              </p>
+              <p className="mt-1 font-mono text-lg font-medium tabular-nums text-stone-900">
+                {countdownLabel}
+              </p>
+            </div>
+          ) : null}
+        </div>
+        {countdownLabel ? (
+          <p className="mt-2 text-[11px] leading-snug text-stone-400">
+            Complete checkout within {checkoutHoldDurationLabel()} to hold
+            your time slot.
+          </p>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="mb-6">
