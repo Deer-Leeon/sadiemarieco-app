@@ -967,6 +967,8 @@
     showMount(link);
     drawer.classList.add('drawer-open');
     backdrop.classList.add('drawer-open');
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
     scrollDrawerToTop();
     const activeMount = mountsByLink.get(link);
     if (activeMount) bindDrawerEmbedFrame(activeMount);
@@ -988,6 +990,8 @@
     pendingContactBooking = null;
     drawer.classList.remove('drawer-open');
     backdrop.classList.remove('drawer-open');
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
   };
 
   const returnDrawerToCalendar = async () => {
