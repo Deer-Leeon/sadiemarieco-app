@@ -1586,6 +1586,8 @@ interface FormProps {
   payNow: boolean;
   quotedServicePriceCents: number | null;
   onBack?: () => void;
+  /** 3DS / bank redirect target. /book when the card form is inlined on the phone booker. */
+  returnPath?: string;
   onConfirmed: (result: {
     calWarning: string | null;
     contact: { sms: boolean; email: boolean };
@@ -1694,7 +1696,7 @@ function CheckoutHoldSummary({
   );
 }
 
-function CheckoutForm({
+export function CheckoutForm({
   uid,
   name,
   email,
@@ -1703,6 +1705,7 @@ function CheckoutForm({
   payNow,
   quotedServicePriceCents,
   onBack,
+  returnPath = '/checkout',
   onConfirmed,
 }: FormProps) {
   const stripe = useStripe();
@@ -1844,7 +1847,7 @@ function CheckoutForm({
         return;
       }
 
-      const returnUrl = new URL('/checkout', window.location.origin);
+      const returnUrl = new URL(returnPath, window.location.origin);
       returnUrl.searchParams.set('uid', uid);
       if (name) returnUrl.searchParams.set('name', name);
       if (email) returnUrl.searchParams.set('email', email);

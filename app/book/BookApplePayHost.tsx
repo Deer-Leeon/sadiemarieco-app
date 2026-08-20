@@ -436,7 +436,9 @@ export default function BookApplePayHost({
       }}
     >
       {active && prefersApplePay && !showApplePay ? (
-        <div className={styles.applePaySlot} aria-hidden="true" />
+        <div className={styles.applePayPlaceholder} aria-hidden="true">
+          Book with Apple Pay
+        </div>
       ) : null}
       <div
         className={
