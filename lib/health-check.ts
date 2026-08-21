@@ -1206,8 +1206,10 @@ async function checkJobFreshness(): Promise<HealthCheckResult[]> {
       id: 'job-cleanup-abandoned',
       name: 'Abandoned hold sweep (last run)',
       key: JOB_HEARTBEAT_KEYS.cleanupAbandoned,
-      warnAfterMs: 2 * 60 * 60 * 1000,
-      failAfterMs: 30 * 60 * 60 * 1000,
+      // Daily midnight MT job — do not reuse the hourly 2h window or it
+      // stays DEGRADED all afternoon after a successful run.
+      warnAfterMs: 26 * 60 * 60 * 1000,
+      failAfterMs: 50 * 60 * 60 * 1000,
       whatBreaks:
         'Stale checkout holds can block calendar slots. Scheduled once at midnight MT via QStash + a daily Vercel Cron backstop.',
     },
