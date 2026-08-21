@@ -313,6 +313,15 @@
   cursor: not-allowed;
 }
 
+/* Not-yet-fetched days — don't look "closed" while a later chunk loads. */
+.dayChipPending,
+.dayChipPending:disabled {
+  opacity: 1;
+  border-style: dashed;
+  color: #5c6470;
+  cursor: wait;
+}
+
 .dayChipOn {
   border-color: #0d1b2a;
   background: #0d1b2a;
@@ -322,6 +331,7 @@
 .dayChipOn:disabled {
   opacity: 1;
   cursor: default;
+  border-style: solid;
 }
 
 .slotGrid {
