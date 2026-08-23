@@ -741,22 +741,26 @@ export default function BookClient() {
           if (restoreStart && offset === 0) {
             const ymd = isoToStudioYmd(restoreStart);
             const firstEnd = rangeEnd;
-            const nbStart = ymd
-              ? clampYmd(
-                  addDaysYmd(ymd, -BOOK_SLOTS_NEIGHBORHOOD_DAYS),
-                  start,
-                  lastDay
-                )
-              : start;
-            const nbEnd = ymd
-              ? clampYmd(
-                  addDaysYmd(ymd, BOOK_SLOTS_NEIGHBORHOOD_DAYS),
-                  start,
-                  lastDay
-                )
-              : firstEnd;
-            const needNeighborhood =
-              Boolean(ymd) && (nbEnd > firstEnd || ymd < start);
+            if (!ymd) {
+              const more = await fetchRange(rangeStart, rangeEnd);
+              if (!stillCurrent()) return;
+              merged = { ...merged, ...more };
+              paintSlots(merged, start, restoreStart);
+              painted = true;
+              offset += chunkDays;
+              break;
+            }
+            const nbStart = clampYmd(
+              addDaysYmd(ymd, -BOOK_SLOTS_NEIGHBORHOOD_DAYS),
+              start,
+              lastDay
+            );
+            const nbEnd = clampYmd(
+              addDaysYmd(ymd, BOOK_SLOTS_NEIGHBORHOOD_DAYS),
+              start,
+              lastDay
+            );
+            const needNeighborhood = nbEnd > firstEnd || ymd < start;
             const extraPromise = needNeighborhood
               ? fetchRange(nbStart, nbEnd)
               : Promise.resolve({} as Record<string, string[]>);
@@ -769,7 +773,7 @@ export default function BookClient() {
             if (!slotsIncludeInstant(merged, restoreStart)) {
               merged = mergeSlotIntoDay(merged, restoreStart);
             }
-            paintSlots(merged, ymd || '', restoreStart);
+            paintSlots(merged, ymd, restoreStart);
             painted = true;
             offset += chunkDays;
             break;
