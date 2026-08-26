@@ -39,10 +39,23 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+// Two full probe passes plus the confirmation delay when something fails.
+export const maxDuration = 120;
 
 /** Re-alert for an unchanged failure set at most this often. */
 const REALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const ALERT_STATE_KEY = 'health-alert:state';
+
+/**
+ * A failing probe must fail a second pass before anyone is paged. Hosted
+ * dependencies (Cal.com especially) stall for a single sample every few
+ * days, which used to produce a daily ALERT → RECOVERED pair for nothing.
+ */
+const CONFIRM_DELAY_MS = 8_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -63,8 +76,10 @@ function fingerprintOf(checks: HealthCheckResult[]): string {
     .join(',');
 }
 
-function alertEmailHtml(report: HealthReport): string {
-  const bad = failing(report);
+function alertEmailHtml(
+  report: HealthReport,
+  bad: HealthCheckResult[]
+): string {
   const warn = degradedList(report);
   const row = (c: HealthCheckResult, color: string) =>
     `<tr>
@@ -179,7 +194,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const liveOverall = report.overall;
+  let liveOverall = report.overall;
 
   if (simulate) {
     report = {
@@ -189,7 +204,34 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     };
   }
 
-  const bad = failing(report);
+  const firstBad = failing(report);
+  let bad = firstBad;
+  let flapped: string[] = [];
+
+  if (!simulate && firstBad.length > 0) {
+    await sleep(CONFIRM_DELAY_MS);
+    try {
+      const confirm = await runHealthChecks();
+      const stillFailing = new Set(failing(confirm).map((c) => c.id));
+      bad = firstBad.filter((c) => stillFailing.has(c.id));
+      flapped = firstBad
+        .filter((c) => !stillFailing.has(c.id))
+        .map((c) => c.id);
+      report = confirm;
+      liveOverall = confirm.overall;
+    } catch (err) {
+      console.warn(
+        '[api/cron/health-alert] confirmation pass failed; using first result',
+        errorMessage(err)
+      );
+    }
+    if (flapped.length > 0) {
+      console.warn('[api/cron/health-alert] transient failure(s) ignored', {
+        flapped,
+      });
+    }
+  }
+
   const fingerprint = fingerprintOf(bad);
   const prior = await getOpsState(ALERT_STATE_KEY);
   const priorFingerprint =
@@ -213,7 +255,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const names = bad.map((c) => c.name).join(', ');
     email = await sendAlertEmail(
       `TEST: Sadie Marie site issue: ${names.slice(0, 110)}`,
-      alertEmailHtml(report)
+      alertEmailHtml(report, bad)
     );
     sms = await sendAlertSms(
       `TEST: Sadie Marie site ALERT: ${names.slice(0, 220)}. Nothing is actually broken. Details: sadiemarie.co/admin/health`
@@ -236,7 +278,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const names = bad.map((c) => c.name).join(', ');
       email = await sendAlertEmail(
         `🔴 Sadie Marie site issue: ${names.slice(0, 120)}`,
-        alertEmailHtml(report)
+        alertEmailHtml(report, bad)
       );
       sms = await sendAlertSms(
         `Sadie Marie site ALERT: ${names.slice(0, 240)}. Details: sadiemarie.co/admin/health`
@@ -276,6 +318,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     overall: report.overall,
     failing: bad.map((c) => ({ id: c.id, message: c.message })),
     degraded: degradedList(report).map((c) => c.id),
+    flapped,
     action,
     email,
     sms,
