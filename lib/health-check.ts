@@ -64,6 +64,50 @@ async function timed<T>(fn: () => Promise<T>): Promise<{ value: T; latencyMs: nu
   return { value, latencyMs: Date.now() - start };
 }
 
+/** Hard cap on a single third-party probe so a hung socket can't stall the run. */
+const PROBE_TIMEOUT_MS = 12_000;
+const PROBE_RETRY_GAP_MS = 1_200;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * True for failures that say "try again" rather than "this is broken":
+ * timeouts, dropped sockets, rate limits, upstream 5xx.
+ */
+function isTransientFailure(err: unknown): boolean {
+  const status =
+    err && typeof err === 'object' && 'status' in err
+      ? Number((err as { status: unknown }).status)
+      : NaN;
+  if (Number.isFinite(status)) return status === 429 || status >= 500;
+  const name = err instanceof Error ? err.name : '';
+  if (name === 'TimeoutError' || name === 'AbortError') return true;
+  return (
+    err instanceof Error &&
+    /fetch failed|network|socket|ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(
+      err.message
+    )
+  );
+}
+
+/**
+ * Give a flaky dependency one more chance before the probe reports a
+ * failure. Cal.com's hosted API stalls past our client timeout every few
+ * days; paging the owners on a single sample means a daily alert/recovery
+ * pair for something that was already fine on the next run.
+ */
+async function retryTransient<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!isTransientFailure(err)) throw err;
+    await sleep(PROBE_RETRY_GAP_MS);
+    return fn();
+  }
+}
+
 function result(
   partial: Omit<HealthCheckResult, 'status'> & { status?: HealthStatus },
   latencyMs?: number
@@ -437,25 +481,28 @@ async function checkCalCom(): Promise<HealthCheckResult[]> {
   }
 
   try {
-    const { value: payload, latencyMs } = await timed(async () => {
-      const res = await fetch(`${CAL_V2_BASE}/event-types`, {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'cal-api-version': '2024-06-14',
-          Accept: 'application/json',
-        },
-        cache: 'no-store',
-      });
-      const body: unknown = await res.json().catch(() => null);
-      if (!res.ok) {
-        const msg =
-          body && typeof body === 'object' && 'message' in body
-            ? String((body as { message: unknown }).message)
-            : `HTTP ${res.status}`;
-        throw new Error(msg);
-      }
-      return body;
-    });
+    const { value: payload, latencyMs } = await timed(() =>
+      retryTransient(async () => {
+        const res = await fetch(`${CAL_V2_BASE}/event-types`, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'cal-api-version': '2024-06-14',
+            Accept: 'application/json',
+          },
+          cache: 'no-store',
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        });
+        const body: unknown = await res.json().catch(() => null);
+        if (!res.ok) {
+          const msg =
+            body && typeof body === 'object' && 'message' in body
+              ? String((body as { message: unknown }).message)
+              : `HTTP ${res.status}`;
+          throw Object.assign(new Error(msg), { status: res.status });
+        }
+        return body;
+      })
+    );
 
     const eventTypes = extractCalEventTypes(payload);
     checks.push(
@@ -529,8 +576,8 @@ async function checkCalCom(): Promise<HealthCheckResult[]> {
       const { fetchDefaultSchedule } = await import(
         '@/app/admin/availability/calSchedules'
       );
-      const { value: schedule, latencyMs: scheduleMs } = await timed(async () =>
-        fetchDefaultSchedule(apiKey)
+      const { value: schedule, latencyMs: scheduleMs } = await timed(() =>
+        retryTransient(() => fetchDefaultSchedule(apiKey))
       );
       const windows = Array.isArray(schedule.availability)
         ? schedule.availability.length
