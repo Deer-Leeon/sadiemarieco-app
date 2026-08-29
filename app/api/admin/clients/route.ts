@@ -18,6 +18,11 @@
  *                          ClientProfileModal calls on mount so the
  *                          admin can drill into a brand-new client
  *                          without an explicit "create" step.
+ *                          Never sends SMS, email, or a consent link —
+ *                          those fire only when an appointment is booked.
+ *                          Response includes `created: true` on a new
+ *                          row, `created: false` when the phone already
+ *                          existed.
  *
  * PATCH lives on /api/admin/clients/[id]/route.ts — keeps the id in
  * the URL for cleaner request shape and lets per-client routes share
@@ -292,6 +297,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       `;
       return NextResponse.json({
         client: await rowToClient({ ...existingByPhone, phone } as ClientRow),
+        created: false,
       });
     }
 
@@ -304,11 +310,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         return NextResponse.json({
           client: await rowToClient(adopted),
           adopted: true,
+          created: false,
         });
       }
     }
 
-    const { rows } = await sql<ClientRow>`
+    const { rows } = await sql<ClientRow & { created: boolean | string }>`
       INSERT INTO clients (phone, first_name, last_name, email)
       VALUES (${phone}, ${firstName}, ${lastName}, ${email})
       ON CONFLICT (phone) DO UPDATE
@@ -322,7 +329,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         created_at,
         has_consented,
         consent_form_url,
-        consent_technician_reviewed_at
+        consent_technician_reviewed_at,
+        (xmax = 0) AS created
     `;
     if (rows.length === 0) {
       return NextResponse.json(
@@ -330,7 +338,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 500 }
       );
     }
-    return NextResponse.json({ client: await rowToClient(rows[0]) });
+    const { created, ...row } = rows[0];
+    return NextResponse.json({
+      client: await rowToClient(row),
+      created: created === true || created === 't',
+    });
   } catch (err) {
     // UNIQUE on email when the same inbox exists on a legacy row.
     const msg = errorMessage(err);
