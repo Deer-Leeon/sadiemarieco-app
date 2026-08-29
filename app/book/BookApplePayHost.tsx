@@ -31,6 +31,7 @@ import {
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
 import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
+import { applePayFriendlyError } from '@/lib/apple-pay-express';
 import { prefersApplePayDevice } from '@/lib/prefers-apple-pay';
 
 import styles from './book.module.css';
@@ -60,12 +61,6 @@ async function fetchWithTimeout(
   } finally {
     window.clearTimeout(timer);
   }
-}
-
-function friendlyStripeError(error: { message?: string }): string {
-  const msg = (error.message || '').trim();
-  if (msg) return msg;
-  return 'Apple Pay could not complete. Please try again or pay with card.';
 }
 
 export type BookCreatePayload = {
@@ -138,6 +133,8 @@ export default function BookApplePayHost({
   const prefersApplePay = useMemo(() => prefersApplePayDevice(), []);
   const [applePayAvailable, setApplePayAvailable] = useState(false);
   const [expressReady, setExpressReady] = useState(false);
+  /** Bump after a failed attempt so Express Checkout can collect a new card. */
+  const [expressNonce, setExpressNonce] = useState(0);
 
   // Latest props mirrored into refs (after render, per react-hooks/refs) so
   // the Apple Pay onConfirm callback stays stable across re-renders.
@@ -145,12 +142,15 @@ export default function BookApplePayHost({
   const serviceTitleRef = useRef(serviceTitle);
   const paymentTimingRef = useRef(paymentTiming);
   const holdUidRef = useRef(calBookingUid);
+  const activeRef = useRef(active);
+  const inFlightRef = useRef(false);
   useEffect(() => {
     payloadRef.current = createPayload;
     serviceTitleRef.current = serviceTitle;
     paymentTimingRef.current = paymentTiming;
     holdUidRef.current = calBookingUid;
-  }, [createPayload, serviceTitle, paymentTiming, calBookingUid]);
+    activeRef.current = active;
+  }, [createPayload, serviceTitle, paymentTiming, calBookingUid, active]);
 
   const onReady = useCallback(
     (event: StripeExpressCheckoutElementReadyEvent) => {
@@ -168,9 +168,10 @@ export default function BookApplePayHost({
 
   const onClick = useCallback(
     (event: StripeExpressCheckoutElementClickEvent) => {
+      onError(null);
       event.resolve({});
     },
-    []
+    [onError]
   );
 
   const createHold = useCallback(
@@ -222,7 +223,11 @@ export default function BookApplePayHost({
 
   const onConfirm = useCallback(
     async (event: StripeExpressCheckoutElementConfirmEvent) => {
-      if (!stripe || !elements || submitting || !active) {
+      if (!stripe || !elements || !activeRef.current) {
+        event.paymentFailed({ reason: 'fail' });
+        return;
+      }
+      if (inFlightRef.current) {
         event.paymentFailed({ reason: 'fail' });
         return;
       }
@@ -231,6 +236,7 @@ export default function BookApplePayHost({
       const timing = paymentTimingRef.current;
       const analyticsService = analyticsServiceLabel(serviceTitleRef.current);
 
+      inFlightRef.current = true;
       onError(null);
       onSubmittingChange(true);
       trackBook(BOOKING_ANALYTICS_EVENTS.CHECKOUT_PAYMENT_ATTEMPT, {
@@ -239,10 +245,12 @@ export default function BookApplePayHost({
         payment_timing: timing,
       });
 
+      let failed = true;
+      let notifyWallet = true;
       try {
         const { error: submitError } = await elements.submit();
         if (submitError) {
-          onError(friendlyStripeError(submitError));
+          onError(applePayFriendlyError(submitError));
           event.paymentFailed({ reason: 'fail' });
           return;
         }
@@ -296,7 +304,7 @@ export default function BookApplePayHost({
             redirect: 'if_required',
           });
           if (error) {
-            onError(friendlyStripeError(error));
+            onError(applePayFriendlyError(error));
             event.paymentFailed({ reason: 'fail' });
             return;
           }
@@ -306,7 +314,7 @@ export default function BookApplePayHost({
               clientSecret: siPayload.clientSecret,
             });
             if (next.error) {
-              onError(friendlyStripeError(next.error));
+              onError(applePayFriendlyError(next.error));
               event.paymentFailed({ reason: 'fail' });
               return;
             }
@@ -328,7 +336,7 @@ export default function BookApplePayHost({
             redirect: 'if_required',
           });
           if (error) {
-            onError(friendlyStripeError(error));
+            onError(applePayFriendlyError(error));
             event.paymentFailed({ reason: 'fail' });
             return;
           }
@@ -338,7 +346,7 @@ export default function BookApplePayHost({
               clientSecret: siPayload.clientSecret,
             });
             if (next.error) {
-              onError(friendlyStripeError(next.error));
+              onError(applePayFriendlyError(next.error));
               event.paymentFailed({ reason: 'fail' });
               return;
             }
@@ -353,6 +361,11 @@ export default function BookApplePayHost({
           }
           confirmId = finalIntent.id;
         }
+
+        // Wallet sheet already completed. A later booking-confirm
+        // rejection (wrong ZIP, etc.) must remount Express Checkout —
+        // paymentFailed here is too late and a second card cannot start.
+        notifyWallet = false;
 
         const confirmRes = await fetchWithTimeout(
           '/api/booking/confirm',
@@ -389,6 +402,7 @@ export default function BookApplePayHost({
           source: 'phone_booker_apple_pay',
           payment_timing: timing,
         });
+        failed = false;
         onConfirmed({
           name: bookingName,
           calWarning: confirmPayload?.cal_accept_error ?? null,
@@ -398,26 +412,24 @@ export default function BookApplePayHost({
           },
         });
       } catch (err) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : 'Something went wrong with Apple Pay. Try card instead.';
-        onError(message);
-        event.paymentFailed({ reason: 'fail' });
+        onError(
+          applePayFriendlyError(
+            err instanceof Error
+              ? err.message
+              : 'Something went wrong with Apple Pay. Try card instead.'
+          )
+        );
+        if (notifyWallet) event.paymentFailed({ reason: 'fail' });
       } finally {
+        inFlightRef.current = false;
         onSubmittingChange(false);
+        if (failed) {
+          setExpressReady(false);
+          setExpressNonce((n) => n + 1);
+        }
       }
     },
-    [
-      stripe,
-      elements,
-      submitting,
-      active,
-      onError,
-      onSubmittingChange,
-      createHold,
-      onConfirmed,
-    ]
+    [stripe, elements, onError, onSubmittingChange, createHold, onConfirmed]
   );
 
   const showApplePay = expressReady && applePayAvailable;
@@ -448,6 +460,7 @@ export default function BookApplePayHost({
         }
       >
         <ExpressCheckoutElement
+          key={expressNonce}
           options={EXPRESS_OPTIONS}
           onReady={onReady}
           onClick={onClick}
@@ -457,7 +470,10 @@ export default function BookApplePayHost({
             setApplePayAvailable(false);
             onApplePayResolved(false);
           }}
-          onCancel={() => onSubmittingChange(false)}
+          onCancel={() => {
+            inFlightRef.current = false;
+            onSubmittingChange(false);
+          }}
         />
       </div>
     </div>

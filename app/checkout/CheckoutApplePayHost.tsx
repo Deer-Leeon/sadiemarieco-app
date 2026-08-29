@@ -30,6 +30,7 @@ import {
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
 import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
+import { applePayFriendlyError } from '@/lib/apple-pay-express';
 import { prefersApplePayDevice } from '@/lib/prefers-apple-pay';
 
 async function fetchWithTimeout(
@@ -44,12 +45,6 @@ async function fetchWithTimeout(
   } finally {
     window.clearTimeout(timer);
   }
-}
-
-function friendlyStripeError(error: { message?: string }): string {
-  const msg = (error.message || '').trim();
-  if (msg) return msg;
-  return 'Apple Pay could not complete. Please try again or pay with card.';
 }
 
 export type CheckoutApplePayConfirmed = {
@@ -108,6 +103,7 @@ export default function CheckoutApplePayHost({
   const prefersApplePay = useMemo(() => prefersApplePayDevice(), []);
   const [applePayAvailable, setApplePayAvailable] = useState(false);
   const [expressReady, setExpressReady] = useState(false);
+  const [expressNonce, setExpressNonce] = useState(0);
 
   // Latest props mirrored into refs (after render, per react-hooks/refs) so
   // the Apple Pay onConfirm callback stays stable across re-renders.
@@ -116,13 +112,16 @@ export default function CheckoutApplePayHost({
   const emailRef = useRef(email);
   const serviceTitleRef = useRef(serviceTitle);
   const paymentTimingRef = useRef(paymentTiming);
+  const activeRef = useRef(active);
+  const inFlightRef = useRef(false);
   useEffect(() => {
     uidRef.current = uid;
     nameRef.current = name;
     emailRef.current = email;
     serviceTitleRef.current = serviceTitle;
     paymentTimingRef.current = paymentTiming;
-  }, [uid, name, email, serviceTitle, paymentTiming]);
+    activeRef.current = active;
+  }, [uid, name, email, serviceTitle, paymentTiming, active]);
 
   const onReady = useCallback(
     (event: StripeExpressCheckoutElementReadyEvent) => {
@@ -140,14 +139,19 @@ export default function CheckoutApplePayHost({
 
   const onClick = useCallback(
     (event: StripeExpressCheckoutElementClickEvent) => {
+      onError(null);
       event.resolve({});
     },
-    []
+    [onError]
   );
 
   const onConfirm = useCallback(
     async (event: StripeExpressCheckoutElementConfirmEvent) => {
-      if (!stripe || !elements || submitting || !active) {
+      if (!stripe || !elements || !activeRef.current) {
+        event.paymentFailed({ reason: 'fail' });
+        return;
+      }
+      if (inFlightRef.current) {
         event.paymentFailed({ reason: 'fail' });
         return;
       }
@@ -158,6 +162,7 @@ export default function CheckoutApplePayHost({
       const bookingEmail = emailRef.current;
       const analyticsService = analyticsServiceLabel(serviceTitleRef.current);
 
+      inFlightRef.current = true;
       onError(null);
       onSubmittingChange(true);
       try {
@@ -170,10 +175,12 @@ export default function CheckoutApplePayHost({
         /* analytics must never break checkout */
       }
 
+      let failed = true;
+      let notifyWallet = true;
       try {
         const { error: submitError } = await elements.submit();
         if (submitError) {
-          onError(friendlyStripeError(submitError));
+          onError(applePayFriendlyError(submitError));
           event.paymentFailed({ reason: 'fail' });
           return;
         }
@@ -223,7 +230,7 @@ export default function CheckoutApplePayHost({
             redirect: 'if_required',
           });
           if (error) {
-            onError(friendlyStripeError(error));
+            onError(applePayFriendlyError(error));
             event.paymentFailed({ reason: 'fail' });
             return;
           }
@@ -233,7 +240,7 @@ export default function CheckoutApplePayHost({
               clientSecret: siPayload.clientSecret,
             });
             if (next.error) {
-              onError(friendlyStripeError(next.error));
+              onError(applePayFriendlyError(next.error));
               event.paymentFailed({ reason: 'fail' });
               return;
             }
@@ -255,7 +262,7 @@ export default function CheckoutApplePayHost({
             redirect: 'if_required',
           });
           if (error) {
-            onError(friendlyStripeError(error));
+            onError(applePayFriendlyError(error));
             event.paymentFailed({ reason: 'fail' });
             return;
           }
@@ -265,7 +272,7 @@ export default function CheckoutApplePayHost({
               clientSecret: siPayload.clientSecret,
             });
             if (next.error) {
-              onError(friendlyStripeError(next.error));
+              onError(applePayFriendlyError(next.error));
               event.paymentFailed({ reason: 'fail' });
               return;
             }
@@ -280,6 +287,8 @@ export default function CheckoutApplePayHost({
           }
           confirmId = finalIntent.id;
         }
+
+        notifyWallet = false;
 
         const confirmRes = await fetchWithTimeout(
           '/api/booking/confirm',
@@ -320,6 +329,7 @@ export default function CheckoutApplePayHost({
         } catch {
           /* ignore */
         }
+        failed = false;
         onConfirmed({
           name: bookingName,
           calWarning: confirmPayload?.cal_accept_error ?? null,
@@ -329,17 +339,24 @@ export default function CheckoutApplePayHost({
           },
         });
       } catch (err) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : 'Something went wrong with Apple Pay. Try card instead.';
-        onError(message);
-        event.paymentFailed({ reason: 'fail' });
+        onError(
+          applePayFriendlyError(
+            err instanceof Error
+              ? err.message
+              : 'Something went wrong with Apple Pay. Try card instead.'
+          )
+        );
+        if (notifyWallet) event.paymentFailed({ reason: 'fail' });
       } finally {
+        inFlightRef.current = false;
         onSubmittingChange(false);
+        if (failed) {
+          setExpressReady(false);
+          setExpressNonce((n) => n + 1);
+        }
       }
     },
-    [stripe, elements, submitting, active, onError, onSubmittingChange, onConfirmed]
+    [stripe, elements, onError, onSubmittingChange, onConfirmed]
   );
 
   const showApplePay = expressReady && applePayAvailable;
@@ -366,6 +383,7 @@ export default function CheckoutApplePayHost({
         }
       >
         <ExpressCheckoutElement
+          key={expressNonce}
           options={EXPRESS_OPTIONS}
           onReady={onReady}
           onClick={onClick}
@@ -375,7 +393,10 @@ export default function CheckoutApplePayHost({
             setApplePayAvailable(false);
             onApplePayResolved(false);
           }}
-          onCancel={() => onSubmittingChange(false)}
+          onCancel={() => {
+            inFlightRef.current = false;
+            onSubmittingChange(false);
+          }}
         />
       </div>
     </div>
