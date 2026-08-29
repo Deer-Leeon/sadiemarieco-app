@@ -24,13 +24,20 @@ import {
   Flag,
   Mail,
   Phone,
+  Plus,
   Search,
   UserRound,
 } from 'lucide-react';
 
 import {
+  CLIENT_PHONE_HINT,
   clientPhoneLookupVariants,
+  clientPhoneValidationMessage,
+  formatUsPhoneAsYouType,
+  isPlaceholderClientEmail,
   normaliseClientPhoneForStorage,
+  parseClientPhone,
+  parseOptionalClientEmail,
 } from '@/lib/client-identity';
 
 import type { Client } from '../types';
@@ -125,6 +132,18 @@ export default function ClientDirectory({ clients: initialClients }: Props) {
   // feel the spec asks for.
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<ClientSortKey>('name');
+  const [addOpen, setAddOpen] = useState(false);
+
+  const handleClientCreated = useCallback((created: Client) => {
+    setClients((prev) => {
+      if (prev.some((c) => c.id === created.id)) {
+        return prev.map((c) => (c.id === created.id ? { ...c, ...created } : c));
+      }
+      return [created, ...prev];
+    });
+    setAddOpen(false);
+    setOpenClient(created);
+  }, []);
 
   const handleClientUpdated = useCallback((updated: Client) => {
     setClients((prev) =>
@@ -189,7 +208,19 @@ export default function ClientDirectory({ clients: initialClients }: Props) {
 
   return (
     <div className="flex flex-col gap-6">
-      <SearchBar value={searchQuery} onChange={setSearchQuery} />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1">
+          <SearchBar value={searchQuery} onChange={setSearchQuery} />
+        </div>
+        <button
+          type="button"
+          onClick={() => setAddOpen(true)}
+          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full border border-stone-200 bg-white px-4 py-2.5 text-xs font-medium text-stone-800 shadow-sm transition-colors hover:bg-stone-50 hover:text-stone-900"
+        >
+          <Plus className="h-3.5 w-3.5 text-stone-500" strokeWidth={2} />
+          <span className="font-serif text-sm leading-none">Add client</span>
+        </button>
+      </div>
 
       {/* Result summary — quiet, sits just below the search bar.
           We only render the count when there's something to count;
@@ -204,7 +235,7 @@ export default function ClientDirectory({ clients: initialClients }: Props) {
       )}
 
       {clients.length === 0 ? (
-        <EmptyDirectoryState />
+        <EmptyDirectoryState onAdd={() => setAddOpen(true)} />
       ) : filteredClients.length === 0 ? (
         <NoMatchesState query={searchQuery} />
       ) : (
@@ -217,6 +248,13 @@ export default function ClientDirectory({ clients: initialClients }: Props) {
             />
           ))}
         </ul>
+      )}
+
+      {addOpen && (
+        <AddClientModal
+          onClose={() => setAddOpen(false)}
+          onCreated={handleClientCreated}
+        />
       )}
 
       {openClient && (
@@ -334,6 +372,237 @@ function SearchBar({
         spellCheck={false}
         className="w-full rounded-full border border-stone-200 bg-white py-3 pl-11 pr-4 text-sm text-stone-900 placeholder:text-stone-400 shadow-sm transition-shadow focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-300/40"
       />
+    </div>
+  );
+}
+
+const ADD_INPUT_CLASS =
+  'block w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 transition-colors focus:border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-200';
+
+function AddClientModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (client: Client) => void;
+}) {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [phoneTouched, setPhoneTouched] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const parsedPhone = parseClientPhone(phone);
+  const phoneInvalid = phoneTouched && !parsedPhone;
+  const rawEmail = email.trim();
+  const parsedEmail = parseOptionalClientEmail(email);
+  const emailInvalid =
+    rawEmail.length > 0 &&
+    !parsedEmail &&
+    !isPlaceholderClientEmail(rawEmail);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, []);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setPhoneTouched(true);
+    setError(null);
+    if (!firstName.trim()) {
+      setError('Enter a first name.');
+      return;
+    }
+    if (!parsedPhone) {
+      setError(clientPhoneValidationMessage());
+      return;
+    }
+    if (emailInvalid) {
+      setError('Enter a valid email address.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/admin/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name: firstName.trim(),
+          last_name: lastName.trim() || null,
+          phone: parsedPhone.digits,
+          email: parsedEmail,
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        client?: Client;
+        created?: boolean;
+        error?: string;
+        message?: string;
+      } | null;
+      if (!res.ok || !data?.client) {
+        setError(
+          data?.message ||
+            data?.error ||
+            'Could not save this client. Try again.'
+        );
+        return;
+      }
+      onCreated(data.client);
+    } catch {
+      setError('Could not save this client. Try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-60 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-2xl bg-[#FAF9F6] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-client-title"
+      >
+        <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col">
+          <div className="border-b border-stone-200 px-6 py-4">
+            <h2
+              id="add-client-title"
+              className="font-serif text-lg text-stone-900"
+            >
+              Add client
+            </h2>
+            <p className="mt-1 text-sm text-stone-500">
+              Saves them to the directory only. No text, email, or consent
+              form is sent until you book them an appointment.
+            </p>
+          </div>
+          <div className="flex flex-col gap-4 px-6 py-5">
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+                  First name
+                </span>
+                <input
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  autoComplete="given-name"
+                  required
+                  className={ADD_INPUT_CLASS}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+                  Last name{' '}
+                  <span className="normal-case tracking-normal text-stone-400">
+                    (optional)
+                  </span>
+                </span>
+                <input
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  autoComplete="family-name"
+                  className={ADD_INPUT_CLASS}
+                />
+              </label>
+            </div>
+            <label className="block">
+              <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+                Phone
+              </span>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) =>
+                  setPhone(formatUsPhoneAsYouType(e.target.value))
+                }
+                onBlur={() => setPhoneTouched(true)}
+                autoComplete="tel"
+                placeholder="(801) 555-1234"
+                required
+                aria-invalid={phoneInvalid}
+                className={`${ADD_INPUT_CLASS}${
+                  phoneInvalid
+                    ? ' border-rose-200 focus:border-rose-300 focus:ring-rose-100'
+                    : ''
+                }`}
+              />
+              <p className="mt-1.5 text-xs text-stone-500">{CLIENT_PHONE_HINT}</p>
+              {phoneInvalid ? (
+                <p className="mt-1 text-xs text-rose-600" role="alert">
+                  {clientPhoneValidationMessage()}
+                </p>
+              ) : null}
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+                Email{' '}
+                <span className="normal-case tracking-normal text-stone-400">
+                  (optional)
+                </span>
+              </span>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                placeholder="client@example.com"
+                aria-invalid={emailInvalid}
+                className={`${ADD_INPUT_CLASS}${
+                  emailInvalid
+                    ? ' border-rose-200 focus:border-rose-300 focus:ring-rose-100'
+                    : ''
+                }`}
+              />
+              {emailInvalid ? (
+                <p className="mt-1 text-xs text-rose-600" role="alert">
+                  Enter a valid email address.
+                </p>
+              ) : null}
+            </label>
+            {error ? (
+              <p className="text-sm text-rose-700" role="alert">
+                {error}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex items-center justify-end gap-2 border-t border-stone-200 px-6 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full px-4 py-2 text-sm text-stone-600 hover:text-stone-900"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-60"
+            >
+              {submitting ? 'Saving…' : 'Save client'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -595,7 +864,7 @@ function ClientCard({
 // ─── EMPTY STATES ──────────────────────────────────────────────────────────
 
 /** Rendered when the `clients` table is genuinely empty. */
-function EmptyDirectoryState() {
+function EmptyDirectoryState({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="rounded-lg border border-dashed border-stone-300 bg-white/60 px-6 py-12 text-center">
       <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-stone-100 text-stone-500">
@@ -603,9 +872,17 @@ function EmptyDirectoryState() {
       </span>
       <h3 className="mt-4 font-serif text-lg text-stone-900">No clients yet</h3>
       <p className="mt-1 text-sm text-stone-500">
-        Clients are created automatically when bookings come in through
-        Cal.com — your first booking will populate this directory.
+        Add people you already work with, or wait for bookings to come in
+        through the site. Saving a client does not text or email them.
       </p>
+      <button
+        type="button"
+        onClick={onAdd}
+        className="mt-5 inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium text-stone-800 shadow-sm hover:bg-stone-50"
+      >
+        <Plus className="h-3.5 w-3.5 text-stone-500" strokeWidth={2} />
+        Add client
+      </button>
     </div>
   );
 }
