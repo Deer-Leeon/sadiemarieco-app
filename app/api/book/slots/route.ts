@@ -1,20 +1,19 @@
 /**
  * GET /api/book/slots
  *
- * Public Cal.com availability for a service slug (studio timezone).
+ * Public availability for a service slug (studio timezone).
  * Query: slug, date (YYYY-MM-DD), optional end (YYYY-MM-DD).
+ *
+ * Starts come from Cal working hours (weekly + date overrides) minus
+ * live Postgres occupancy. Cal.com /slots is not used: cancelled Cal
+ * bookings often leave connected-calendar busy events that would hide
+ * times the studio calendar shows as open.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
 import { loadBookableServiceBySlug } from '@/lib/book-public';
-import { STUDIO_TIMEZONE } from '@/lib/cal-config';
-import { addCalendarDays } from '@/lib/cal-slot-dates';
-import {
-  CAL_SLOTS_API_VERSION,
-  normalizeCalSlotsPayload,
-  proxyCalV2Get,
-} from '@/lib/cal-proxy';
+import { listStudioAvailableSlots } from '@/lib/studio-available-slots';
 import {
   clientIpFromRequest,
   RATE_LIMITS,
@@ -71,29 +70,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const calRangeEnd = addCalendarDays(end, 1);
-  const slotQuery: Record<string, string> = {
-    eventTypeId: String(service.calEventId),
-    start: date,
-    end: calRangeEnd,
-    timeZone: STUDIO_TIMEZONE,
-    duration: String(service.durationMins),
-  };
+  const listed = await listStudioAvailableSlots({
+    rangeStartYmd: date,
+    rangeEndYmd: end,
+    durationMins: service.durationMins,
+  });
+  if (!listed.ok) {
+    return NextResponse.json(
+      { error: 'slots_unavailable', message: listed.message },
+      { status: 502 }
+    );
+  }
 
-  const result = await proxyCalV2Get('/slots', slotQuery, CAL_SLOTS_API_VERSION);
-  if (!result.ok) return result.response;
-
-  const normOpts = { studioDateStart: date, studioDateEnd: end };
   if (end === date) {
-    const normalized = normalizeCalSlotsPayload(result.data, normOpts);
     return NextResponse.json({
       slug: service.slug,
-      slots: { [date]: normalized.slots[date] ?? [] },
+      slots: { [date]: listed.slots[date] ?? [] },
     });
   }
 
   return NextResponse.json({
     slug: service.slug,
-    ...normalizeCalSlotsPayload(result.data, normOpts),
+    slots: listed.slots,
   });
 }
