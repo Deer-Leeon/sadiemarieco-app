@@ -25,9 +25,11 @@ import {
   STUDIO_TIMEZONE,
 } from '@/lib/cal-config';
 import {
+  CAL_BOOKINGS_ADMIN_CREATE_API_VERSION,
   CAL_BOOKINGS_API_VERSION,
   proxyCalV2Post,
 } from '@/lib/cal-proxy';
+import { studioSlotIsOpen } from '@/lib/studio-available-slots';
 import {
   CalStartTimeError,
   parseBookingStartForCal,
@@ -432,6 +434,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
+  const slotOpen = await studioSlotIsOpen({
+    startUtc,
+    durationMins: service.durationMins,
+  });
+  if (!slotOpen) {
+    return NextResponse.json(
+      {
+        error: 'slot_unavailable',
+        message: 'That time is no longer available. Pick another time.',
+      },
+      { status: 409 }
+    );
+  }
+
   const calPayload: Record<string, unknown> = {
     eventTypeId: service.calEventId,
     start: startUtc.toISOString(),
@@ -456,12 +472,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     metadata: {
       phone_booker: 'true',
     },
+    // Host calendar still lists cancelled test bookings as busy. Occupancy
+    // was already checked against Postgres; do not let those leftovers 409.
+    allowConflicts: true,
   };
 
   const createResult = await proxyCalV2Post(
     '/bookings',
     calPayload,
-    CAL_BOOKINGS_API_VERSION
+    CAL_BOOKINGS_ADMIN_CREATE_API_VERSION
   );
   if (!createResult.ok) return mapCalCreateFailure(createResult.response);
 
