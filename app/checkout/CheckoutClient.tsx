@@ -31,6 +31,11 @@ import {
 } from '@stripe/react-stripe-js';
 import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
 import { stripePromise } from '@/lib/stripe-browser';
+import {
+  isKeepHoldThroughUnload,
+  sendAbandonHoldBeacon,
+  setKeepHoldThroughUnload,
+} from '@/lib/abandon-hold-client';
 import CheckoutApplePayHost, {
   type CheckoutApplePayConfirmed,
 } from './CheckoutApplePayHost';
@@ -471,10 +476,26 @@ export default function CheckoutClient({
   const [holdReleaseState, setHoldReleaseState] = useState<
     'idle' | 'releasing' | 'released' | 'failed'
   >('idle');
+  const checkoutConfirmedRef = useRef(confirmed);
+  checkoutConfirmedRef.current = confirmed;
 
   useEffect(() => {
     setMountApplePay(prefersApplePayDevice());
   }, []);
+
+  useEffect(() => {
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (event.persisted) return;
+      if (isKeepHoldThroughUnload()) return;
+      if (checkoutConfirmedRef.current) return;
+      if (holdExpired) return;
+      const currentUid = uid.trim();
+      if (!currentUid) return;
+      sendAbandonHoldBeacon(currentUid);
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, [uid, holdExpired]);
 
   const onApplePayResolved = useCallback((available: boolean) => {
     setApplePayAvailable((prev) => (prev === true ? true : available));
@@ -494,6 +515,7 @@ export default function CheckoutClient({
       else url.searchParams.delete('email');
       const target =
         window.top && window.top !== window ? window.top : window;
+      setKeepHoldThroughUnload(true);
       target.location.replace(url.toString());
     },
     [uid, contactName, contactEmail]
@@ -525,6 +547,7 @@ export default function CheckoutClient({
     });
     const target =
       window.top && window.top !== window ? window.top : window;
+    setKeepHoldThroughUnload(true);
     target.location.assign(resume);
   }, [
     embedInDrawer,
@@ -1854,6 +1877,7 @@ export function CheckoutForm({
       if (payNow) returnUrl.searchParams.set('payMode', 'now');
 
       setSubmitLabel('Verifying with your bank…');
+      setKeepHoldThroughUnload(true);
       if (payNow) {
         const { error, paymentIntent } = await stripe.confirmPayment({
           elements,
@@ -1865,6 +1889,7 @@ export function CheckoutForm({
         });
 
         if (error) {
+          setKeepHoldThroughUnload(false);
           setSubmitError(friendlyStripeSetupError(error));
           return;
         }
@@ -1873,6 +1898,7 @@ export function CheckoutForm({
         if (finalPi?.status === 'requires_action') {
           const next = await stripe.handleNextAction({ clientSecret });
           if (next.error) {
+            setKeepHoldThroughUnload(false);
             setSubmitError(friendlyStripeSetupError(next.error));
             return;
           }
@@ -1880,6 +1906,7 @@ export function CheckoutForm({
         }
 
         if (!finalPi || finalPi.status !== 'succeeded') {
+          setKeepHoldThroughUnload(false);
           setSubmitError(
             'Your payment could not be confirmed. Please check the details and try again.'
           );
@@ -1888,6 +1915,7 @@ export function CheckoutForm({
 
         setSubmitLabel('Confirming your appointment…');
         await finalizeBooking({ paymentIntentId: finalPi.id });
+        setKeepHoldThroughUnload(false);
       } else {
         const { error, setupIntent } = await stripe.confirmSetup({
           elements,
@@ -1899,6 +1927,7 @@ export function CheckoutForm({
         });
 
         if (error) {
+          setKeepHoldThroughUnload(false);
           setSubmitError(friendlyStripeSetupError(error));
           return;
         }
@@ -1907,6 +1936,7 @@ export function CheckoutForm({
         if (finalIntent?.status === 'requires_action') {
           const next = await stripe.handleNextAction({ clientSecret });
           if (next.error) {
+            setKeepHoldThroughUnload(false);
             setSubmitError(friendlyStripeSetupError(next.error));
             return;
           }
@@ -1914,6 +1944,7 @@ export function CheckoutForm({
         }
 
         if (!finalIntent || finalIntent.status !== 'succeeded') {
+          setKeepHoldThroughUnload(false);
           setSubmitError(
             'Your card could not be confirmed. Please check the details and try again — if your bank asks to verify the charge, complete that prompt and retry.'
           );
@@ -1922,8 +1953,10 @@ export function CheckoutForm({
 
         setSubmitLabel('Confirming your appointment…');
         await finalizeBooking({ setupIntentId: finalIntent.id });
+        setKeepHoldThroughUnload(false);
       }
     } catch (err) {
+      setKeepHoldThroughUnload(false);
       setSubmitError(
         err instanceof Error
           ? err.message

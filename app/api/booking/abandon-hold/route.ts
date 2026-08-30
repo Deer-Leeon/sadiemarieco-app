@@ -7,6 +7,9 @@
  * opaque Cal UID from their own checkout.
  *
  * No abandoned-checkout SMS: they chose to leave, they did not time out.
+ *
+ * Also used via `navigator.sendBeacon` on `pagehide` when Google Maps'
+ * in-app browser (top-left ✓) kills the tab. Body may be JSON or text/plain.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -27,6 +30,36 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+async function parseCalBookingUid(req: NextRequest): Promise<string> {
+  const fromQuery = req.nextUrl.searchParams.get('calBookingUid')?.trim() ?? '';
+  if (fromQuery) return fromQuery;
+
+  let raw = '';
+  try {
+    raw = (await req.text()).trim();
+  } catch {
+    return '';
+  }
+  if (!raw) return '';
+
+  try {
+    const parsed = JSON.parse(raw) as { calBookingUid?: unknown };
+    if (typeof parsed?.calBookingUid === 'string') {
+      return parsed.calBookingUid.trim();
+    }
+  } catch {
+    /* sendBeacon may arrive as text/plain JSON or a bare uid */
+  }
+
+  const contentType = req.headers.get('content-type') || '';
+  if (contentType.includes('application/x-www-form-urlencoded')) {
+    return new URLSearchParams(raw).get('calBookingUid')?.trim() || '';
+  }
+
+  if (/^[A-Za-z0-9_-]{8,200}$/.test(raw)) return raw;
+  return '';
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const limited = await rejectUnlessRateAllowed({
     key: `booking:abandon-hold:${clientIpFromRequest(req)}`,
@@ -34,19 +67,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
   if (limited) return limited;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
-  }
-
-  const uid =
-    body &&
-    typeof body === 'object' &&
-    typeof (body as { calBookingUid?: unknown }).calBookingUid === 'string'
-      ? (body as { calBookingUid: string }).calBookingUid.trim()
-      : '';
+  const uid = await parseCalBookingUid(req);
 
   if (!uid || uid.length > 200) {
     return NextResponse.json(

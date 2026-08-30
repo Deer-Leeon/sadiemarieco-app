@@ -32,6 +32,7 @@ import {
 } from '@/lib/booking-analytics';
 import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
 import { applePayFriendlyError } from '@/lib/apple-pay-express';
+import { setKeepHoldThroughUnload } from '@/lib/abandon-hold-client';
 import { prefersApplePayDevice } from '@/lib/prefers-apple-pay';
 
 import styles from './book.module.css';
@@ -296,6 +297,7 @@ export default function BookApplePayHost({
         if (bookingEmail) returnUrl.searchParams.set('email', bookingEmail);
 
         let confirmId: string | null = null;
+        setKeepHoldThroughUnload(true);
         if (timing === 'pay_now') {
           const { error, paymentIntent } = await stripe.confirmPayment({
             elements,
@@ -424,8 +426,11 @@ export default function BookApplePayHost({
         inFlightRef.current = false;
         onSubmittingChange(false);
         if (failed) {
+          setKeepHoldThroughUnload(false);
           setExpressReady(false);
           setExpressNonce((n) => n + 1);
+        } else {
+          setKeepHoldThroughUnload(false);
         }
       }
     },
