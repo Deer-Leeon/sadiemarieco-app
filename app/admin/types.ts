@@ -371,6 +371,15 @@ export interface Client extends ClientCrmStats {
    * signed consent PDF. Null until reviewed.
    */
   consent_technician_reviewed_at: string | null;
+  /**
+   * When TRUE, send a Google review SMS ~30 minutes after the next
+   * completed confirmed visit, then clear this flag.
+   */
+  review_request_pending: boolean;
+  /** Manual admin mark that this client already left a Google review. */
+  google_review_noted: boolean;
+  google_review_noted_at: string | null;
+  review_request_last_sent_at: string | null;
 }
 
 export type { ClientIntakeForm } from '@/lib/consent';
@@ -393,6 +402,14 @@ export const EMPTY_CLIENT_CRM_STATS: ClientCrmStats = {
   no_show_waive_next: true,
   late_change_waive_next: true,
   last_booked_at: null,
+};
+
+/** Defaults when a client SELECT does not include review-request columns. */
+export const EMPTY_CLIENT_REVIEW_FLAGS = {
+  review_request_pending: false,
+  google_review_noted: false,
+  google_review_noted_at: null as string | null,
+  review_request_last_sent_at: null as string | null,
 };
 
 /**

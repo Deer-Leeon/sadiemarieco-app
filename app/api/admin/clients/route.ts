@@ -39,6 +39,7 @@ import { sql } from '@vercel/postgres';
 import { requireAdminUser } from '@/app/admin/auth';
 import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
+import { reviewFlagsFromRow } from '@/lib/client-review-flags';
 import {
   findClientRowByPhone,
   clientPhoneExistsInDb,
@@ -79,6 +80,10 @@ interface ClientRow {
   has_consented: boolean;
   consent_form_url: string | null;
   consent_technician_reviewed_at?: Date | string | null;
+  review_request_pending?: boolean | null;
+  google_review_noted?: boolean | null;
+  google_review_noted_at?: Date | string | null;
+  review_request_last_sent_at?: Date | string | null;
 }
 
 function serializeReviewedAt(
@@ -104,13 +109,14 @@ async function rowToClient(row: ClientRow): Promise<Client> {
     consent_technician_reviewed_at: serializeReviewedAt(
       row.consent_technician_reviewed_at
     ),
+    ...reviewFlagsFromRow(row),
   };
   try {
     const stats = await fetchClientCrmStats(row.id, {
       email: row.email,
       phone: row.phone,
     });
-    return { ...base, ...stats };
+    return { ...base, ...stats, ...reviewFlagsFromRow(row) };
   } catch (err) {
     console.warn(
       '[api/admin/clients] fetchClientCrmStats failed; returning base row',
@@ -130,10 +136,14 @@ async function selectClientByEmail(email: string): Promise<ClientRow | null> {
       email,
       created_at,
       has_consented,
-      consent_form_url,
-      consent_technician_reviewed_at
-    FROM clients
-    WHERE email IS NOT NULL
+        consent_form_url,
+        consent_technician_reviewed_at,
+        review_request_pending,
+        google_review_noted,
+        google_review_noted_at,
+        review_request_last_sent_at
+      FROM clients
+      WHERE email IS NOT NULL
       AND LOWER(TRIM(email)) = LOWER(TRIM(${email}))
     LIMIT 1
   `;
@@ -164,8 +174,12 @@ async function adoptLegacyEmailRow(
       created_at,
       has_consented,
       consent_form_url,
-      consent_technician_reviewed_at
-  `;
+      consent_technician_reviewed_at,
+      review_request_pending,
+      google_review_noted,
+      google_review_noted_at,
+      review_request_last_sent_at
+    `;
   return rows[0] ?? null;
 }
 
@@ -330,6 +344,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         has_consented,
         consent_form_url,
         consent_technician_reviewed_at,
+        review_request_pending,
+        google_review_noted,
+        google_review_noted_at,
+        review_request_last_sent_at,
         (xmax = 0) AS created
     `;
     if (rows.length === 0) {
@@ -390,7 +408,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               created_at,
               has_consented,
               consent_form_url,
-              consent_technician_reviewed_at
+              consent_technician_reviewed_at,
+              review_request_pending,
+              google_review_noted,
+              google_review_noted_at,
+              review_request_last_sent_at
           `;
           if (phoneOnly[0]) {
             return NextResponse.json({

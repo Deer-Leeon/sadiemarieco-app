@@ -50,9 +50,10 @@ Do not reintroduce those failure modes.
 Public Cal bookings must only trigger Twilio SMS when `sms-consent` is **explicitly true**.
 
 - Webhook parses `sms-consent` and passes `smsOptIn: true` only when checked.
-- If unchecked / missing on a website booking → **no** confirmation SMS, **no** consent-request SMS, and **no** QStash remind/feedback SMS jobs.
+- If unchecked / missing on a website booking → **no** confirmation SMS, **no** consent-request SMS, and **no** QStash remind / feedback / Google-review-request SMS jobs.
 - Consent **email** may still send when a real email is on file and the client has not signed intake yet (email is not A2P SMS).
 - Admin manual bookings may pass `smsOptIn: true` (staff-initiated outreach).
+- Opted-in clients may get one extra post-visit text: a Google review request ~30 minutes after a completed visit, only when **Ask for a Google review after their next visit** is on in their CRM profile. New clients default on; existing clients default off. The booking `sms-consent` checkbox stays optional.
 
 **Code:** `lib/legacy-handlers/webhook.js`, `lib/booking-notifications.js`  
 **Consent SMS template:** `consent_request` in Admin → SMS Messages (`lib/sms-templates.js`)
@@ -191,6 +192,14 @@ Sadie Marie: Your [service] on [date] at [time] was canceled or rescheduled. A l
 
 (Under 2 hours uses the no-show charged template at 100% of service cost, for cancel or reschedule.)
 
+**#9 – Google review request** (~30 min after a confirmed visit ends; profile checkbox on):
+
+```text
+Sadie Marie: Hi [firstName]! I hope you loved your [service] today. If you have a moment, a Google review would mean the world: [reviewUrl]. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+The day-after thank-you (`feedback_day_after` → `/api/feedback`) still sends separately for opted-in visits.
+
 **Code:** `lib/sms-appointment-copy.js`, `lib/booking-notifications.js`, `lib/legacy-handlers/remind.js`, `lib/legacy-handlers/webhook.js`, admin status/reschedule routes  
 **Send timing:** confirmation + QStash schedules run after checkout confirm (not on Cal `BOOKING_CREATED`). Lifecycle SMS only when `appointments.sms_opt_in === true`.
 
@@ -205,6 +214,7 @@ Sadie Marie: Your [service] on [date] at [time] was canceled or rescheduled. A l
 | Footer legal links | `public/index.html` |
 | Gate SMS on opt-in | `lib/booking-notifications.js`, `app/api/booking/confirm/route.ts`, `appointments.sms_opt_in` |
 | Reminder SMS | `lib/legacy-handlers/remind.js` (24h + 1h; only if QStash scheduled after confirm + opt-in) |
+| Google review SMS | `app/api/qstash/review-request/route.ts`, `clients.review_request_pending` (Clerk-excluded via `/api/qstash(.*)`) |
 | SMS copy defaults + send-time resolve | `lib/sms-appointment-copy.js`, `lib/sms-templates.js` |
 | Admin SMS editor | `/admin/sms-messages`, `app/api/admin/sms-messages` |
 | Apply studio fields on new services | `app/api/admin/services/route.ts` |

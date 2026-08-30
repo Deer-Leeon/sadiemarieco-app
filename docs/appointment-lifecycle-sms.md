@@ -268,7 +268,20 @@ Sadie Marie: Your Brow Lamination is in one hour. Please arrive with clean brows
 Sadie Marie: Your Consultation is in one hour. Please arrive a few minutes early. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
-### 23. Reminder emails (lead + 1h)
+### 23. Google review request (~30 min after visit)
+
+| | |
+|---|---|
+| **Who** | System (QStash → `/api/qstash/review-request`) |
+| **Status gate** | Must still be `confirmed`; `sms_opt_in`; `clients.review_request_pending` |
+| **SMS** | Yes (below) |
+| **Notes** | Fire at visit end + 30 minutes. Successful send unchecks the profile box. Cancel / no-show / opt-out skip and leave the box on. Day-after thank-you (`/api/feedback`) still sends separately. |
+
+```
+Sadie Marie: Hi Sarah! I hope you loved your 2 Week Fill today. If you have a moment, a Google review would mean the world: https://g.page/r/CQ0Tmk7shapREBM/review. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+### 24. Reminder emails (lead + 1h)
 
 | | |
 |---|---|
@@ -277,7 +290,7 @@ Sadie Marie: Your Consultation is in one hour. Please arrive a few minutes early
 | **SMS** | none |
 | **Notes** | Email only (not SMS). Lead: ~48h brows / ~24h lashes; plus 1h before. |
 
-### 24. App booking confirmation email
+### 25. App booking confirmation email
 
 | | |
 |---|---|
@@ -289,7 +302,7 @@ Sadie Marie: Your Consultation is in one hour. Please arrive a few minutes early
 
 ## Other
 
-### 25. Studio time block create or delete
+### 26. Studio time block create or delete
 
 | | |
 |---|---|
@@ -298,7 +311,7 @@ Sadie Marie: Your Consultation is in one hour. Please arrive a few minutes early
 | **SMS** | none |
 | **Notes** | Blocks availability. Not a client appointment. |
 
-### 26. Service payment / Stripe Terminal charge
+### 27. Service payment / Stripe Terminal charge
 
 | | |
 |---|---|
@@ -330,10 +343,11 @@ Sadie Marie: Your Consultation is in one hour. Please arrive a few minutes early
 | 16 | Admin reschedule | reschedule |
 | 17 | Admin other status PATCH | **none** |
 | 18–22 | Reminder SMS variants | reminder |
-| 23 | Reminder emails | **none** (email) |
-| 24 | App confirmation email | **none** |
-| 25 | Time blocks | **none** |
-| 26 | Terminal / service charge | **none** |
+| 23 | Google review request (+30m, profile box on) | review request |
+| 24 | Reminder emails | **none** (email) |
+| 25 | App confirmation email | **none** |
+| 26 | Time blocks | **none** |
+| 27 | Terminal / service charge | **none** |
 
 ---
 
@@ -348,4 +362,6 @@ Sadie Marie: Your Consultation is in one hour. Please arrive a few minutes early
 | Admin reschedule | `app/api/admin/appointments/[id]/reschedule/route.ts` |
 | Webhook (cancel / reschedule / late fee) | `lib/legacy-handlers/webhook.js` |
 | Reminder delivery | `lib/legacy-handlers/remind.js` |
+| Google review SMS | `app/api/qstash/review-request/route.ts` |
+| Day-after thank-you | `lib/legacy-handlers/feedback.js` |
 | A2P notes | `docs/a2p-sms-compliance.md` |

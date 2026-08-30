@@ -24,6 +24,7 @@ import AdminSectionTabs from '../AdminSectionTabs';
 import type { Client } from '../types';
 import ClientDirectory from './ClientDirectory';
 import { parseOptionalClientEmail } from '@/lib/client-identity';
+import { reviewFlagsFromRow } from '@/lib/client-review-flags';
 
 // Same dynamic posture as the other admin pages: this route reads
 // Clerk cookies and queries Postgres on every render. Static
@@ -54,6 +55,10 @@ interface ClientRow {
   late_change_reschedule_count: number | string | null;
   no_show_waive_next: boolean | null;
   late_change_waive_next: boolean | null;
+  review_request_pending: boolean | null;
+  google_review_noted: boolean | null;
+  google_review_noted_at: Date | string | null;
+  review_request_last_sent_at: Date | string | null;
   last_booked_at: Date | string | null;
 }
 
@@ -106,6 +111,10 @@ export default async function ClientsPage() {
         COALESCE(c.late_change_reschedule_count, 0)::int AS late_change_reschedule_count,
         COALESCE(c.no_show_waive_next, TRUE) AS no_show_waive_next,
         COALESCE(c.late_change_waive_next, TRUE) AS late_change_waive_next,
+        COALESCE(c.review_request_pending, FALSE) AS review_request_pending,
+        COALESCE(c.google_review_noted, FALSE) AS google_review_noted,
+        c.google_review_noted_at,
+        c.review_request_last_sent_at,
         stats.last_booked_at
       FROM clients c
       LEFT JOIN LATERAL (
@@ -234,6 +243,7 @@ export default async function ClientsPage() {
           ? true
           : Boolean(r.late_change_waive_next),
       last_booked_at: serializeDate(r.last_booked_at),
+      ...reviewFlagsFromRow(r),
     }));
   } catch (err) {
     console.error('[admin/clients] clients query failed:', err);

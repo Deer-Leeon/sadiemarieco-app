@@ -49,6 +49,7 @@ import {
   Pin,
   Plus,
   Scissors,
+  Star,
   Trash2,
   Upload,
   User,
@@ -466,6 +467,8 @@ function DossierSection({
     'no_show' | 'late_change' | null
   >(null);
   const [grantingWaive, setGrantingWaive] = useState(false);
+  const [reviewFlagError, setReviewFlagError] = useState<string | null>(null);
+  const [savingReviewFlags, setSavingReviewFlags] = useState(false);
   const mutatedRef = useRef(false);
 
   const applyClientToCrmStats = useCallback((c: Client) => {
@@ -558,6 +561,39 @@ function DossierSection({
     [client.id, onClientUpdated, applyClientToCrmStats]
   );
 
+  const patchReviewFlags = useCallback(
+    async (body: {
+      review_request_pending?: boolean;
+      google_review_noted?: boolean;
+    }) => {
+      setReviewFlagError(null);
+      setSavingReviewFlags(true);
+      try {
+        const res = await fetch(`/api/admin/clients/${client.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          setReviewFlagError(
+            `Could not update (HTTP ${res.status})${text ? `: ${text.slice(0, 120)}` : ''}`
+          );
+          return;
+        }
+        const data = (await res.json()) as { client: Client };
+        if (data.client) onClientUpdated(data.client);
+      } catch (err) {
+        setReviewFlagError(
+          err instanceof Error ? err.message : 'Could not update review settings.'
+        );
+      } finally {
+        setSavingReviewFlags(false);
+      }
+    },
+    [client.id, onClientUpdated]
+  );
+
   const refreshClientRecord = useCallback(() => {
     fetch(`/api/admin/clients/${client.id}`)
       .then(async (res) => {
@@ -642,6 +678,18 @@ function DossierSection({
           setWaiveError(null);
         }}
         onConfirmGrant={(kind) => void grantFeeWaive(kind)}
+      />
+      <GoogleReviewSmsBar
+        pending={Boolean(client.review_request_pending)}
+        noted={Boolean(client.google_review_noted)}
+        error={reviewFlagError}
+        saving={savingReviewFlags}
+        onTogglePending={(next) =>
+          void patchReviewFlags({ review_request_pending: next })
+        }
+        onToggleNoted={(next) =>
+          void patchReviewFlags({ google_review_noted: next })
+        }
       />
 
       {(crmStats.no_show_flag || client.no_show_flag) && (
@@ -822,6 +870,75 @@ function DossierSection({
         </div>
       )}
     </>
+  );
+}
+
+function GoogleReviewSmsBar({
+  pending,
+  noted,
+  error,
+  saving,
+  onTogglePending,
+  onToggleNoted,
+}: {
+  pending: boolean;
+  noted: boolean;
+  error: string | null;
+  saving: boolean;
+  onTogglePending: (next: boolean) => void;
+  onToggleNoted: (next: boolean) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white px-3.5 py-3">
+      <div className="flex items-start gap-3">
+        <Star
+          className="mt-0.5 h-4 w-4 shrink-0 text-stone-500"
+          aria-hidden="true"
+        />
+        <div className="min-w-0 flex-1 space-y-3">
+          <p className="text-sm font-medium text-stone-900">Google reviews</p>
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+              checked={pending}
+              disabled={saving}
+              onChange={(e) => onTogglePending(e.target.checked)}
+            />
+            <span>
+              <span className="block text-sm text-stone-800">
+                Ask for a Google review after their next visit
+              </span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-stone-500">
+                Turns off automatically after the text is sent.
+              </span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+              checked={noted}
+              disabled={saving}
+              onChange={(e) => onToggleNoted(e.target.checked)}
+            />
+            <span>
+              <span className="block text-sm text-stone-800">
+                Noted a Google review
+              </span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-stone-500">
+                Manual only. Google doesn&apos;t tell us who left a review.
+              </span>
+            </span>
+          </label>
+          {error && (
+            <p className="text-xs text-rose-700" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

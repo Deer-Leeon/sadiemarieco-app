@@ -34,6 +34,10 @@ import {
 } from '@/lib/client-no-show';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
 import { notifyFeeFreePassSms } from '@/lib/booking-notifications';
+import {
+  patchClientReviewFlags,
+  reviewFlagsFromRow,
+} from '@/lib/client-review-flags';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -58,6 +62,10 @@ interface ClientRow {
   late_change_reschedule_count?: number | string | null;
   no_show_waive_next?: boolean | null;
   late_change_waive_next?: boolean | null;
+  review_request_pending?: boolean | null;
+  google_review_noted?: boolean | null;
+  google_review_noted_at?: Date | string | null;
+  review_request_last_sent_at?: Date | string | null;
 }
 
 function toNumber(value: number | string | null | undefined): number {
@@ -107,6 +115,7 @@ async function rowToClient(row: ClientRow): Promise<Client> {
       row.late_change_waive_next === undefined
         ? true
         : Boolean(row.late_change_waive_next),
+    ...reviewFlagsFromRow(row),
   };
 
   try {
@@ -114,7 +123,7 @@ async function rowToClient(row: ClientRow): Promise<Client> {
       email: row.email,
       phone: row.phone,
     });
-    return { ...base, ...stats };
+    return { ...base, ...stats, ...reviewFlagsFromRow(row) };
   } catch {
     return base;
   }
@@ -193,7 +202,11 @@ export async function GET(
         late_change_cancel_count,
         late_change_reschedule_count,
         no_show_waive_next,
-        late_change_waive_next
+        late_change_waive_next,
+        review_request_pending,
+        google_review_noted,
+        google_review_noted_at,
+        review_request_last_sent_at
       FROM clients
       WHERE id = ${id}::uuid
       LIMIT 1
@@ -257,6 +270,16 @@ export async function PATCH(
   const clearNoShowFlag = payload.no_show_flag === false;
   const grantNoShowWaive = payload.no_show_waive_next === true;
   const grantLateChangeWaive = payload.late_change_waive_next === true;
+  const patchReviewPending =
+    typeof payload.review_request_pending === 'boolean'
+      ? payload.review_request_pending
+      : undefined;
+  const patchGoogleReviewNoted =
+    typeof payload.google_review_noted === 'boolean'
+      ? payload.google_review_noted
+      : undefined;
+  const patchingReviewFlags =
+    patchReviewPending !== undefined || patchGoogleReviewNoted !== undefined;
 
   const changedFirst = nextFirst !== undefined;
   const changedLast = nextLast !== undefined;
@@ -322,7 +345,11 @@ export async function PATCH(
           late_change_cancel_count,
           late_change_reschedule_count,
           no_show_waive_next,
-          late_change_waive_next
+          late_change_waive_next,
+          review_request_pending,
+          google_review_noted,
+          google_review_noted_at,
+          review_request_last_sent_at
         FROM clients
         WHERE id = ${id}::uuid
         LIMIT 1
@@ -343,11 +370,73 @@ export async function PATCH(
     }
   }
 
-  if (!changedFirst && !changedLast && !changedEmail && !clearNoShowFlag) {
+  if (
+    patchingReviewFlags &&
+    !changedFirst &&
+    !changedLast &&
+    !changedEmail &&
+    !clearNoShowFlag &&
+    !grantNoShowWaive &&
+    !grantLateChangeWaive
+  ) {
+    try {
+      const result = await patchClientReviewFlags(id, {
+        reviewRequestPending: patchReviewPending,
+        googleReviewNoted: patchGoogleReviewNoted,
+      });
+      if (!result.found) {
+        return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      }
+      const { rows } = await sql<ClientRow>`
+        SELECT
+          id,
+          phone,
+          first_name,
+          last_name,
+          email,
+          created_at,
+          has_consented,
+          consent_form_url,
+          consent_technician_reviewed_at,
+          no_show_count,
+          no_show_flag,
+          no_show_admin_count,
+          no_show_auto_cancel_count,
+          no_show_auto_reschedule_count,
+          late_change_count,
+          late_change_cancel_count,
+          late_change_reschedule_count,
+          no_show_waive_next,
+          late_change_waive_next,
+          review_request_pending,
+          google_review_noted,
+          google_review_noted_at,
+          review_request_last_sent_at
+        FROM clients
+        WHERE id = ${id}::uuid
+        LIMIT 1
+      `;
+      if (rows.length === 0) {
+        return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      }
+      return NextResponse.json({ client: await rowToClient(rows[0]) });
+    } catch (err) {
+      console.error(
+        '[api/admin/clients/[id]] review flags PATCH failed:',
+        errorMessage(err)
+      );
+      return NextResponse.json(
+        { error: 'db_update_failed', message: errorMessage(err) },
+        { status: 500 }
+      );
+    }
+  }
+
+  if (!changedFirst && !changedLast && !changedEmail && !clearNoShowFlag && !patchingReviewFlags) {
     return NextResponse.json(
       {
         error: 'no_fields',
-        hint: 'pass at least one of first_name, last_name, email, no_show_flag: false, or no_show_waive_next / late_change_waive_next: true',
+        hint: 'pass at least one of first_name, last_name, email, no_show_flag: false, no_show_waive_next / late_change_waive_next: true, or review_request_pending / google_review_noted',
       },
       { status: 400 }
     );
@@ -394,7 +483,11 @@ export async function PATCH(
           late_change_cancel_count,
           late_change_reschedule_count,
           no_show_waive_next,
-          late_change_waive_next
+          late_change_waive_next,
+          review_request_pending,
+          google_review_noted,
+          google_review_noted_at,
+          review_request_last_sent_at
         FROM clients
         WHERE id = ${id}::uuid
         LIMIT 1
@@ -556,6 +649,16 @@ export async function PATCH(
       await clearClientNoShowFlag(id);
     }
 
+    if (patchingReviewFlags) {
+      const flagsResult = await patchClientReviewFlags(id, {
+        reviewRequestPending: patchReviewPending,
+        googleReviewNoted: patchGoogleReviewNoted,
+      });
+      if (!flagsResult.found) {
+        return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      }
+    }
+
     const { rows: refreshed } = await sql<ClientRow>`
       SELECT
         id,
@@ -576,7 +679,11 @@ export async function PATCH(
         late_change_cancel_count,
         late_change_reschedule_count,
         no_show_waive_next,
-        late_change_waive_next
+        late_change_waive_next,
+        review_request_pending,
+        google_review_noted,
+        google_review_noted_at,
+        review_request_last_sent_at
       FROM clients
       WHERE id = ${id}::uuid
       LIMIT 1

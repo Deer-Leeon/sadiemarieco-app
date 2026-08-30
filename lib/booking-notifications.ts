@@ -41,6 +41,7 @@ const impl = require('./booking-notifications.js') as {
     serviceName: string | null;
     smsOptIn: boolean | null | undefined;
     scheduleSmsReminders?: boolean;
+    endTime?: string | null;
   }) => Promise<Record<string, unknown>>;
   notifyLateCancelFeeSms: (args: {
     clientPhone: string | null;
@@ -78,6 +79,28 @@ const impl = require('./booking-notifications.js') as {
     serviceName?: string | null;
     bookingUid?: string | null;
   }) => Promise<Record<string, unknown>>;
+  notifyReviewRequestSms: (args: {
+    clientPhone: string | null;
+    smsOptIn: boolean | null | undefined;
+    firstName?: string | null;
+    serviceName?: string | null;
+    bookingUid?: string | null;
+  }) => Promise<Record<string, unknown>>;
+  scheduleReviewRequestSms: (
+    bookingUid: string,
+    opts?: {
+      bookingTime?: string | null;
+      endTime?: string | null;
+      force?: boolean;
+    }
+  ) => Promise<{ scheduled: boolean; reason?: string; messageId?: unknown }>;
+  scheduleReviewRequestForClient: (
+    clientId: string
+  ) => Promise<{ scheduled: boolean; reason?: string; messageId?: unknown }>;
+  fulfillReviewRequestForBooking: (args: {
+    bookingUid: string;
+    expectedBookingTime?: string | null;
+  }) => Promise<Record<string, unknown>>;
   notifyFeeFreePassSms: (args: {
     kind:
       | 'no_show_free_pass_used'
@@ -106,4 +129,10 @@ export const notifyClientCancelLateNoFeeSms =
   impl.notifyClientCancelLateNoFeeSms;
 export const notifyCheckoutAbandonedSms = impl.notifyCheckoutAbandonedSms;
 export const notifyFeedbackDayAfterSms = impl.notifyFeedbackDayAfterSms;
+export const notifyReviewRequestSms = impl.notifyReviewRequestSms;
+export const scheduleReviewRequestSms = impl.scheduleReviewRequestSms;
+export const scheduleReviewRequestForClient =
+  impl.scheduleReviewRequestForClient;
+export const fulfillReviewRequestForBooking =
+  impl.fulfillReviewRequestForBooking;
 export const notifyFeeFreePassSms = impl.notifyFeeFreePassSms;

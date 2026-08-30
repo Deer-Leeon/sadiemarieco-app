@@ -13,6 +13,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import { EMPTY_CLIENT_CRM_STATS, type Client } from '@/app/admin/types';
+import { reviewFlagsFromRow } from '@/lib/client-review-flags';
 import { asConsentFormData } from '@/app/consent/[clientId]/consent-form-config';
 import { parseOptionalClientEmail } from '@/lib/client-identity';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
@@ -49,6 +50,10 @@ interface ClientRow {
   late_change_reschedule_count?: number | string | null;
   no_show_waive_next?: boolean | null;
   late_change_waive_next?: boolean | null;
+  review_request_pending?: boolean | null;
+  google_review_noted?: boolean | null;
+  google_review_noted_at?: Date | string | null;
+  review_request_last_sent_at?: Date | string | null;
 }
 
 interface IntakeRow {
@@ -117,6 +122,7 @@ async function rowToClient(row: ClientRow): Promise<Client> {
       row.late_change_waive_next === undefined
         ? true
         : Boolean(row.late_change_waive_next),
+    ...reviewFlagsFromRow(row),
   };
 
   try {
@@ -124,7 +130,7 @@ async function rowToClient(row: ClientRow): Promise<Client> {
       email: row.email,
       phone: row.phone,
     });
-    return { ...base, ...stats };
+    return { ...base, ...stats, ...reviewFlagsFromRow(row) };
   } catch (err) {
     console.warn(
       '[api/admin/clients/consent-review] fetchClientCrmStats failed',
@@ -155,7 +161,11 @@ async function loadClient(id: string): Promise<ClientRow | null> {
       late_change_cancel_count,
       late_change_reschedule_count,
       no_show_waive_next,
-      late_change_waive_next
+      late_change_waive_next,
+      review_request_pending,
+      google_review_noted,
+      google_review_noted_at,
+      review_request_last_sent_at
     FROM clients
     WHERE id = ${id}::uuid
     LIMIT 1
