@@ -208,6 +208,11 @@ Internal form at **`/consent/[clientId]`** (public). Answers live in `client_int
 | Name              | Value                                              |
 | ----------------- | -------------------------------------------------- |
 | `PUBLIC_BASE_URL` | Override for the prod URL used in SMS links / QStash callback URLs |
+| `APNS_KEY_ID`     | Apple Push auth key id (admin iOS booking alerts) |
+| `APNS_TEAM_ID`    | Apple Developer team id (`F54JWSP8S3`) |
+| `APNS_P8`         | Contents of the APNs `.p8` key |
+
+See [`docs/admin-ios-push.md`](docs/admin-ios-push.md) for Apple + Vercel setup.
 
 ## Local development
 

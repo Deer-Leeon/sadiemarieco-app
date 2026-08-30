@@ -243,6 +243,9 @@ async function checkEnvironment(): Promise<HealthCheckResult[]> {
     ['GOOGLE_PLACES_API_KEY', 'Google Places API key'],
     ['NEXT_PUBLIC_GOOGLE_PLACE_ID', 'Google Place ID'],
     ['CAL_USERNAME', 'Cal.com username slug'],
+    ['APNS_KEY_ID', 'Apple Push key id'],
+    ['APNS_TEAM_ID', 'Apple Developer team id'],
+    ['APNS_P8', 'Apple Push .p8 private key'],
   ] as const;
 
   const missingOptional = optional.filter(([k]) => !envPresent(k)).map(([, l]) => l);

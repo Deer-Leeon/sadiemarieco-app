@@ -241,7 +241,11 @@ messages like "wip" or "updates".
 ## Required environment variables
 
 See `.env.local` for the full list (Clerk, Cal.com, Twilio, Stripe, Postgres,
-Upstash QStash, Vercel Blob, Google Places/Reviews, cron secret). Pull fresh
+Upstash QStash, Vercel Blob, Google Places/Reviews, cron secret, APNs). Pull fresh
 values with `vercel env pull .env.local` after adding new ones in the Vercel
 dashboard — missing vars typically surface as runtime 500s, not build
 failures, since most routes are `force-dynamic`.
+
+Admin iOS booking alerts need `APNS_KEY_ID`, `APNS_TEAM_ID` (`F54JWSP8S3`), and
+`APNS_P8` on Vercel Production + Preview. Apple setup and bundle IDs:
+[`docs/admin-ios-push.md`](docs/admin-ios-push.md).
