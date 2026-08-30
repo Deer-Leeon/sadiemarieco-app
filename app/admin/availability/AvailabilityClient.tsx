@@ -270,9 +270,7 @@ export default function AvailabilityClient({ initial }: Props) {
   const [archivedOverrides, setArchivedOverrides] = useState<OverrideRow[]>(
     () => initialPartition.archived
   );
-  const [archiveOpen, setArchiveOpen] = useState(
-    () => initialPartition.archived.length > 0
-  );
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // `savedAt` is the timestamp of the last successful save; the UI
@@ -386,7 +384,6 @@ export default function AvailabilityClient({ initial }: Props) {
       );
       setOverrides(partitioned.active);
       setArchivedOverrides(partitioned.archived);
-      if (partitioned.archived.length > 0) setArchiveOpen(true);
 
       const res = await fetch('/api/admin/availability', {
         method: 'PATCH',
