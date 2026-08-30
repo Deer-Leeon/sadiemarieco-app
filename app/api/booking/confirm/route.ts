@@ -57,7 +57,7 @@ import {
 } from '@/lib/appointment-settlement';
 import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
 import { notifyBookingConfirmed } from '@/lib/booking-notifications';
-import { stripeCardCheckRejection } from '@/lib/stripe-card-checks';
+import { isWalletCard, stripeCardCheckRejection } from '@/lib/stripe-card-checks';
 import { acceptOnCal } from '@/lib/cal-accept';
 import { CAL_BOOKINGS_API_VERSION } from '@/lib/cal-proxy';
 import { isValidEmail } from '@/lib/client-identity';
@@ -602,9 +602,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // pay-now the PaymentIntent already SUCCEEDED — the issuer approved the
     // charge — so rejecting here would keep captured money while showing the
     // client a verification failure.
+    // Apple Pay / other wallets: skip CVC+ZIP AVS. Tokenized wallet PANs
+    // routinely report address_postal_code_check=fail even when Wallet ZIP
+    // is right; the client cannot type a ZIP/CVC in the sheet.
+    const wallet = isWalletCard(pmFull);
+    if (wallet && !paymentIntentId) {
+      console.info('[api/booking/confirm] skipping card AVS for wallet', {
+        wallet: pmFull.card?.wallet?.type ?? null,
+        postal: pmFull.card?.checks?.address_postal_code_check ?? null,
+        cvc: pmFull.card?.checks?.cvc_check ?? null,
+      });
+    }
     const checkReject = paymentIntentId
       ? null
-      : stripeCardCheckRejection(pmFull.card?.checks ?? null);
+      : stripeCardCheckRejection(pmFull.card?.checks ?? null, {
+          skipAvs: wallet,
+        });
     if (checkReject) {
       try {
         if (pmFull.customer) {
