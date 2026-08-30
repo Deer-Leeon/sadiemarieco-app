@@ -23,6 +23,7 @@ import { sql } from '@vercel/postgres';
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Client } from '@/app/admin/types';
 import { parseOptionalClientEmail } from '@/lib/client-identity';
+import { reviewFlagsFromRow } from '@/lib/client-review-flags';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,6 +53,10 @@ interface ClientRow {
   late_change_reschedule_count: number | string | null;
   no_show_waive_next: boolean | null;
   late_change_waive_next: boolean | null;
+  review_request_pending: boolean | null;
+  google_review_noted: boolean | null;
+  google_review_noted_at: Date | string | null;
+  review_request_last_sent_at: Date | string | null;
   last_booked_at: Date | string | null;
 }
 
@@ -104,6 +109,7 @@ function rowToClient(row: ClientRow): Client {
         ? true
         : Boolean(row.late_change_waive_next),
     last_booked_at: serializeDate(row.last_booked_at),
+    ...reviewFlagsFromRow(row),
   };
 }
 
@@ -146,6 +152,10 @@ export async function GET(): Promise<NextResponse> {
         COALESCE(c.late_change_reschedule_count, 0)::int AS late_change_reschedule_count,
         COALESCE(c.no_show_waive_next, TRUE) AS no_show_waive_next,
         COALESCE(c.late_change_waive_next, TRUE) AS late_change_waive_next,
+        COALESCE(c.review_request_pending, FALSE) AS review_request_pending,
+        COALESCE(c.google_review_noted, FALSE) AS google_review_noted,
+        c.google_review_noted_at,
+        c.review_request_last_sent_at,
         stats.last_booked_at
       FROM clients c
       LEFT JOIN LATERAL (

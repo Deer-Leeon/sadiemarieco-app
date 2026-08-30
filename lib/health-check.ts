@@ -1113,8 +1113,8 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
         name: 'QStash callback URLs',
         category: 'Scheduled jobs (QStash)',
         status: 'healthy',
-        message: 'Reminder, feedback, reminder-email, and hold-release endpoints',
-        detail: `${publicBase}/api/remind · ${publicBase}/api/feedback · ${publicBase}/api/remind-email · ${publicBase}/api/qstash/release-hold · ${publicBase}/api/cron/ensure-reminders`,
+        message: 'Reminder, feedback, review-request, reminder-email, and hold-release endpoints',
+        detail: `${publicBase}/api/remind · ${publicBase}/api/feedback · ${publicBase}/api/remind-email · ${publicBase}/api/qstash/release-hold · ${publicBase}/api/qstash/review-request · ${publicBase}/api/cron/ensure-reminders`,
       })
     );
   }

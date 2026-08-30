@@ -1,10 +1,11 @@
 /**
  * GET /api/cron/ensure-reminders
  *
- * Backfill QStash 48h/24h + 1h reminder (and feedback) jobs for every
- * upcoming confirmed appointment that should receive SMS. Catches admin
- * bookings whose complete/webhook notify never published, QStash publish
- * failures, and confirm retries that skipped scheduling.
+ * Backfill QStash 48h/24h + 1h reminder, day-after feedback, and
+ * end+30m Google review-request jobs for confirmed appointments that
+ * should receive SMS. Catches admin bookings whose complete/webhook
+ * notify never published, QStash publish failures, and confirm retries
+ * that skipped scheduling.
  *
  * Auth: CRON_SECRET via Bearer / X-Cron-Secret / ?cron_secret=
  * QStash every 15 minutes; Vercel Cron is the same cadence as a backstop.
