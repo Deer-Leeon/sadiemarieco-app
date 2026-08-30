@@ -4,6 +4,7 @@
 //   0 0 * * *  America/Denver  → /api/cron/cleanup-abandoned  (midnight MT)
 //   0 * * * *  America/Denver  → /api/cron/health-alert       (hourly, MT)
 //   0 6 * * *  America/Denver  → /api/cron/sync-reviews       (6am MT)
+//   */15 * * * *                 → /api/cron/ensure-reminders  (SMS reminder backfill)
 //
 // Existing schedules for the same destination are replaced, so re-running
 // is safe. Vercel Cron (vercel.json) keeps daily/hourly backstops in UTC
@@ -37,6 +38,10 @@ const wanted = [
   {
     destination: `${BASE}/api/cron/sync-reviews`,
     cron: 'CRON_TZ=America/Denver 0 6 * * *',
+  },
+  {
+    destination: `${BASE}/api/cron/ensure-reminders`,
+    cron: '*/15 * * * *',
   },
 ];
 

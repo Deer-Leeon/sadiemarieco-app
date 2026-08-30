@@ -16,6 +16,12 @@ const impl = require('./booking-notifications.js') as {
     skipIfAlreadySent?: boolean;
     smsOptIn?: boolean | null;
   }) => Promise<Record<string, unknown>>;
+  ensureUpcomingAppointmentSmsReminders: () => Promise<{
+    scanned: number;
+    scheduled: number;
+    failed: number;
+    failures: Array<{ bookingUid: string; error: string }>;
+  }>;
   rescheduleAppointmentReminderEmails: (
     bookingUid: string,
   ) => Promise<Record<string, unknown>>;
@@ -87,6 +93,8 @@ const impl = require('./booking-notifications.js') as {
 };
 
 export const notifyBookingConfirmed = impl.notifyBookingConfirmed;
+export const ensureUpcomingAppointmentSmsReminders =
+  impl.ensureUpcomingAppointmentSmsReminders;
 export const rescheduleAppointmentReminderEmails =
   impl.rescheduleAppointmentReminderEmails;
 export const notifyAdminAppointmentStatusSms =

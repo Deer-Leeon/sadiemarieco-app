@@ -41,7 +41,7 @@ Sadie Marie: Your 2 Week Fill is confirmed for Saturday, July 25 at 10:00am. Man
 | **Who** | Admin |
 | **Status** | `confirmed` |
 | **SMS** | Yes — same confirmation as checkout |
-| **Notes** | No Stripe vault. `sms_opt_in` forced true. |
+| **Notes** | No Stripe vault. `sms_opt_in` forced true. Confirmation + QStash 48h/24h + 1h reminders are queued from both `/api/admin/manual-booking/complete` and the Cal webhook (whichever lands first; the other is idempotent). A 15-minute cron backfills any confirmed booking still missing jobs. |
 
 ```
 Sadie Marie: Your 2 Week Fill is confirmed for Saturday, July 25 at 10:00am. Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
