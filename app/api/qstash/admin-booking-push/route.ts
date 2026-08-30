@@ -7,7 +7,7 @@
 import { Receiver } from '@upstash/qstash';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { sendAdminBookingPushToTokens } from '@/lib/admin-booking-push';
+import { loadAdminPushDevices, sendAdminBookingPushToTokens } from '@/lib/admin-booking-push';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,6 +62,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       bundle_id?: string;
       environment?: string;
     }>;
+    reloadDevices?: boolean;
     appointmentId?: string | null;
     bookingUid?: string;
     clientName?: string | null;
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const bookingUid =
     typeof parsed.bookingUid === 'string' ? parsed.bookingUid.trim() : '';
-  const tokens = Array.isArray(parsed.tokens)
+  let tokens = Array.isArray(parsed.tokens)
     ? parsed.tokens.filter(
         (row): row is {
           device_token: string;
@@ -88,6 +89,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           (row.environment === 'development' || row.environment === 'production')
       )
     : [];
+
+  if (parsed.reloadDevices === true) {
+    tokens = await loadAdminPushDevices();
+  }
 
   if (!bookingUid || tokens.length === 0) {
     return NextResponse.json({ ok: true, skipped: 'empty' });

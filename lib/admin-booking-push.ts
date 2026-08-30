@@ -25,8 +25,16 @@ const impl = require('./admin-booking-push.js') as {
     serviceName?: string | null;
     bookingTime?: string | Date | null;
   }) => Promise<{ ok: boolean; sent: number; retryable?: unknown[] }>;
+  loadDevices: () => Promise<
+    Array<{
+      device_token: string;
+      bundle_id: string;
+      environment: string;
+    }>
+  >;
 };
 
 export const ensureAdminPushDevicesTable = impl.ensureAdminPushDevicesTable;
 export const notifyAdminBookingConfirmed = impl.notifyAdminBookingConfirmed;
 export const sendAdminBookingPushToTokens = impl.sendAdminBookingPushToTokens;
+export const loadAdminPushDevices = impl.loadDevices;
