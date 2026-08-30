@@ -468,8 +468,10 @@ function DossierSection({
   >(null);
   const [grantingWaive, setGrantingWaive] = useState(false);
   const [reviewFlagError, setReviewFlagError] = useState<string | null>(null);
-  const [savingReviewFlags, setSavingReviewFlags] = useState(false);
   const mutatedRef = useRef(false);
+  const reviewPatchSeq = useRef(0);
+  const clientRef = useRef(client);
+  clientRef.current = client;
 
   const applyClientToCrmStats = useCallback((c: Client) => {
     setCrmStats((prev) => ({
@@ -564,34 +566,57 @@ function DossierSection({
   const patchReviewFlags = useCallback(
     async (body: {
       review_request_pending?: boolean;
-      google_review_noted?: boolean;
+      google_review_stars?: number | null;
     }) => {
       setReviewFlagError(null);
-      setSavingReviewFlags(true);
+      const previous = clientRef.current;
+      const starsInPatch = Object.hasOwn(body, 'google_review_stars');
+      const nextStars = starsInPatch
+        ? (body.google_review_stars ?? null)
+        : previous.google_review_stars;
+      const recordingReview = typeof nextStars === 'number' && starsInPatch;
+      const optimistic: Client = {
+        ...previous,
+        review_request_pending: recordingReview
+          ? false
+          : (body.review_request_pending ?? previous.review_request_pending),
+        google_review_stars: nextStars,
+        google_review_noted: nextStars !== null,
+      };
+      clientRef.current = optimistic;
+      onClientUpdated(optimistic);
+      const seq = ++reviewPatchSeq.current;
       try {
-        const res = await fetch(`/api/admin/clients/${client.id}`, {
+        const res = await fetch(`/api/admin/clients/${previous.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
+        if (seq !== reviewPatchSeq.current) return;
         if (!res.ok) {
           const text = await res.text();
+          clientRef.current = previous;
+          onClientUpdated(previous);
           setReviewFlagError(
             `Could not update (HTTP ${res.status})${text ? `: ${text.slice(0, 120)}` : ''}`
           );
           return;
         }
         const data = (await res.json()) as { client: Client };
-        if (data.client) onClientUpdated(data.client);
+        if (data.client) {
+          clientRef.current = data.client;
+          onClientUpdated(data.client);
+        }
       } catch (err) {
+        if (seq !== reviewPatchSeq.current) return;
+        clientRef.current = previous;
+        onClientUpdated(previous);
         setReviewFlagError(
           err instanceof Error ? err.message : 'Could not update review settings.'
         );
-      } finally {
-        setSavingReviewFlags(false);
       }
     },
-    [client.id, onClientUpdated]
+    [onClientUpdated]
   );
 
   const refreshClientRecord = useCallback(() => {
@@ -681,14 +706,13 @@ function DossierSection({
       />
       <GoogleReviewSmsBar
         pending={Boolean(client.review_request_pending)}
-        noted={Boolean(client.google_review_noted)}
+        stars={client.google_review_stars ?? null}
         error={reviewFlagError}
-        saving={savingReviewFlags}
         onTogglePending={(next) =>
           void patchReviewFlags({ review_request_pending: next })
         }
-        onToggleNoted={(next) =>
-          void patchReviewFlags({ google_review_noted: next })
+        onChangeStars={(next) =>
+          void patchReviewFlags({ google_review_stars: next })
         }
       />
 
@@ -875,20 +899,25 @@ function DossierSection({
 
 function GoogleReviewSmsBar({
   pending,
-  noted,
+  stars,
   error,
-  saving,
   onTogglePending,
-  onToggleNoted,
+  onChangeStars,
 }: {
   pending: boolean;
-  noted: boolean;
+  stars: number | null;
   error: string | null;
-  saving: boolean;
   onTogglePending: (next: boolean) => void;
-  onToggleNoted: (next: boolean) => void;
+  onChangeStars: (next: number | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [draftPending, setDraftPending] = useState(pending);
+  const [draftStars, setDraftStars] = useState<number | null>(stars);
+
+  useEffect(() => {
+    setDraftPending(pending);
+    setDraftStars(stars);
+  }, [pending, stars]);
 
   useEffect(() => {
     if (!open) return;
@@ -906,35 +935,28 @@ function GoogleReviewSmsBar({
         onClick={() => setOpen(true)}
         className="w-full rounded-lg border border-stone-200 bg-white px-3.5 py-3 text-left transition-colors hover:bg-stone-50/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60"
       >
-        <div className="flex items-start gap-3">
-          <Star
-            className="mt-0.5 h-4 w-4 shrink-0 text-stone-500"
-            aria-hidden="true"
-          />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2.5">
               <p className="text-sm font-medium text-stone-900">Google reviews</p>
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-[0.12em] text-stone-500">
-                Edit
-                <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-              </span>
+              <GoogleReviewStars value={draftStars} size="sm" />
             </div>
-            <div className="mt-3 space-y-2">
-              <GoogleReviewStatusRow
-                label="Ask after next visit"
-                on={pending}
-              />
-              <GoogleReviewStatusRow
-                label="Noted a Google review"
-                on={noted}
-              />
-            </div>
-            {error && (
-              <p className="mt-2 text-xs text-rose-700" role="alert">
-                {error}
-              </p>
-            )}
+            <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium uppercase tracking-[0.12em] text-stone-500">
+              Edit
+              <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
           </div>
+          <div className="mt-3">
+            <GoogleReviewStatusRow
+              label="Ask after next visit"
+              on={draftPending}
+            />
+          </div>
+          {error && (
+            <p className="mt-2 text-xs text-rose-700" role="alert">
+              {error}
+            </p>
+          )}
         </div>
       </button>
 
@@ -975,22 +997,38 @@ function GoogleReviewSmsBar({
 
             <div className="space-y-4 px-5 py-4">
               <p className="text-xs leading-relaxed text-stone-500">
-                Changes save as soon as you flip a switch.
+                Changes save as soon as you tap.
               </p>
               <GoogleReviewSwitchRow
                 title="Ask for a Google review after their next visit"
                 helper="Turns off automatically after the text is sent."
-                on={pending}
-                disabled={saving}
-                onToggle={onTogglePending}
+                on={draftPending}
+                onToggle={(next) => {
+                  setDraftPending(next);
+                  onTogglePending(next);
+                }}
               />
-              <GoogleReviewSwitchRow
-                title="Noted a Google review"
-                helper="Manual only. Google doesn’t tell us who left a review."
-                on={noted}
-                disabled={saving}
-                onToggle={onToggleNoted}
-              />
+              <div className="rounded-xl border border-stone-200 bg-white px-3.5 py-3">
+                <p className="text-sm font-medium text-stone-900">
+                  Google rating
+                </p>
+                <p className="mt-0.5 text-xs leading-relaxed text-stone-500">
+                  Tap how many stars they left. Tap the same star again to
+                  clear.
+                </p>
+                <div className="mt-3">
+                  <GoogleReviewStars
+                    value={draftStars}
+                    size="lg"
+                    interactive
+                    onChange={(next) => {
+                      setDraftStars(next);
+                      if (next !== null) setDraftPending(false);
+                      onChangeStars(next);
+                    }}
+                  />
+                </div>
+              </div>
               {error && (
                 <p className="text-xs text-rose-700" role="alert">
                   {error}
@@ -1011,6 +1049,68 @@ function GoogleReviewSmsBar({
         </div>
       )}
     </>
+  );
+}
+
+function GoogleReviewStars({
+  value,
+  size = 'sm',
+  interactive = false,
+  onChange,
+}: {
+  value: number | null;
+  size?: 'sm' | 'lg';
+  interactive?: boolean;
+  onChange?: (next: number | null) => void;
+}) {
+  const count = value ?? 0;
+  const dim = size === 'lg' ? 'h-8 w-8' : 'h-4 w-4';
+  const label =
+    count > 0
+      ? `${count} of 5 Google stars`
+      : 'No Google rating recorded';
+
+  return (
+    <div
+      className="inline-flex shrink-0 items-center gap-0.5"
+      role={interactive ? 'radiogroup' : 'img'}
+      aria-label={label}
+    >
+      {([1, 2, 3, 4, 5] as const).map((n) => {
+        const filled = n <= count;
+        const star = (
+          <Star
+            className={`${dim} ${
+              filled
+                ? 'fill-[#F4B400] text-[#F4B400]'
+                : 'fill-transparent text-stone-300'
+            }`}
+            strokeWidth={1.5}
+            aria-hidden="true"
+          />
+        );
+        if (!interactive) {
+          return (
+            <span key={n} className="inline-flex">
+              {star}
+            </span>
+          );
+        }
+        return (
+          <button
+            key={n}
+            type="button"
+            role="radio"
+            aria-checked={count === n}
+            aria-label={`${n} star${n === 1 ? '' : 's'}`}
+            onClick={() => onChange?.(count === n ? null : n)}
+            className="rounded-sm p-0.5 transition-transform duration-100 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60"
+          >
+            {star}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1041,13 +1141,11 @@ function GoogleReviewSwitchRow({
   title,
   helper,
   on,
-  disabled,
   onToggle,
 }: {
   title: string;
   helper: string;
   on: boolean;
-  disabled: boolean;
   onToggle: (next: boolean) => void;
 }) {
   return (
@@ -1061,16 +1159,15 @@ function GoogleReviewSwitchRow({
         role="switch"
         aria-checked={on}
         aria-label={title}
-        disabled={disabled}
         onClick={() => onToggle(!on)}
-        className={`relative mt-0.5 h-7 w-12 shrink-0 rounded-full border transition-colors disabled:opacity-60 ${
+        className={`relative mt-0.5 h-7 w-12 shrink-0 rounded-full border transition-colors duration-150 ${
           on
             ? 'border-stone-900 bg-stone-900'
             : 'border-stone-400 bg-stone-300'
         }`}
       >
         <span
-          className={`pointer-events-none absolute top-[3px] left-[3px] block h-[22px] w-[22px] rounded-full bg-white shadow-sm transition-transform ${
+          className={`pointer-events-none absolute top-[3px] left-[3px] block h-[22px] w-[22px] rounded-full bg-white shadow-sm transition-transform duration-150 ease-out ${
             on ? 'translate-x-5' : 'translate-x-0'
           }`}
         />

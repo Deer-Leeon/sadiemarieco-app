@@ -11,20 +11,55 @@ export function serializeOptionalIso(
   return d.toISOString();
 }
 
+export function parseStoredGoogleReviewStars(
+  value: number | string | null | undefined
+): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 5) return null;
+  return n;
+}
+
+export type GoogleReviewStarsPatchParse =
+  | { present: false }
+  | { present: true; invalid: false; value: number | null }
+  | { present: true; invalid: true };
+
+/**
+ * PATCH body for `google_review_stars`.
+ * `undefined` = field omitted; `null` = clear; 1–5 = set.
+ */
+export function parseGoogleReviewStarsPatch(
+  raw: unknown
+): GoogleReviewStarsPatchParse {
+  if (raw === undefined) return { present: false };
+  if (raw === null) return { present: true, invalid: false, value: null };
+  const n =
+    typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
+  if (!Number.isInteger(n) || n < 1 || n > 5) {
+    return { present: true, invalid: true };
+  }
+  return { present: true, invalid: false, value: n };
+}
+
 export function reviewFlagsFromRow(row: {
   review_request_pending?: boolean | null;
   google_review_noted?: boolean | null;
+  google_review_stars?: number | string | null;
   google_review_noted_at?: Date | string | null;
   review_request_last_sent_at?: Date | string | null;
 }): {
   review_request_pending: boolean;
   google_review_noted: boolean;
+  google_review_stars: number | null;
   google_review_noted_at: string | null;
   review_request_last_sent_at: string | null;
 } {
+  const stars = parseStoredGoogleReviewStars(row.google_review_stars);
   return {
     review_request_pending: Boolean(row.review_request_pending),
-    google_review_noted: Boolean(row.google_review_noted),
+    google_review_noted: stars !== null || Boolean(row.google_review_noted),
+    google_review_stars: stars,
     google_review_noted_at: serializeOptionalIso(row.google_review_noted_at),
     review_request_last_sent_at: serializeOptionalIso(
       row.review_request_last_sent_at
@@ -33,8 +68,9 @@ export function reviewFlagsFromRow(row: {
 }
 
 /**
- * Apply profile review-request / noted-review toggles.
- * Checking “noted a Google review” always clears the ask-after-visit box.
+ * Apply profile review-request / Google-star updates.
+ * Setting any star count (1–5) records a review and clears the
+ * ask-after-visit box. Clearing stars does not turn the ask box back on.
  * Turning the ask box on queues a QStash job for an upcoming confirmed visit.
  */
 export async function patchClientReviewFlags(
@@ -42,21 +78,31 @@ export async function patchClientReviewFlags(
   patch: {
     reviewRequestPending?: boolean;
     googleReviewNoted?: boolean;
+    googleReviewStars?: number | null;
   }
 ): Promise<{ found: boolean; queuedReviewSms: boolean }> {
-  const setNoted = patch.googleReviewNoted;
   const setPending = patch.reviewRequestPending;
+  const starsInPatch = Object.hasOwn(patch, 'googleReviewStars');
+  let nextStars: number | null | undefined;
+  if (starsInPatch) {
+    nextStars = patch.googleReviewStars ?? null;
+  } else if (patch.googleReviewNoted === true) {
+    nextStars = 5;
+  } else if (patch.googleReviewNoted === false) {
+    nextStars = null;
+  }
 
-  if (setNoted === undefined && setPending === undefined) {
+  if (nextStars === undefined && setPending === undefined) {
     return { found: true, queuedReviewSms: false };
   }
 
   let found = false;
 
-  if (setNoted === true) {
+  if (nextStars !== undefined && nextStars !== null) {
     const { rows } = await sql`
       UPDATE clients
       SET
+        google_review_stars = ${nextStars},
         google_review_noted = TRUE,
         google_review_noted_at = COALESCE(google_review_noted_at, NOW()),
         review_request_pending = FALSE
@@ -64,10 +110,11 @@ export async function patchClientReviewFlags(
       RETURNING id
     `;
     found = rows.length > 0;
-  } else if (setNoted === false) {
+  } else if (nextStars === null) {
     const { rows } = await sql`
       UPDATE clients
       SET
+        google_review_stars = NULL,
         google_review_noted = FALSE,
         google_review_noted_at = NULL
       WHERE id = ${clientId}::uuid
@@ -76,7 +123,7 @@ export async function patchClientReviewFlags(
     found = rows.length > 0;
   }
 
-  if (setPending === true && setNoted !== true) {
+  if (setPending === true && typeof nextStars !== 'number') {
     const { rows } = await sql`
       UPDATE clients
       SET review_request_pending = TRUE
@@ -98,7 +145,7 @@ export async function patchClientReviewFlags(
     return { found, queuedReviewSms: false };
   }
 
-  if (setPending === false && setNoted !== true) {
+  if (setPending === false && typeof nextStars !== 'number') {
     const { rows } = await sql`
       UPDATE clients
       SET review_request_pending = FALSE

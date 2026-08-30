@@ -376,8 +376,10 @@ export interface Client extends ClientCrmStats {
    * completed confirmed visit, then clear this flag.
    */
   review_request_pending: boolean;
-  /** Manual admin mark that this client already left a Google review. */
+  /** True when `google_review_stars` is 1–5 (admin recorded a Google rating). */
   google_review_noted: boolean;
+  /** Admin-entered Google star count (1–5). Null = not recorded. */
+  google_review_stars: number | null;
   google_review_noted_at: string | null;
   review_request_last_sent_at: string | null;
 }
@@ -408,6 +410,7 @@ export const EMPTY_CLIENT_CRM_STATS: ClientCrmStats = {
 export const EMPTY_CLIENT_REVIEW_FLAGS = {
   review_request_pending: false,
   google_review_noted: false,
+  google_review_stars: null as number | null,
   google_review_noted_at: null as string | null,
   review_request_last_sent_at: null as string | null,
 };

@@ -52,6 +52,7 @@ interface ClientRow {
   late_change_waive_next?: boolean | null;
   review_request_pending?: boolean | null;
   google_review_noted?: boolean | null;
+  google_review_stars?: number | string | null;
   google_review_noted_at?: Date | string | null;
   review_request_last_sent_at?: Date | string | null;
 }
@@ -164,6 +165,7 @@ async function loadClient(id: string): Promise<ClientRow | null> {
       late_change_waive_next,
       review_request_pending,
       google_review_noted,
+      google_review_stars,
       google_review_noted_at,
       review_request_last_sent_at
     FROM clients
