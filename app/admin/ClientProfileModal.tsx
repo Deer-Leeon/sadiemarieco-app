@@ -888,56 +888,193 @@ function GoogleReviewSmsBar({
   onTogglePending: (next: boolean) => void;
   onToggleNoted: (next: boolean) => void;
 }) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
   return (
-    <div className="rounded-lg border border-stone-200 bg-white px-3.5 py-3">
-      <div className="flex items-start gap-3">
-        <Star
-          className="mt-0.5 h-4 w-4 shrink-0 text-stone-500"
-          aria-hidden="true"
-        />
-        <div className="min-w-0 flex-1 space-y-3">
-          <p className="text-sm font-medium text-stone-900">Google reviews</p>
-          <label className="flex cursor-pointer items-start gap-2.5">
-            <input
-              type="checkbox"
-              className="mt-0.5 h-4 w-4 shrink-0 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
-              checked={pending}
-              disabled={saving}
-              onChange={(e) => onTogglePending(e.target.checked)}
-            />
-            <span>
-              <span className="block text-sm text-stone-800">
-                Ask for a Google review after their next visit
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full rounded-lg border border-stone-200 bg-white px-3.5 py-3 text-left transition-colors hover:bg-stone-50/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60"
+      >
+        <div className="flex items-start gap-3">
+          <Star
+            className="mt-0.5 h-4 w-4 shrink-0 text-stone-500"
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium text-stone-900">Google reviews</p>
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-[0.12em] text-stone-500">
+                Edit
+                <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
               </span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-stone-500">
-                Turns off automatically after the text is sent.
-              </span>
-            </span>
-          </label>
-          <label className="flex cursor-pointer items-start gap-2.5">
-            <input
-              type="checkbox"
-              className="mt-0.5 h-4 w-4 shrink-0 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
-              checked={noted}
-              disabled={saving}
-              onChange={(e) => onToggleNoted(e.target.checked)}
-            />
-            <span>
-              <span className="block text-sm text-stone-800">
-                Noted a Google review
-              </span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-stone-500">
-                Manual only. Google doesn&apos;t tell us who left a review.
-              </span>
-            </span>
-          </label>
-          {error && (
-            <p className="text-xs text-rose-700" role="alert">
-              {error}
-            </p>
-          )}
+            </div>
+            <div className="mt-3 space-y-2">
+              <GoogleReviewStatusRow
+                label="Ask after next visit"
+                on={pending}
+              />
+              <GoogleReviewStatusRow
+                label="Noted a Google review"
+                on={noted}
+              />
+            </div>
+            {error && (
+              <p className="mt-2 text-xs text-rose-700" role="alert">
+                {error}
+              </p>
+            )}
+          </div>
         </div>
+      </button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-100 flex items-end justify-center bg-stone-900/40 p-4 backdrop-blur-sm sm:items-center"
+          onClick={() => setOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="w-full max-w-md overflow-hidden rounded-2xl border border-stone-200/80 bg-[#FAF9F6] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="google-reviews-editor-title"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-stone-200/70 px-5 py-4">
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+                  Client profile
+                </p>
+                <h2
+                  id="google-reviews-editor-title"
+                  className="font-serif text-xl text-stone-900"
+                >
+                  Google reviews
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Close Google review settings"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-4">
+              <p className="text-xs leading-relaxed text-stone-500">
+                Changes save as soon as you flip a switch.
+              </p>
+              <GoogleReviewSwitchRow
+                title="Ask for a Google review after their next visit"
+                helper="Turns off automatically after the text is sent."
+                on={pending}
+                disabled={saving}
+                onToggle={onTogglePending}
+              />
+              <GoogleReviewSwitchRow
+                title="Noted a Google review"
+                helper="Manual only. Google doesn’t tell us who left a review."
+                on={noted}
+                disabled={saving}
+                onToggle={onToggleNoted}
+              />
+              {error && (
+                <p className="text-xs text-rose-700" role="alert">
+                  {error}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end border-t border-stone-200/70 bg-stone-100/40 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-full border border-stone-900 bg-stone-900 px-4 py-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-white transition-colors hover:bg-stone-800"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function GoogleReviewStatusRow({
+  label,
+  on,
+}: {
+  label: string;
+  on: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-sm text-stone-800">{label}</span>
+      <span
+        className={
+          on
+            ? 'rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700'
+            : 'rounded-full border border-stone-300 bg-stone-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500'
+        }
+      >
+        {on ? 'On' : 'Off'}
+      </span>
+    </div>
+  );
+}
+
+function GoogleReviewSwitchRow({
+  title,
+  helper,
+  on,
+  disabled,
+  onToggle,
+}: {
+  title: string;
+  helper: string;
+  on: boolean;
+  disabled: boolean;
+  onToggle: (next: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-xl border border-stone-200 bg-white px-3.5 py-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-stone-900">{title}</p>
+        <p className="mt-0.5 text-xs leading-relaxed text-stone-500">{helper}</p>
       </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={title}
+        disabled={disabled}
+        onClick={() => onToggle(!on)}
+        className={`relative mt-0.5 h-7 w-12 shrink-0 rounded-full border transition-colors disabled:opacity-60 ${
+          on
+            ? 'border-stone-900 bg-stone-900'
+            : 'border-stone-400 bg-stone-300'
+        }`}
+      >
+        <span
+          className={`pointer-events-none absolute top-[3px] left-[3px] block h-[22px] w-[22px] rounded-full bg-white shadow-sm transition-transform ${
+            on ? 'translate-x-5' : 'translate-x-0'
+          }`}
+        />
+      </button>
     </div>
   );
 }
