@@ -18,6 +18,7 @@ export const JOB_HEARTBEAT_KEYS = {
   cleanupAbandoned: 'heartbeat:cleanup-abandoned',
   syncReviews: 'heartbeat:sync-reviews',
   healthAlert: 'heartbeat:health-alert',
+  ensureReminders: 'heartbeat:ensure-reminders',
 } as const;
 
 export async function setOpsState(

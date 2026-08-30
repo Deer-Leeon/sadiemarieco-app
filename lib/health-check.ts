@@ -1056,6 +1056,7 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
           [`${PRODUCTION_BASE}/api/cron/cleanup-abandoned`, 'abandoned-hold sweep'],
           [`${PRODUCTION_BASE}/api/cron/health-alert`, 'health alert'],
           [`${PRODUCTION_BASE}/api/cron/sync-reviews`, 'reviews sync'],
+          [`${PRODUCTION_BASE}/api/cron/ensure-reminders`, 'reminder backfill'],
         ];
         const missing = expected
           .filter(([url]) => !destinations.includes(url))
@@ -1113,7 +1114,7 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
         category: 'Scheduled jobs (QStash)',
         status: 'healthy',
         message: 'Reminder, feedback, reminder-email, and hold-release endpoints',
-        detail: `${publicBase}/api/remind · ${publicBase}/api/feedback · ${publicBase}/api/remind-email · ${publicBase}/api/qstash/release-hold`,
+        detail: `${publicBase}/api/remind · ${publicBase}/api/feedback · ${publicBase}/api/remind-email · ${publicBase}/api/qstash/release-hold · ${publicBase}/api/cron/ensure-reminders`,
       })
     );
   }
@@ -1279,6 +1280,15 @@ async function checkJobFreshness(): Promise<HealthCheckResult[]> {
       warnAfterMs: 30 * 60 * 60 * 1000,
       whatBreaks:
         'Homepage review carousel goes stale. Scheduled daily via QStash.',
+    },
+    {
+      id: 'job-ensure-reminders',
+      name: 'Appointment reminder backfill (last run)',
+      key: JOB_HEARTBEAT_KEYS.ensureReminders,
+      warnAfterMs: 45 * 60 * 1000,
+      failAfterMs: 3 * 60 * 60 * 1000,
+      whatBreaks:
+        'Confirmed bookings can miss 48h/24h/1h reminder texts. Scheduled every 15 minutes via QStash + Vercel Cron.',
     },
   ];
 
