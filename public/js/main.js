@@ -426,11 +426,12 @@
     drawerHoldUid = '';
     try {
       const body = JSON.stringify({ calBookingUid: holdUid });
+      const url = new URL('/api/booking/abandon-hold', window.location.origin).href;
       if (typeof navigator.sendBeacon === 'function') {
-        const blob = new Blob([body], { type: 'application/json' });
-        if (navigator.sendBeacon('/api/booking/abandon-hold', blob)) return;
+        const blob = new Blob([body], { type: 'text/plain;charset=UTF-8' });
+        if (navigator.sendBeacon(url, blob)) return;
       }
-      fetch('/api/booking/abandon-hold', {
+      fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
