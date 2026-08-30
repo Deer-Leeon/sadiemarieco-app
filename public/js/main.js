@@ -425,10 +425,15 @@
     }
     drawerHoldUid = '';
     try {
+      const body = JSON.stringify({ calBookingUid: holdUid });
+      if (typeof navigator.sendBeacon === 'function') {
+        const blob = new Blob([body], { type: 'application/json' });
+        if (navigator.sendBeacon('/api/booking/abandon-hold', blob)) return;
+      }
       fetch('/api/booking/abandon-hold', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ calBookingUid: holdUid }),
+        body,
         keepalive: true
       }).catch(() => {});
     } catch {
@@ -1104,6 +1109,12 @@
   // Browser back/forward can restore the page with drawer-open still set.
   window.addEventListener('pageshow', (event) => {
     if (event.persisted) closeDrawer();
+  });
+
+  window.addEventListener('pagehide', (event) => {
+    if (event.persisted) return;
+    if (!drawerHoldUid || drawerHoldConfirmed) return;
+    abandonDrawerHold();
   });
 
   let resumeCheckoutUid = '';

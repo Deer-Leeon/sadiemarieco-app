@@ -25,7 +25,11 @@ import {
   parseClientPhone,
 } from '@/lib/client-identity';
 import { STUDIO_TIMEZONE } from '@/lib/cal-config';
-import { stripePromise } from '@/lib/stripe-browser';
+import {
+  isKeepHoldThroughUnload,
+  sendAbandonHoldBeacon,
+  setKeepHoldThroughUnload,
+} from '@/lib/abandon-hold-client';
 
 import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
 
@@ -426,10 +430,12 @@ export default function BookClient() {
   const [showCardCheckout, setShowCardCheckout] = useState(false);
   const resumeAppliedRef = useRef(false);
   const holdUidRef = useRef<string | null>(null);
+  const confirmedRef = useRef<BookConfirmed | null>(null);
   const slotsLoadGenRef = useRef(0);
   const slotsAbortRef = useRef<AbortController | null>(null);
   const slotsByDayRef = useRef<Record<string, string[]>>({});
   holdUidRef.current = holdUid;
+  confirmedRef.current = confirmed;
   slotsByDayRef.current = slotsByDay;
 
   const onApplePayResolved = useCallback((available: boolean) => {
@@ -1002,6 +1008,19 @@ export default function BookClient() {
   );
 
   useEffect(() => {
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (event.persisted) return;
+      if (isKeepHoldThroughUnload()) return;
+      if (confirmedRef.current) return;
+      const uid = holdUidRef.current;
+      if (!uid) return;
+      sendAbandonHoldBeacon(uid);
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, []);
+
+  useEffect(() => {
     if (!holdCreatedAt || holdExpired) {
       setHoldCountdown('');
       return;
@@ -1270,6 +1289,7 @@ export default function BookClient() {
       if (email.trim()) params.set('email', email.trim());
       if (phone.trim()) params.set('phone', phone.trim());
       params.set('payMode', paymentTiming === 'pay_now' ? 'now' : 'later');
+      setKeepHoldThroughUnload(true);
       window.location.assign(`/checkout?${params.toString()}`);
       return;
     }
