@@ -25,6 +25,7 @@ import {
   parseClientPhone,
 } from '@/lib/client-identity';
 import { STUDIO_TIMEZONE } from '@/lib/cal-config';
+import { stripePromise } from '@/lib/stripe-browser';
 import {
   isKeepHoldThroughUnload,
   sendAbandonHoldBeacon,
