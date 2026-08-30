@@ -18,6 +18,7 @@ export interface ClientPhoneRow {
   consent_technician_reviewed_at?: string | Date | null;
   review_request_pending?: boolean | null;
   google_review_noted?: boolean | null;
+  google_review_stars?: number | string | null;
   google_review_noted_at?: Date | string | null;
   review_request_last_sent_at?: Date | string | null;
 }
@@ -44,6 +45,7 @@ export async function findClientRowByPhone(
         consent_technician_reviewed_at,
         review_request_pending,
         google_review_noted,
+        google_review_stars,
         google_review_noted_at,
         review_request_last_sent_at
       FROM clients

@@ -82,6 +82,7 @@ interface ClientRow {
   consent_technician_reviewed_at?: Date | string | null;
   review_request_pending?: boolean | null;
   google_review_noted?: boolean | null;
+  google_review_stars?: number | string | null;
   google_review_noted_at?: Date | string | null;
   review_request_last_sent_at?: Date | string | null;
 }
@@ -140,6 +141,7 @@ async function selectClientByEmail(email: string): Promise<ClientRow | null> {
         consent_technician_reviewed_at,
         review_request_pending,
         google_review_noted,
+        google_review_stars,
         google_review_noted_at,
         review_request_last_sent_at
       FROM clients
@@ -177,6 +179,7 @@ async function adoptLegacyEmailRow(
       consent_technician_reviewed_at,
       review_request_pending,
       google_review_noted,
+      google_review_stars,
       google_review_noted_at,
       review_request_last_sent_at
     `;
@@ -346,6 +349,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         consent_technician_reviewed_at,
         review_request_pending,
         google_review_noted,
+        google_review_stars,
         google_review_noted_at,
         review_request_last_sent_at,
         (xmax = 0) AS created
@@ -411,6 +415,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               consent_technician_reviewed_at,
               review_request_pending,
               google_review_noted,
+              google_review_stars,
               google_review_noted_at,
               review_request_last_sent_at
           `;

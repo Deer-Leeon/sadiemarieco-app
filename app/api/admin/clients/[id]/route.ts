@@ -35,6 +35,7 @@ import {
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
 import { notifyFeeFreePassSms } from '@/lib/booking-notifications';
 import {
+  parseGoogleReviewStarsPatch,
   patchClientReviewFlags,
   reviewFlagsFromRow,
 } from '@/lib/client-review-flags';
@@ -64,6 +65,7 @@ interface ClientRow {
   late_change_waive_next?: boolean | null;
   review_request_pending?: boolean | null;
   google_review_noted?: boolean | null;
+  google_review_stars?: number | string | null;
   google_review_noted_at?: Date | string | null;
   review_request_last_sent_at?: Date | string | null;
 }
@@ -205,6 +207,7 @@ export async function GET(
         late_change_waive_next,
         review_request_pending,
         google_review_noted,
+        google_review_stars,
         google_review_noted_at,
         review_request_last_sent_at
       FROM clients
@@ -278,8 +281,27 @@ export async function PATCH(
     typeof payload.google_review_noted === 'boolean'
       ? payload.google_review_noted
       : undefined;
+  const starsPatch = parseGoogleReviewStarsPatch(
+    payload.google_review_stars !== undefined
+      ? payload.google_review_stars
+      : payload.googleReviewStars
+  );
+  if (starsPatch.present && starsPatch.invalid) {
+    return NextResponse.json(
+      {
+        error: 'invalid_google_review_stars',
+        message: 'google_review_stars must be 1–5, or null to clear.',
+      },
+      { status: 400 }
+    );
+  }
+  const patchGoogleReviewStars = starsPatch.present
+    ? starsPatch.value
+    : undefined;
   const patchingReviewFlags =
-    patchReviewPending !== undefined || patchGoogleReviewNoted !== undefined;
+    patchReviewPending !== undefined ||
+    patchGoogleReviewNoted !== undefined ||
+    starsPatch.present;
 
   const changedFirst = nextFirst !== undefined;
   const changedLast = nextLast !== undefined;
@@ -348,6 +370,7 @@ export async function PATCH(
           late_change_waive_next,
           review_request_pending,
           google_review_noted,
+          google_review_stars,
           google_review_noted_at,
           review_request_last_sent_at
         FROM clients
@@ -383,6 +406,7 @@ export async function PATCH(
       const result = await patchClientReviewFlags(id, {
         reviewRequestPending: patchReviewPending,
         googleReviewNoted: patchGoogleReviewNoted,
+        ...(starsPatch.present ? { googleReviewStars: patchGoogleReviewStars } : {}),
       });
       if (!result.found) {
         return NextResponse.json({ error: 'not_found' }, { status: 404 });
@@ -410,6 +434,7 @@ export async function PATCH(
           late_change_waive_next,
           review_request_pending,
           google_review_noted,
+          google_review_stars,
           google_review_noted_at,
           review_request_last_sent_at
         FROM clients
@@ -436,7 +461,7 @@ export async function PATCH(
     return NextResponse.json(
       {
         error: 'no_fields',
-        hint: 'pass at least one of first_name, last_name, email, no_show_flag: false, no_show_waive_next / late_change_waive_next: true, or review_request_pending / google_review_noted',
+        hint: 'pass at least one of first_name, last_name, email, no_show_flag: false, no_show_waive_next / late_change_waive_next: true, or review_request_pending / google_review_stars',
       },
       { status: 400 }
     );
@@ -486,6 +511,7 @@ export async function PATCH(
           late_change_waive_next,
           review_request_pending,
           google_review_noted,
+          google_review_stars,
           google_review_noted_at,
           review_request_last_sent_at
         FROM clients
@@ -653,6 +679,7 @@ export async function PATCH(
       const flagsResult = await patchClientReviewFlags(id, {
         reviewRequestPending: patchReviewPending,
         googleReviewNoted: patchGoogleReviewNoted,
+        ...(starsPatch.present ? { googleReviewStars: patchGoogleReviewStars } : {}),
       });
       if (!flagsResult.found) {
         return NextResponse.json({ error: 'not_found' }, { status: 404 });
@@ -682,6 +709,7 @@ export async function PATCH(
         late_change_waive_next,
         review_request_pending,
         google_review_noted,
+        google_review_stars,
         google_review_noted_at,
         review_request_last_sent_at
       FROM clients

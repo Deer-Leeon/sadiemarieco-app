@@ -57,6 +57,7 @@ interface ClientRow {
   late_change_waive_next: boolean | null;
   review_request_pending: boolean | null;
   google_review_noted: boolean | null;
+  google_review_stars: number | string | null;
   google_review_noted_at: Date | string | null;
   review_request_last_sent_at: Date | string | null;
   last_booked_at: Date | string | null;
@@ -113,6 +114,7 @@ export default async function ClientsPage() {
         COALESCE(c.late_change_waive_next, TRUE) AS late_change_waive_next,
         COALESCE(c.review_request_pending, FALSE) AS review_request_pending,
         COALESCE(c.google_review_noted, FALSE) AS google_review_noted,
+        c.google_review_stars,
         c.google_review_noted_at,
         c.review_request_last_sent_at,
         stats.last_booked_at
