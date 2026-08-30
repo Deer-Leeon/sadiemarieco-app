@@ -32,7 +32,10 @@ import {
 } from '@/lib/booking-analytics';
 import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
 import { applePayFriendlyError } from '@/lib/apple-pay-express';
-import { setKeepHoldThroughUnload } from '@/lib/abandon-hold-client';
+import {
+  rememberActiveHoldUid,
+  setKeepHoldThroughUnload,
+} from '@/lib/abandon-hold-client';
 import { prefersApplePayDevice } from '@/lib/prefers-apple-pay';
 
 import styles from './book.module.css';
@@ -257,6 +260,7 @@ export default function BookApplePayHost({
         }
 
         const hold = await createHold('phone_booker_apple_pay');
+        rememberActiveHoldUid(hold.calBookingUid);
         const bookingName = hold.name || payload.name;
         const bookingEmail = hold.email || payload.email || '';
 

@@ -28,6 +28,7 @@ import { STUDIO_TIMEZONE } from '@/lib/cal-config';
 import { stripePromise } from '@/lib/stripe-browser';
 import {
   isKeepHoldThroughUnload,
+  rememberActiveHoldUid,
   sendAbandonHoldBeacon,
   setKeepHoldThroughUnload,
 } from '@/lib/abandon-hold-client';
@@ -437,6 +438,7 @@ export default function BookClient() {
   const slotsByDayRef = useRef<Record<string, string[]>>({});
   holdUidRef.current = holdUid;
   confirmedRef.current = confirmed;
+  rememberActiveHoldUid(holdUid);
   slotsByDayRef.current = slotsByDay;
 
   const onApplePayResolved = useCallback((available: boolean) => {
@@ -981,6 +983,7 @@ export default function BookClient() {
   const stepIndex = STEPS.indexOf(step);
 
   const clearHoldState = useCallback(() => {
+    rememberActiveHoldUid(null);
     setHoldUid(null);
     setHoldCreatedAt(null);
     setHoldCountdown('');
@@ -1013,9 +1016,7 @@ export default function BookClient() {
       if (event.persisted) return;
       if (isKeepHoldThroughUnload()) return;
       if (confirmedRef.current) return;
-      const uid = holdUidRef.current;
-      if (!uid) return;
-      sendAbandonHoldBeacon(uid);
+      sendAbandonHoldBeacon(holdUidRef.current);
     };
     window.addEventListener('pagehide', onPageHide);
     return () => window.removeEventListener('pagehide', onPageHide);
