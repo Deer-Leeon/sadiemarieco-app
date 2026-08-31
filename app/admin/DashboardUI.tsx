@@ -21,6 +21,11 @@ import {
   studioWeekdaySun0,
   todayStudioDateKey,
 } from '@/lib/studio-calendar';
+import {
+  parseAvailabilityPayload,
+  type StudioAvailabilityBlock,
+  type StudioDateOverride,
+} from '@/lib/studio-schedule-windows';
 
 import ManualBookingModal from './components/ManualBookingModal';
 import type {
@@ -136,6 +141,31 @@ export default function DashboardUI({
   const [removedBlockCalUids, setRemovedBlockCalUids] = useState<Set<string>>(
     () => new Set()
   );
+  const [scheduleAvailability, setScheduleAvailability] = useState<
+    StudioAvailabilityBlock[] | null
+  >(null);
+  const [scheduleOverrides, setScheduleOverrides] = useState<
+    StudioDateOverride[] | null
+  >(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/availability');
+        if (!res.ok) return;
+        const parsed = parseAvailabilityPayload(await res.json());
+        if (!parsed || cancelled) return;
+        setScheduleAvailability(parsed.availability);
+        setScheduleOverrides(parsed.overrides);
+      } catch {
+        // Leave null — time grids stay unhatched until a later refresh.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const timeBlockCalUids = useMemo(
     () => timeBlockCalUidSet(timeBlocks),
@@ -320,6 +350,8 @@ export default function DashboardUI({
             onDayClick={setModalDate}
             onAppointmentClick={setSelectedAppointment}
             onBlockClick={setBlockPendingEdit}
+            scheduleAvailability={scheduleAvailability}
+            scheduleOverrides={scheduleOverrides}
           />
         ) : (
           <TimeGrid
@@ -331,6 +363,8 @@ export default function DashboardUI({
             onDayClick={setModalDate}
             onAppointmentClick={setSelectedAppointment}
             onBlockClick={setBlockPendingEdit}
+            scheduleAvailability={scheduleAvailability}
+            scheduleOverrides={scheduleOverrides}
           />
         )}
       </main>
@@ -357,8 +391,9 @@ export default function DashboardUI({
           onBlockClick={setBlockPendingEdit}
           onBlocksChanged={(infoMessage) => {
             if (infoMessage) setBookingToast(infoMessage);
-            router.refresh();
           }}
+          scheduleAvailability={scheduleAvailability}
+          scheduleOverrides={scheduleOverrides}
         />
       )}
       {blockPendingEdit !== null && (
