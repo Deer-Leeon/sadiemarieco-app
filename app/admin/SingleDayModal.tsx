@@ -11,6 +11,7 @@ import {
 } from '@/lib/studio-calendar';
 
 import BlockTimeDialog from './BlockTimeDialog';
+import ClosedHoursHatch from './components/ClosedHoursHatch';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
 import type { Appointment, TimeBlock } from './types';
@@ -22,12 +23,17 @@ import {
   MIN_PILL_HEIGHT_PX,
   MODAL_HOUR_GRID_ROWS,
   START_HOUR,
+  closedBandPercentsForDay,
   layoutBlocksForDay,
   layoutForDay,
   safeParseISO,
   type PositionedAppointment,
   type PositionedTimeBlock,
 } from './timeline';
+import type {
+  StudioAvailabilityBlock,
+  StudioDateOverride,
+} from '@/lib/studio-schedule-windows';
 
 const HOUR_LABELS = [
   '9 AM',
@@ -70,6 +76,8 @@ interface Props {
   onAppointmentClick?: (appointment: Appointment) => void;
   onBlockClick?: (block: TimeBlock) => void;
   onBlocksChanged?: (infoMessage?: string) => void;
+  scheduleAvailability?: StudioAvailabilityBlock[] | null;
+  scheduleOverrides?: StudioDateOverride[] | null;
 }
 
 export default function SingleDayModal({
@@ -81,6 +89,8 @@ export default function SingleDayModal({
   onAppointmentClick,
   onBlockClick,
   onBlocksChanged,
+  scheduleAvailability = null,
+  scheduleOverrides = null,
 }: Props) {
   const [activeDate, setActiveDate] = useState<Date>(initialDate);
   const [blockDialogHour, setBlockDialogHour] = useState<number | null>(null);
@@ -132,6 +142,17 @@ export default function SingleDayModal({
 
   const header = studioHeaderParts(activeDate);
 
+  const hatchBands = useMemo(
+    () =>
+      closedBandPercentsForDay(
+        activeDate,
+        positioned.map((item) => item.appointment),
+        scheduleAvailability,
+        scheduleOverrides
+      ),
+    [activeDate, positioned, scheduleAvailability, scheduleOverrides]
+  );
+
   return (
     <>
       <div
@@ -162,6 +183,7 @@ export default function SingleDayModal({
             <DayTimeline
               positioned={positioned}
               positionedBlocks={positionedBlocks}
+              hatchBands={hatchBands}
               removingBlockId={removingBlockId}
               onHourClick={(hour) => setBlockDialogHour(hour)}
               onAppointmentClick={onAppointmentClick}
@@ -239,6 +261,7 @@ function ModalHeader({
 function DayTimeline({
   positioned,
   positionedBlocks,
+  hatchBands,
   removingBlockId,
   onHourClick,
   onAppointmentClick,
@@ -246,6 +269,7 @@ function DayTimeline({
 }: {
   positioned: PositionedAppointment[];
   positionedBlocks: PositionedTimeBlock[];
+  hatchBands: { topPct: number; heightPct: number }[];
   removingBlockId: string | null;
   onHourClick: (hour: number) => void;
   onAppointmentClick?: (appointment: Appointment) => void;
@@ -263,6 +287,7 @@ function DayTimeline({
       <DayBody
         positioned={positioned}
         positionedBlocks={positionedBlocks}
+        hatchBands={hatchBands}
         removingBlockId={removingBlockId}
         onHourClick={onHourClick}
         onAppointmentClick={onAppointmentClick}
@@ -296,6 +321,7 @@ function TimeLabelColumn() {
 function DayBody({
   positioned,
   positionedBlocks,
+  hatchBands,
   removingBlockId,
   onHourClick,
   onAppointmentClick,
@@ -303,6 +329,7 @@ function DayBody({
 }: {
   positioned: PositionedAppointment[];
   positionedBlocks: PositionedTimeBlock[];
+  hatchBands: { topPct: number; heightPct: number }[];
   removingBlockId: string | null;
   onHourClick: (hour: number) => void;
   onAppointmentClick?: (appointment: Appointment) => void;
@@ -312,8 +339,9 @@ function DayBody({
 
   return (
     <div className="relative h-full min-h-0">
+      <ClosedHoursHatch bands={hatchBands} />
       <div
-        className="pointer-events-none absolute inset-0 grid h-full"
+        className="pointer-events-none absolute inset-0 z-1 grid h-full"
         style={{ gridTemplateRows: MODAL_HOUR_GRID_ROWS }}
         aria-hidden="true"
       >

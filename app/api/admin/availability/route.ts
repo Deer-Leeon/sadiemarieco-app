@@ -29,7 +29,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import {
-  fetchDefaultSchedule,
+  fetchDefaultScheduleCached,
   updateSchedule,
   type DayName,
   type ScheduleAvailability,
@@ -56,7 +56,9 @@ const VALID_DAY_NAMES: ReadonlySet<DayName> = new Set([
 // ─── HANDLERS ──────────────────────────────────────────────────────────────
 
 /**
- * GET → returns the studio's current default schedule shape:
+ * GET → returns the studio's current default schedule shape
+ * (60s in-process cache via fetchDefaultScheduleCached so the iOS
+ * admin app is not blocked on a live Cal round-trip every tab visit):
  *   { id, name, timeZone, availability[], overrides[] }
  *
  * The id is what the client must echo back on PATCH (Cal requires
@@ -77,7 +79,7 @@ export async function GET(): Promise<NextResponse> {
   }
 
   try {
-    const schedule = await fetchDefaultSchedule(apiKey);
+    const schedule = await fetchDefaultScheduleCached(apiKey);
     return NextResponse.json({
       id: schedule.id,
       name: schedule.name,

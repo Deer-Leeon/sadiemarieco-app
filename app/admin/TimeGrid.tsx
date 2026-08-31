@@ -15,6 +15,7 @@ import {
 
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import ClosedHoursHatch from './components/ClosedHoursHatch';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
 import { settlementAriaLabel } from './settlementDisplay';
@@ -23,12 +24,17 @@ import {
   HOURS,
   MIN_PILL_HEIGHT_PX,
   START_HOUR,
+  closedBandPercentsForDay,
   layoutBlocksForDay,
   layoutForDay,
   safeParseISO,
   type PositionedAppointment,
   type PositionedTimeBlock,
 } from './timeline';
+import type {
+  StudioAvailabilityBlock,
+  StudioDateOverride,
+} from '@/lib/studio-schedule-windows';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Public component types
@@ -63,6 +69,10 @@ interface Props {
   onAppointmentClick?: (appointment: Appointment) => void;
   /** Fired when the user clicks a blocked-time pill. */
   onBlockClick?: (block: TimeBlock) => void;
+  /** Official weekly hours. Null until GET /api/admin/availability returns. */
+  scheduleAvailability?: StudioAvailabilityBlock[] | null;
+  /** Date overrides. Null until the schedule has loaded. */
+  scheduleOverrides?: StudioDateOverride[] | null;
 }
 
 interface DayColumn {
@@ -142,6 +152,8 @@ export default function TimeGrid({
   onDayClick,
   onAppointmentClick,
   onBlockClick,
+  scheduleAvailability = null,
+  scheduleOverrides = null,
 }: Props) {
   const days = buildDays(currentDate, daysToShow);
   const columns = buildColumns(days, appointments, timeBlocks);
@@ -151,7 +163,7 @@ export default function TimeGrid({
   const gridTemplate = `60px repeat(${daysToShow}, minmax(0, 1fr))`;
 
   return (
-    <div className="flex h-full flex-col bg-[#FAF9F6]">
+    <div className="flex h-full flex-col overflow-hidden bg-[#FAF9F6]">
       <div
         className="grid border-b border-stone-200 bg-[#FAF9F6]/95 backdrop-blur-sm"
         style={{ gridTemplateColumns: gridTemplate }}
@@ -187,6 +199,12 @@ export default function TimeGrid({
             removingBlockId={removingBlockId}
             onAppointmentClick={onAppointmentClick}
             onBlockClick={onBlockClick}
+            hatchBands={closedBandPercentsForDay(
+              col.date,
+              col.items.map((item) => item.appointment),
+              scheduleAvailability,
+              scheduleOverrides
+            )}
           />
         ))}
       </div>
@@ -290,11 +308,13 @@ function DayColumnView({
   removingBlockId,
   onAppointmentClick,
   onBlockClick,
+  hatchBands,
 }: {
   column: DayColumn;
   removingBlockId: string | null;
   onAppointmentClick?: (appointment: Appointment) => void;
   onBlockClick?: (block: TimeBlock) => void;
+  hatchBands: { topPct: number; heightPct: number }[];
 }) {
   // Day-column body is intentionally inert. The only clickable
   // surfaces inside the time grid are (1) the day header above
@@ -303,14 +323,16 @@ function DayColumnView({
   // Layered structure:
   //   * `.relative` parent — owns the appointment-pill coordinate
   //     space (percentages are computed against THIS element's height).
+  //   * closed-hours hatch — background wash behind hour lines.
   //   * inner `.absolute inset-0` grid — paints the hour gridlines
   //     using `repeat(HOURS, 1fr)` so they stretch to fill any height.
   //   * pills — absolutely positioned with topPct/heightPct, layered
   //     above the gridlines.
   return (
     <div className="relative border-l border-stone-200">
+      <ClosedHoursHatch bands={hatchBands} />
       <div
-        className="pointer-events-none absolute inset-0 grid"
+        className="pointer-events-none absolute inset-0 z-1 grid"
         style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
         aria-hidden="true"
       >

@@ -5,6 +5,7 @@ import { getAdminAccess } from '../auth';
 import AdminHeader from '../AdminHeader';
 import AdminSectionTabs from '../AdminSectionTabs';
 import SmsMessagesClient from './SmsMessagesClient';
+import SmsOutboundLogPanel from './SmsOutboundLogPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,10 @@ export default async function AdminSmsMessagesPage() {
           message; the brand prefix and STOP/HELP footer stay locked. Edits
           apply on the next send.
         </p>
-        <SmsMessagesClient />
+        <div className="space-y-8">
+          <SmsOutboundLogPanel />
+          <SmsMessagesClient />
+        </div>
       </main>
     </div>
   );

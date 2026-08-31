@@ -9,8 +9,16 @@ import { parseISO } from 'date-fns';
 
 import {
   isSameStudioDay,
+  studioDateKey,
   studioMinutesFromMidnight,
 } from '@/lib/studio-calendar';
+import {
+  closedBandsForVisibleGrid,
+  minuteBandsToPercents,
+  type MinuteBand,
+  type StudioAvailabilityBlock,
+  type StudioDateOverride,
+} from '@/lib/studio-schedule-windows';
 
 import type { Appointment } from './types';
 
@@ -318,4 +326,44 @@ export function layoutBlocksForDay(
     positioned.push({ block, topPct: pos.topPct, heightPct: pos.heightPct });
   }
   return positioned.sort((a, b) => a.topPct - b.topPct);
+}
+
+function appointmentHoleBands(appointments: Appointment[]): MinuteBand[] {
+  const holes: MinuteBand[] = [];
+  for (const apt of appointments) {
+    const start = safeParseISO(apt.booking_time);
+    if (!start) continue;
+    const end =
+      safeParseISO(apt.end_time) ?? new Date(start.getTime() + 60 * 60 * 1000);
+    const startMins = studioMinutesFromMidnight(start);
+    let endMins = studioMinutesFromMidnight(end);
+    if (endMins <= startMins) endMins = END_HOUR * 60;
+    holes.push({ startMins, endMins });
+  }
+  return holes;
+}
+
+/**
+ * Hatch rectangles (percent of the 9 AM–9 PM column) for closed studio
+ * hours on a day, with displayed appointments punched out.
+ * Returns [] when the schedule has not loaded yet.
+ */
+export function closedBandPercentsForDay(
+  date: Date,
+  appointments: Appointment[],
+  availability: StudioAvailabilityBlock[] | null | undefined,
+  overrides: StudioDateOverride[] | null | undefined
+): { topPct: number; heightPct: number }[] {
+  if (!availability || !overrides) return [];
+  const ymd = studioDateKey(date);
+  if (!ymd) return [];
+  const bands = closedBandsForVisibleGrid(
+    ymd,
+    availability,
+    overrides,
+    appointmentHoleBands(appointments),
+    START_HOUR * 60,
+    END_HOUR * 60
+  );
+  return minuteBandsToPercents(bands, START_HOUR * 60, END_HOUR * 60);
 }
