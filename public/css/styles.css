@@ -3455,7 +3455,7 @@ html.reverie-handoff .reverie-hero {
   }
   .reverie-portrait img {
     object-fit: cover;
-    object-position: 50% 6%;
+    object-position: 50% 16%;
     filter: saturate(0.9) contrast(1.02);
   }
   .reverie-img-col {
