@@ -5,6 +5,10 @@
 (function () {
   'use strict';
 
+  if (document.documentElement.classList.contains('hero-ready')) {
+    return;
+  }
+
   var MAX_WAIT_MS = 10000;
   var done = false;
 
