@@ -92,8 +92,32 @@
   (function () {
     var cta = document.querySelector('.reverie-cta-desktop');
     if (!cta) return;
-    cta.addEventListener('click', function () {
-      document.documentElement.classList.add('reverie-handoff');
+
+    function restore() {
+      document.documentElement.classList.remove('reverie-handoff');
+    }
+    window.addEventListener('pageshow', restore);
+    window.addEventListener('popstate', restore);
+
+    cta.addEventListener('click', function (event) {
+      if (
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey ||
+        event.button !== 0
+      ) {
+        return;
+      }
+      event.preventDefault();
+      if (document.documentElement.classList.contains('reverie-handoff')) return;
+      var href = cta.href;
+      window.setTimeout(function () {
+        document.documentElement.classList.add('reverie-handoff');
+        window.setTimeout(function () {
+          window.location.href = href;
+        }, 450);
+      }, 320);
     });
   })();
 </script>
