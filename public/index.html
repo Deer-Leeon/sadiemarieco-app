@@ -11,23 +11,34 @@
   <style>
     /* Hold the full page until the hero photo is decoded — navy matches the image slot. */
     html { background-color: #0D1B2A; }
-    /* Deep links (#services from Reverie, etc.) skip the navy hold so the
-       cream page can paint immediately instead of flashing the hero slot. */
     html.hash-landing { background-color: #F5F3F0; }
     html:not(.hero-ready) body { visibility: hidden; }
+    /* /#services (Reverie desktop) — first paint is the catalogue, not the hero. */
+    html.hash-landing #hero,
+    html.hash-landing .marquee-strip { display: none !important; }
+    html.hash-landing .reveal {
+      opacity: 1 !important;
+      transform: none !important;
+      transition: none !important;
+    }
+    html.hash-landing .fade-in { animation: none !important; }
   </style>
   <script>
     (function () {
       var h = location.hash;
       if (h && h !== '#' && h !== '#hero') {
         document.documentElement.classList.add('hero-ready', 'hash-landing');
+        if (history.scrollRestoration) history.scrollRestoration = 'manual';
+        document.addEventListener('DOMContentLoaded', function () {
+          window.scrollTo(0, 0);
+        });
       }
     })();
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&amp;family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&amp;family=DM+Sans:wght@200;300;400&amp;display=block">
-  <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@200;300;400&display=block" rel="stylesheet">
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&amp;family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&amp;family=DM+Sans:wght@200;300;400&amp;display=swap">
+  <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@200;300;400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>

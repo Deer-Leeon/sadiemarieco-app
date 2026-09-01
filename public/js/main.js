@@ -131,7 +131,7 @@
     window.matchMedia(`(max-width: ${MOBILE_LAYOUT_MAX_PX}px)`).matches;
 
   if (reveals.length) {
-    if (isMobileInstantLayout()) {
+    if (isMobileInstantLayout() || document.documentElement.classList.contains('hash-landing')) {
       showAllReveals();
     } else if ('IntersectionObserver' in window) {
       const revealObs = new IntersectionObserver((entries) => {

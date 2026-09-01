@@ -55,6 +55,14 @@ html {
 html.hash-landing {
   background-color: var(--off-white);
 }
+html.hash-landing .reveal {
+  opacity: 1;
+  transform: none;
+  transition: none;
+}
+html.hash-landing .fade-in {
+  animation: none;
+}
 body {
   background: var(--off-white);
   color: var(--ink);
@@ -3168,6 +3176,9 @@ html:has(.reverie-landing) body {
   overflow: hidden;
   background: var(--off-white);
   --reverie-bar: 88px;
+}
+html.reverie-handoff .reverie-hero {
+  visibility: hidden;
 }
 .reverie-landing .reverie-topbar {
   position: fixed;

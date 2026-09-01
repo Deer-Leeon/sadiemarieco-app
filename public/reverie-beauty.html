@@ -22,6 +22,7 @@
   <meta property="og:image" content="https://www.sadiemarie.co/assets/brand/og-default.jpg">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="preload" as="image" href="/assets/images/reverie-hero.webp" type="image/webp" fetchpriority="high">
+  <link rel="prefetch" href="https://www.sadiemarie.co/" as="document">
   <style>
     html { background-color: #F5F3F0; }
     html:not(.hero-ready) body { visibility: hidden; }
@@ -85,6 +86,15 @@
       img.addEventListener('error', reveal, { once: true });
     }
     setTimeout(reveal, 4000);
+  })();
+</script>
+<script>
+  (function () {
+    var cta = document.querySelector('.reverie-cta-desktop');
+    if (!cta) return;
+    cta.addEventListener('click', function () {
+      document.documentElement.classList.add('reverie-handoff');
+    });
   })();
 </script>
 <script>
