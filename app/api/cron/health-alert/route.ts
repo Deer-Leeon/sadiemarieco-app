@@ -9,6 +9,8 @@
  * Alert policy:
  *   • Fires when overall status is `unhealthy` (soft checks — e.g. the
  *     Terminal reader sleeping between appointments — never count).
+ *   • Timeouts/aborts (Cal.com especially) are `degraded` + `transient`
+ *     and only page after the same probe fails two hourly runs in a row.
  *   • Email to the admin allowlist via Resend; SMS to HEALTH_ALERT_PHONE
  *     (optional env, E.164) via Twilio.
  *   • Cooldown via ops_state: the same set of failing checks re-alerts at
@@ -45,6 +47,9 @@ export const maxDuration = 120;
 /** Re-alert for an unchanged failure set at most this often. */
 const REALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const ALERT_STATE_KEY = 'health-alert:state';
+const TRANSIENT_STATE_KEY = 'health-alert:transient';
+/** Same Cal.com timeout two hours in a row is no longer a one-sample flake. */
+const TRANSIENT_STRIKES_TO_ALERT = 2;
 
 /**
  * A failing probe must fail a second pass before anyone is paged. Hosted
@@ -74,6 +79,12 @@ function fingerprintOf(checks: HealthCheckResult[]): string {
     .map((c) => c.id)
     .sort()
     .join(',');
+}
+
+function transients(report: HealthReport): HealthCheckResult[] {
+  return report.checks.filter(
+    (c) => !c.soft && c.transient && c.status !== 'healthy' && c.status !== 'skipped'
+  );
 }
 
 function alertEmailHtml(
@@ -232,6 +243,43 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // Cal.com (and similar) abort a single hourly probe at night, then pass
+  // on the next hour. Degraded+transient checks are not paged unless they
+  // stay failing across consecutive scheduled runs.
+  const flake = transients(report);
+  const flakeFingerprint = fingerprintOf(flake);
+  const priorFlake = await getOpsState(TRANSIENT_STATE_KEY);
+  const priorFlakeFingerprint =
+    typeof priorFlake?.value?.fingerprint === 'string'
+      ? priorFlake.value.fingerprint
+      : '';
+  const priorFlakeStrikes =
+    typeof priorFlake?.value?.strikes === 'number'
+      ? priorFlake.value.strikes
+      : 0;
+
+  let flakeStrikes = 0;
+  if (!simulate && bad.length === 0 && flake.length > 0) {
+    flakeStrikes =
+      flakeFingerprint === priorFlakeFingerprint ? priorFlakeStrikes + 1 : 1;
+    await setOpsState(TRANSIENT_STATE_KEY, {
+      fingerprint: flakeFingerprint,
+      strikes: flakeStrikes,
+    });
+    if (flakeStrikes >= TRANSIENT_STRIKES_TO_ALERT) {
+      bad = flake;
+    } else {
+      console.warn('[api/cron/health-alert] holding flake for next hour', {
+        flake: flake.map((c) => c.id),
+        flakeStrikes,
+      });
+    }
+  } else if (!simulate) {
+    if (priorFlakeFingerprint) {
+      await setOpsState(TRANSIENT_STATE_KEY, { fingerprint: '', strikes: 0 });
+    }
+  }
+
   const fingerprint = fingerprintOf(bad);
   const prior = await getOpsState(ALERT_STATE_KEY);
   const priorFingerprint =
@@ -319,6 +367,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     failing: bad.map((c) => ({ id: c.id, message: c.message })),
     degraded: degradedList(report).map((c) => c.id),
     flapped,
+    flakeStrikes: flakeStrikes || undefined,
     action,
     email,
     sms,

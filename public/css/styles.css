@@ -52,6 +52,9 @@ html {
   overflow-x: hidden;
   max-width: 100%;
 }
+html.hash-landing {
+  background-color: var(--off-white);
+}
 body {
   background: var(--off-white);
   color: var(--ink);
