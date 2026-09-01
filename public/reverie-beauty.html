@@ -43,7 +43,15 @@
 
 <main class="reverie-hero">
   <div class="reverie-copy-col">
-    <h1 class="reverie-title">Welcome<em>!</em></h1>
+    <div class="reverie-intro">
+      <div class="reverie-portrait">
+        <picture>
+          <source srcset="/assets/images/reverie-hero.webp" type="image/webp">
+          <img src="/assets/images/reverie-hero.jpg" alt="Sadie Marie" width="96" height="96" decoding="async">
+        </picture>
+      </div>
+      <h1 class="reverie-title">Welcome<em>!</em></h1>
+    </div>
     <div class="section-divider"></div>
     <div class="reverie-copy">
       <p>Maggie with Reverie Beauty has moved out of state, and I’m honored to continue caring for her wonderful clientele here at Sadie Marie.</p>
@@ -72,7 +80,7 @@
       done = true;
       document.documentElement.classList.add('hero-ready');
     }
-    var img = document.querySelector('.reverie-img-frame img');
+    var img = document.querySelector('.reverie-portrait img, .reverie-img-frame img');
     function finish() {
       if (img && img.naturalWidth > 0 && img.decode) {
         img.decode().then(reveal).catch(reveal);
