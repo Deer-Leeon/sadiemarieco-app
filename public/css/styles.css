@@ -3277,60 +3277,73 @@ html:has(.reverie-landing) body {
 }
 
 @media (max-width: 860px) {
+  html:has(.reverie-landing),
+  html:has(.reverie-landing) body,
+  .reverie-landing,
+  .reverie-hero {
+    height: 100svh;
+    max-height: 100svh;
+  }
+  .reverie-landing nav {
+    min-height: 52px;
+  }
+  .reverie-landing .nav-logo {
+    font-size: 0.95rem;
+  }
   .reverie-hero {
     width: 100%;
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
+    grid-template-columns: none;
+    grid-template-rows: none;
     column-gap: 0;
     align-items: stretch;
     padding: 0;
   }
   .reverie-img-col {
     order: -1;
-    padding: calc(var(--nav-block) + 28px)
-      max(20px, env(safe-area-inset-left))
-      28px
+    flex: 0 0 auto;
+    padding: 62px max(20px, env(safe-area-inset-left)) 8px
       max(20px, env(safe-area-inset-right));
-    align-items: stretch;
+    align-items: center;
   }
   .reverie-img-frame {
-    width: min(100%, calc(38vh * 4 / 5));
-    max-height: 38vh;
+    width: auto;
+    height: min(22svh, 168px);
+    max-height: min(22svh, 168px);
+    aspect-ratio: 4 / 5;
     margin: 0 auto;
   }
   .reverie-copy-col {
-    padding: 24px max(20px, env(safe-area-inset-left))
-      max(16px, env(safe-area-inset-bottom))
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    padding: 8px max(20px, env(safe-area-inset-left))
+      max(10px, env(safe-area-inset-bottom))
       max(20px, env(safe-area-inset-right));
     justify-content: flex-start;
   }
-  .reverie-title { font-size: clamp(2.4rem, 9vw, 3.2rem); margin-bottom: 8px; }
-  .reverie-copy { font-size: 0.98rem; line-height: 1.5; max-width: none; }
-  .reverie-copy p { margin-bottom: 0.55em; }
-  .reverie-copy-col .hero-scroll-hint { margin-top: 10px; margin-bottom: 0; }
+  .reverie-title { font-size: clamp(1.9rem, 7vw, 2.4rem); margin-bottom: 6px; }
+  .reverie-copy-col .section-divider { margin-bottom: 10px; }
+  .reverie-copy {
+    flex: 1 1 auto;
+    font-size: 0.92rem;
+    line-height: 1.42;
+    max-width: none;
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .reverie-copy p { margin-bottom: 0.45em; }
+  .reverie-copy-col .hero-scroll-hint { display: none; }
   .reverie-cta {
     display: block;
     width: 100%;
     text-align: center;
     box-sizing: border-box;
+    flex-shrink: 0;
     align-self: stretch;
     margin-top: auto;
-    padding: 15px 38px;
+    padding: 13px 24px;
   }
-}
-
-@media (max-width: 640px) {
-  .reverie-cta {
-    display: block;
-    width: 100%;
-    text-align: center;
-    box-sizing: border-box;
-    align-self: stretch;
-  }
-}
-
-@media (max-width: 860px) and (max-height: 740px) {
-  .reverie-copy-col .hero-scroll-hint { display: none; }
-  .reverie-copy { font-size: 0.92rem; line-height: 1.45; }
-  .reverie-title { font-size: clamp(2.2rem, 6vh, 3rem); }
 }
