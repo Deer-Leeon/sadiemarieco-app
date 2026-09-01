@@ -2,6 +2,7 @@ import { clerkMiddleware, createRouteMatcher, clerkClient } from '@clerk/nextjs/
 import { NextResponse } from 'next/server';
 
 import { isAllowedAdminEmail } from '@/lib/admin-allowlist';
+import { isReverieBeautyHost } from '@/lib/reverie-beauty-host';
 import {
   PRODUCTION_SITE_URL,
   shouldGateAsStaging,
@@ -45,6 +46,12 @@ const isApplePayDomainAssociation = createRouteMatcher([
   '/.well-known/apple-developer-merchantid-domain-association',
 ]);
 
+/** Public Reverie Beauty handoff — previewable on staging without a Clerk session. */
+const isReverieBeautyPreviewRoute = createRouteMatcher([
+  '/reveriebeauty',
+  '/reverie-beauty.html',
+]);
+
 /** Production paths that must not run Clerk session parsing (Bearer cron / webhooks). */
 const isClerkExcludedApi = createRouteMatcher([
   '/api/webhook(.*)',
@@ -76,6 +83,14 @@ async function userHasAdminAccess(userId: string): Promise<boolean> {
  */
 export default clerkMiddleware(async (auth, req) => {
   const host = req.headers.get('host');
+
+  // Dedicated client-handoff host: every path shows the welcome card.
+  if (isReverieBeautyHost(host)) {
+    const url = req.nextUrl.clone();
+    url.pathname = '/reverie-beauty.html';
+    return NextResponse.rewrite(url);
+  }
+
   const staging = shouldGateAsStaging(host);
 
   if (staging) {
@@ -86,6 +101,10 @@ export default clerkMiddleware(async (auth, req) => {
     }
 
     if (isApplePayDomainAssociation(req)) {
+      return;
+    }
+
+    if (isReverieBeautyPreviewRoute(req)) {
       return;
     }
 
