@@ -3171,7 +3171,7 @@ html:has(.reverie-landing) body {
   max-height: 100dvh;
   overflow: hidden;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
   align-items: stretch;
   background: var(--off-white);
 }
@@ -3183,31 +3183,24 @@ html:has(.reverie-landing) body {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: calc(var(--nav-block) + 16px) clamp(28px, 4vw, 56px)
-    clamp(20px, 3vh, 40px) clamp(28px, 4vw, 56px);
-}
-.reverie-watermark {
-  top: auto;
-  left: clamp(16px, 2.5vw, 40px);
-  bottom: 4%;
-  font-size: clamp(3.2rem, 7vw, 6.5rem);
-  opacity: 0.85;
+  padding: calc(var(--nav-block) + 16px) clamp(32px, 4.5vw, 64px)
+    clamp(20px, 3vh, 40px) clamp(32px, 4.5vw, 64px);
 }
 .reverie-copy-col .section-label {
   position: relative;
   z-index: 1;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .reverie-title {
   position: relative;
   z-index: 1;
   font-family: var(--serif);
-  font-size: clamp(2.6rem, 5.4vh, 4.4rem);
+  font-size: clamp(3.1rem, 6.4vh, 5.2rem);
   font-weight: 400;
   line-height: 0.92;
   letter-spacing: -0.02em;
   color: var(--navy);
-  margin: 0 0 12px;
+  margin: 0 0 14px;
   -webkit-text-stroke: 1px var(--navy);
 }
 .reverie-title em {
@@ -3219,19 +3212,19 @@ html:has(.reverie-landing) body {
 .reverie-copy-col .section-divider {
   position: relative;
   z-index: 1;
-  margin: 0 0 16px;
+  margin: 0 0 20px;
 }
 .reverie-copy {
   position: relative;
   z-index: 1;
   font-family: var(--serif-alt);
-  font-size: clamp(0.95rem, 1.7vh, 1.08rem);
-  line-height: 1.55;
+  font-size: clamp(1.12rem, 2.1vh, 1.32rem);
+  line-height: 1.65;
   color: var(--ink);
-  max-width: 34rem;
+  max-width: 36rem;
 }
 .reverie-copy p {
-  margin: 0 0 0.7em;
+  margin: 0 0 0.8em;
 }
 .reverie-copy p:last-child {
   margin-bottom: 0;
@@ -3239,13 +3232,13 @@ html:has(.reverie-landing) body {
 .reverie-cta {
   position: relative;
   z-index: 1;
-  margin-top: 18px;
-  padding: 14px 36px;
+  margin-top: 22px;
+  padding: 15px 38px;
 }
 .reverie-copy-col .hero-scroll-hint {
   position: relative;
   z-index: 1;
-  margin-top: 18px;
+  margin-top: 20px;
 }
 .reverie-landing a.btn-navy,
 .reverie-landing a.btn-navy:hover {
@@ -3253,13 +3246,23 @@ html:has(.reverie-landing) body {
   text-decoration: none;
 }
 .reverie-img-col {
-  position: relative;
   min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--nav-block) + 24px) clamp(24px, 3.5vw, 44px) clamp(24px, 4vh, 44px);
+  background: var(--off-white);
+}
+.reverie-img-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   background: var(--navy);
-  line-height: 0;
+  border: 1px solid rgba(13, 27, 42, 0.35);
+  box-shadow: 0 16px 36px rgba(13, 27, 42, 0.1);
 }
-.reverie-img-col img {
+.reverie-img-frame img {
   position: absolute;
   inset: 0;
   display: block;
@@ -3269,26 +3272,17 @@ html:has(.reverie-landing) body {
   object-position: center center;
   filter: saturate(0.9) contrast(1.02);
 }
-.reverie-img-col::after {
-  content: '';
-  position: absolute;
-  bottom: 0; left: 0; right: 0;
-  height: 28%;
-  pointer-events: none;
-  background: linear-gradient(to top, rgba(13,27,42,0.42) 0%, transparent 100%);
-}
 
 @media (max-width: 860px) {
   .reverie-hero {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, auto) minmax(140px, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(110px, 30vh);
   }
   .reverie-copy-col {
     order: -1;
     justify-content: flex-end;
-    padding: calc(var(--nav-block) + 8px) 24px 16px;
+    padding: calc(var(--nav-block) + 8px) 24px 12px;
   }
-  .reverie-watermark { display: none; }
   .reverie-title { font-size: clamp(2.4rem, 9vw, 3.2rem); margin-bottom: 8px; }
   .reverie-copy { font-size: 0.98rem; line-height: 1.5; max-width: none; }
   .reverie-copy p { margin-bottom: 0.55em; }
@@ -3298,14 +3292,22 @@ html:has(.reverie-landing) body {
     margin-top: 14px;
   }
   .reverie-copy-col .hero-scroll-hint { margin-top: 12px; }
-  .reverie-img-col { min-height: 140px; }
+  .reverie-img-col {
+    padding: 10px 24px max(18px, env(safe-area-inset-bottom));
+    align-items: stretch;
+  }
 }
 
 @media (max-width: 640px) {
   .reverie-copy-col {
     padding: calc(var(--nav-block) + 6px)
       max(20px, env(safe-area-inset-left))
-      14px
+      12px
+      max(20px, env(safe-area-inset-right));
+  }
+  .reverie-img-col {
+    padding: 10px max(20px, env(safe-area-inset-left))
+      max(18px, env(safe-area-inset-bottom))
       max(20px, env(safe-area-inset-right));
   }
   .reverie-cta {
@@ -3317,7 +3319,7 @@ html:has(.reverie-landing) body {
   }
 }
 
-@media (max-height: 740px) {
+@media (max-width: 860px) and (max-height: 740px) {
   .reverie-copy-col .hero-scroll-hint { display: none; }
   .reverie-copy { font-size: 0.92rem; line-height: 1.45; }
   .reverie-title { font-size: clamp(2.2rem, 6vh, 3rem); }
