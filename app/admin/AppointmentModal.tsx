@@ -58,6 +58,7 @@ import type {
   TerminalPaymentSummary,
 } from './types';
 import { appointmentServiceLabel, clientDisplayName, isAppointmentReadOnly } from './helpers';
+import { getServiceColor } from './serviceColors';
 import {
   NO_SHOW_PENALTY_FRACTION,
   penaltyAmountCents,
@@ -842,6 +843,7 @@ function ServiceBox({ appointment }: { appointment: Appointment }) {
   const title = appointmentServiceLabel(appointment);
   const description = appointment.service_description;
   const price = appointment.service_price;
+  const color = getServiceColor(appointment);
 
   return (
     <DetailBox label="Service" icon={<Scissors className="h-3 w-3" />}>
@@ -854,7 +856,15 @@ function ServiceBox({ appointment }: { appointment: Appointment }) {
       */}
       <div className="grid grid-cols-[1fr_auto] items-start gap-3">
         <div className="min-w-0">
-          <p className="font-serif text-lg leading-tight text-stone-900">
+          <p className="flex items-center gap-2 font-serif text-lg leading-tight text-stone-900">
+            {color ? (
+              <span
+                className="inline-block h-3.5 w-3.5 shrink-0 rounded-sm ring-1 ring-stone-900/10"
+                style={{ backgroundColor: color.accent }}
+                title="Calendar colour"
+                aria-hidden="true"
+              />
+            ) : null}
             {title}
           </p>
           {description && (

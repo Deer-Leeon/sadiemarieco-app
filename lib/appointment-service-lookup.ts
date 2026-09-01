@@ -1,9 +1,10 @@
 import { sql } from '@vercel/postgres';
 
+import { matchCatalogueService } from '@/lib/match-catalogue-service';
+
 export type ReminderServiceKind = 'brows' | 'lashes';
 
 const BROWS_CATEGORIES = new Set(['Brow Services', 'Teeth Whitening']);
-const AMBIGUOUS_LASH_TITLES = new Set(['classic', 'hybrid', 'volume']);
 
 export function reminderKindFromCategory(
   category: string | null | undefined,
@@ -38,12 +39,6 @@ function primaryServiceTitle(serviceName: string): string {
   return trimmed.slice(0, betweenIdx).trim();
 }
 
-function toIsoTimestamp(value: string | Date): string | null {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
-}
-
 export interface ResolvedAppointmentService {
   displayName: string;
   category: string | null;
@@ -52,7 +47,8 @@ export interface ResolvedAppointmentService {
 
 /**
  * Resolve the catalogue title + category for an appointment's stored
- * `service_name` (matches admin dashboard lateral join logic).
+ * `service_name`. Uses the same token-bag match as calendar colours so
+ * reordered Cal titles still hit the CMS row.
  */
 export async function resolveAppointmentService(
   serviceName: string,
@@ -71,42 +67,25 @@ export async function resolveAppointmentService(
   }
 
   try {
-    const bookingIso = bookingTime ? toIsoTimestamp(bookingTime) : null;
-    const endIso = endTime ? toIsoTimestamp(endTime) : null;
-    const needsDurationMatch =
-      AMBIGUOUS_LASH_TITLES.has(primary.toLowerCase().trim()) &&
-      bookingIso &&
-      endIso;
-
-    const { rows } = needsDurationMatch
-      ? await sql<{ title: string; category: string }>`
-          SELECT s.title, s.category
-          FROM site_services s
-          WHERE s.title = ${primary}
-            AND s.is_active = TRUE
-            AND s.duration_mins IS NOT NULL
-            AND s.duration_mins = GREATEST(
-              1,
-              ROUND(
-                EXTRACT(
-                  EPOCH FROM (${endIso}::timestamptz - ${bookingIso}::timestamptz)
-                ) / 60.0
-              )
-            )::integer
-          ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
-          LIMIT 1
-        `
-      : await sql<{ title: string; category: string }>`
-          SELECT s.title, s.category
-          FROM site_services s
-          WHERE s.title = ${primary}
-            AND s.is_active = TRUE
-          ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
-          LIMIT 1
-        `;
-
-    const row = rows[0];
-    if (!row) {
+    const { rows } = await sql<{
+      title: string;
+      category: string | null;
+      duration_mins: number | null;
+      color: string | null;
+      slug: string | null;
+      description: string | null;
+    }>`
+      SELECT title, category, duration_mins, color, slug, description
+      FROM site_services
+      WHERE is_active = TRUE
+    `;
+    const matched = matchCatalogueService(
+      serviceName,
+      bookingTime,
+      endTime,
+      rows,
+    );
+    if (!matched) {
       return {
         displayName: fallbackName,
         category: null,
@@ -115,9 +94,9 @@ export async function resolveAppointmentService(
     }
 
     return {
-      displayName: row.title,
-      category: row.category,
-      reminderKind: reminderKindFromCategory(row.category),
+      displayName: matched.title,
+      category: matched.category ?? null,
+      reminderKind: reminderKindFromCategory(matched.category),
     };
   } catch (err) {
     console.error('[appointment-service-lookup] lookup failed', {
