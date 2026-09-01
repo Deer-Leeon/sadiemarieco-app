@@ -3278,6 +3278,7 @@ html:has(.reverie-landing) body {
   margin-top: 22px;
   padding: 15px 38px;
 }
+.reverie-cta-phone { display: none; }
 .reverie-landing a.btn-navy,
 .reverie-landing a.btn-navy:hover {
   color: var(--off-white);
@@ -3390,7 +3391,8 @@ html:has(.reverie-landing) body {
   }
   .reverie-copy p { margin-bottom: 0.7em; }
   .reverie-copy-col .hero-scroll-hint { display: none; }
-  .reverie-cta {
+  .reverie-cta-phone,
+  .reverie-cta-desktop {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3405,4 +3407,12 @@ html:has(.reverie-landing) body {
     font-size: 0.78rem;
     letter-spacing: 0.2em;
   }
+}
+
+@media (max-width: 768px) {
+  .reverie-cta-desktop { display: none; }
+}
+
+@media (min-width: 769px) {
+  .reverie-cta-phone { display: none; }
 }

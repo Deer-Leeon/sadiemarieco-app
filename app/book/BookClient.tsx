@@ -11,6 +11,7 @@ import {
   analyticsServiceLabel,
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
+import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-public';
 import { STUDIO_SMS_CONSENT_LABEL } from '@/lib/cal-event-studio-defaults';
 import { formatAppointmentWhen } from '@/lib/format-booking-time';
 import {
@@ -244,6 +245,11 @@ function formatSlotTime(iso: string): string {
   }).format(d);
 }
 
+function isPhoneViewport(): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.matchMedia(`(max-width: ${BOOK_PHONE_MAX_WIDTH_PX}px)`).matches;
+}
+
 function firstDayWithSlots(
   days: string[],
   slots: Record<string, string[]>
@@ -384,7 +390,7 @@ export default function BookClient() {
   const presetSlug = searchParams.get('service')?.trim() ?? '';
   const resumeUidParam = searchParams.get('resume_checkout')?.trim() ?? '';
 
-  const ready = true;
+  const [ready, setReady] = useState(false);
   const [step, setStep] = useState<Step>(() =>
     resumeUidParam ? 'pay' : 'service'
   );
@@ -479,6 +485,14 @@ export default function BookClient() {
       appearance: elementsAppearance,
     };
   }, [elementsAppearance, selectedPriceCents]);
+
+  useEffect(() => {
+    if (!isPhoneViewport()) {
+      window.location.replace('/#services');
+      return;
+    }
+    setReady(true);
+  }, []);
 
   useEffect(() => {
     if (!ready) return;
@@ -1307,6 +1321,14 @@ export default function BookClient() {
       smsOptIn,
     ]
   );
+
+  if (!ready) {
+    return (
+      <div className={styles.shell}>
+        <BookTopBar />
+      </div>
+    );
+  }
 
   const stepTitle =
     confirmed
