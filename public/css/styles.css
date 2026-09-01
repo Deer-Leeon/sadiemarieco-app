@@ -3151,17 +3151,25 @@ button.btn-outline-navy:disabled {
 
 /* ── Reverie Beauty handoff ── */
 html:has(.reverie-landing) {
+  height: 100%;
   background-color: var(--navy);
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+html:has(.reverie-landing) body {
+  height: 100%;
+  overflow: hidden;
 }
 .reverie-landing {
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
   background: var(--off-white);
 }
 .reverie-hero {
   width: 100%;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: stretch;
@@ -3170,35 +3178,36 @@ html:has(.reverie-landing) {
 .reverie-copy-col {
   position: relative;
   z-index: 2;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: calc(var(--nav-block) + 28px) clamp(36px, 5vw, 70px)
-    clamp(40px, 6vh, 64px) clamp(36px, 5vw, 70px);
+  padding: calc(var(--nav-block) + 16px) clamp(28px, 4vw, 56px)
+    clamp(20px, 3vh, 40px) clamp(28px, 4vw, 56px);
 }
 .reverie-watermark {
   top: auto;
-  left: clamp(20px, 3vw, 48px);
-  bottom: 8%;
-  font-size: clamp(4.5rem, 9vw, 9rem);
-  opacity: 0.9;
+  left: clamp(16px, 2.5vw, 40px);
+  bottom: 4%;
+  font-size: clamp(3.2rem, 7vw, 6.5rem);
+  opacity: 0.85;
 }
 .reverie-copy-col .section-label {
   position: relative;
   z-index: 1;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .reverie-title {
   position: relative;
   z-index: 1;
   font-family: var(--serif);
-  font-size: clamp(3.2rem, 7vw, 5.4rem);
+  font-size: clamp(2.6rem, 5.4vh, 4.4rem);
   font-weight: 400;
   line-height: 0.92;
   letter-spacing: -0.02em;
   color: var(--navy);
-  margin: 0 0 18px;
+  margin: 0 0 12px;
   -webkit-text-stroke: 1px var(--navy);
 }
 .reverie-title em {
@@ -3210,19 +3219,19 @@ html:has(.reverie-landing) {
 .reverie-copy-col .section-divider {
   position: relative;
   z-index: 1;
-  margin: 0 0 28px;
+  margin: 0 0 16px;
 }
 .reverie-copy {
   position: relative;
   z-index: 1;
   font-family: var(--serif-alt);
-  font-size: 1.08rem;
-  line-height: 1.75;
+  font-size: clamp(0.95rem, 1.7vh, 1.08rem);
+  line-height: 1.55;
   color: var(--ink);
   max-width: 34rem;
 }
 .reverie-copy p {
-  margin: 0 0 1em;
+  margin: 0 0 0.7em;
 }
 .reverie-copy p:last-child {
   margin-bottom: 0;
@@ -3230,11 +3239,13 @@ html:has(.reverie-landing) {
 .reverie-cta {
   position: relative;
   z-index: 1;
-  margin-top: 28px;
+  margin-top: 18px;
+  padding: 14px 36px;
 }
 .reverie-copy-col .hero-scroll-hint {
   position: relative;
   z-index: 1;
+  margin-top: 18px;
 }
 .reverie-landing a.btn-navy,
 .reverie-landing a.btn-navy:hover {
@@ -3243,15 +3254,17 @@ html:has(.reverie-landing) {
 }
 .reverie-img-col {
   position: relative;
+  min-height: 0;
   overflow: hidden;
   background: var(--navy);
   line-height: 0;
 }
 .reverie-img-col img {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 100%;
   object-fit: cover;
   object-position: center center;
   filter: saturate(0.9) contrast(1.02);
@@ -3268,39 +3281,31 @@ html:has(.reverie-landing) {
 @media (max-width: 860px) {
   .reverie-hero {
     grid-template-columns: 1fr;
-    min-height: 0;
+    grid-template-rows: minmax(0, auto) minmax(140px, 1fr);
   }
   .reverie-copy-col {
     order: -1;
-    padding: calc(var(--nav-block) + 16px) 24px 40px;
+    justify-content: flex-end;
+    padding: calc(var(--nav-block) + 8px) 24px 16px;
   }
-  .reverie-watermark {
-    font-size: clamp(3.4rem, 18vw, 5.5rem);
-    bottom: auto;
-    top: 12px;
-    left: 12px;
-  }
-  .reverie-title { font-size: clamp(3rem, 14vw, 4.4rem); }
-  .reverie-copy { font-size: 1.04rem; max-width: none; }
+  .reverie-watermark { display: none; }
+  .reverie-title { font-size: clamp(2.4rem, 9vw, 3.2rem); margin-bottom: 8px; }
+  .reverie-copy { font-size: 0.98rem; line-height: 1.5; max-width: none; }
+  .reverie-copy p { margin-bottom: 0.55em; }
   .reverie-cta {
     display: inline-block;
     align-self: flex-start;
+    margin-top: 14px;
   }
-  .reverie-img-col {
-    aspect-ratio: var(--hero-aspect);
-  }
-  .reverie-img-col img {
-    position: absolute;
-    inset: 0;
-    min-height: 0;
-  }
+  .reverie-copy-col .hero-scroll-hint { margin-top: 12px; }
+  .reverie-img-col { min-height: 140px; }
 }
 
 @media (max-width: 640px) {
   .reverie-copy-col {
-    padding: calc(var(--nav-block) + 12px)
+    padding: calc(var(--nav-block) + 6px)
       max(20px, env(safe-area-inset-left))
-      36px
+      14px
       max(20px, env(safe-area-inset-right));
   }
   .reverie-cta {
@@ -3310,4 +3315,10 @@ html:has(.reverie-landing) {
     box-sizing: border-box;
     align-self: stretch;
   }
+}
+
+@media (max-height: 740px) {
+  .reverie-copy-col .hero-scroll-hint { display: none; }
+  .reverie-copy { font-size: 0.92rem; line-height: 1.45; }
+  .reverie-title { font-size: clamp(2.2rem, 6vh, 3rem); }
 }
