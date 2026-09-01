@@ -37,6 +37,13 @@ export interface HealthCheckResult {
    * reader, which is routinely powered off between appointments.
    */
   soft?: boolean;
+  /**
+   * Timeout / dropped socket / abort — not a real auth or config failure.
+   * The hourly alerter pages only if the same probe stays in this state
+   * across consecutive runs (Cal.com stalls like this for one sample at
+   * night, then is fine on the next hour).
+   */
+  transient?: boolean;
 }
 
 export interface HealthReport {
@@ -72,40 +79,55 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function httpStatusOf(err: unknown): number {
+  if (!err || typeof err !== 'object' || !('status' in err)) return NaN;
+  const status = Number((err as { status: unknown }).status);
+  return Number.isFinite(status) ? status : NaN;
+}
+
+function errorText(err: unknown): string {
+  if (err instanceof Error) return `${err.name} ${err.message}`;
+  return String(err);
+}
+
 /**
  * True for failures that say "try again" rather than "this is broken":
  * timeouts, dropped sockets, rate limits, upstream 5xx.
  */
 function isTransientFailure(err: unknown): boolean {
-  const status =
-    err && typeof err === 'object' && 'status' in err
-      ? Number((err as { status: unknown }).status)
-      : NaN;
+  const status = httpStatusOf(err);
   if (Number.isFinite(status)) return status === 429 || status >= 500;
   const name = err instanceof Error ? err.name : '';
-  if (name === 'TimeoutError' || name === 'AbortError') return true;
-  return (
-    err instanceof Error &&
-    /fetch failed|network|socket|ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(
-      err.message
-    )
+  if (name === 'TimeoutError' || name === 'AbortError' || name === 'DOMException') {
+    return true;
+  }
+  return /fetch failed|network|socket|ECONNRESET|ETIMEDOUT|EAI_AGAIN|aborted|timed out|timeout/i.test(
+    errorText(err)
   );
 }
 
+function isCalAuthRejection(err: unknown): boolean {
+  const status = httpStatusOf(err);
+  return status === 401 || status === 403;
+}
+
 /**
- * Give a flaky dependency one more chance before the probe reports a
- * failure. Cal.com's hosted API stalls past our client timeout every few
- * days; paging the owners on a single sample means a daily alert/recovery
- * pair for something that was already fine on the next run.
+ * Give a flaky dependency a couple of chances before the probe reports a
+ * failure. Cal.com's hosted API regularly stalls past a single client
+ * timeout in the small hours; one sample must not page the owners.
  */
-async function retryTransient<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    if (!isTransientFailure(err)) throw err;
-    await sleep(PROBE_RETRY_GAP_MS);
-    return fn();
+async function retryTransient<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      last = err;
+      if (!isTransientFailure(err) || i === attempts - 1) throw err;
+      await sleep(PROBE_RETRY_GAP_MS * (i + 1));
+    }
   }
+  throw last;
 }
 
 function result(
@@ -646,13 +668,24 @@ async function checkCalCom(): Promise<HealthCheckResult[]> {
       );
     }
   } catch (err) {
+    const authRejected = isCalAuthRejection(err);
+    const statusCode = httpStatusOf(err);
+    const flake =
+      !authRejected &&
+      !Number.isFinite(statusCode) &&
+      isTransientFailure(err);
     checks.push(
       result({
         id: 'cal-api-auth',
         name: 'Cal.com API authentication',
         category: 'Cal.com',
-        status: 'unhealthy',
-        message: 'Cal.com API request failed',
+        status: flake ? 'degraded' : 'unhealthy',
+        transient: flake,
+        message: authRejected
+          ? 'Cal.com rejected the API key'
+          : flake
+            ? 'Cal.com API timed out (transient — not an auth failure)'
+            : 'Cal.com API request failed',
         detail: err instanceof Error ? err.message : String(err),
       })
     );
