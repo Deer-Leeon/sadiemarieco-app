@@ -23,6 +23,7 @@
   <meta name="twitter:card" content="summary_large_image">
   <link rel="preload" as="image" href="/assets/images/reverie-hero.webp" type="image/webp" fetchpriority="high">
   <link rel="prefetch" href="https://www.sadiemarie.co/" as="document">
+  <link rel="prefetch" href="https://www.sadiemarie.co/book" as="document">
   <style>
     html { background-color: #F5F3F0; }
     html:not(.hero-ready) body { visibility: hidden; }
@@ -90,8 +91,8 @@
 </script>
 <script>
   (function () {
-    var cta = document.querySelector('.reverie-cta-desktop');
-    if (!cta) return;
+    var ctas = document.querySelectorAll('a.reverie-cta-phone, a.reverie-cta-desktop');
+    if (!ctas.length) return;
 
     function restore() {
       document.documentElement.classList.remove('reverie-handoff');
@@ -99,25 +100,27 @@
     window.addEventListener('pageshow', restore);
     window.addEventListener('popstate', restore);
 
-    cta.addEventListener('click', function (event) {
-      if (
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey ||
-        event.button !== 0
-      ) {
-        return;
-      }
-      event.preventDefault();
-      if (document.documentElement.classList.contains('reverie-handoff')) return;
-      var href = cta.href;
-      window.setTimeout(function () {
-        document.documentElement.classList.add('reverie-handoff');
+    ctas.forEach(function (cta) {
+      cta.addEventListener('click', function (event) {
+        if (
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey ||
+          event.button !== 0
+        ) {
+          return;
+        }
+        event.preventDefault();
+        if (document.documentElement.classList.contains('reverie-handoff')) return;
+        var href = cta.href;
         window.setTimeout(function () {
-          window.location.href = href;
-        }, 450);
-      }, 320);
+          document.documentElement.classList.add('reverie-handoff');
+          window.setTimeout(function () {
+            window.location.href = href;
+          }, 450);
+        }, 320);
+      });
     });
   })();
 </script>

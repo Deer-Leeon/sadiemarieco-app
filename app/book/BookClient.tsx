@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { track } from '@vercel/analytics';
 import { Elements } from '@stripe/react-stripe-js';
@@ -58,7 +58,7 @@ const SLOT_RELEASE_WAIT_MS = 15_000;
 /** Extra beat after the slot reappears so Cal's embed cache can catch up. */
 const SLOT_RELEASE_SETTLE_MS = 700;
 
-interface BookService {
+export type BookService = {
   slug: string;
   title: string;
   category: string;
@@ -67,7 +67,20 @@ interface BookService {
   priceCents: number;
   durationMins: number;
   durationLabel: string;
-}
+};
+
+export type BookQuery = {
+  service: string;
+  resumeCheckout: string;
+  name: string;
+  email: string;
+  phone: string;
+  time: string;
+  redirectStatus: string;
+  setupIntent: string;
+  paymentIntent: string;
+  uid: string;
+};
 
 function trackBook(name: string, data?: Record<string, string | number | boolean | null>) {
   try {
@@ -384,17 +397,22 @@ function BookDayScroller({
   );
 }
 
-export default function BookClient() {
+export default function BookClient({
+  initialServices,
+  bookQuery,
+}: {
+  initialServices: BookService[];
+  bookQuery: BookQuery;
+}) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const presetSlug = searchParams.get('service')?.trim() ?? '';
-  const resumeUidParam = searchParams.get('resume_checkout')?.trim() ?? '';
+  const presetSlug = bookQuery.service;
+  const resumeUidParam = bookQuery.resumeCheckout;
 
-  const [ready, setReady] = useState(false);
+  const ready = true;
   const [step, setStep] = useState<Step>(() =>
     resumeUidParam ? 'pay' : 'service'
   );
-  const [services, setServices] = useState<BookService[]>([]);
+  const [services, setServices] = useState<BookService[]>(initialServices);
   const [servicesError, setServicesError] = useState<string | null>(null);
   const [selected, setSelected] = useState<BookService | null>(null);
 
@@ -491,12 +509,36 @@ export default function BookClient() {
       window.location.replace('/#services');
       return;
     }
-    setReady(true);
   }, []);
 
   useEffect(() => {
     if (!ready) return;
     let cancelled = false;
+
+    const applyPreset = (list: BookService[]) => {
+      if (
+        presetSlug &&
+        !resumeUidParam &&
+        !holdUidRef.current &&
+        !resumeAppliedRef.current
+      ) {
+        const match = list.find((s) => s.slug === presetSlug);
+        if (match) {
+          setSelected(match);
+          setStep('when');
+          trackBook(BOOKING_ANALYTICS_EVENTS.SERVICE_OPENED, {
+            service: analyticsServiceLabel(match.title),
+            source: 'phone_booker',
+          });
+        }
+      }
+    };
+
+    if (initialServices.length > 0) {
+      applyPreset(initialServices);
+      return;
+    }
+
     (async () => {
       try {
         const res = await fetch('/api/book/services', {
@@ -519,23 +561,7 @@ export default function BookClient() {
               : 0,
         }));
         setServices(list);
-        const resumeUid = searchParams.get('resume_checkout')?.trim() ?? '';
-        if (
-          presetSlug &&
-          !resumeUid &&
-          !holdUidRef.current &&
-          !resumeAppliedRef.current
-        ) {
-          const match = list.find((s) => s.slug === presetSlug);
-          if (match) {
-            setSelected(match);
-            setStep('when');
-            trackBook(BOOKING_ANALYTICS_EVENTS.SERVICE_OPENED, {
-              service: analyticsServiceLabel(match.title),
-              source: 'phone_booker',
-            });
-          }
-        }
+        applyPreset(list);
       } catch {
         if (!cancelled) setServicesError('Could not load services.');
       }
@@ -543,19 +569,19 @@ export default function BookClient() {
     return () => {
       cancelled = true;
     };
-  }, [ready, presetSlug, searchParams]);
+  }, [ready, presetSlug, resumeUidParam, initialServices]);
 
   useEffect(() => {
     if (!ready || resumeAppliedRef.current || services.length === 0) return;
-    const uid = searchParams.get('resume_checkout')?.trim() ?? '';
+    const uid = bookQuery.resumeCheckout;
     if (!uid) return;
     resumeAppliedRef.current = true;
 
-    const urlName = searchParams.get('name')?.trim() ?? '';
-    const urlEmail = searchParams.get('email')?.trim() ?? '';
-    const urlPhone = searchParams.get('phone')?.trim() ?? '';
-    const urlService = searchParams.get('service')?.trim() ?? '';
-    const urlTime = searchParams.get('time')?.trim() ?? '';
+    const urlName = bookQuery.name;
+    const urlEmail = bookQuery.email;
+    const urlPhone = bookQuery.phone;
+    const urlService = bookQuery.service;
+    const urlTime = bookQuery.time;
 
     let cancelled = false;
     (async () => {
@@ -615,7 +641,7 @@ export default function BookClient() {
     return () => {
       cancelled = true;
     };
-  }, [ready, services, searchParams]);
+  }, [ready, services, bookQuery]);
 
   const loadSlots = useCallback(
     async (
@@ -887,12 +913,12 @@ export default function BookClient() {
   // Rare Apple Pay / wallet 3DS redirect return onto /book.
   useEffect(() => {
     if (!ready || confirmed) return;
-    const redirectStatus = searchParams.get('redirect_status');
-    const setupIntentId = searchParams.get('setup_intent')?.trim() ?? '';
-    const paymentIntentId = searchParams.get('payment_intent')?.trim() ?? '';
-    const uid = searchParams.get('uid')?.trim() ?? '';
-    const resumeName = searchParams.get('name')?.trim() ?? '';
-    const resumeEmail = searchParams.get('email')?.trim() ?? '';
+    const redirectStatus = bookQuery.redirectStatus;
+    const setupIntentId = bookQuery.setupIntent;
+    const paymentIntentId = bookQuery.paymentIntent;
+    const uid = bookQuery.uid;
+    const resumeName = bookQuery.name;
+    const resumeEmail = bookQuery.email;
     const hasSetup = setupIntentId.startsWith('seti_');
     const hasPayment = paymentIntentId.startsWith('pi_');
     if (
@@ -979,7 +1005,7 @@ export default function BookClient() {
     return () => {
       cancelled = true;
     };
-  }, [ready, confirmed, searchParams, fullName]);
+  }, [ready, confirmed, bookQuery, fullName]);
 
   const stepIndex = STEPS.indexOf(step);
 
@@ -1322,14 +1348,6 @@ export default function BookClient() {
     ]
   );
 
-  if (!ready) {
-    return (
-      <div className={styles.shell}>
-        <BookTopBar />
-      </div>
-    );
-  }
-
   const stepTitle =
     confirmed
       ? "You're booked"
@@ -1431,9 +1449,6 @@ export default function BookClient() {
         {step === 'service' && !resumeUidParam && (
           <section className={styles.section}>
             {servicesError && <p className={styles.error}>{servicesError}</p>}
-            {!servicesError && services.length === 0 && (
-              <p className={styles.muted}>Loading services…</p>
-            )}
             {[...servicesByCategory.entries()].map(([category, list]) => (
               <div key={category} className={styles.categoryBlock}>
                 <p className={styles.categoryLabel}>{category}</p>
