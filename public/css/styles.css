@@ -3284,9 +3284,9 @@ html:has(.reverie-landing) body {
   }
   .reverie-img-col {
     order: -1;
-    padding: calc(var(--nav-block) + 10px)
+    padding: calc(var(--nav-block) + 28px)
       max(20px, env(safe-area-inset-left))
-      12px
+      28px
       max(20px, env(safe-area-inset-right));
     align-items: stretch;
   }
@@ -3296,7 +3296,7 @@ html:has(.reverie-landing) body {
     margin: 0 auto;
   }
   .reverie-copy-col {
-    padding: 8px max(20px, env(safe-area-inset-left))
+    padding: 24px max(20px, env(safe-area-inset-left))
       max(16px, env(safe-area-inset-bottom))
       max(20px, env(safe-area-inset-right));
     justify-content: flex-start;
