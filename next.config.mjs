@@ -80,6 +80,7 @@ const nextConfig = {
         destination: '/beauty-studio-lehi.html',
       },
       { source: '/areas-we-serve', destination: '/areas-we-serve.html' },
+      { source: '/reveriebeauty', destination: '/reverie-beauty.html' },
     ];
   },
 };
