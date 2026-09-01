@@ -25,6 +25,11 @@ import { requireAdminUser } from '@/app/admin/auth';
 import type { Appointment } from '@/app/admin/types';
 import { normalizeStoredBookingNotes } from '@/lib/cal-booking-notes';
 import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
+import {
+  applyCatalogueService,
+  loadActiveCatalogueServices,
+  type CatalogueServiceRow,
+} from '@/lib/match-catalogue-service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -76,7 +81,11 @@ function serializeDate(value: Date | string | null): string | null {
 }
 
 /** Same mapper as `app/api/admin/clients/[id]/appointments/route.ts`. */
-function rowToAppointment(row: AppointmentRow): Appointment {
+function rowToAppointment(
+  row: AppointmentRow,
+  catalogue: CatalogueServiceRow[],
+): Appointment {
+  const catalogueFields = applyCatalogueService(row, catalogue);
   return {
     id: row.id,
     cal_uid: row.cal_event_id,
@@ -96,9 +105,9 @@ function rowToAppointment(row: AppointmentRow): Appointment {
             const n = Number(row.service_price);
             return Number.isFinite(n) ? n : null;
           })(),
-    service_description: row.service_description,
-    service_slug: row.service_slug,
-    service_color: row.service_color,
+    service_description: catalogueFields.service_description,
+    service_slug: catalogueFields.service_slug,
+    service_color: catalogueFields.service_color,
     stripe_customer_id: row.stripe_customer_id,
     terminal_payment: mapSqlPaymentFields(row),
     client_no_show_flag: Boolean(row.client_no_show_flag),
@@ -119,7 +128,8 @@ export async function GET(): Promise<NextResponse> {
   }
 
   try {
-    const { rows } = await sql<AppointmentRow>`
+    const [{ rows }, catalogue] = await Promise.all([
+      sql<AppointmentRow>`
       SELECT
         a.id,
         a.cal_event_id,
@@ -233,10 +243,12 @@ export async function GET(): Promise<NextResponse> {
       WHERE a.booking_time >= NOW() - INTERVAL '30 days'
       ORDER BY a.booking_time ASC
       LIMIT 1000
-    `;
+    `,
+      loadActiveCatalogueServices(),
+    ]);
 
     return NextResponse.json({
-      appointments: rows.map(rowToAppointment),
+      appointments: rows.map((row) => rowToAppointment(row, catalogue)),
     });
   } catch (err) {
     console.error('[api/admin/appointments] GET failed:', errorMessage(err));

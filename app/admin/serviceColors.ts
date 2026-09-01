@@ -8,11 +8,13 @@
  * Resolution strategy:
  *   The hex comes from `site_services.color` exclusively — the
  *   editor picks it in /admin/services and it travels onto each
- *   appointment row via the LEFT JOIN LATERAL in
- *   `app/admin/page.tsx` and `/api/admin/clients/[id]/appointments`.
- *   Bare fill children ("Classic" / "Hybrid" / "Volume") are matched
- *   by title AND appointment duration so 2-/3-/4-week fills each keep
- *   their own hex (see `appointmentServiceLabel` in helpers.ts).
+ *   appointment row via the LEFT JOIN LATERAL, then a token-bag
+ *   fallback (`lib/match-catalogue-service.ts`) so punctuation and
+ *   word order ("Lamination, Tint, + Wax" vs "Lamination, Wax, + Tint")
+ *   still resolve to the same catalogue hex. Bare fill children
+ *   ("Classic" / "Hybrid" / "Volume") are matched by title key AND
+ *   appointment duration so 2-/3-/4-week fills each keep their own hex
+ *   (see `appointmentServiceLabel` in helpers.ts).
  *   There is intentionally NO fallback heuristic any more — the
  *   studio asked for full manual control over which service gets
  *   which colour, so an unset service renders the original neutral
@@ -111,8 +113,9 @@ export interface ServiceColorInput {
 export function getServiceColor(
   input: ServiceColorInput
 ): ServiceColor | null {
-  if (input.service_color && HEX_COLOR_RE.test(input.service_color)) {
-    return makeColor(input.service_color.toUpperCase());
+  const hex = input.service_color?.trim();
+  if (hex && HEX_COLOR_RE.test(hex)) {
+    return makeColor(hex.toUpperCase());
   }
   return null;
 }

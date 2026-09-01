@@ -6,6 +6,10 @@ import { loadCalEventTypeMaps } from '@/lib/cal-config';
 import { normalizeStoredBookingNotes } from '@/lib/cal-booking-notes';
 import { ALLOWED_ADMIN_EMAILS } from '@/lib/admin-allowlist';
 import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
+import {
+  applyCatalogueService,
+  loadActiveCatalogueServices,
+} from '@/lib/match-catalogue-service';
 
 import DashboardUI from './DashboardUI';
 import type { Appointment, TimeBlock } from './types';
@@ -149,6 +153,11 @@ export default async function AdminPage() {
     // so we strip everything from the first ' between ' onward via
     // split_part before matching against site_services.title.
     //
+    // Exact title can miss when Cal and the CMS disagree on punctuation
+    // or word order ("Lamination, Tint, + Wax" vs "Lamination, Wax, + Tint").
+    // `applyCatalogueService` fills colour / slug / description from a
+    // token-bag match in that case.
+    //
     // The JOIN is LEFT (not INNER) so:
     //   • bookings for services renamed in the CMS after the booking
     //     was created still appear, just without price/description,
@@ -166,7 +175,8 @@ export default async function AdminPage() {
     // (always the most-recently-updated "Volume" row). For those bare
     // fill titles we also match on appointment duration (120 / 150 /
     // 180 min) so each week group keeps its editor-assigned hex.
-    const { rows } = await sql<DbRow>`
+    const [{ rows }, catalogue] = await Promise.all([
+      sql<DbRow>`
       SELECT
         a.id,
         a.cal_event_id,
@@ -280,9 +290,13 @@ export default async function AdminPage() {
       WHERE a.booking_time >= NOW() - INTERVAL '30 days'
       ORDER BY a.booking_time ASC
       LIMIT 1000
-    `;
-    appointments = rows.map<Appointment>((r) => ({
-      id: r.id,
+    `,
+      loadActiveCatalogueServices(),
+    ]);
+    appointments = rows.map<Appointment>((r) => {
+      const catalogueFields = applyCatalogueService(r, catalogue);
+      return {
+        id: r.id,
       cal_uid: r.cal_event_id,
       client_first_name: r.client_first_name,
       client_last_name: r.client_last_name,
@@ -304,13 +318,14 @@ export default async function AdminPage() {
               const n = Number(r.service_price);
               return Number.isFinite(n) ? n : null;
             })(),
-      service_description: r.service_description,
-      service_slug: r.service_slug,
-      service_color: r.service_color,
+      service_description: catalogueFields.service_description,
+      service_slug: catalogueFields.service_slug,
+      service_color: catalogueFields.service_color,
       stripe_customer_id: r.stripe_customer_id,
       terminal_payment: mapSqlPaymentFields(r),
       client_no_show_flag: Boolean(r.client_no_show_flag),
-    }));
+    };
+    });
   } catch (err) {
     console.error('[admin] appointments query failed:', err);
     dbError = err instanceof Error ? err.message : 'Unknown DB error';

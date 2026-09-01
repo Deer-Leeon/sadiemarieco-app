@@ -38,6 +38,11 @@ import { normalizeStoredBookingNotes } from '@/lib/cal-booking-notes';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
 import { sqlPhoneVariants } from '@/lib/client-identity';
 import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
+import {
+  applyCatalogueService,
+  loadActiveCatalogueServices,
+  type CatalogueServiceRow,
+} from '@/lib/match-catalogue-service';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -104,7 +109,11 @@ function serializeDate(value: Date | string | null): string | null {
   return d.toISOString();
 }
 
-function rowToAppointment(row: AppointmentRow): Appointment {
+function rowToAppointment(
+  row: AppointmentRow,
+  catalogue: CatalogueServiceRow[],
+): Appointment {
+  const catalogueFields = applyCatalogueService(row, catalogue);
   return {
     id: row.id,
     cal_uid: row.cal_event_id,
@@ -124,9 +133,9 @@ function rowToAppointment(row: AppointmentRow): Appointment {
             const n = Number(row.service_price);
             return Number.isFinite(n) ? n : null;
           })(),
-    service_description: row.service_description,
-    service_slug: row.service_slug,
-    service_color: row.service_color,
+    service_description: catalogueFields.service_description,
+    service_slug: catalogueFields.service_slug,
+    service_color: catalogueFields.service_color,
     stripe_customer_id: row.stripe_customer_id,
     terminal_payment: mapSqlPaymentFields(row),
     client_no_show_flag: Boolean(row.client_no_show_flag),
@@ -197,7 +206,8 @@ export async function GET(
     // "Hybrid" / "Volume") also require matching appointment duration
     // to the child's duration_mins so 2-/3-/4-week fills keep distinct
     // editor-assigned colours.
-    const { rows } = await sql<AppointmentRow>`
+    const [{ rows }, catalogue] = await Promise.all([
+      sql<AppointmentRow>`
       SELECT
         a.id,
         a.cal_event_id,
@@ -298,7 +308,9 @@ export async function GET(
         AND COALESCE(LOWER(TRIM(a.status)), '') <> 'pending'
       ORDER BY a.booking_time DESC NULLS LAST, a.id DESC
       LIMIT 500
-    `;
+    `,
+      loadActiveCatalogueServices(),
+    ]);
     const crm_stats = await fetchClientCrmStats(client.id, {
       email: client.email,
       phone: client.phone,
@@ -306,10 +318,13 @@ export async function GET(
 
     return NextResponse.json({
       appointments: rows.map((row) =>
-        rowToAppointment({
-          ...row,
-          client_no_show_flag: crm_stats.no_show_flag,
-        })
+        rowToAppointment(
+          {
+            ...row,
+            client_no_show_flag: crm_stats.no_show_flag,
+          },
+          catalogue,
+        )
       ),
       crm_stats,
     });
