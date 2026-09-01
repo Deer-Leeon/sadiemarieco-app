@@ -3155,15 +3155,20 @@ html:has(.reverie-landing) {
 }
 .reverie-landing {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   background: var(--off-white);
 }
 .reverie-stage {
   flex: 1;
-  display: grid;
-  place-items: center;
-  padding: 32px 20px 56px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 32px max(20px, env(safe-area-inset-right))
+    max(56px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
   background:
     radial-gradient(ellipse at 50% 18%, rgba(13, 27, 42, 0.06) 0%, transparent 58%),
     var(--off-white);
@@ -3213,7 +3218,16 @@ html:has(.reverie-landing) {
 }
 
 @media (max-width: 640px) {
+  .reverie-stage {
+    align-items: flex-start;
+    padding-top: 24px;
+  }
   .reverie-card { padding: 32px 22px 28px; }
   .reverie-copy { font-size: 1.02rem; }
-  .reverie-cta { width: 100%; text-align: center; }
+  .reverie-cta {
+    display: block;
+    width: 100%;
+    text-align: center;
+    box-sizing: border-box;
+  }
 }
