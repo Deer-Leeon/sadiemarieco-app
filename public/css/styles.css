@@ -3164,6 +3164,43 @@ html:has(.reverie-landing) body {
   height: 100dvh;
   overflow: hidden;
   background: var(--off-white);
+  --reverie-bar: 64px;
+}
+.reverie-landing .reverie-topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 0;
+  padding: 14px 16px;
+  background: #0d1b2a;
+  color: #f5f3f0;
+  border-bottom: 0;
+}
+.reverie-topbar-slot {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  text-decoration: none;
+}
+.reverie-brand {
+  margin: 0;
+  font-family: 'Bodoni Moda', Georgia, serif;
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #f5f3f0;
 }
 .reverie-hero {
   width: min(1080px, 100%);
@@ -3187,7 +3224,7 @@ html:has(.reverie-landing) body {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: calc(var(--nav-block) + 16px) 0 clamp(20px, 3vh, 40px);
+  padding: calc(var(--reverie-bar) + 16px) 0 clamp(20px, 3vh, 40px);
 }
 .reverie-title {
   position: relative;
@@ -3248,15 +3285,15 @@ html:has(.reverie-landing) body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: calc(var(--nav-block) + 28px) 0 28px;
+  padding: calc(var(--reverie-bar) + 28px) 0 28px;
   background: var(--off-white);
 }
 .reverie-img-frame {
   position: relative;
-  width: min(100%, calc((100dvh - var(--nav-block) - 56px) * 4 / 5));
+  width: min(100%, calc((100dvh - var(--reverie-bar) - 56px) * 4 / 5));
   aspect-ratio: 4 / 5;
   height: auto;
-  max-height: calc(100dvh - var(--nav-block) - 56px);
+  max-height: calc(100dvh - var(--reverie-bar) - 56px);
   overflow: hidden;
   background: var(--off-white);
   border: 1px solid rgba(13, 27, 42, 0.35);
@@ -3284,11 +3321,8 @@ html:has(.reverie-landing) body {
     height: 100svh;
     max-height: 100svh;
   }
-  .reverie-landing nav {
-    min-height: 52px;
-  }
-  .reverie-landing .nav-logo {
-    font-size: 0.95rem;
+  .reverie-landing .reverie-topbar {
+    min-height: 0;
   }
   .reverie-hero {
     width: 100%;
@@ -3303,8 +3337,9 @@ html:has(.reverie-landing) body {
   .reverie-img-col {
     order: -1;
     flex: 1 1 auto;
-    min-height: 160px;
-    padding: 66px max(20px, env(safe-area-inset-left)) 16px
+    min-height: 0;
+    max-height: 34svh;
+    padding: calc(var(--reverie-bar) + 12px) max(20px, env(safe-area-inset-left)) 12px
       max(20px, env(safe-area-inset-right));
     align-items: center;
   }
@@ -3320,31 +3355,36 @@ html:has(.reverie-landing) body {
     flex: 0 0 auto;
     min-height: 0;
     overflow: visible;
-    padding: 4px max(20px, env(safe-area-inset-left))
+    padding: 10px max(20px, env(safe-area-inset-left))
       max(18px, env(safe-area-inset-bottom))
       max(20px, env(safe-area-inset-right));
     justify-content: flex-start;
   }
-  .reverie-title { font-size: clamp(1.9rem, 7vw, 2.4rem); margin-bottom: 6px; }
-  .reverie-copy-col .section-divider { margin-bottom: 10px; }
+  .reverie-title { font-size: clamp(1.9rem, 7vw, 2.4rem); margin-bottom: 10px; }
+  .reverie-copy-col .section-divider { margin-bottom: 16px; }
   .reverie-copy {
     flex: none;
-    font-size: 0.95rem;
-    line-height: 1.48;
+    font-size: 0.98rem;
+    line-height: 1.65;
     max-width: none;
     min-height: 0;
     overflow: visible;
   }
-  .reverie-copy p { margin-bottom: 0.5em; }
+  .reverie-copy p { margin-bottom: 0.7em; }
   .reverie-copy-col .hero-scroll-hint { display: none; }
   .reverie-cta {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 100%;
     text-align: center;
     box-sizing: border-box;
     flex-shrink: 0;
     align-self: stretch;
-    margin-top: 16px;
-    padding: 14px 24px;
+    margin-top: 18px;
+    padding: 20px 24px;
+    min-height: 54px;
+    font-size: 0.78rem;
+    letter-spacing: 0.2em;
   }
 }
