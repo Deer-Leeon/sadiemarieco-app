@@ -3325,6 +3325,7 @@ html:has(.reverie-landing) body {
     min-height: 0;
   }
   .reverie-hero {
+    --reverie-gutter: 24px;
     width: 100%;
     display: flex;
     flex-direction: column;
@@ -3338,8 +3339,7 @@ html:has(.reverie-landing) body {
     order: -1;
     flex: 1 1 auto;
     min-height: 0;
-    max-height: 34svh;
-    padding: calc(var(--reverie-bar) + 12px) max(20px, env(safe-area-inset-left)) 12px
+    padding: calc(var(--reverie-bar) + var(--reverie-gutter)) max(20px, env(safe-area-inset-left)) 12px
       max(20px, env(safe-area-inset-right));
     align-items: center;
   }
@@ -3355,8 +3355,8 @@ html:has(.reverie-landing) body {
     flex: 0 0 auto;
     min-height: 0;
     overflow: visible;
-    padding: 10px max(20px, env(safe-area-inset-left))
-      max(18px, env(safe-area-inset-bottom))
+    padding: 8px max(20px, env(safe-area-inset-left))
+      max(var(--reverie-gutter), env(safe-area-inset-bottom))
       max(20px, env(safe-area-inset-right));
     justify-content: flex-start;
   }
