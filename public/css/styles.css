@@ -3178,7 +3178,8 @@ html:has(.reverie-landing) body {
   --reverie-bar: 88px;
 }
 html.reverie-handoff .reverie-hero {
-  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 .reverie-landing .reverie-topbar {
   position: fixed;
@@ -3232,6 +3233,7 @@ html.reverie-handoff .reverie-hero {
   padding: 0 clamp(28px, 5vw, 56px);
   box-sizing: border-box;
   background: var(--off-white);
+  transition: opacity 0.45s ease;
 }
 .reverie-copy-col {
   position: relative;
