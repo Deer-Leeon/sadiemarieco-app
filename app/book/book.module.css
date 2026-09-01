@@ -924,3 +924,28 @@
   line-height: 1.35;
   color: #586574;
 }
+
+/* Desktop: homepage-height bar, wordmark on the left, no nav / Book Now. */
+@media (min-width: 861px) {
+  .topBar {
+    min-height: 88px;
+    padding: 0 clamp(24px, 5vw, 64px);
+    border-bottom: 1px solid rgba(245, 243, 240, 0.1);
+  }
+
+  .topBar > span.iconBtn {
+    display: none;
+  }
+
+  .brand {
+    margin-right: auto;
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+  }
+
+  .main {
+    max-width: 560px;
+    padding: 32px 24px 80px;
+  }
+}
