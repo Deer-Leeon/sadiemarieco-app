@@ -1,6 +1,8 @@
 import { Suspense } from 'react';
 
 import BookClient from './BookClient';
+import BookTopBar from './BookTopBar';
+import styles from './book.module.css';
 
 export const metadata = {
   title: 'Book',
@@ -12,18 +14,8 @@ export default function BookPage() {
   return (
     <Suspense
       fallback={
-        <div
-          style={{
-            minHeight: '100dvh',
-            display: 'grid',
-            placeItems: 'center',
-            background: '#F5F3F0',
-            color: '#586574',
-            fontFamily: 'DM Sans, system-ui, sans-serif',
-            fontSize: 14,
-          }}
-        >
-          Opening booking…
+        <div className={styles.shell}>
+          <BookTopBar />
         </div>
       }
     >

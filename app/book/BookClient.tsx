@@ -11,7 +11,6 @@ import {
   analyticsServiceLabel,
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
-import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-public';
 import { STUDIO_SMS_CONSENT_LABEL } from '@/lib/cal-event-studio-defaults';
 import { formatAppointmentWhen } from '@/lib/format-booking-time';
 import {
@@ -37,6 +36,7 @@ import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
 
 import BookPayErrorBoundary from './BookPayErrorBoundary';
 import BookApplePayHost, { type BookConfirmed } from './BookApplePayHost';
+import BookTopBar from './BookTopBar';
 import { CheckoutForm } from '@/app/checkout/CheckoutClient';
 import styles from './book.module.css';
 
@@ -244,11 +244,6 @@ function formatSlotTime(iso: string): string {
   }).format(d);
 }
 
-function isPhoneViewport(): boolean {
-  if (typeof window === 'undefined') return true;
-  return window.matchMedia(`(max-width: ${BOOK_PHONE_MAX_WIDTH_PX}px)`).matches;
-}
-
 function firstDayWithSlots(
   days: string[],
   slots: Record<string, string[]>
@@ -389,7 +384,7 @@ export default function BookClient() {
   const presetSlug = searchParams.get('service')?.trim() ?? '';
   const resumeUidParam = searchParams.get('resume_checkout')?.trim() ?? '';
 
-  const [ready, setReady] = useState(false);
+  const ready = true;
   const [step, setStep] = useState<Step>(() =>
     resumeUidParam ? 'pay' : 'service'
   );
@@ -484,14 +479,6 @@ export default function BookClient() {
       appearance: elementsAppearance,
     };
   }, [elementsAppearance, selectedPriceCents]);
-
-  useEffect(() => {
-    if (!isPhoneViewport()) {
-      window.location.replace('/#services');
-      return;
-    }
-    setReady(true);
-  }, []);
 
   useEffect(() => {
     if (!ready) return;
@@ -1321,16 +1308,6 @@ export default function BookClient() {
     ]
   );
 
-  if (!ready) {
-    return (
-      <div className={styles.shell}>
-        <p className={styles.loading}>
-          {resumeUidParam ? 'Preparing checkout…' : 'Opening booking…'}
-        </p>
-      </div>
-    );
-  }
-
   const stepTitle =
     confirmed
       ? "You're booked"
@@ -1356,13 +1333,7 @@ export default function BookClient() {
             : 'messages';
     return (
       <div className={styles.shell}>
-        <header className={styles.topBar}>
-          <span className={styles.iconBtn} aria-hidden="true" />
-          <p className={styles.brand}>Sadie Marie</p>
-          <Link href="/" className={styles.iconBtn} aria-label="Home">
-            ✕
-          </Link>
-        </header>
+        <BookTopBar />
         <main className={styles.main}>
           <div className={styles.successCard}>
             <h1 className={styles.successTitle}>
@@ -1390,31 +1361,13 @@ export default function BookClient() {
 
   return (
     <div className={styles.shell}>
-      <header className={styles.topBar}>
-        {step === 'service' ? (
-          <span className={styles.iconBtn} aria-hidden="true" />
-        ) : (
-          <button
-            type="button"
-            className={styles.iconBtn}
-            onClick={goBack}
-            aria-label="Back"
-          >
-            ←
-          </button>
-        )}
-        <p className={styles.brand}>Sadie Marie</p>
-        <Link
-          href="/"
-          className={styles.iconBtn}
-          aria-label="Home"
-          onClick={() => {
-            void abandonHold();
-          }}
-        >
-          ✕
-        </Link>
-      </header>
+      <BookTopBar
+        showBack={step !== 'service'}
+        onBack={goBack}
+        onHomeClick={() => {
+          void abandonHold();
+        }}
+      />
 
       <div className={styles.progress} aria-hidden="true">
         {STEPS.map((s, i) => (
