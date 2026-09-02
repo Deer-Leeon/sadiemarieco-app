@@ -164,6 +164,8 @@ const SKIP_STATUS: Record<string, number> = {
   invalid_consent_url: 400,
   unknown_kind: 400,
   twilio_not_configured: 409,
+  already_consented: 409,
+  already_reviewed: 409,
 };
 
 export async function POST(
