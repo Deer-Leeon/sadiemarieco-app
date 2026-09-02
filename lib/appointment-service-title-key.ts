@@ -24,4 +24,20 @@ export function appointmentServiceTitleKey(raw: string | null | undefined): stri
   return tokens.join(' ');
 }
 
+/**
+ * Drop a trailing "Add On" pair (`add` + `on` tokens) so a Cal title
+ * like "Lash Tint Add On" still hits the catalogue row "Lash Tint"
+ * after a rename. Only strips when both tokens are present so
+ * unrelated words are left alone.
+ */
+export function appointmentServiceTitleKeyWithoutAddOn(
+  raw: string | null | undefined,
+): string {
+  const key = appointmentServiceTitleKey(raw);
+  if (!key) return '';
+  const tokens = key.split(' ').filter(Boolean);
+  if (!tokens.includes('add') || !tokens.includes('on')) return key;
+  return tokens.filter((token) => token !== 'add' && token !== 'on').join(' ');
+}
+
 export const BARE_FILL_TITLE_KEYS = new Set(['classic', 'hybrid', 'volume']);

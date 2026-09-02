@@ -256,6 +256,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ...(originalServiceName
         ? { original_service_name: originalServiceName }
         : {}),
+      original_cal_event_id: String(serviceEventTypeId),
       ...(originalServiceDurationMins != null
         ? {
             original_service_duration_mins: String(

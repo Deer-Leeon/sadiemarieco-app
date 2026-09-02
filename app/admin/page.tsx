@@ -29,6 +29,7 @@ interface DbRow {
   // UID (despite the column name). Mapped to Appointment.cal_uid
   // below so the modal can build Cal's reschedule URL.
   cal_event_id: string | null;
+  cal_event_type_id: number | null;
   // site_services.slug — Cal.com event-type slug joined in below.
   // The reschedule embed needs this to construct the calLink path
   // (`<username>/<slug>`); the booking UID alone isn't enough,
@@ -145,13 +146,10 @@ export default async function AdminPage() {
   }
 
   try {
-    // LEFT JOIN to site_services on the cleaned service title so the
-    // appointment-details modal can show service metadata alongside the
-    // booking. Price comes from the immutable appointment snapshot. Cal
-    // stores `service_name` as the FULL
-    // event title ("Classic Lash Set between Sadie Marie and Leon"),
-    // so we strip everything from the first ' between ' onward via
-    // split_part before matching against site_services.title.
+    // LEFT JOIN to site_services: prefer Cal event-type id so a catalogue
+    // rename does not orphan calendar colours or prices. Fall back to the
+    // stored Cal title snapshot (`split_part` strips " between …") plus
+    // duration disambiguation for Classic / Hybrid / Volume fills.
     //
     // Exact title can miss when Cal and the CMS disagree on punctuation
     // or word order ("Lamination, Tint, + Wax" vs "Lamination, Wax, + Tint").
@@ -180,6 +178,7 @@ export default async function AdminPage() {
       SELECT
         a.id,
         a.cal_event_id,
+        a.cal_event_type_id,
         a.client_first_name,
         a.client_last_name,
         a.booking_time,
@@ -243,22 +242,31 @@ export default async function AdminPage() {
       LEFT JOIN LATERAL (
         SELECT s.price, s.description, s.slug, s.color
         FROM site_services s
-        WHERE s.title = split_part(a.service_name, ' between ', 1)
-          AND s.is_active = TRUE
+        WHERE s.is_active = TRUE
           AND (
-            lower(trim(split_part(a.service_name, ' between ', 1))) NOT IN (
-              'classic', 'hybrid', 'volume'
+            (
+              a.cal_event_type_id IS NOT NULL
+              AND s.cal_event_id = a.cal_event_type_id
             )
             OR (
-              a.booking_time IS NOT NULL
-              AND a.end_time IS NOT NULL
-              AND s.duration_mins IS NOT NULL
-              AND s.duration_mins = GREATEST(
-                1,
-                ROUND(
-                  EXTRACT(EPOCH FROM (a.end_time - a.booking_time)) / 60.0
+              a.cal_event_type_id IS NULL
+              AND s.title = split_part(a.service_name, ' between ', 1)
+              AND (
+                lower(trim(split_part(a.service_name, ' between ', 1))) NOT IN (
+                  'classic', 'hybrid', 'volume'
                 )
-              )::integer
+                OR (
+                  a.booking_time IS NOT NULL
+                  AND a.end_time IS NOT NULL
+                  AND s.duration_mins IS NOT NULL
+                  AND s.duration_mins = GREATEST(
+                    1,
+                    ROUND(
+                      EXTRACT(EPOCH FROM (a.end_time - a.booking_time)) / 60.0
+                    )
+                  )::integer
+                )
+              )
             )
           )
         ORDER BY s.updated_at DESC NULLS LAST, s.id DESC

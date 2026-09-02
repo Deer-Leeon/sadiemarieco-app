@@ -28,6 +28,10 @@ import {
   errorMessage,
   gateAdmin,
 } from '@/lib/cal-proxy';
+import {
+  loadActiveCatalogueServices,
+  matchCatalogueService,
+} from '@/lib/match-catalogue-service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,11 +46,44 @@ interface CompleteBody {
   bookingTime?: unknown;
   endTime?: unknown;
   durationMins?: unknown;
+  eventTypeId?: unknown;
 }
 
 function splitName(fullName: string): { first: string; last: string } {
   const parts = fullName.trim().split(/\s+/);
   return { first: parts[0] || '', last: parts.slice(1).join(' ') || '' };
+}
+
+function parsePositiveInt(value: unknown): number | null {
+  const n =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number(value)
+        : NaN;
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function extractCalEventTypeId(source: unknown): number | null {
+  if (!source || typeof source !== 'object') return null;
+  const record = source as Record<string, unknown>;
+  const metadata =
+    record.metadata && typeof record.metadata === 'object'
+      ? (record.metadata as Record<string, unknown>)
+      : null;
+  const nested =
+    record.eventType && typeof record.eventType === 'object'
+      ? (record.eventType as Record<string, unknown>)
+      : null;
+  return parsePositiveInt(
+    metadata?.original_cal_event_id ??
+      metadata?.originalCalEventId ??
+      record.eventTypeId ??
+      record.eventTypeID ??
+      nested?.id ??
+      nested?.eventTypeId ??
+      null,
+  );
 }
 
 function parseBody(input: unknown):
@@ -59,6 +96,7 @@ function parseBody(input: unknown):
       bookingTime: string | null;
       endTime: string | null;
       durationMins: number | null;
+      eventTypeId: number | null;
     }
   | { error: string; message: string } {
   if (!input || typeof input !== 'object') {
@@ -109,15 +147,20 @@ function parseBody(input: unknown):
     bookingTime,
     endTime,
     durationMins: parsedDurationMins,
+    eventTypeId: parsePositiveInt(body.eventTypeId),
   };
 }
 
-/** Fetch start/end from Cal only when the client omitted bookingTime. */
-async function fetchBookingTimesFromCal(
-  uid: string
-): Promise<{ bookingTime: string | null; endTime: string | null }> {
+/** Fetch start/end and event-type id from Cal when the client omitted them. */
+async function fetchBookingFromCal(uid: string): Promise<{
+  bookingTime: string | null;
+  endTime: string | null;
+  calEventTypeId: number | null;
+}> {
   const apiKey = getCalComApiKey();
-  if (!apiKey) return { bookingTime: null, endTime: null };
+  if (!apiKey) {
+    return { bookingTime: null, endTime: null, calEventTypeId: null };
+  }
 
   try {
     const res = await fetch(`${CAL_V2_BASE}/bookings/${encodeURIComponent(uid)}`, {
@@ -129,7 +172,9 @@ async function fetchBookingTimesFromCal(
       },
       cache: 'no-store',
     });
-    if (!res.ok) return { bookingTime: null, endTime: null };
+    if (!res.ok) {
+      return { bookingTime: null, endTime: null, calEventTypeId: null };
+    }
 
     const payload: unknown = await res.json().catch(() => null);
     const booking =
@@ -138,7 +183,7 @@ async function fetchBookingTimesFromCal(
         : (payload as Record<string, unknown> | null);
 
     if (!booking || typeof booking !== 'object') {
-      return { bookingTime: null, endTime: null };
+      return { bookingTime: null, endTime: null, calEventTypeId: null };
     }
 
     const bookingTime =
@@ -154,13 +199,17 @@ async function fetchBookingTimesFromCal(
           ? booking.endTime
           : null;
 
-    return { bookingTime, endTime };
+    return {
+      bookingTime,
+      endTime,
+      calEventTypeId: extractCalEventTypeId(booking),
+    };
   } catch (err) {
     console.warn('[api/admin/manual-booking/complete] Cal hydrate failed', {
       uid,
       error: errorMessage(err),
     });
-    return { bookingTime: null, endTime: null };
+    return { bookingTime: null, endTime: null, calEventTypeId: null };
   }
 }
 
@@ -211,11 +260,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let bookingTime = parsed.bookingTime;
   let endTime = parsed.endTime;
+  let calEventTypeId = parsed.eventTypeId;
 
-  if (!bookingTime) {
-    const fromCal = await fetchBookingTimesFromCal(parsed.calBookingUid);
-    bookingTime = fromCal.bookingTime;
+  if (!bookingTime || calEventTypeId == null) {
+    const fromCal = await fetchBookingFromCal(parsed.calBookingUid);
+    bookingTime = bookingTime || fromCal.bookingTime;
     if (!endTime) endTime = fromCal.endTime;
+    if (calEventTypeId == null) calEventTypeId = fromCal.calEventTypeId;
   }
 
   const schedule = resolveAppointmentSchedule({
@@ -227,6 +278,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   endTime = schedule.endTime;
 
   const appointmentServiceName = parsed.serviceName;
+
+  if (calEventTypeId == null) {
+    try {
+      const catalogue = await loadActiveCatalogueServices();
+      const matched = matchCatalogueService(
+        appointmentServiceName,
+        bookingTime,
+        endTime,
+        catalogue,
+      );
+      const fromCatalogue = parsePositiveInt(matched?.cal_event_id);
+      if (fromCatalogue) calEventTypeId = fromCatalogue;
+    } catch (err) {
+      console.warn(
+        '[api/admin/manual-booking/complete] catalogue event-type lookup failed',
+        { error: errorMessage(err) },
+      );
+    }
+  }
 
   if (!bookingTime) {
     return NextResponse.json(
@@ -369,18 +439,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     await sql`
       INSERT INTO appointments (
         client_id, service_name, booking_time, end_time, cal_event_id,
+        cal_event_type_id,
         client_first_name, client_last_name, client_email, client_phone,
         status, sms_opt_in
       )
       VALUES (
         ${clientId}, ${appointmentServiceName}, ${bookingTime},
-        ${endTime}, ${parsed.calBookingUid},
+        ${endTime}, ${parsed.calBookingUid}, ${calEventTypeId},
         ${first}, ${last}, ${parsed.clientEmail}, ${parsed.clientPhone},
         'confirmed', TRUE
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,
         service_name = EXCLUDED.service_name,
+        cal_event_type_id = COALESCE(
+          EXCLUDED.cal_event_type_id,
+          appointments.cal_event_type_id
+        ),
         quoted_service_price_cents = COALESCE(
           appointments.quoted_service_price_cents,
           EXCLUDED.quoted_service_price_cents

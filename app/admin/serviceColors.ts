@@ -8,8 +8,8 @@
  * Resolution strategy:
  *   The hex comes from `site_services.color` exclusively — the
  *   editor picks it in /admin/services and it travels onto each
- *   appointment row via the LEFT JOIN LATERAL, then a token-bag
- *   fallback (`lib/match-catalogue-service.ts`) so punctuation and
+ *   appointment row via the LEFT JOIN LATERAL (Cal event-type id first,
+ *   then title), then a token-bag fallback (`lib/match-catalogue-service.ts`) so punctuation and
  *   word order ("Lamination, Tint, + Wax" vs "Lamination, Wax, + Tint")
  *   still resolve to the same catalogue hex. Bare fill children
  *   ("Classic" / "Hybrid" / "Volume") are matched by title key AND
