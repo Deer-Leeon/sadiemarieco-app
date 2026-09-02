@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 
 import {
   buildManualBookingServiceMenu,
@@ -180,17 +180,35 @@ function ServiceCard({
       <button
         type="button"
         onClick={() => onSelect(service)}
+        aria-pressed={selected}
         className={`${SERVICE_CARD_CLASS} ${
           selected
-            ? 'border-stone-300 bg-stone-50'
+            ? 'border-stone-900 bg-stone-900 text-white shadow-sm'
             : 'border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50'
         }`}
       >
-        <span className="block font-serif text-base text-stone-900">
-          {service.title}
+        <span className="flex items-start justify-between gap-3">
+          <span
+            className={`block font-serif text-base ${
+              selected ? 'text-white' : 'text-stone-900'
+            }`}
+          >
+            {service.title}
+          </span>
+          {selected ? (
+            <Check
+              className="mt-0.5 h-4 w-4 shrink-0 text-white"
+              strokeWidth={2.5}
+              aria-hidden="true"
+            />
+          ) : null}
         </span>
         {service.durationMins != null && (
-          <span className="mt-0.5 block text-xs text-stone-500">
+          <span
+            className={`mt-0.5 block text-xs ${
+              selected ? 'text-stone-300' : 'text-stone-500'
+            }`}
+          >
             {service.durationMins} min
           </span>
         )}

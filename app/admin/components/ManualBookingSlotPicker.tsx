@@ -530,18 +530,20 @@ export default function ManualBookingSlotPicker({
                   type="button"
                   disabled={!isSelectable}
                   onClick={() => pickDate(cell.date)}
+                  aria-pressed={isSelected}
+                  aria-current={isSelected ? 'date' : undefined}
                   className={`flex h-9 w-full items-center justify-center rounded-full border text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 ${
                     isSelected
-                      ? `${isStudio ? 'border-stone-900' : 'border-stone-300'} bg-stone-50 font-medium text-stone-900`
+                      ? 'border-stone-900 bg-stone-900 font-semibold text-white'
                       : isSelectable
-                        ? `${isStudio ? 'border-stone-900' : 'border-transparent'} font-medium text-stone-900 hover:bg-stone-50 ${
+                        ? `${isStudio ? 'border-stone-900' : 'border-transparent'} font-medium text-stone-900 hover:bg-stone-100 ${
                             isStudio ? '' : 'hover:border-stone-200'
                           }`
                         : `${isStudio ? 'border-stone-900/40' : 'border-transparent'} cursor-default text-stone-300`
                   }`}
                   aria-label={
                     isSelectable
-                      ? `${cell.day}${isStudio ? ', studio day' : ''}${hasSlots ? ', open times' : ''}`
+                      ? `${cell.day}${isSelected ? ', selected' : ''}${isStudio ? ', studio day' : ''}${hasSlots ? ', open times' : ''}`
                       : `${cell.day}, past`
                   }
                 >
@@ -552,7 +554,7 @@ export default function ManualBookingSlotPicker({
         </div>
 
         <p className="mt-3 text-center text-[10px] uppercase tracking-[0.18em] text-stone-400">
-          Black border = planned studio day
+          Filled = selected day · Black border = planned studio day
         </p>
 
         {monthError ? (
@@ -594,11 +596,10 @@ export default function ManualBookingSlotPicker({
                     key={slot}
                     type="button"
                     onClick={() => onSelectSlot(slot)}
+                    aria-pressed={active}
                     className={`flex flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 ${
                       active
-                        ? occupied
-                          ? 'border-amber-400 bg-amber-50 text-stone-900'
-                          : 'border-stone-300 bg-stone-50 text-stone-900'
+                        ? 'border-stone-900 bg-stone-900 text-white shadow-sm'
                         : occupied
                           ? 'border-amber-200 bg-amber-50/70 text-stone-800 hover:border-amber-300 hover:bg-amber-50'
                           : 'border-stone-200 bg-white text-stone-800 hover:border-stone-300 hover:bg-stone-50'
@@ -607,14 +608,16 @@ export default function ManualBookingSlotPicker({
                     <span className="flex items-center justify-center gap-1.5">
                       <span
                         className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                          occupied
-                            ? 'bg-amber-500'
-                            : inStudio
-                              ? active
+                          active
+                            ? occupied
+                              ? 'bg-amber-300'
+                              : inStudio
                                 ? 'bg-emerald-400'
-                                : 'bg-emerald-500'
-                              : active
-                                ? 'bg-stone-700'
+                                : 'bg-white'
+                            : occupied
+                              ? 'bg-amber-500'
+                              : inStudio
+                                ? 'bg-emerald-500'
                                 : 'bg-stone-900'
                         }`}
                         aria-hidden
@@ -622,7 +625,11 @@ export default function ManualBookingSlotPicker({
                       {formatSlotInStudioTime(slot)}
                     </span>
                     {occupied ? (
-                      <span className="text-[10px] font-medium uppercase tracking-wide text-amber-800">
+                      <span
+                        className={`text-[10px] font-medium uppercase tracking-wide ${
+                          active ? 'text-amber-200' : 'text-amber-800'
+                        }`}
+                      >
                         Busy
                       </span>
                     ) : null}
@@ -631,8 +638,8 @@ export default function ManualBookingSlotPicker({
               })}
             </div>
             <p className="mt-2 text-center text-[10px] uppercase tracking-[0.18em] text-stone-400">
-              Green = fits studio hours · Amber = already booked (admin can still
-              double-book) · Black = outside or overruns
+              Filled = selected · Green = fits studio hours · Amber = already
+              booked (admin can still double-book) · Black = outside or overruns
             </p>
           </>
         ) : (
