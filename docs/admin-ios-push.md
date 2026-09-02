@@ -56,7 +56,7 @@ Confirmed-booking, reschedule, and cancel pushes include `content-available` so 
 
 - Schema: `scripts/add_admin_push_devices.sql` + `scripts/run-admin-push-devices-migration.mjs`
 - Register / logout: `POST` / `DELETE` `/api/admin/push-devices`
-- Send: `lib/admin-booking-push.js` `notifyAdminAppointmentPush`
+- Send: `lib/admin-booking-push.js` `notifyAdminAppointmentPush` — **production only**. Staging / Vercel preview do not send APNs. Cal.com webhooks hit `www`, so a booking made on staging already notifies from production; a second staging send was the duplicate “New booking” + “You scheduled a booking” pair.
   - Confirmed: `notifyBookingConfirmed` (website checkout, Stripe recovery, admin New booking)
   - Rescheduled: `notifyAppointmentRescheduled` (Cal webhook + admin reschedule)
   - Canceled: admin status PATCH + Cal `BOOKING_CANCELLED` (client cancel of a confirmed booking)
@@ -64,3 +64,4 @@ Confirmed-booking, reschedule, and cancel pushes include `content-available` so 
 - Collapse id: `{uid}:{kind}` (so a cancel banner does not replace a new-booking banner)
 - If no device is registered yet, the dedupe claim is released and QStash retries after loading devices again
 - Apple 5xx retry: QStash → `/api/qstash/admin-booking-push` (forwards `kind` + `source`)
+- Debug (`Sadie Marie Dev`) and TestFlight/App Store (`Sadie Marie`) are separate bundle IDs. Both receive the same alert if both apps are installed and registered.
