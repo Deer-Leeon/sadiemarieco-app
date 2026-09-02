@@ -58,6 +58,8 @@ export const MODAL_HOUR_ROW_MIN_PX = 56;
 
 export const MODAL_HOUR_GRID_ROWS = `repeat(${HOURS}, minmax(${MODAL_HOUR_ROW_MIN_PX}px, 1fr))`;
 
+export const PHONE_CALENDAR_MQ = '(max-width: 767px)';
+
 // ──────────────────────────────────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────────────────────────────────
@@ -171,18 +173,44 @@ interface RawPositioned {
   apt: Appointment;
   topPct: number;
   heightPct: number;
-  /** Epoch ms — overlap math uses real timestamps, not % floats. */
-  startMs: number;
-  endMs: number;
+  /** Inclusive start minute (epoch minutes). */
+  startMin: number;
+  /** Exclusive end minute — touching bookings (2:30 / 2:30) do not overlap. */
+  endMin: number;
+}
+
+/**
+ * Occupied range as `[startMinute, endMinute)`. Flooring to minutes
+ * swallows sub-minute Cal/Postgres jitter so a 12:00:00.400 end does
+ * not collide with a 12:00:00.000 start.
+ */
+function occupiedMinutes(
+  startMs: number,
+  endMs: number
+): { startMin: number; endMin: number } {
+  const startMin = Math.floor(startMs / 60_000);
+  let endMin = Math.floor(endMs / 60_000);
+  if (endMin <= startMin) endMin = startMin + 1;
+  return { startMin, endMin };
+}
+
+function minutesOverlap(
+  a: { startMin: number; endMin: number },
+  b: { startMin: number; endMin: number }
+): boolean {
+  return a.startMin < b.endMin && b.startMin < a.endMin;
 }
 
 /**
  * Pack appointments into horizontal lanes, scoped per overlap cluster.
  *
  * Two appointments share a "cluster" only when their times transitively
- * overlap. Within a cluster we greedy-colour into the fewest lanes and
- * set `totalCols` to that cluster's concurrency. Appointments that don't
- * overlap anyone get `totalCols = 1` (full day-column width).
+ * overlap. Overlap is compared at minute resolution with exclusive
+ * ends, so a 12:00:00.400 finish does not collide with a 12:00 start.
+ * Within a cluster we greedy-colour into the fewest lanes and set
+ * `totalCols` to that cluster's concurrency. Appointments that don't
+ * overlap anyone get `col = 0` / `totalCols = 1` (full day-column
+ * width) even if they were pulled into a larger cluster.
  *
  * Previously every item inherited the day's global max concurrency, so a
  * single overlapping pair made the whole day render as half-width rails
@@ -192,8 +220,8 @@ function packLanes(raw: RawPositioned[]): PositionedAppointment[] {
   if (raw.length === 0) return [];
 
   const sorted = [...raw].sort((a, b) => {
-    if (a.startMs !== b.startMs) return a.startMs - b.startMs;
-    return b.endMs - a.endMs;
+    if (a.startMin !== b.startMin) return a.startMin - b.startMin;
+    return b.endMin - a.endMin;
   });
 
   // Union-find so transitive overlaps share one cluster
@@ -218,10 +246,10 @@ function packLanes(raw: RawPositioned[]): PositionedAppointment[] {
 
   for (let i = 0; i < sorted.length; i++) {
     for (let j = i + 1; j < sorted.length; j++) {
-      // Sorted by start — once j starts at/after i ends, later j's can't
-      // overlap i either.
-      if (sorted[j].startMs >= sorted[i].endMs) break;
-      if (sorted[i].startMs < sorted[j].endMs) {
+      // Sorted by start minute — once j starts at/after i ends, later
+      // j's can't overlap i either.
+      if (sorted[j].startMin >= sorted[i].endMin) break;
+      if (minutesOverlap(sorted[i], sorted[j])) {
         union(i, j);
       }
     }
@@ -241,45 +269,105 @@ function packLanes(raw: RawPositioned[]): PositionedAppointment[] {
     const members = memberIdxs
       .map((i) => ({ i, item: sorted[i] }))
       .sort((a, b) => {
-        if (a.item.startMs !== b.item.startMs) {
-          return a.item.startMs - b.item.startMs;
+        if (a.item.startMin !== b.item.startMin) {
+          return a.item.startMin - b.item.startMin;
         }
-        return b.item.endMs - a.item.endMs;
+        return b.item.endMin - a.item.endMin;
       });
 
-    const lanes: { endMs: number }[] = [];
+    const lanes: { endMin: number }[] = [];
     const colByMember: number[] = [];
 
     for (const { item } of members) {
       let placed = false;
       for (let lane = 0; lane < lanes.length; lane++) {
-        // Back-to-back (prev ends exactly when next starts) reuses the lane.
-        if (lanes[lane].endMs <= item.startMs) {
-          lanes[lane].endMs = item.endMs;
+        // Back-to-back (prev ends when next starts) reuses the lane.
+        if (lanes[lane].endMin <= item.startMin) {
+          lanes[lane].endMin = item.endMin;
           colByMember.push(lane);
           placed = true;
           break;
         }
       }
       if (!placed) {
-        lanes.push({ endMs: item.endMs });
+        lanes.push({ endMin: item.endMin });
         colByMember.push(lanes.length - 1);
       }
     }
 
     const totalCols = Math.max(lanes.length, 1);
     members.forEach(({ i, item }, memberOrder) => {
+      const overlapsAnyone = members.some(
+        (other, k) => k !== memberOrder && minutesOverlap(item, other.item)
+      );
       out[i] = {
         appointment: item.apt,
         topPct: item.topPct,
         heightPct: item.heightPct,
-        col: colByMember[memberOrder],
-        totalCols,
+        col: overlapsAnyone ? colByMember[memberOrder] : 0,
+        totalCols: overlapsAnyone ? totalCols : 1,
       };
     });
   }
 
   return out;
+}
+
+/**
+ * CSS left/width for an overlap lane inside a day column.
+ *
+ * Lanes share the column equally. A hairline gap sits *between* columns
+ * only — subtracting gutter from both sides of every pill (the previous
+ * `widthPct - gutter*2` formula) opened a 6–8px hole between overlapping
+ * appointments plus unused space on the outer edges.
+ */
+export function overlapLaneBoxStyle(
+  col: number,
+  totalCols: number,
+  options?: { outerPx?: number; gapPx?: number }
+): { left: string; width: string; zIndex: number } {
+  const n = Math.max(totalCols, 1);
+  const i = Math.min(Math.max(col, 0), n - 1);
+  const overlapping = n > 1;
+  const outerPx = options?.outerPx ?? (overlapping ? 1 : 2);
+  const gapPx = options?.gapPx ?? (overlapping ? 1 : 0);
+  const innerGaps = (n - 1) * gapPx;
+  const laneWidth = `((100% - ${outerPx * 2}px - ${innerGaps}px) / ${n})`;
+  return {
+    left: `calc(${outerPx}px + ${i} * (${laneWidth} + ${gapPx}px))`,
+    width: `calc${laneWidth}`,
+    zIndex: 20,
+  };
+}
+
+/**
+ * Fresha-style cascade for narrow viewports: later overlapping pills
+ * indent to the right and sit on top, leaving a tappable colour strip
+ * of the booking underneath. Lane 0 stays nearly full width so names
+ * stay readable instead of splitting a ~40px phone column in half.
+ */
+export function overlapLaneCascadeStyle(
+  col: number,
+  totalCols: number,
+  options?: { indentPx?: number; outerPx?: number }
+): { left: string; width: string; zIndex: number } {
+  const n = Math.max(totalCols, 1);
+  const i = Math.min(Math.max(col, 0), n - 1);
+  const overlapping = n > 1;
+  const outerPx = options?.outerPx ?? (overlapping ? 1 : 2);
+  const indentPx = options?.indentPx ?? 14;
+  if (!overlapping) {
+    return {
+      left: `${outerPx}px`,
+      width: `calc(100% - ${outerPx * 2}px)`,
+      zIndex: 20,
+    };
+  }
+  return {
+    left: `${i * indentPx + outerPx}px`,
+    width: `calc(100% - ${i * indentPx + outerPx * 2}px)`,
+    zIndex: 20 + i,
+  };
 }
 
 /**
@@ -300,12 +388,16 @@ export function layoutForDay(
     const end =
       safeParseISO(apt.end_time) ??
       new Date(start.getTime() + 60 * 60 * 1000);
+    const { startMin, endMin } = occupiedMinutes(
+      start.getTime(),
+      end.getTime()
+    );
     positioned.push({
       apt,
       topPct: pos.topPct,
       heightPct: pos.heightPct,
-      startMs: start.getTime(),
-      endMs: end.getTime(),
+      startMin,
+      endMin,
     });
   }
   return packLanes(positioned);

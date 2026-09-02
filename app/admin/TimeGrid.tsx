@@ -1,10 +1,12 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Flag } from 'lucide-react';
 
 import {
   addStudioCalendarDays,
   calendarDayUtcNoon,
+  formatStudioClock,
   formatStudioClockRange,
   formatStudioDayOfMonth,
   formatStudioWeekdayShort,
@@ -27,6 +29,9 @@ import {
   closedBandPercentsForDay,
   layoutBlocksForDay,
   layoutForDay,
+  overlapLaneBoxStyle,
+  overlapLaneCascadeStyle,
+  PHONE_CALENDAR_MQ,
   safeParseISO,
   type PositionedAppointment,
   type PositionedTimeBlock,
@@ -113,6 +118,20 @@ function buildColumns(
   }));
 }
 
+function usePhoneCalendar(): boolean {
+  const [isPhone, setIsPhone] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia(PHONE_CALENDAR_MQ).matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(PHONE_CALENDAR_MQ);
+    const apply = () => setIsPhone(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+  return isPhone;
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Component
 // ──────────────────────────────────────────────────────────────────────────
@@ -157,6 +176,7 @@ export default function TimeGrid({
 }: Props) {
   const days = buildDays(currentDate, daysToShow);
   const columns = buildColumns(days, appointments, timeBlocks);
+  const cascadeOverlap = usePhoneCalendar();
 
   // Same grid-template-columns string used by both the header row and
   // the body grid so columns line up perfectly across the divider.
@@ -206,6 +226,7 @@ export default function TimeGrid({
               scheduleAvailability,
               scheduleOverrides
             )}
+            cascadeOverlap={cascadeOverlap}
           />
         ))}
       </div>
@@ -311,6 +332,7 @@ function DayColumnView({
   onBlockClick,
   onHourClick,
   hatchBands,
+  cascadeOverlap,
 }: {
   column: DayColumn;
   removingBlockId: string | null;
@@ -318,6 +340,7 @@ function DayColumnView({
   onBlockClick?: (block: TimeBlock) => void;
   onHourClick?: (date: Date, hour: number) => void;
   hatchBands: { topPct: number; heightPct: number }[];
+  cascadeOverlap: boolean;
 }) {
   // Layered structure:
   //   * `.relative` parent — appointment-pill coordinate space.
@@ -381,6 +404,7 @@ function DayColumnView({
           key={pa.appointment.id}
           positioned={pa}
           onClick={onAppointmentClick}
+          cascadeOverlap={cascadeOverlap}
         />
       ))}
     </div>
@@ -416,9 +440,11 @@ function includeServiceOnPill(
 function AppointmentBlock({
   positioned,
   onClick,
+  cascadeOverlap,
 }: {
   positioned: PositionedAppointment;
   onClick?: (appointment: Appointment) => void;
+  cascadeOverlap: boolean;
 }) {
   const { appointment: apt, topPct, heightPct, col, totalCols } = positioned;
   // Canceled rows (admin- or client-initiated) and pending checkout
@@ -435,29 +461,33 @@ function AppointmentBlock({
   const timeLabel = start
     ? formatStudioClockRange(start, end)
     : '';
+  const startLabel = start ? formatStudioClock(start) : '';
   const durationMinutes =
     start && end
       ? Math.max(0, (end.getTime() - start.getTime()) / 60_000)
       : null;
 
-  const name = clientDisplayName(apt.client_first_name, apt.client_last_name);
+  const fullName = clientDisplayName(apt.client_first_name, apt.client_last_name);
   const service = appointmentServiceLabel(apt);
-  const stacked = canStackPillLines(durationMinutes, heightPct);
-  const showService = includeServiceOnPill(
-    durationMinutes,
-    heightPct,
-    stacked
-  );
-  const detailBits = [
-    timeLabel,
-    showService ? service : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const overlapping = totalCols > 1;
+  const compactLabel = cascadeOverlap && overlapping;
+  const peekingUnder = compactLabel && col === 0;
+  const name = compactLabel
+    ? (apt.client_first_name?.trim() || fullName)
+    : fullName;
+  const stacked = !compactLabel && canStackPillLines(durationMinutes, heightPct);
+  const showService =
+    !compactLabel &&
+    includeServiceOnPill(durationMinutes, heightPct, stacked);
+  const detailBits = compactLabel
+    ? peekingUnder
+      ? ''
+      : startLabel
+    : [timeLabel, showService ? service : ''].filter(Boolean).join(' · ');
 
-  const widthPct = 100 / totalCols;
-  const leftPct = col * widthPct;
-  const gutterPx = totalCols > 1 ? 3 : 2;
+  const laneBox = cascadeOverlap
+    ? overlapLaneCascadeStyle(col, totalCols)
+    : overlapLaneBoxStyle(col, totalCols);
 
   // stopPropagation is defensive — the day-column body no longer
   // has its own click handler (only the day-header at the top of
@@ -479,8 +509,15 @@ function AppointmentBlock({
   // Match SingleDayModal pills: solid fill, no black outline. Gap between
   // back-to-back same-colour bookings comes from layout packing / height,
   // not a stroke. No-show and unmapped services keep a left accent stripe.
-  const baseClasses =
-    'absolute z-20 overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left leading-tight';
+  const overlapShadow =
+    overlapping && cascadeOverlap
+      ? col > 0
+        ? '0 1px 1px rgba(28,25,23,0.06), 0 4px 12px rgba(28,25,23,0.12), 0 0 0 1px rgba(255,255,255,0.75)'
+        : '0 0 0 1px rgba(255,255,255,0.5)'
+      : undefined;
+  const baseClasses = overlapping
+    ? 'absolute overflow-hidden rounded-sm text-left leading-none transition-colors'
+    : 'absolute z-20 overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left leading-tight';
   const variantClasses = isNoShow
     ? 'border-l-[3px] border-l-stone-400 bg-stone-50 opacity-60'
     : color
@@ -493,14 +530,16 @@ function AppointmentBlock({
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : 'pointer-events-none';
 
-  const nameClass = `truncate text-xs font-semibold ${
+  const nameClass = `truncate ${
+    compactLabel ? 'text-[10px] font-semibold leading-none' : 'text-xs font-semibold'
+  } ${
     isNoShow
       ? 'text-gray-400 line-through'
       : color
         ? ''
         : 'text-stone-900'
   }`;
-  const mutedClass = `text-[10px] ${
+  const mutedClass = `${compactLabel ? 'text-[9px] leading-none' : 'text-[10px]'} ${
     isNoShow
       ? 'text-gray-400 line-through'
       : color
@@ -518,21 +557,26 @@ function AppointmentBlock({
       type="button"
       onClick={clickable ? handleClick : undefined}
       disabled={!clickable}
-      className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${interactiveClasses}`}
-      title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}${settledLabel ? ` · ${settledLabel}` : ''}`}
-      aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${flagSuffix}${settledSuffix}`}
+      className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${interactiveClasses} ${
+        overlapping ? (peekingUnder ? 'px-1 py-0.5' : 'px-1 py-1') : ''
+      }`}
+      title={`${timeLabel}${timeLabel ? ' · ' : ''}${fullName} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}${settledLabel ? ` · ${settledLabel}` : ''}`}
+      aria-label={`Open booking: ${fullName}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${flagSuffix}${settledSuffix}`}
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,
-        minHeight: MIN_PILL_HEIGHT_PX,
-        left: `calc(${leftPct}% + ${gutterPx}px)`,
-        width: `calc(${widthPct}% - ${gutterPx * 2}px)`,
+        minHeight: peekingUnder ? 14 : MIN_PILL_HEIGHT_PX,
+        left: laneBox.left,
+        width: laneBox.width,
+        zIndex: laneBox.zIndex,
+        boxShadow: overlapShadow,
         ...(color && {
           backgroundColor: color.accent,
           color: color.text,
         }),
       }}
     >
+      {peekingUnder ? null : (
       <span className="pointer-events-none absolute right-0.5 top-0.5 z-10 flex items-start gap-0.5">
         <SettlementCheckMarker payment={apt.terminal_payment} />
         {hasNoShowFlag ? (
@@ -545,6 +589,7 @@ function AppointmentBlock({
           </span>
         ) : null}
       </span>
+      )}
       {stacked ? (
         <>
           <div className={nameClass} style={nameStyle}>
@@ -557,7 +602,9 @@ function AppointmentBlock({
           ) : null}
         </>
       ) : (
-        <div className={`truncate text-xs ${isNoShow ? 'line-through' : ''}`}>
+        <div
+          className={`truncate ${compactLabel ? 'text-[10px] leading-none' : 'text-xs'} ${isNoShow ? 'line-through' : ''}`}
+        >
           <span
             className={
               isNoShow

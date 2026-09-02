@@ -7,6 +7,7 @@ import {
   formatStudioClockRange,
   formatStudioDateLong,
   formatStudioDateShort,
+  isSameStudioDay,
 } from '@/lib/studio-calendar';
 import Cal, { getCalApi, type EmbedEvent } from '@calcom/embed-react';
 import {
@@ -74,6 +75,8 @@ const CAL_RESCHEDULE_NAMESPACE = 'reschedule';
 
 interface Props {
   appointment: Appointment;
+  /** Other bookings already on screen — used to list same-day unpaid siblings. */
+  siblingCandidates?: Appointment[];
   onClose: () => void;
   /**
    * Set when this modal is rendered ON TOP of another modal — e.g.
@@ -121,7 +124,10 @@ interface Props {
    * can patch `selectedAppointment` + list/calendar rows without waiting
    * for a close/reopen cycle. `null` means the appointment is unpaid again.
    */
-  onPaymentUpdated?: (payment: TerminalPaymentSummary | null) => void;
+  onPaymentUpdated?: (
+    payment: TerminalPaymentSummary | null,
+    appointmentIds?: string[]
+  ) => void;
 }
 
 /**
@@ -186,6 +192,7 @@ type StatusConfirmKind = 'no-show' | 'cancel';
  */
 export default function AppointmentModal({
   appointment,
+  siblingCandidates = [],
   onClose,
   stacked = false,
   onMutated,
@@ -237,9 +244,12 @@ export default function AppointmentModal({
   const [settlementBusy, setSettlementBusy] = useState(false);
   const [settlementError, setSettlementError] = useState<string | null>(null);
 
-  const applyLivePayment = (payment: TerminalPaymentSummary | null) => {
+  const applyLivePayment = (
+    payment: TerminalPaymentSummary | null,
+    appointmentIds?: string[]
+  ) => {
     setLivePayment(payment);
-    onPaymentUpdated?.(payment);
+    onPaymentUpdated?.(payment, appointmentIds);
     router.refresh();
     onMutated?.();
   };
@@ -357,7 +367,7 @@ export default function AppointmentModal({
     setSettlementConfirm(kind);
   };
 
-  const submitSettlement = async () => {
+  const submitSettlement = async (additionalAppointmentIds: string[] = []) => {
     if (!settlementConfirm || settlementBusy) return;
     setSettlementBusy(true);
     setSettlementError(null);
@@ -375,6 +385,10 @@ export default function AppointmentModal({
             : JSON.stringify({
                 method: settlementConfirm,
                 note: settlementNote.trim() || undefined,
+                additional_appointment_ids:
+                  additionalAppointmentIds.length > 0
+                    ? additionalAppointmentIds
+                    : undefined,
               }),
         }
       );
@@ -382,6 +396,7 @@ export default function AppointmentModal({
         message?: string;
         error?: string;
         payment?: TerminalPaymentSummary | null;
+        payments?: TerminalPaymentSummary[] | null;
       } | null;
       if (!res.ok) {
         setSettlementError(
@@ -391,13 +406,17 @@ export default function AppointmentModal({
       }
       setSettlementConfirm(null);
       setSettlementNote('');
-      // Undo returns a canceled row — treat as unpaid for the modal UI.
+      const relatedIds = [
+        appointment.id,
+        ...additionalAppointmentIds,
+      ];
       applyLivePayment(
         isUndo
           ? null
           : data?.payment?.status === 'succeeded'
             ? data.payment
-            : data?.payment ?? null
+            : data?.payment ?? null,
+        isUndo ? [appointment.id] : relatedIds
       );
     } catch (err) {
       setSettlementError(err instanceof Error ? err.message : String(err));
@@ -516,10 +535,11 @@ export default function AppointmentModal({
         ) : isCollectingPayment ? (
           <TerminalChargeView
             appointment={appointment}
+            siblingCandidates={siblingCandidates}
             onBack={() => setIsCollectingPayment(false)}
             onDone={onClose}
-            onPaid={(payment) => {
-              applyLivePayment(payment);
+            onPaid={(payment, relatedIds) => {
+              applyLivePayment(payment, relatedIds);
             }}
           />
         ) : view === 'client' && allowClientProfileLink ? (
@@ -598,6 +618,8 @@ export default function AppointmentModal({
             {!readOnly && settlementConfirm && (
               <SettlementConfirmDialog
                 kind={settlementConfirm}
+                appointment={appointment}
+                siblingCandidates={siblingCandidates}
                 amountCents={
                   appointment.service_price == null
                     ? 0
@@ -612,7 +634,7 @@ export default function AppointmentModal({
                   setSettlementConfirm(null);
                   setSettlementError(null);
                 }}
-                onConfirm={() => void submitSettlement()}
+                onConfirm={(extraIds) => void submitSettlement(extraIds)}
               />
             )}
 
@@ -1651,16 +1673,245 @@ interface TerminalApiPayload {
   message?: string;
 }
 
+type SameDayVisit = {
+  id: string;
+  booking_time: string | null;
+  end_time: string | null;
+  service_name: string | null;
+  quoted_service_price_cents: number | null;
+  service_price: number | null;
+};
+
+function visitQuotedCents(visit: SameDayVisit): number {
+  if (visit.quoted_service_price_cents != null) {
+    const raw = Number(visit.quoted_service_price_cents);
+    if (Number.isSafeInteger(raw) && raw >= 0) return raw;
+  }
+  if (visit.service_price != null && Number.isFinite(visit.service_price)) {
+    return Math.round(visit.service_price * 100);
+  }
+  return 0;
+}
+
+function phoneDigits(raw: string | null | undefined): string {
+  return (raw || '').replace(/\D/g, '');
+}
+
+function phonesMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  const da = phoneDigits(a);
+  const db = phoneDigits(b);
+  if (!da || !db) return false;
+  return da === db || da.endsWith(db) || db.endsWith(da);
+}
+
+function displayNameKey(row: {
+  client_first_name?: string | null;
+  client_last_name?: string | null;
+}): string {
+  const first = (row.client_first_name || '').trim().toLowerCase();
+  const last = (row.client_last_name || '').trim().toLowerCase();
+  return `${first} ${last}`.trim();
+}
+
+function isSameClientVisit(a: Appointment, b: Appointment): boolean {
+  if (phonesMatch(a.client_phone, b.client_phone)) return true;
+  const ea = (a.client_email || '').trim().toLowerCase();
+  const eb = (b.client_email || '').trim().toLowerCase();
+  if (ea && eb && ea === eb) return true;
+  const na = displayNameKey(a);
+  const nb = displayNameKey(b);
+  return Boolean(na && na === nb);
+}
+
+function sameDayUnsettledFromList(
+  primary: Appointment,
+  candidates: Appointment[]
+): SameDayVisit[] {
+  return candidates
+    .filter((row) => {
+      if (row.id === primary.id) return false;
+      if ((row.status || '').toLowerCase() !== 'confirmed') return false;
+      if (row.terminal_payment?.status === 'succeeded') return false;
+      if (
+        row.terminal_payment?.payment_kind === 'service_payment' &&
+        (row.terminal_payment.status === 'pending' ||
+          row.terminal_payment.status === 'processing')
+      ) {
+        return false;
+      }
+      if (!primary.booking_time || !row.booking_time) return false;
+      if (!isSameStudioDay(primary.booking_time, row.booking_time)) return false;
+      return isSameClientVisit(primary, row);
+    })
+    .map((row) => ({
+      id: row.id,
+      booking_time: row.booking_time,
+      end_time: row.end_time,
+      service_name: row.service_name,
+      quoted_service_price_cents:
+        row.service_price == null ? null : Math.round(row.service_price * 100),
+      service_price: row.service_price,
+    }))
+    .sort((a, b) => (a.booking_time || '').localeCompare(b.booking_time || ''));
+}
+
+function useSameDayUnsettled(
+  appointment: Appointment,
+  candidates: Appointment[]
+) {
+  const [siblings, setSiblings] = useState<SameDayVisit[]>(() =>
+    sameDayUnsettledFromList(appointment, candidates)
+  );
+  const [selectedExtraIds, setSelectedExtraIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const local = sameDayUnsettledFromList(appointment, candidates);
+    setSiblings(local);
+    let disposed = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/appointments/${appointment.id}/same-day-unsettled`,
+          { cache: 'no-store' }
+        );
+        const data = (await res.json().catch(() => null)) as {
+          appointments?: SameDayVisit[];
+        } | null;
+        if (disposed) return;
+        if (res.ok && (data?.appointments?.length ?? 0) > 0) {
+          setSiblings(data?.appointments ?? []);
+        } else {
+          setSiblings(local);
+        }
+      } catch {
+        if (!disposed) setSiblings(local);
+      }
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, [appointment, candidates]);
+
+  function toggleExtra(id: string) {
+    setSelectedExtraIds((current) =>
+      current.includes(id)
+        ? current.filter((value) => value !== id)
+        : [...current, id]
+    );
+  }
+
+  return { siblings, selectedExtraIds, toggleExtra };
+}
+
+function SameDayVisitChecklist({
+  primary,
+  siblings,
+  selectedExtraIds,
+  onToggle,
+  disabled,
+}: {
+  primary: Appointment;
+  siblings: SameDayVisit[];
+  selectedExtraIds: string[];
+  onToggle: (id: string) => void;
+  disabled?: boolean;
+}) {
+  if (siblings.length === 0) return null;
+  const rows: Array<{
+    id: string;
+    locked: boolean;
+    checked: boolean;
+    visit: SameDayVisit | Appointment;
+  }> = [
+    {
+      id: primary.id,
+      locked: true,
+      checked: true,
+      visit: primary,
+    },
+    ...siblings.map((visit) => ({
+      id: visit.id,
+      locked: false,
+      checked: selectedExtraIds.includes(visit.id),
+      visit,
+    })),
+  ];
+
+  return (
+    <div className="mt-5 w-full max-w-sm text-left">
+      <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
+        Same-day visits
+      </p>
+      <p className="mt-1 text-xs text-stone-500">
+        Include other unpaid appointments for this client today.
+      </p>
+      <ul className="mt-2 divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 bg-white">
+        {rows.map((row) => {
+          const time =
+            'booking_time' in row.visit && row.visit.booking_time
+              ? formatStudioClockRange(
+                  parseISO(row.visit.booking_time),
+                  'end_time' in row.visit && row.visit.end_time
+                    ? parseISO(row.visit.end_time)
+                    : null
+                )
+              : '';
+          const service = appointmentServiceLabel(row.visit);
+          const cents =
+            'quoted_service_price_cents' in row.visit
+              ? visitQuotedCents(row.visit as SameDayVisit)
+              : row.visit.service_price == null
+                ? 0
+                : Math.round(row.visit.service_price * 100);
+          return (
+            <li key={row.id}>
+              <label
+                className={`flex cursor-pointer items-start gap-3 px-3 py-2.5 ${
+                  disabled ? 'cursor-not-allowed opacity-60' : ''
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={row.checked}
+                  disabled={row.locked || disabled}
+                  onChange={() => {
+                    if (!row.locked) onToggle(row.id);
+                  }}
+                  className="mt-1 h-4 w-4 rounded border-stone-300 text-stone-900"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-stone-900">
+                    {service}
+                    {row.locked ? ' · this visit' : ''}
+                  </span>
+                  <span className="block text-xs text-stone-500">
+                    {time || 'Scheduled'}
+                  </span>
+                </span>
+                <span className="shrink-0 text-sm text-stone-700">
+                  {formatCentsUsd(cents)}
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function TerminalChargeView({
   appointment,
+  siblingCandidates = [],
   onBack,
   onDone,
   onPaid,
 }: {
   appointment: Appointment;
+  siblingCandidates?: Appointment[];
   onBack: () => void;
   onDone: () => void;
-  onPaid: (payment: TerminalPaymentSummary) => void;
+  onPaid: (payment: TerminalPaymentSummary, relatedIds: string[]) => void;
 }) {
   const [payment, setPayment] = useState<TerminalPaymentSummary | null>(
     appointment.terminal_payment
@@ -1684,15 +1935,31 @@ function TerminalChargeView({
     )
   );
   const paidNotified = useRef(false);
-  const quotedCents =
+  const { siblings, selectedExtraIds, toggleExtra } = useSameDayUnsettled(
+    appointment,
+    siblingCandidates
+  );
+  const primaryQuotedCents =
     appointment.service_price == null
       ? 0
       : Math.round(appointment.service_price * 100);
+  const quotedCents =
+    primaryQuotedCents +
+    siblings
+      .filter((visit) => selectedExtraIds.includes(visit.id))
+      .reduce((sum, visit) => sum + visitQuotedCents(visit), 0);
   const customCents = parseDollarsToCents(customDollars);
+
+  useEffect(() => {
+    if (amountMode !== 'custom') {
+      setCustomDollars(formatCentsAsDollarInput(quotedCents));
+    }
+  }, [amountMode, quotedCents]);
   const amountCents =
     amountMode === 'custom'
       ? customCents ?? 0
       : applyTerminalDiscount(quotedCents, discountPercent);
+  const relatedIds = [appointment.id, ...selectedExtraIds];
   const clientName = clientDisplayName(
     appointment.client_first_name,
     appointment.client_last_name
@@ -1705,8 +1972,8 @@ function TerminalChargeView({
   useEffect(() => {
     if (payment?.status !== 'succeeded' || paidNotified.current) return;
     paidNotified.current = true;
-    onPaid(payment);
-  }, [payment, onPaid]);
+    onPaid(payment, relatedIds);
+  }, [payment, onPaid, relatedIds]);
 
   useEffect(() => {
     if (!active || !payment?.payment_intent_id) return;
@@ -1767,8 +2034,20 @@ function TerminalChargeView({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(
                   amountMode === 'custom'
-                    ? { custom_amount_cents: amountCents }
-                    : { discount_percent: discountPercent }
+                    ? {
+                        custom_amount_cents: amountCents,
+                        additional_appointment_ids:
+                          selectedExtraIds.length > 0
+                            ? selectedExtraIds
+                            : undefined,
+                      }
+                    : {
+                        discount_percent: discountPercent,
+                        additional_appointment_ids:
+                          selectedExtraIds.length > 0
+                            ? selectedExtraIds
+                            : undefined,
+                      }
                 ),
               }
             : {}),
@@ -1976,8 +2255,20 @@ function TerminalChargeView({
               </p>
             ) : null}
             <p className="mt-2 text-sm text-stone-600">
-              {serviceLabel} for {clientName}
+              {selectedExtraIds.length > 0
+                ? `${selectedExtraIds.length + 1} visits for ${clientName}`
+                : `${serviceLabel} for ${clientName}`}
             </p>
+
+            {!isFailed ? (
+              <SameDayVisitChecklist
+                primary={appointment}
+                siblings={siblings}
+                selectedExtraIds={selectedExtraIds}
+                onToggle={toggleExtra}
+                disabled={busy !== null}
+              />
+            ) : null}
 
             {!isFailed ? (
               <div className="mt-5 w-full max-w-sm">
@@ -2110,6 +2401,8 @@ function TerminalChargeView({
 
 function SettlementConfirmDialog({
   kind,
+  appointment,
+  siblingCandidates = [],
   amountCents,
   note,
   onNoteChange,
@@ -2119,14 +2412,25 @@ function SettlementConfirmDialog({
   onConfirm,
 }: {
   kind: 'cash' | 'complimentary' | 'undo';
+  appointment: Appointment;
+  siblingCandidates?: Appointment[];
   amountCents: number;
   note: string;
   onNoteChange: (value: string) => void;
   busy: boolean;
   error: string | null;
   onDismiss: () => void;
-  onConfirm: () => void;
+  onConfirm: (additionalAppointmentIds: string[]) => void;
 }) {
+  const { siblings, selectedExtraIds, toggleExtra } = useSameDayUnsettled(
+    appointment,
+    siblingCandidates
+  );
+  const extraQuoted = siblings
+    .filter((visit) => selectedExtraIds.includes(visit.id))
+    .reduce((sum, visit) => sum + visitQuotedCents(visit), 0);
+  const cashTotal = amountCents + extraQuoted;
+  const visitCount = 1 + selectedExtraIds.length;
   const title =
     kind === 'undo'
       ? 'Undo settlement?'
@@ -2137,8 +2441,12 @@ function SettlementConfirmDialog({
     kind === 'undo'
       ? 'This clears the cash or complimentary mark so you can charge or settle again.'
       : kind === 'cash'
-        ? `Record ${formatCentsUsd(amountCents)} as paid in cash. No card charge will be sent to the Terminal.`
-        : 'Mark this appointment settled with no charge. Useful for friends, trades, or gifts.';
+        ? visitCount > 1
+          ? `Record ${formatCentsUsd(cashTotal)} across ${visitCount} visits as paid in cash. No card charge will be sent to the Terminal.`
+          : `Record ${formatCentsUsd(amountCents)} as paid in cash. No card charge will be sent to the Terminal.`
+        : visitCount > 1
+          ? `Mark ${visitCount} visits settled with no charge.`
+          : 'Mark this appointment settled with no charge. Useful for friends, trades, or gifts.';
 
   return (
     <div
@@ -2160,6 +2468,15 @@ function SettlementConfirmDialog({
             {title}
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-stone-600">{body}</p>
+          {kind !== 'undo' ? (
+            <SameDayVisitChecklist
+              primary={appointment}
+              siblings={siblings}
+              selectedExtraIds={selectedExtraIds}
+              onToggle={toggleExtra}
+              disabled={busy}
+            />
+          ) : null}
           {kind !== 'undo' ? (
             <label className="mt-4 block">
               <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
@@ -2193,7 +2510,7 @@ function SettlementConfirmDialog({
           </button>
           <button
             type="button"
-            onClick={onConfirm}
+            onClick={() => onConfirm(kind === 'undo' ? [] : selectedExtraIds)}
             disabled={busy}
             className="inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-4 py-2 text-xs font-medium uppercase tracking-[0.16em] text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
           >

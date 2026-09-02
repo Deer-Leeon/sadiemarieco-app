@@ -22,6 +22,11 @@ import {
   validateConfiguredTerminalReader,
 } from '@/lib/stripe-terminal';
 import {
+  parseAdditionalAppointmentIds,
+  resolveAdditionalUnsettledVisits,
+  sumQuotedCents,
+} from '@/lib/same-day-unsettled';
+import {
   applyTerminalDiscount,
   isTerminalDiscountPercent,
   isValidTerminalCustomAmountCents,
@@ -59,11 +64,24 @@ export async function POST(
 
   let discountPercent: TerminalDiscountPercent = 0;
   let customAmountCents: number | null = null;
+  let additionalAppointmentIds: string[] = [];
   try {
     const body = (await req.json().catch(() => null)) as {
       discount_percent?: unknown;
       custom_amount_cents?: unknown;
+      additional_appointment_ids?: unknown;
     } | null;
+    const parsedExtras = parseAdditionalAppointmentIds(
+      body?.additional_appointment_ids,
+      id
+    );
+    if (!Array.isArray(parsedExtras)) {
+      return NextResponse.json(
+        { error: parsedExtras.error, message: parsedExtras.message },
+        { status: 400 }
+      );
+    }
+    additionalAppointmentIds = parsedExtras;
     if (body?.custom_amount_cents !== undefined) {
       if (!isValidTerminalCustomAmountCents(body.custom_amount_cents)) {
         return NextResponse.json(
@@ -132,23 +150,55 @@ export async function POST(
     const quotedRaw = Number(appointment.quoted_service_price_cents);
     const quotedCents = Number.isSafeInteger(quotedRaw) ? quotedRaw : 0;
 
-    let amountCents: number;
-    let amountNote: string | null = null;
-    if (customAmountCents != null) {
-      amountCents = customAmountCents;
-      amountNote = terminalCustomAmountNote(customAmountCents, quotedCents);
-    } else {
-      if (quotedCents < 50) {
+    const extras = await resolveAdditionalUnsettledVisits(
+      appointment.id,
+      additionalAppointmentIds
+    );
+    if (!extras.ok) {
+      return NextResponse.json(
+        { error: extras.error, message: extras.message },
+        { status: 409 }
+      );
+    }
+
+    for (const extra of extras.visits) {
+      const extraPaid = await getSucceededAppointmentPayment(extra.id);
+      if (extraPaid) {
         return NextResponse.json(
           {
-            error: 'service_price_unavailable',
-            message:
-              'This appointment does not have a valid quoted service price and cannot be charged automatically.',
+            error: 'already_paid',
+            message: 'One of the selected appointments has already been paid.',
+            payment: extraPaid,
           },
           { status: 409 }
         );
       }
-      amountCents = applyTerminalDiscount(quotedCents, discountPercent);
+    }
+
+    const quotedTotalCents = sumQuotedCents(quotedCents, extras.visits);
+    const groupedIds = [appointment.id, ...extras.visits.map((visit) => visit.id)];
+    const paymentGroupId =
+      extras.visits.length > 0 ? crypto.randomUUID() : null;
+
+    let amountCents: number;
+    let amountNote: string | null = null;
+    if (customAmountCents != null) {
+      amountCents = customAmountCents;
+      amountNote = terminalCustomAmountNote(customAmountCents, quotedTotalCents);
+    } else {
+      if (quotedTotalCents < 50) {
+        return NextResponse.json(
+          {
+            error: 'service_price_unavailable',
+            message:
+              extras.visits.length > 0
+                ? 'The selected appointments do not have a valid combined service price and cannot be charged automatically.'
+                : 'This appointment does not have a valid quoted service price and cannot be charged automatically.',
+          },
+          { status: 409 }
+        );
+      }
+      amountCents = applyTerminalDiscount(quotedTotalCents, discountPercent);
       if (amountCents < 50) {
         return NextResponse.json(
           {
@@ -160,6 +210,10 @@ export async function POST(
         );
       }
       amountNote = terminalDiscountNote(discountPercent);
+      if (extras.visits.length > 0) {
+        const extraNote = `Includes ${extras.visits.length + 1} same-day visits`;
+        amountNote = amountNote ? `${amountNote}. ${extraNote}` : extraNote;
+      }
     }
 
     const succeeded = await getSucceededAppointmentPayment(appointment.id);
@@ -340,8 +394,10 @@ export async function POST(
 
     const attemptNumber = (await countTerminalAttempts(appointment.id)) + 1;
     const serviceLabel =
-      appointment.service_name?.split(' between ')[0]?.trim() ||
-      'Studio service';
+      extras.visits.length > 0
+        ? `${appointment.service_name?.split(' between ')[0]?.trim() || 'Studio service'} + ${extras.visits.length} more`
+        : appointment.service_name?.split(' between ')[0]?.trim() ||
+          'Studio service';
     const intent = await terminal.stripe.paymentIntents.create(
       {
         amount: amountCents,
@@ -355,13 +411,15 @@ export async function POST(
           : {}),
         metadata: {
           appointment_id: appointment.id,
+          appointment_ids: groupedIds.join(','),
           cal_booking_uid: appointment.cal_booking_uid || '',
           payment_kind: 'service_payment',
           service_label: serviceLabel.slice(0, 500),
-          quoted_service_price_cents: String(quotedCents),
+          quoted_service_price_cents: String(quotedTotalCents),
           discount_percent:
             customAmountCents != null ? 'custom' : String(discountPercent),
           charge_amount_cents: String(amountCents),
+          ...(paymentGroupId ? { payment_group_id: paymentGroupId } : {}),
           ...(customAmountCents != null
             ? { custom_amount_cents: String(customAmountCents) }
             : {}),
@@ -381,6 +439,7 @@ export async function POST(
         currency: intent.currency,
         amountCents,
         note: amountNote,
+        paymentGroupId,
       });
     } catch (err) {
       if (!isTerminalReaderLockConflict(err)) throw err;

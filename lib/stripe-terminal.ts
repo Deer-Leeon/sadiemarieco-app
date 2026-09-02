@@ -9,8 +9,10 @@ import type {
 } from '@/app/admin/types';
 import {
   type AppointmentPaymentRow,
+  isSettlementUniqueConflict,
   paymentRowToSummary,
 } from '@/lib/appointment-settlement';
+import { splitChargeAcrossQuoted } from '@/lib/same-day-unsettled';
 import { stripe } from '@/lib/stripe';
 import {
   getStripeEnvModes,
@@ -262,6 +264,7 @@ export async function insertTerminalPayment(args: {
   currency: string;
   amountCents: number;
   note?: string | null;
+  paymentGroupId?: string | null;
 }): Promise<TerminalPaymentSummary> {
   const { rows } = await sql<PaymentRow>`
     INSERT INTO appointment_payments (
@@ -273,7 +276,8 @@ export async function insertTerminalPayment(args: {
       base_amount_cents,
       total_amount_cents,
       status,
-      note
+      note,
+      payment_group_id
     )
     VALUES (
       ${args.appointmentId},
@@ -284,10 +288,9 @@ export async function insertTerminalPayment(args: {
       ${args.amountCents},
       ${args.amountCents},
       'pending',
-      ${args.note ?? null}
+      ${args.note ?? null},
+      ${args.paymentGroupId ?? null}
     )
-    ON CONFLICT (stripe_payment_intent_id) DO UPDATE SET
-      updated_at = NOW()
     RETURNING
       id,
       appointment_id,
@@ -445,13 +448,135 @@ function paymentStateFromStripe(
   return { status: 'pending', failureCode: null, failureMessage: null };
 }
 
+function groupedAppointmentIdsFromIntent(intent: Stripe.PaymentIntent): string[] {
+  const raw = intent.metadata?.appointment_ids?.trim() || '';
+  if (!raw) {
+    const primary = intent.metadata?.appointment_id?.trim();
+    return primary ? [primary] : [];
+  }
+  return raw
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+}
+
+async function fanOutGroupedTerminalSettlements(
+  intent: Stripe.PaymentIntent,
+  primaryRow: PaymentRow
+): Promise<void> {
+  if (primaryRow.status !== 'succeeded') return;
+  const ids = groupedAppointmentIdsFromIntent(intent);
+  if (ids.length <= 1) return;
+
+  const primaryId = intent.metadata?.appointment_id?.trim() || primaryRow.appointment_id;
+  const extraIds = ids.filter((id) => id !== primaryId);
+  if (extraIds.length === 0) return;
+
+  const existing = await sql<{ appointment_id: string }>`
+    SELECT appointment_id
+    FROM appointment_payments
+    WHERE stripe_payment_intent_id = ${intent.id}
+      AND status = 'succeeded'
+  `;
+  const already = new Set(existing.rows.map((row) => row.appointment_id));
+  if (extraIds.every((id) => already.has(id))) return;
+
+  const { rows: quotedRows } = await sql.query(
+    `SELECT id::text AS id, quoted_service_price_cents, cal_event_id AS cal_booking_uid
+     FROM appointments
+     WHERE id::text = ANY($1::text[])`,
+    [ids]
+  );
+  const quotedById = new Map<string, number>();
+  const uidById = new Map<string, string | null>();
+  for (const row of quotedRows as {
+    id: string;
+    quoted_service_price_cents: number | null;
+    cal_booking_uid: string | null;
+  }[]) {
+    const raw = Number(row.quoted_service_price_cents);
+    quotedById.set(row.id, Number.isSafeInteger(raw) && raw >= 0 ? raw : 0);
+    uidById.set(row.id, row.cal_booking_uid);
+  }
+
+  const fromMeta = Number(intent.metadata?.charge_amount_cents);
+  const combinedBase =
+    Number.isSafeInteger(fromMeta) && fromMeta >= 0
+      ? fromMeta
+      : Number(primaryRow.base_amount_cents);
+  const shares = splitChargeAcrossQuoted(
+    ids.map((id) => ({ id, quotedCents: quotedById.get(id) ?? 0 })),
+    combinedBase,
+    primaryId
+  );
+  const groupId = crypto.randomUUID();
+  const tipAmount = Number(primaryRow.tip_amount_cents) || 0;
+  const primaryShare = shares.get(primaryId) ?? combinedBase;
+  const readerId = primaryRow.stripe_reader_id;
+  const paidAt =
+    primaryRow.paid_at instanceof Date
+      ? primaryRow.paid_at.toISOString()
+      : primaryRow.paid_at;
+
+  await sql.query(
+    `UPDATE appointment_payments
+     SET
+       base_amount_cents = $1,
+       tip_amount_cents = $2,
+       total_amount_cents = $3,
+       payment_group_id = COALESCE(payment_group_id, $4::uuid),
+       updated_at = NOW()
+     WHERE id = $5::uuid`,
+    [primaryShare, tipAmount, primaryShare + tipAmount, groupId, primaryRow.id]
+  );
+
+  for (const extraId of extraIds) {
+    if (already.has(extraId)) continue;
+    const share = shares.get(extraId) ?? 0;
+    try {
+      await sql.query(
+        `INSERT INTO appointment_payments (
+           appointment_id,
+           cal_booking_uid,
+           payment_kind,
+           stripe_payment_intent_id,
+           stripe_reader_id,
+           currency,
+           base_amount_cents,
+           tip_amount_cents,
+           total_amount_cents,
+           status,
+           note,
+           payment_group_id,
+           paid_at
+         )
+         VALUES (
+           $1, $2, 'service_payment', $3, $4, $5, $6, 0, $6, 'succeeded',
+           'Same-day grouped Terminal charge', $7::uuid, $8
+         )`,
+        [
+          extraId,
+          uidById.get(extraId) ?? null,
+          intent.id,
+          readerId,
+          primaryRow.currency,
+          share,
+          groupId,
+          paidAt,
+        ]
+      );
+    } catch (err) {
+      if (!isSettlementUniqueConflict(err)) throw err;
+    }
+  }
+}
+
 export async function syncTerminalPaymentFromStripe(
   intent: Stripe.PaymentIntent,
   readerAction?: Stripe.Terminal.Reader['action']
 ): Promise<TerminalPaymentSummary | null> {
   const state = paymentStateFromStripe(intent, readerAction);
   const tipAmount = Math.max(0, intent.amount_details?.tip?.amount || 0);
-  // Keep total = base + tip so the settlement amounts check stays valid.
   const paidAt =
     state.status === 'succeeded'
       ? new Date(
@@ -463,44 +588,108 @@ export async function syncTerminalPaymentFromStripe(
         ).toISOString()
       : null;
 
-  const { rows } = await sql<PaymentRow>`
-    UPDATE appointment_payments
-    SET
-      status = CASE
-        WHEN status IN ('succeeded', 'canceled') THEN status
-        ELSE ${state.status}
-      END,
-      currency = ${intent.currency.toLowerCase()},
-      tip_amount_cents = ${tipAmount},
-      total_amount_cents = base_amount_cents + ${tipAmount},
-      failure_code = ${state.failureCode},
-      failure_message = ${state.failureMessage},
-      paid_at = CASE
-        WHEN status IN ('succeeded', 'canceled') THEN paid_at
-        WHEN ${state.status} = 'succeeded' THEN ${paidAt}
-        ELSE paid_at
-      END,
-      updated_at = NOW()
-    WHERE stripe_payment_intent_id = ${intent.id}
-    RETURNING
-      id,
-      appointment_id,
-      cal_booking_uid,
-      payment_kind,
-      stripe_payment_intent_id,
-      stripe_reader_id,
-      status,
-      currency,
-      base_amount_cents,
-      tip_amount_cents,
-      total_amount_cents,
-      failure_code,
-      failure_message,
-      note,
-      settled_by_email,
-      paid_at
-  `;
-  return rows[0] ? paymentRowToSummary(rows[0]) : null;
+  const primaryId = intent.metadata?.appointment_id?.trim() || null;
+  const { rows } = primaryId
+    ? await sql.query(
+        `UPDATE appointment_payments
+         SET
+           status = CASE
+             WHEN status IN ('succeeded', 'canceled') THEN status
+             ELSE $1
+           END,
+           currency = $2,
+           tip_amount_cents = $3,
+           total_amount_cents = base_amount_cents + $3,
+           failure_code = $4,
+           failure_message = $5,
+           paid_at = CASE
+             WHEN status IN ('succeeded', 'canceled') THEN paid_at
+             WHEN $1 = 'succeeded' THEN $6::timestamptz
+             ELSE paid_at
+           END,
+           updated_at = NOW()
+         WHERE stripe_payment_intent_id = $7
+           AND appointment_id = $8
+         RETURNING
+           id,
+           appointment_id,
+           cal_booking_uid,
+           payment_kind,
+           stripe_payment_intent_id,
+           stripe_reader_id,
+           status,
+           currency,
+           base_amount_cents,
+           tip_amount_cents,
+           total_amount_cents,
+           failure_code,
+           failure_message,
+           note,
+           settled_by_email,
+           paid_at`,
+        [
+          state.status,
+          intent.currency.toLowerCase(),
+          tipAmount,
+          state.failureCode,
+          state.failureMessage,
+          paidAt,
+          intent.id,
+          primaryId,
+        ]
+      )
+    : await sql<PaymentRow>`
+        UPDATE appointment_payments
+        SET
+          status = CASE
+            WHEN status IN ('succeeded', 'canceled') THEN status
+            ELSE ${state.status}
+          END,
+          currency = ${intent.currency.toLowerCase()},
+          tip_amount_cents = ${tipAmount},
+          total_amount_cents = base_amount_cents + ${tipAmount},
+          failure_code = ${state.failureCode},
+          failure_message = ${state.failureMessage},
+          paid_at = CASE
+            WHEN status IN ('succeeded', 'canceled') THEN paid_at
+            WHEN ${state.status} = 'succeeded' THEN ${paidAt}
+            ELSE paid_at
+          END,
+          updated_at = NOW()
+        WHERE stripe_payment_intent_id = ${intent.id}
+        RETURNING
+          id,
+          appointment_id,
+          cal_booking_uid,
+          payment_kind,
+          stripe_payment_intent_id,
+          stripe_reader_id,
+          status,
+          currency,
+          base_amount_cents,
+          tip_amount_cents,
+          total_amount_cents,
+          failure_code,
+          failure_message,
+          note,
+          settled_by_email,
+          paid_at
+      `;
+
+  const row = rows[0] as PaymentRow | undefined;
+  if (!row) return null;
+
+  if (state.status === 'succeeded' || row.status === 'succeeded') {
+    try {
+      await fanOutGroupedTerminalSettlements(intent, row);
+    } catch (err) {
+      console.error('[terminal] grouped settlement fan-out failed', err);
+    }
+    const latest = await getLatestTerminalPayment(row.appointment_id);
+    if (latest) return latest;
+  }
+
+  return paymentRowToSummary(row);
 }
 
 export async function markTerminalPaymentFailure(

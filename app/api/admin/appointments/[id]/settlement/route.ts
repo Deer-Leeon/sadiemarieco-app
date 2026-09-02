@@ -4,8 +4,14 @@ import { requireAdminUser } from '@/app/admin/auth';
 import {
   getSucceededAppointmentPayment,
   insertManualSettlement,
+  insertManualSettlements,
   isSettlementUniqueConflict,
 } from '@/lib/appointment-settlement';
+import {
+  parseAdditionalAppointmentIds,
+  quotedCentsForVisit,
+  resolveAdditionalUnsettledVisits,
+} from '@/lib/same-day-unsettled';
 import {
   findTerminalAppointment,
   getLatestTerminalPayment,
@@ -39,9 +45,17 @@ export async function POST(
     return NextResponse.json({ error: 'invalid_id' }, { status: 400 });
   }
 
-  let body: { method?: unknown; note?: unknown } = {};
+  let body: {
+    method?: unknown;
+    note?: unknown;
+    additional_appointment_ids?: unknown;
+  } = {};
   try {
-    body = (await req.json()) as { method?: unknown; note?: unknown };
+    body = (await req.json()) as {
+      method?: unknown;
+      note?: unknown;
+      additional_appointment_ids?: unknown;
+    };
   } catch {
     body = {};
   }
@@ -60,6 +74,16 @@ export async function POST(
   const noteRaw = typeof body.note === 'string' ? body.note.trim() : '';
   const note = noteRaw.length > 0 ? noteRaw.slice(0, 500) : null;
   const settledByEmail = access.emails[0] || 'admin';
+  const parsedExtras = parseAdditionalAppointmentIds(
+    body.additional_appointment_ids,
+    id
+  );
+  if (!Array.isArray(parsedExtras)) {
+    return NextResponse.json(
+      { error: parsedExtras.error, message: parsedExtras.message },
+      { status: 400 }
+    );
+  }
 
   try {
     const appointment = await findTerminalAppointment(id);
@@ -104,6 +128,17 @@ export async function POST(
       );
     }
 
+    const extras = await resolveAdditionalUnsettledVisits(
+      appointment.id,
+      parsedExtras
+    );
+    if (!extras.ok) {
+      return NextResponse.json(
+        { error: extras.error, message: extras.message },
+        { status: 409 }
+      );
+    }
+
     const amountCents = Number(appointment.quoted_service_price_cents);
     if (method === 'cash') {
       if (!Number.isSafeInteger(amountCents) || amountCents < 0) {
@@ -116,18 +151,70 @@ export async function POST(
           { status: 409 }
         );
       }
+      for (const extra of extras.visits) {
+        if (
+          extra.quoted_service_price_cents == null ||
+          !Number.isSafeInteger(Number(extra.quoted_service_price_cents)) ||
+          Number(extra.quoted_service_price_cents) < 0
+        ) {
+          return NextResponse.json(
+            {
+              error: 'service_price_unavailable',
+              message:
+                'One of the selected appointments does not have a valid quoted service price for cash settlement.',
+            },
+            { status: 409 }
+          );
+        }
+      }
     }
 
-    const payment = await insertManualSettlement({
-      appointmentId: appointment.id,
-      calBookingUid: appointment.cal_booking_uid,
-      kind: method,
-      baseAmountCents: method === 'complimentary' ? 0 : amountCents,
-      note,
-      settledByEmail,
-    });
+    const groupId =
+      extras.visits.length > 0 ? crypto.randomUUID() : null;
+    const items = [
+      {
+        appointmentId: appointment.id,
+        calBookingUid: appointment.cal_booking_uid,
+        baseAmountCents: method === 'complimentary' ? 0 : amountCents,
+      },
+      ...extras.visits.map((visit) => ({
+        appointmentId: visit.id,
+        calBookingUid: visit.cal_booking_uid,
+        baseAmountCents:
+          method === 'complimentary' ? 0 : quotedCentsForVisit(visit),
+      })),
+    ];
 
-    return NextResponse.json({ payment });
+    const payments =
+      items.length === 1
+        ? [
+            await insertManualSettlement({
+              appointmentId: items[0].appointmentId,
+              calBookingUid: items[0].calBookingUid,
+              kind: method,
+              baseAmountCents: items[0].baseAmountCents,
+              note,
+              settledByEmail,
+              paymentGroupId: groupId,
+            }),
+          ]
+        : await insertManualSettlements({
+            kind: method,
+            note,
+            settledByEmail,
+            paymentGroupId: groupId,
+            items,
+          });
+
+    const primaryPayment =
+      payments.find((row) => row.appointment_id === appointment.id) ??
+      payments[0] ??
+      null;
+
+    return NextResponse.json({
+      payment: primaryPayment,
+      payments,
+    });
   } catch (err) {
     if (isSettlementUniqueConflict(err)) {
       const payment = await getSucceededAppointmentPayment(id);

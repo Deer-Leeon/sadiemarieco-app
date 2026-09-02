@@ -252,6 +252,7 @@ export function isAppointmentPaymentKind(
 
 export interface TerminalPaymentSummary {
   id: string;
+  appointment_id?: string;
   payment_kind: AppointmentPaymentKind;
   payment_intent_id: string | null;
   reader_id: string | null;
