@@ -296,6 +296,13 @@ export function slotToStudioLocalHhmm(isoUtc: string): string | null {
   }
 }
 
+/** True when the slot's America/Denver hour matches `hour` (0–23). */
+export function slotMatchesStudioHour(isoUtc: string, hour: number): boolean {
+  const hhmm = slotToStudioLocalHhmm(isoUtc);
+  if (!hhmm) return false;
+  return Number(hhmm.slice(0, 2)) === hour;
+}
+
 export function todayInStudio(): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: STUDIO_TIMEZONE,

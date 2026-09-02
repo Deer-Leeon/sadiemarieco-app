@@ -28,6 +28,9 @@ import {
 } from '@/lib/studio-schedule-windows';
 
 import ManualBookingModal from './components/ManualBookingModal';
+import CalendarSlotActionDialog, {
+  type CalendarSlotAction,
+} from './CalendarSlotActionDialog';
 import type {
   ManualBookingServiceGroupHeader,
   ManualBookingServiceOption,
@@ -124,6 +127,9 @@ export default function DashboardUI({
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
   const [manualBookingOpen, setManualBookingOpen] = useState(false);
+  const [slotAction, setSlotAction] = useState<CalendarSlotAction | null>(
+    null
+  );
   const [bookingToast, setBookingToast] = useState<string | null>(null);
   useEffect(() => {
     if (!bookingToast) return;
@@ -352,6 +358,7 @@ export default function DashboardUI({
             onDayClick={setModalDate}
             onAppointmentClick={setSelectedAppointment}
             onBlockClick={setBlockPendingEdit}
+            onHourClick={(date, hour) => setSlotAction({ date, hour })}
             scheduleAvailability={scheduleAvailability}
             scheduleOverrides={scheduleOverrides}
           />
@@ -365,6 +372,7 @@ export default function DashboardUI({
             onDayClick={setModalDate}
             onAppointmentClick={setSelectedAppointment}
             onBlockClick={setBlockPendingEdit}
+            onHourClick={(date, hour) => setSlotAction({ date, hour })}
             scheduleAvailability={scheduleAvailability}
             scheduleOverrides={scheduleOverrides}
           />
@@ -391,9 +399,8 @@ export default function DashboardUI({
           onClose={() => setModalDate(null)}
           onAppointmentClick={setSelectedAppointment}
           onBlockClick={setBlockPendingEdit}
-          onBlocksChanged={(infoMessage) => {
-            if (infoMessage) setBookingToast(infoMessage);
-          }}
+          onHourClick={(date, hour) => setSlotAction({ date, hour })}
+          ignoreEscape={slotAction !== null}
           scheduleAvailability={scheduleAvailability}
           scheduleOverrides={scheduleOverrides}
         />
@@ -446,6 +453,25 @@ export default function DashboardUI({
           onSuccess={() => {
             setBookingToast('Appointment booked successfully.');
             router.refresh();
+          }}
+        />
+      )}
+
+      {slotAction !== null && (
+        <CalendarSlotActionDialog
+          action={slotAction}
+          services={manualBookingServices}
+          groupHeaders={manualBookingGroupHeaders}
+          onClose={() => setSlotAction(null)}
+          onBooked={() => {
+            setBookingToast('Appointment booked successfully.');
+            router.refresh();
+            setSlotAction(null);
+          }}
+          onBlocked={(infoMessage) => {
+            if (infoMessage) setBookingToast(infoMessage);
+            router.refresh();
+            setSlotAction(null);
           }}
         />
       )}

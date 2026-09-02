@@ -17,11 +17,13 @@ import {
   formatSlotInStudioTime,
   isStudioDateInMonth,
   occupiedStartMsFromSlotsPayload,
+  slotMatchesStudioHour,
   slotsGroupedByStudioDate,
   slotToStudioLocalHhmm,
   STUDIO_TIMEZONE,
   todayInStudio,
 } from './manual-booking-utils';
+import { studioDateKey } from '@/lib/studio-calendar';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
@@ -112,6 +114,10 @@ interface Props {
   durationMins: number | null;
   selectedSlot: string | null;
   onSelectSlot: (isoUtc: string | null) => void;
+  /** Studio calendar day to open on (from a time-grid hour click). */
+  seedDate?: Date;
+  /** 0–23 studio hour to pre-select once slots load. */
+  seedHour?: number;
 }
 
 export default function ManualBookingSlotPicker({
@@ -120,9 +126,15 @@ export default function ManualBookingSlotPicker({
   durationMins,
   selectedSlot,
   onSelectSlot,
+  seedDate,
+  seedHour,
 }: Props) {
   const today = todayInStudio();
-  const initial = parseStudioDate(today);
+  const seedYmdRaw = seedDate ? studioDateKey(seedDate) : '';
+  const seedYmd =
+    seedYmdRaw && seedYmdRaw >= today ? seedYmdRaw : null;
+  const startYmd = seedYmd ?? today;
+  const initial = parseStudioDate(startYmd);
 
   const [viewYear, setViewYear] = useState(initial.year);
   const [viewMonth, setViewMonth] = useState(initial.month);
@@ -142,7 +154,8 @@ export default function ManualBookingSlotPicker({
     () => new Set()
   );
   /** Skip empty current month once on open so admins land on the next bookable month. */
-  const mayAdvanceFromEmptyStart = useRef(true);
+  const mayAdvanceFromEmptyStart = useRef(!seedYmd);
+  const seededSlotAppliedRef = useRef(false);
   const monthCacheRef = useRef<Map<string, MonthCacheEntry>>(new Map());
   const monthInflightRef = useRef<Map<string, Promise<MonthCacheEntry>>>(new Map());
   const monthLoadGenRef = useRef(0);
@@ -179,19 +192,32 @@ export default function ManualBookingSlotPicker({
       setMonthError(entry.error);
 
       if (entry.availableDates.length === 0) {
-        setSelectedDate(null);
+        if (seedYmd && isStudioDateInMonth(seedYmd, year, month)) {
+          setSelectedDate(seedYmd);
+        } else {
+          setSelectedDate(null);
+        }
         onSelectSlotRef.current(null);
         return;
       }
 
-      const defaultDate =
-        entry.availableDates.includes(today) && isStudioDateInMonth(today, year, month)
+      const seedInMonth =
+        seedYmd &&
+        isStudioDateInMonth(seedYmd, year, month) &&
+        (entry.availableDates.includes(seedYmd) || seedYmd >= today);
+
+      const defaultDate = seedInMonth
+        ? seedYmd
+        : entry.availableDates.includes(today) &&
+            isStudioDateInMonth(today, year, month)
           ? today
           : entry.availableDates[0];
       setSelectedDate(defaultDate);
-      onSelectSlotRef.current(null);
+      if (!(seedYmd && defaultDate === seedYmd && seedHour != null)) {
+        onSelectSlotRef.current(null);
+      }
     },
-    [today]
+    [today, seedYmd, seedHour]
   );
 
   const fetchMonthEntry = useCallback(
@@ -397,6 +423,21 @@ export default function ManualBookingSlotPicker({
   useEffect(() => {
     void loadMonth(viewYear, viewMonth);
   }, [viewYear, viewMonth, loadMonth]);
+
+  useEffect(() => {
+    if (seedHour == null || !seedYmd) return;
+    if (selectedDate !== seedYmd) return;
+    if (seededSlotAppliedRef.current) return;
+    const times = filterSlotsForBookingDay(
+      monthSlots[selectedDate] ?? [],
+      selectedDate,
+      today
+    );
+    const match = times.find((iso) => slotMatchesStudioHour(iso, seedHour));
+    if (!match) return;
+    seededSlotAppliedRef.current = true;
+    onSelectSlotRef.current(match);
+  }, [selectedDate, monthSlots, seedHour, seedYmd, today]);
 
   const slots =
     selectedDate && selectedDate >= today

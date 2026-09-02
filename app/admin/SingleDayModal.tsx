@@ -10,7 +10,6 @@ import {
   studioDateKey,
 } from '@/lib/studio-calendar';
 
-import BlockTimeDialog from './BlockTimeDialog';
 import ClosedHoursHatch from './components/ClosedHoursHatch';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
@@ -75,7 +74,9 @@ interface Props {
   onClose: () => void;
   onAppointmentClick?: (appointment: Appointment) => void;
   onBlockClick?: (block: TimeBlock) => void;
-  onBlocksChanged?: (infoMessage?: string) => void;
+  onHourClick?: (date: Date, hour: number) => void;
+  /** When a nested book/block dialog is open, don't steal Escape. */
+  ignoreEscape?: boolean;
   scheduleAvailability?: StudioAvailabilityBlock[] | null;
   scheduleOverrides?: StudioDateOverride[] | null;
 }
@@ -88,12 +89,12 @@ export default function SingleDayModal({
   onClose,
   onAppointmentClick,
   onBlockClick,
-  onBlocksChanged,
+  onHourClick,
+  ignoreEscape = false,
   scheduleAvailability = null,
   scheduleOverrides = null,
 }: Props) {
   const [activeDate, setActiveDate] = useState<Date>(initialDate);
-  const [blockDialogHour, setBlockDialogHour] = useState<number | null>(null);
 
   useEffect(() => {
     setActiveDate(initialDate);
@@ -101,15 +102,11 @@ export default function SingleDayModal({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (ignoreEscape) return;
       if (e.key === 'Escape') {
-        if (blockDialogHour !== null) {
-          setBlockDialogHour(null);
-          return;
-        }
         onClose();
         return;
       }
-      if (blockDialogHour !== null) return;
       if (e.key === 'ArrowLeft') {
         setActiveDate((d) => subDays(d, 1));
         return;
@@ -120,7 +117,7 @@ export default function SingleDayModal({
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, blockDialogHour]);
+  }, [onClose, ignoreEscape]);
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -176,7 +173,7 @@ export default function SingleDayModal({
           />
 
           <p className="shrink-0 border-b border-stone-200 px-4 py-2.5 text-center text-[11px] uppercase tracking-[0.22em] text-stone-500">
-            Click an hour to block · click a block to edit
+            Click an hour to book or block · click a block to edit
           </p>
 
           <div className="min-h-0 flex-1 overflow-hidden px-1 pb-1 pt-1">
@@ -185,22 +182,13 @@ export default function SingleDayModal({
               positionedBlocks={positionedBlocks}
               hatchBands={hatchBands}
               removingBlockId={removingBlockId}
-              onHourClick={(hour) => setBlockDialogHour(hour)}
+              onHourClick={(hour) => onHourClick?.(activeDate, hour)}
               onAppointmentClick={onAppointmentClick}
               onBlockClick={onBlockClick}
             />
           </div>
         </div>
       </div>
-
-      {blockDialogHour !== null && (
-        <BlockTimeDialog
-          activeDate={activeDate}
-          initialHour={blockDialogHour}
-          onClose={() => setBlockDialogHour(null)}
-          onCreated={(infoMessage) => onBlocksChanged?.(infoMessage)}
-        />
-      )}
     </>
   );
 }
@@ -360,7 +348,7 @@ function DayBody({
             <button
               key={hour}
               type="button"
-              aria-label={`Block time starting at ${HOUR_LABELS[i]}`}
+              aria-label={`Book or block time starting at ${HOUR_LABELS[i]}`}
               className="w-full border-t border-transparent transition-colors hover:bg-stone-900/[0.04] focus:outline-none focus-visible:bg-stone-900/[0.06] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-400/60"
               onClick={(e) => {
                 e.stopPropagation();
@@ -374,7 +362,7 @@ function DayBody({
       {isEmpty && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <p className="text-xs uppercase tracking-[0.28em] text-stone-400">
-            No bookings — click an hour to block
+            No bookings — click an hour to book or block
           </p>
         </div>
       )}
