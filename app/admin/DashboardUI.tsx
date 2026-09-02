@@ -94,12 +94,14 @@ export default function DashboardUI({
   manualBookingGroupHeaders,
 }: Props) {
   const router = useRouter();
-  // Default to the continuous-scroll month calendar. It surfaces both
-  // the highest density of context (a full month of bookings at a
-  // glance) and lands the user on "today" via the auto-scroll in
-  // CalendarView — the closest single-view equivalent of the old
-  // homepage feeling.
-  const [view, setView] = useState<ViewMode>('month');
+  // Desktop Bookings lands on the Sun–Sat week grid (today's week).
+  // Narrow viewports keep the month calendar — seven hour-columns are
+  // cramped on a phone, and the toggle still lets either size switch.
+  const [view, setView] = useState<ViewMode>('week');
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 768px)').matches;
+    if (!desktop) setView('month');
+  }, []);
   const [currentDate, setCurrentDate] = useState<Date>(() =>
     calendarDayUtcNoon(todayStudioDateKey())
   );

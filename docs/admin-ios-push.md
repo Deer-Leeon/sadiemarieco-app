@@ -1,6 +1,19 @@
-# Admin iOS new-booking push (APNs)
+# Admin iOS booking push (APNs)
 
-Always-on alerts when an appointment becomes **`confirmed`** in Postgres (the same moment it appears on the calendar). Holds (`pending`) do **not** notify.
+Always-on alerts when a **confirmed** appointment is booked, rescheduled, or canceled. Holds (`pending`) and abandoned checkout (`canceled_by_system`) do **not** notify.
+
+Copy depends on who made the change:
+
+| Event | Who | Title | Body |
+| ----- | --- | ----- | ---- |
+| Confirmed | Client | New booking | `{name} booked {service} · {when}` |
+| Confirmed | Admin | You scheduled a booking | `You scheduled {service} for {name} · {when}` |
+| Rescheduled | Client | Booking rescheduled | `{name} rescheduled {service} · {when}` |
+| Rescheduled | Admin | You rescheduled a booking | `You rescheduled {service} for {name} · {when}` |
+| Canceled | Client | Booking canceled | `{name} canceled {service} · {when}` |
+| Canceled | Admin | You canceled a booking | `You canceled {service} for {name} · {when}` |
+
+`{when}` is Mountain time (same format as before, e.g. `Tue, Sep 2, 10:00 AM`). If the time is missing, the ` · {when}` suffix is omitted. `{name}` is the client's first + last name.
 
 There is no in-app mute. Sign in once; stay signed in until **Log Out**. The app keeps the Clerk session warm and re-registers the APNs token on launch, every foreground, background fetch, and silent push. The token is removed only on **Log Out**.
 
@@ -37,13 +50,17 @@ If the phone is only briefly offline, Apple now **stores** the alert for up to *
 
 The Simulator never receives real APNs. First proof is a **device / TestFlight** build with Release `aps-environment=production`.
 
-Confirmed-booking pushes include `content-available` so a backgrounded admin app can refetch the calendar immediately and refresh its session/token. With the app open on Bookings, the calendar also reloads when the banner arrives, when you return from another app, and about every 10 seconds while that tab is selected. Pending checkout holds still do not appear on the 3-day / week grids.
+Confirmed-booking, reschedule, and cancel pushes include `content-available` so a backgrounded admin app can refetch the calendar immediately and refresh its session/token. With the app open on Bookings, the calendar also reloads when the banner arrives, when you return from another app, and about every 10 seconds while that tab is selected. Pending checkout holds still do not appear on the 3-day / week grids.
 
 ## Backend map
 
 - Schema: `scripts/add_admin_push_devices.sql` + `scripts/run-admin-push-devices-migration.mjs`
 - Register / logout: `POST` / `DELETE` `/api/admin/push-devices`
-- Send: `lib/admin-booking-push.js` from `notifyBookingConfirmed` (website checkout, Stripe recovery, admin New booking)
-- Dedupe: `webhook_events.booking_uid` = `{calBookingUid}:admin_push`
+- Send: `lib/admin-booking-push.js` `notifyAdminAppointmentPush`
+  - Confirmed: `notifyBookingConfirmed` (website checkout, Stripe recovery, admin New booking)
+  - Rescheduled: `notifyAppointmentRescheduled` (Cal webhook + admin reschedule)
+  - Canceled: admin status PATCH + Cal `BOOKING_CANCELLED` (client cancel of a confirmed booking)
+- Dedupe: `webhook_events.booking_uid` = `{calBookingUid}:admin_push` (confirmed) or `{calBookingUid}:admin_push:{kind}` (rescheduled / canceled)
+- Collapse id: `{uid}:{kind}` (so a cancel banner does not replace a new-booking banner)
 - If no device is registered yet, the dedupe claim is released and QStash retries after loading devices again
-- Apple 5xx retry: QStash → `/api/qstash/admin-booking-push`
+- Apple 5xx retry: QStash → `/api/qstash/admin-booking-push` (forwards `kind` + `source`)

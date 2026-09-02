@@ -89,7 +89,7 @@ export const RATE_LIMITS = {
   bookingReleaseHold: { limit: 30, windowMs: 60_000 },
   stripeSetupIntent: { limit: 20, windowMs: 60_000 },
   bookServices: { limit: 60, windowMs: 60_000 },
-  bookSlots: { limit: 60, windowMs: 60_000 },
+  bookSlots: { limit: 120, windowMs: 60_000 },
   bookCreate: { limit: 20, windowMs: 60_000 },
   consentPost: { limit: 10, windowMs: 15 * 60_000 },
   consentPatch: { limit: 30, windowMs: 15 * 60_000 },

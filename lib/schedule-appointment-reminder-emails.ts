@@ -26,6 +26,7 @@ export interface ScheduleReminderEmailsArgs {
   serviceName: string;
   clientEmail?: string | null;
   endTime?: string | null;
+  calEventTypeId?: number | null;
 }
 
 export interface ScheduleReminderEmailsResult {
@@ -83,6 +84,7 @@ export async function scheduleAppointmentReminderEmails(
     args.serviceName,
     args.bookingTime,
     args.endTime,
+    args.calEventTypeId,
   );
 
   const out: ScheduleReminderEmailsResult = { scheduled: true };

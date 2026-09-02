@@ -7,6 +7,7 @@ import {
   ADMIN_MANUAL_BOOKING_DAY_START_MIN,
   ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN,
 } from '@/lib/cal-config';
+import { addCalendarDays } from '@/lib/cal-slot-dates';
 import { parseBookingStartForCal } from '@/lib/cal-timezone';
 
 const FIFTEEN_MIN_MS = 15 * 60_000;
@@ -67,6 +68,31 @@ function enumerateAdminCandidateStartMs(
   }
 
   return candidates;
+}
+
+/**
+ * Full 9 AM–9 PM start grid for admin god-mode, ignoring Cal/Postgres occupancy
+ * so staff can double-book. Public booking still uses studio-available-slots.
+ */
+export function adminGodModeSlotsForRange(
+  dateStart: string,
+  dateEnd: string,
+  serviceDurationMins: number,
+  slotIntervalMins: number = ADMIN_MANUAL_BOOKING_SLOT_INTERVAL_MIN
+): Record<string, string[]> {
+  const stepMs = slotIntervalMins * 60_000;
+  const out: Record<string, string[]> = {};
+  let cursor = dateStart;
+  while (cursor <= dateEnd) {
+    const times = enumerateAdminCandidateStartMs(
+      cursor,
+      serviceDurationMins,
+      stepMs
+    ).map((ms) => new Date(ms).toISOString());
+    if (times.length > 0) out[cursor] = times;
+    cursor = addCalendarDays(cursor, 1);
+  }
+  return out;
 }
 
 /**

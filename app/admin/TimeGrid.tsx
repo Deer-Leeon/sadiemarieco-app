@@ -433,6 +433,7 @@ function AppointmentBlock({
 
   const widthPct = 100 / totalCols;
   const leftPct = col * widthPct;
+  const gutterPx = totalCols > 1 ? 3 : 2;
 
   // stopPropagation is defensive — the day-column body no longer
   // has its own click handler (only the day-header at the top of
@@ -500,8 +501,8 @@ function AppointmentBlock({
         top: `${topPct}%`,
         height: `${heightPct}%`,
         minHeight: MIN_PILL_HEIGHT_PX,
-        left: `calc(${leftPct}% + 2px)`,
-        width: `calc(${widthPct}% - 4px)`,
+        left: `calc(${leftPct}% + ${gutterPx}px)`,
+        width: `calc(${widthPct}% - ${gutterPx * 2}px)`,
         ...(color && {
           backgroundColor: color.accent,
           color: color.text,

@@ -16,6 +16,7 @@ import {
   filterSlotsForBookingDay,
   formatSlotInStudioTime,
   isStudioDateInMonth,
+  occupiedStartMsFromSlotsPayload,
   slotsGroupedByStudioDate,
   slotToStudioLocalHhmm,
   STUDIO_TIMEZONE,
@@ -36,6 +37,38 @@ function studioDateString(year: number, month: number, day: number): string {
 function lastDayOfMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
+
+function monthCacheKey(eventTypeId: number, year: number, month: number): string {
+  return `${eventTypeId}-${year}-${month}`;
+}
+
+function shiftYearMonth(
+  year: number,
+  month: number,
+  delta: number
+): { year: number; month: number } {
+  let m = month + delta;
+  let y = year;
+  while (m < 1) {
+    m += 12;
+    y -= 1;
+  }
+  while (m > 12) {
+    m -= 12;
+    y += 1;
+  }
+  return { year: y, month: m };
+}
+
+type MonthCacheEntry = {
+  slotsByDay: Record<string, string[]>;
+  availableDates: string[];
+  studioDaySet: Set<string>;
+  availability: StudioAvailabilityBlock[];
+  overrides: StudioDateOverride[];
+  occupiedStartMs: Set<number>;
+  error: string | null;
+};
 
 function monthLabel(year: number, month: number): string {
   return new Intl.DateTimeFormat('en-US', {
@@ -105,8 +138,19 @@ export default function ManualBookingSlotPicker({
   );
   const [monthLoading, setMonthLoading] = useState(true);
   const [monthError, setMonthError] = useState<string | null>(null);
+  const [occupiedStartMs, setOccupiedStartMs] = useState<Set<number>>(
+    () => new Set()
+  );
   /** Skip empty current month once on open so admins land on the next bookable month. */
   const mayAdvanceFromEmptyStart = useRef(true);
+  const monthCacheRef = useRef<Map<string, MonthCacheEntry>>(new Map());
+  const monthInflightRef = useRef<Map<string, Promise<MonthCacheEntry>>>(new Map());
+  const monthLoadGenRef = useRef(0);
+  const onSelectSlotRef = useRef(onSelectSlot);
+
+  useEffect(() => {
+    onSelectSlotRef.current = onSelectSlot;
+  }, [onSelectSlot]);
 
   const availableSet = useMemo(() => new Set(availableDates), [availableDates]);
 
@@ -124,28 +168,59 @@ export default function ManualBookingSlotPicker({
     );
   }, [selectedDate, scheduleAvailability, scheduleOverrides]);
 
-  const loadMonth = useCallback(
-    async (year: number, month: number) => {
-      setMonthLoading(true);
-      setMonthError(null);
-      setMonthSlots({});
-      setAvailableDates([]);
-      setStudioDaySet(new Set());
-      setSelectedDate(null);
-      onSelectSlot(null);
+  const applyMonthEntry = useCallback(
+    (entry: MonthCacheEntry, year: number, month: number) => {
+      setMonthSlots(entry.slotsByDay);
+      setAvailableDates(entry.availableDates);
+      setStudioDaySet(entry.studioDaySet);
+      setScheduleAvailability(entry.availability);
+      setScheduleOverrides(entry.overrides);
+      setOccupiedStartMs(entry.occupiedStartMs);
+      setMonthError(entry.error);
 
-      const rangeStart = studioDateString(year, month, 1);
-      const rangeEnd = studioDateString(year, month, lastDayOfMonth(year, month));
-      const queryStart = rangeStart < today ? today : rangeStart;
-
-      if (queryStart > rangeEnd) {
+      if (entry.availableDates.length === 0) {
         setSelectedDate(null);
-        setMonthLoading(false);
-        setMonthError('No open days left this month.');
+        onSelectSlotRef.current(null);
         return;
       }
 
-      try {
+      const defaultDate =
+        entry.availableDates.includes(today) && isStudioDateInMonth(today, year, month)
+          ? today
+          : entry.availableDates[0];
+      setSelectedDate(defaultDate);
+      onSelectSlotRef.current(null);
+    },
+    [today]
+  );
+
+  const fetchMonthEntry = useCallback(
+    async (year: number, month: number): Promise<MonthCacheEntry> => {
+      const key = monthCacheKey(eventTypeId, year, month);
+      const cached = monthCacheRef.current.get(key);
+      if (cached) return cached;
+      const inflight = monthInflightRef.current.get(key);
+      if (inflight) return inflight;
+
+      const pending = (async (): Promise<MonthCacheEntry> => {
+        const rangeStart = studioDateString(year, month, 1);
+        const rangeEnd = studioDateString(year, month, lastDayOfMonth(year, month));
+        const queryStart = rangeStart < today ? today : rangeStart;
+
+        if (queryStart > rangeEnd) {
+          const entry: MonthCacheEntry = {
+            slotsByDay: {},
+            availableDates: [],
+            studioDaySet: new Set(),
+            availability: [],
+            overrides: [],
+            occupiedStartMs: new Set(),
+            error: 'No open days left this month.',
+          };
+          monthCacheRef.current.set(key, entry);
+          return entry;
+        }
+
         const params = new URLSearchParams({
           eventTypeId: String(eventTypeId),
           date: queryStart,
@@ -160,22 +235,19 @@ export default function ManualBookingSlotPicker({
         const slotsData: unknown = await slotsRes.json().catch(() => null);
         const scheduleData: unknown = await scheduleRes.json().catch(() => null);
 
+        let availability: StudioAvailabilityBlock[] = [];
+        let overrides: StudioDateOverride[] = [];
+        let studioDays = new Set<string>();
         const schedule = scheduleRes.ok ? parseSchedulePayload(scheduleData) : null;
         if (schedule) {
-          setScheduleAvailability(schedule.availability);
-          setScheduleOverrides(schedule.overrides);
-          setStudioDaySet(
-            studioDaysInRange(
-              rangeStart,
-              rangeEnd,
-              schedule.availability,
-              schedule.overrides
-            )
+          availability = schedule.availability;
+          overrides = schedule.overrides;
+          studioDays = studioDaysInRange(
+            rangeStart,
+            rangeEnd,
+            schedule.availability,
+            schedule.overrides
           );
-        } else {
-          setScheduleAvailability([]);
-          setScheduleOverrides([]);
-          setStudioDaySet(new Set());
         }
 
         if (!slotsRes.ok) {
@@ -186,18 +258,16 @@ export default function ManualBookingSlotPicker({
             typeof (slotsData as { message: unknown }).message === 'string'
               ? (slotsData as { message: string }).message
               : `Could not load availability (HTTP ${slotsRes.status})`;
-          setSelectedDate(null);
-          setMonthError(message);
-          return;
+          throw new Error(message);
         }
 
         const grouped = slotsGroupedByStudioDate(slotsData, {
           rangeStart: queryStart,
           rangeEnd: rangeEnd,
         });
+        const occupiedStartMs = occupiedStartMsFromSlotsPayload(slotsData);
 
         const slotsByDay: Record<string, string[]> = {};
-
         for (const [date, times] of Object.entries(grouped)) {
           if (!isStudioDateInMonth(date, year, month)) continue;
           const filtered = filterSlotsForBookingDay(times, date, today);
@@ -207,49 +277,121 @@ export default function ManualBookingSlotPicker({
         }
 
         const openDates = Object.keys(slotsByDay).sort();
+        const entry: MonthCacheEntry = {
+          slotsByDay,
+          availableDates: openDates,
+          studioDaySet: studioDays,
+          availability,
+          overrides,
+          occupiedStartMs,
+          error:
+            openDates.length === 0
+              ? `No open days in ${monthLabel(year, month)}. Try another month.`
+              : null,
+        };
+        monthCacheRef.current.set(key, entry);
+        return entry;
+      })();
 
-        setMonthSlots(slotsByDay);
-        setAvailableDates(openDates);
+      monthInflightRef.current.set(key, pending);
+      try {
+        return await pending;
+      } finally {
+        monthInflightRef.current.delete(key);
+      }
+    },
+    [eventTypeId, today]
+  );
 
-        if (openDates.length === 0) {
-          setSelectedDate(null);
-          if (
-            mayAdvanceFromEmptyStart.current &&
-            year === initial.year &&
-            month === initial.month
-          ) {
-            mayAdvanceFromEmptyStart.current = false;
-            let nextMonth = month + 1;
-            let nextYear = year;
-            if (nextMonth > 12) {
-              nextMonth = 1;
-              nextYear += 1;
-            }
-            setViewYear(nextYear);
-            setViewMonth(nextMonth);
-            return;
-          }
-          setMonthError(`No open days in ${monthLabel(year, month)}. Try another month.`);
+  const prefetchMonth = useCallback(
+    (year: number, month: number) => {
+      const key = monthCacheKey(eventTypeId, year, month);
+      if (monthCacheRef.current.has(key) || monthInflightRef.current.has(key)) {
+        return;
+      }
+      void fetchMonthEntry(year, month).catch(() => {
+        /* next navigation will retry */
+      });
+    },
+    [eventTypeId, fetchMonthEntry]
+  );
+
+  const loadMonth = useCallback(
+    async (year: number, month: number) => {
+      const loadGen = monthLoadGenRef.current + 1;
+      monthLoadGenRef.current = loadGen;
+      const stillCurrent = () => monthLoadGenRef.current === loadGen;
+
+      const cached = monthCacheRef.current.get(
+        monthCacheKey(eventTypeId, year, month)
+      );
+      if (cached) {
+        if (
+          cached.availableDates.length === 0 &&
+          mayAdvanceFromEmptyStart.current &&
+          year === initial.year &&
+          month === initial.month &&
+          cached.error !== 'No open days left this month.'
+        ) {
+          mayAdvanceFromEmptyStart.current = false;
+          const next = shiftYearMonth(year, month, 1);
+          setViewYear(next.year);
+          setViewMonth(next.month);
+          return;
+        }
+        applyMonthEntry(cached, year, month);
+        setMonthLoading(false);
+        const next = shiftYearMonth(year, month, 1);
+        prefetchMonth(next.year, next.month);
+        return;
+      }
+
+      setMonthLoading(true);
+      setMonthError(null);
+      setSelectedDate(null);
+      onSelectSlotRef.current(null);
+
+      try {
+        const entry = await fetchMonthEntry(year, month);
+        if (!stillCurrent()) return;
+
+        if (
+          entry.availableDates.length === 0 &&
+          mayAdvanceFromEmptyStart.current &&
+          year === initial.year &&
+          month === initial.month &&
+          !entry.error?.startsWith('Could not') &&
+          entry.error !== 'No open days left this month.'
+        ) {
+          mayAdvanceFromEmptyStart.current = false;
+          const next = shiftYearMonth(year, month, 1);
+          setViewYear(next.year);
+          setViewMonth(next.month);
           return;
         }
 
         mayAdvanceFromEmptyStart.current = false;
-
-        const defaultDate =
-          openDates.includes(today) && isStudioDateInMonth(today, year, month)
-            ? today
-            : openDates[0];
-        setSelectedDate(defaultDate);
+        applyMonthEntry(entry, year, month);
+        const next = shiftYearMonth(year, month, 1);
+        prefetchMonth(next.year, next.month);
       } catch (err) {
+        if (!stillCurrent()) return;
         setSelectedDate(null);
         setMonthError(
           err instanceof Error ? err.message : 'Failed to load availability'
         );
       } finally {
-        setMonthLoading(false);
+        if (stillCurrent()) setMonthLoading(false);
       }
     },
-    [eventTypeId, onSelectSlot, today]
+    [
+      applyMonthEntry,
+      eventTypeId,
+      fetchMonthEntry,
+      initial.month,
+      initial.year,
+      prefetchMonth,
+    ]
   );
 
   useEffect(() => {
@@ -260,20 +402,12 @@ export default function ManualBookingSlotPicker({
     selectedDate && selectedDate >= today
       ? filterSlotsForBookingDay(monthSlots[selectedDate] ?? [], selectedDate, today)
       : [];
-  const slotsLoading = monthLoading;
+  const slotsLoading = monthLoading && !selectedDate;
 
   function shiftMonth(delta: number) {
-    let m = viewMonth + delta;
-    let y = viewYear;
-    if (m < 1) {
-      m = 12;
-      y -= 1;
-    } else if (m > 12) {
-      m = 1;
-      y += 1;
-    }
-    setViewYear(y);
-    setViewMonth(m);
+    const next = shiftYearMonth(viewYear, viewMonth, delta);
+    setViewYear(next.year);
+    setViewMonth(next.month);
   }
 
   function pickDate(date: string) {
@@ -311,8 +445,7 @@ export default function ManualBookingSlotPicker({
           <button
             type="button"
             onClick={() => shiftMonth(-1)}
-            disabled={monthLoading}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-50 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 disabled:opacity-40"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-50 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200"
             aria-label="Previous month"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -321,8 +454,7 @@ export default function ManualBookingSlotPicker({
           <button
             type="button"
             onClick={() => shiftMonth(1)}
-            disabled={monthLoading}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-50 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 disabled:opacity-40"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-50 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200"
             aria-label="Next month"
           >
             <ChevronRight className="h-4 w-4" />
@@ -337,13 +469,7 @@ export default function ManualBookingSlotPicker({
           ))}
         </div>
 
-        {monthLoading ? (
-          <div className="flex items-center justify-center gap-2 py-10 text-sm text-stone-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading open days…
-          </div>
-        ) : (
-          <div className="mt-1 grid grid-cols-7 gap-1">
+        <div className="mt-1 grid grid-cols-7 gap-1">
             {monthCells.map((cell, idx) => {
               if (!cell) {
                 return <span key={`pad-${idx}`} aria-hidden />;
@@ -382,18 +508,15 @@ export default function ManualBookingSlotPicker({
                 </button>
               );
             })}
-          </div>
-        )}
+        </div>
 
-        {!monthLoading && (
-          <p className="mt-3 text-center text-[10px] uppercase tracking-[0.18em] text-stone-400">
-            Black border = planned studio day
-          </p>
-        )}
+        <p className="mt-3 text-center text-[10px] uppercase tracking-[0.18em] text-stone-400">
+          Black border = planned studio day
+        </p>
 
-        {monthError && !monthLoading && (
+        {monthError ? (
           <p className="mt-2 text-center text-xs text-stone-500">{monthError}</p>
-        )}
+        ) : null}
       </div>
 
       <div className="rounded-xl border border-stone-200 bg-white p-3 shadow-sm">
@@ -411,7 +534,7 @@ export default function ManualBookingSlotPicker({
           </div>
         ) : slots.length > 0 ? (
           <>
-            <div className="grid max-h-40 grid-cols-2 gap-2 overflow-y-auto pr-0.5 sm:grid-cols-3">
+            <div className="grid max-h-52 grid-cols-2 gap-2 overflow-y-auto pr-0.5 sm:grid-cols-3">
               {slots.map((slot) => {
                 const active = selectedSlot === slot;
                 const hhmm = slotToStudioLocalHhmm(slot);
@@ -422,36 +545,53 @@ export default function ManualBookingSlotPicker({
                     durationMins,
                     selectedDayWindows
                   );
+                const occupied = occupiedStartMs.has(
+                  new Date(slot).getTime()
+                );
                 return (
                   <button
                     key={slot}
                     type="button"
                     onClick={() => onSelectSlot(slot)}
-                    className={`flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 ${
+                    className={`flex flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-stone-200 ${
                       active
-                        ? 'border-stone-300 bg-stone-50 text-stone-900'
-                        : 'border-stone-200 bg-white text-stone-800 hover:border-stone-300 hover:bg-stone-50'
+                        ? occupied
+                          ? 'border-amber-400 bg-amber-50 text-stone-900'
+                          : 'border-stone-300 bg-stone-50 text-stone-900'
+                        : occupied
+                          ? 'border-amber-200 bg-amber-50/70 text-stone-800 hover:border-amber-300 hover:bg-amber-50'
+                          : 'border-stone-200 bg-white text-stone-800 hover:border-stone-300 hover:bg-stone-50'
                     }`}
                   >
-                    <span
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        inStudio
-                          ? active
-                            ? 'bg-emerald-400'
-                            : 'bg-emerald-500'
-                          : active
-                            ? 'bg-stone-700'
-                            : 'bg-stone-900'
-                      }`}
-                      aria-hidden
-                    />
-                    {formatSlotInStudioTime(slot)}
+                    <span className="flex items-center justify-center gap-1.5">
+                      <span
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                          occupied
+                            ? 'bg-amber-500'
+                            : inStudio
+                              ? active
+                                ? 'bg-emerald-400'
+                                : 'bg-emerald-500'
+                              : active
+                                ? 'bg-stone-700'
+                                : 'bg-stone-900'
+                        }`}
+                        aria-hidden
+                      />
+                      {formatSlotInStudioTime(slot)}
+                    </span>
+                    {occupied ? (
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-amber-800">
+                        Busy
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}
             </div>
             <p className="mt-2 text-center text-[10px] uppercase tracking-[0.18em] text-stone-400">
-              Green = fits studio hours · Black = outside or overruns
+              Green = fits studio hours · Amber = already booked (admin can still
+              double-book) · Black = outside or overruns
             </p>
           </>
         ) : (

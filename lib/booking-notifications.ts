@@ -15,6 +15,7 @@ const impl = require('./booking-notifications.js') as {
     endTime?: string | null;
     skipIfAlreadySent?: boolean;
     smsOptIn?: boolean | null;
+    source?: 'client' | 'admin';
   }) => Promise<Record<string, unknown>>;
   ensureUpcomingAppointmentSmsReminders: () => Promise<{
     scanned: number;
@@ -42,6 +43,9 @@ const impl = require('./booking-notifications.js') as {
     smsOptIn: boolean | null | undefined;
     scheduleSmsReminders?: boolean;
     endTime?: string | null;
+    source?: 'client' | 'admin';
+    clientName?: string | null;
+    appointmentId?: string | null;
   }) => Promise<Record<string, unknown>>;
   notifyLateCancelFeeSms: (args: {
     clientPhone: string | null;

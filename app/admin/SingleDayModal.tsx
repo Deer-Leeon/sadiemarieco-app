@@ -424,6 +424,7 @@ function ModalAppointment({
 
   const widthPct = 100 / totalCols;
   const leftPct = col * widthPct;
+  const gutterPx = totalCols > 1 ? 4 : 8;
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -458,8 +459,8 @@ function ModalAppointment({
         top: `${topPct}%`,
         height: `${heightPct}%`,
         minHeight: MIN_PILL_HEIGHT_PX,
-        left: `calc(${leftPct}% + 0.5rem)`,
-        width: `calc(${widthPct}% - 1rem)`,
+        left: `calc(${leftPct}% + ${gutterPx}px)`,
+        width: `calc(${widthPct}% - ${gutterPx * 2}px)`,
         ...(color && {
           backgroundColor: color.accent,
           color: color.text,
