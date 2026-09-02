@@ -410,11 +410,12 @@ function ModalAppointment({
 
   const name = clientDisplayName(apt.client_first_name, apt.client_last_name);
   const service = appointmentServiceLabel(apt);
-
   const overlapping = totalCols > 1;
+  const dense = overlapping;
+
   const laneBox = overlapLaneBoxStyle(col, totalCols, {
     outerPx: overlapping ? 2 : 8,
-    gapPx: overlapping ? 1 : 0,
+    gapPx: overlapping ? 2 : 0,
   });
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -424,8 +425,8 @@ function ModalAppointment({
   const clickable = !!onClick;
 
   const color = isNoShow ? null : getServiceColor(apt);
-  const baseClasses = overlapping
-    ? 'absolute z-20 overflow-hidden rounded-md p-2.5 transition-colors text-left'
+  const baseClasses = dense
+    ? 'absolute z-20 overflow-hidden rounded-md px-1.5 py-1.5 text-left leading-tight shadow-sm transition-colors'
     : 'absolute z-20 overflow-hidden rounded-md p-2.5 shadow-sm transition-colors text-left';
   const variantClasses = isNoShow
     ? 'border-l-[3px] border-stone-400 bg-stone-50 opacity-60'
@@ -453,14 +454,15 @@ function ModalAppointment({
         minHeight: MIN_PILL_HEIGHT_PX,
         left: laneBox.left,
         width: laneBox.width,
+        zIndex: laneBox.zIndex,
         ...(color && {
           backgroundColor: color.accent,
           color: color.text,
         }),
       }}
     >
-      <span className="pointer-events-none absolute right-1.5 top-1.5 z-10 flex items-start gap-0.5">
-        <SettlementCheckMarker payment={apt.terminal_payment} size="md" />
+      <span className="pointer-events-none absolute right-1 top-1 z-10 flex items-start gap-0.5">
+        <SettlementCheckMarker payment={apt.terminal_payment} size={dense ? 'sm' : 'md'} />
         {hasNoShowFlag ? (
           <span
             className="inline-flex h-4 w-4 items-center justify-center rounded-sm bg-amber-50/95 text-amber-800 shadow-sm"
@@ -471,7 +473,9 @@ function ModalAppointment({
         ) : null}
       </span>
       <div
-        className={`truncate text-sm font-medium ${
+        className={`truncate font-medium ${
+          dense ? 'text-[13px] leading-tight' : 'text-sm'
+        } ${
           isNoShow
             ? 'text-gray-400 line-through'
             : color
@@ -483,7 +487,9 @@ function ModalAppointment({
         {name}
       </div>
       <div
-        className={`mt-0.5 truncate text-[11px] ${
+        className={`mt-0.5 truncate leading-snug ${
+          dense ? 'text-[10px]' : 'text-[11px]'
+        } ${
           isNoShow
             ? 'text-gray-400 line-through'
             : color
