@@ -63,6 +63,7 @@ import {
   notifyAdminAppointmentStatusSms,
   notifyFeeFreePassSms,
 } from '@/lib/booking-notifications';
+import { notifyAdminAppointmentPush } from '@/lib/admin-booking-push';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -766,6 +767,21 @@ export async function PATCH(
               : row.booking_time
                 ? String(row.booking_time)
                 : null;
+          try {
+            await notifyAdminAppointmentPush({
+              kind: 'canceled',
+              source: 'admin',
+              bookingUid: row.cal_event_id || '',
+              bookingTime,
+              serviceName: row.service_name,
+              appointmentId: idParam,
+            });
+          } catch (pushErr) {
+            console.warn(
+              '[api/admin/appointments/[id]/status] admin iOS push failed (non-blocking)',
+              { id: idParam, error: errorMessage(pushErr) }
+            );
+          }
           lifecycleSms = await notifyAdminAppointmentStatusSms({
             kind: 'admin_cancel',
             clientPhone: row.client_phone,

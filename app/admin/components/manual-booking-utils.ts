@@ -164,6 +164,20 @@ function extractRawSlotMap(payload: unknown): Record<string, string[]> {
   return out;
 }
 
+/** Occupied start instants from admin slots payload (still bookable). */
+export function occupiedStartMsFromSlotsPayload(payload: unknown): Set<number> {
+  if (!payload || typeof payload !== 'object') return new Set();
+  const raw = (payload as { occupied?: unknown }).occupied;
+  if (!Array.isArray(raw)) return new Set();
+  const out = new Set<number>();
+  for (const iso of raw) {
+    if (typeof iso !== 'string') continue;
+    const ms = new Date(iso).getTime();
+    if (!Number.isNaN(ms)) out.add(ms);
+  }
+  return out;
+}
+
 /** Slots grouped by studio-local date (fixes UTC evening bucket on month boundaries). */
 export function slotsGroupedByStudioDate(
   payload: unknown,
@@ -280,6 +294,13 @@ export function slotToStudioLocalHhmm(isoUtc: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** True when the slot's America/Denver hour matches `hour` (0–23). */
+export function slotMatchesStudioHour(isoUtc: string, hour: number): boolean {
+  const hhmm = slotToStudioLocalHhmm(isoUtc);
+  if (!hhmm) return false;
+  return Number(hhmm.slice(0, 2)) === hour;
 }
 
 export function todayInStudio(): string {

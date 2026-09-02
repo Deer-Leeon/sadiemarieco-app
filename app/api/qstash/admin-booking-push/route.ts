@@ -63,6 +63,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       environment?: string;
     }>;
     reloadDevices?: boolean;
+    kind?: string | null;
+    source?: string | null;
     appointmentId?: string | null;
     bookingUid?: string;
     clientName?: string | null;
@@ -99,8 +101,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
+    const kind =
+      parsed.kind === 'rescheduled' || parsed.kind === 'canceled'
+        ? parsed.kind
+        : 'confirmed';
+    const source = parsed.source === 'admin' ? 'admin' : 'client';
     const result = await sendAdminBookingPushToTokens({
       tokens,
+      kind,
+      source,
       appointmentId: parsed.appointmentId ?? null,
       bookingUid,
       clientName: parsed.clientName,

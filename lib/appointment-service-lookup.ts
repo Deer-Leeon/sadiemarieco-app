@@ -59,7 +59,7 @@ export async function resolveAppointmentService(
   const primary = primaryServiceTitle(serviceName);
   const fallbackName = primary || serviceName.trim() || 'appointment';
 
-  if (!primary) {
+  if (!primary && calEventTypeId == null) {
     return {
       displayName: fallbackName,
       category: null,
@@ -112,4 +112,22 @@ export async function resolveAppointmentService(
       reminderKind: null,
     };
   }
+}
+
+/** Catalogue title for SMS / client-facing copy (no "between …" suffix). */
+export async function smsServiceDisplayName(
+  serviceName: string | null | undefined,
+  opts?: {
+    bookingTime?: string | Date | null;
+    endTime?: string | Date | null;
+    calEventTypeId?: number | null;
+  },
+): Promise<string> {
+  const resolved = await resolveAppointmentService(
+    serviceName || '',
+    opts?.bookingTime,
+    opts?.endTime,
+    opts?.calEventTypeId,
+  );
+  return resolved.displayName || 'appointment';
 }

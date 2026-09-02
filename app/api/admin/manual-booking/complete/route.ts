@@ -29,6 +29,7 @@ import {
   gateAdmin,
 } from '@/lib/cal-proxy';
 import {
+  canonicalAppointmentServiceName,
   loadActiveCatalogueServices,
   matchCatalogueService,
 } from '@/lib/match-catalogue-service';
@@ -277,13 +278,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   bookingTime = schedule.bookingTime;
   endTime = schedule.endTime;
 
-  const appointmentServiceName = parsed.serviceName;
-
   if (calEventTypeId == null) {
     try {
       const catalogue = await loadActiveCatalogueServices();
       const matched = matchCatalogueService(
-        appointmentServiceName,
+        parsed.serviceName,
         bookingTime,
         endTime,
         catalogue,
@@ -297,6 +296,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
   }
+
+  const appointmentServiceName = await canonicalAppointmentServiceName(
+    parsed.serviceName,
+    calEventTypeId
+  );
 
   if (!bookingTime) {
     return NextResponse.json(
@@ -491,6 +495,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       skipIfAlreadySent: true,
       // Admin-created bookings: staff is initiating outreach for the client.
       smsOptIn: true,
+      source: 'admin',
     });
 
     return NextResponse.json({

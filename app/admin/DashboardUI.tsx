@@ -28,6 +28,9 @@ import {
 } from '@/lib/studio-schedule-windows';
 
 import ManualBookingModal from './components/ManualBookingModal';
+import CalendarSlotActionDialog, {
+  type CalendarSlotAction,
+} from './CalendarSlotActionDialog';
 import type {
   ManualBookingServiceGroupHeader,
   ManualBookingServiceOption,
@@ -94,12 +97,14 @@ export default function DashboardUI({
   manualBookingGroupHeaders,
 }: Props) {
   const router = useRouter();
-  // Default to the continuous-scroll month calendar. It surfaces both
-  // the highest density of context (a full month of bookings at a
-  // glance) and lands the user on "today" via the auto-scroll in
-  // CalendarView — the closest single-view equivalent of the old
-  // homepage feeling.
-  const [view, setView] = useState<ViewMode>('month');
+  // Desktop Bookings lands on the Sun–Sat week grid (today's week).
+  // Narrow viewports keep the month calendar — seven hour-columns are
+  // cramped on a phone, and the toggle still lets either size switch.
+  const [view, setView] = useState<ViewMode>('week');
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 768px)').matches;
+    if (!desktop) setView('month');
+  }, []);
   const [currentDate, setCurrentDate] = useState<Date>(() =>
     calendarDayUtcNoon(todayStudioDateKey())
   );
@@ -122,6 +127,9 @@ export default function DashboardUI({
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
   const [manualBookingOpen, setManualBookingOpen] = useState(false);
+  const [slotAction, setSlotAction] = useState<CalendarSlotAction | null>(
+    null
+  );
   const [bookingToast, setBookingToast] = useState<string | null>(null);
   useEffect(() => {
     if (!bookingToast) return;
@@ -350,6 +358,7 @@ export default function DashboardUI({
             onDayClick={setModalDate}
             onAppointmentClick={setSelectedAppointment}
             onBlockClick={setBlockPendingEdit}
+            onHourClick={(date, hour) => setSlotAction({ date, hour })}
             scheduleAvailability={scheduleAvailability}
             scheduleOverrides={scheduleOverrides}
           />
@@ -363,6 +372,7 @@ export default function DashboardUI({
             onDayClick={setModalDate}
             onAppointmentClick={setSelectedAppointment}
             onBlockClick={setBlockPendingEdit}
+            onHourClick={(date, hour) => setSlotAction({ date, hour })}
             scheduleAvailability={scheduleAvailability}
             scheduleOverrides={scheduleOverrides}
           />
@@ -389,9 +399,8 @@ export default function DashboardUI({
           onClose={() => setModalDate(null)}
           onAppointmentClick={setSelectedAppointment}
           onBlockClick={setBlockPendingEdit}
-          onBlocksChanged={(infoMessage) => {
-            if (infoMessage) setBookingToast(infoMessage);
-          }}
+          onHourClick={(date, hour) => setSlotAction({ date, hour })}
+          ignoreEscape={slotAction !== null}
           scheduleAvailability={scheduleAvailability}
           scheduleOverrides={scheduleOverrides}
         />
@@ -444,6 +453,25 @@ export default function DashboardUI({
           onSuccess={() => {
             setBookingToast('Appointment booked successfully.');
             router.refresh();
+          }}
+        />
+      )}
+
+      {slotAction !== null && (
+        <CalendarSlotActionDialog
+          action={slotAction}
+          services={manualBookingServices}
+          groupHeaders={manualBookingGroupHeaders}
+          onClose={() => setSlotAction(null)}
+          onBooked={() => {
+            setBookingToast('Appointment booked successfully.');
+            router.refresh();
+            setSlotAction(null);
+          }}
+          onBlocked={(infoMessage) => {
+            if (infoMessage) setBookingToast(infoMessage);
+            router.refresh();
+            setSlotAction(null);
           }}
         />
       )}

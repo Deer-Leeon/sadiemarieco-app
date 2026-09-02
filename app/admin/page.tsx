@@ -310,7 +310,7 @@ export default async function AdminPage() {
       client_last_name: r.client_last_name,
       booking_time: serializeDate(r.booking_time),
       end_time: serializeDate(r.end_time),
-      service_name: r.service_name,
+      service_name: catalogueFields.service_name,
       status: r.status,
       client_phone: r.client_phone,
       client_email: r.client_email,

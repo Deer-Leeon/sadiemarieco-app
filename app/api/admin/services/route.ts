@@ -620,7 +620,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     }
     const service = rows[0];
     try {
-      await rewriteAppointmentServiceNames({
+      const rewrite = await rewriteAppointmentServiceNames({
         calEventTypeId:
           service.cal_event_id != null && Number(service.cal_event_id) > 0
             ? Number(service.cal_event_id)
@@ -628,6 +628,12 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         oldTitle: existing.title,
         newTitle: service.title,
       });
+      if (rewrite.updated > 0) {
+        console.log('[api/admin/services] PATCH: rewrote appointment titles', {
+          calEventTypeId: service.cal_event_id,
+          updated: rewrite.updated,
+        });
+      }
     } catch (err) {
       console.warn(
         '[api/admin/services] PATCH: appointment title rewrite failed (non-fatal)',

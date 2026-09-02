@@ -43,12 +43,14 @@ import styles from './book.module.css';
 
 type Step = 'service' | 'when' | 'contact' | 'review' | 'pay';
 
-/** Phone /book date strip (inclusive of today). */
-const BOOK_AVAILABILITY_DAYS = 90;
-/** First paint: load this many days before filling the rest in the background. */
+/** First paint: load this many days before filling further ahead. */
 const BOOK_SLOTS_INITIAL_DAYS = 21;
 /** Cal range chunk size for background fills. */
 const BOOK_SLOTS_CHUNK_DAYS = 21;
+/** Extra fully-fetched chunks kept ahead of the visible strip. */
+const BOOK_SLOTS_PREFETCH_CHUNKS = 2;
+/** Session cap so the date strip cannot grow without bound. */
+const BOOK_SLOTS_MAX_HORIZON_DAYS = 365 * 5;
 /** Days on each side of a restored selection that must be loaded before first paint. */
 const BOOK_SLOTS_NEIGHBORHOOD_DAYS = 10;
 /** Abort a hung slots request so the UI never spins forever. */
@@ -173,6 +175,23 @@ function clampYmd(ymd: string, min: string, max: string): string {
   return ymd;
 }
 
+function buildDayList(startYmd: string, count: number): string[] {
+  const days: string[] = [];
+  const n = Math.max(0, count);
+  for (let i = 0; i < n; i += 1) {
+    days.push(addDaysYmd(startYmd, i));
+  }
+  return days;
+}
+
+/** Inclusive day count from start through end (UTC noon to avoid DST). */
+function inclusiveDayCount(startYmd: string, endYmd: string): number {
+  const start = Date.parse(`${startYmd}T12:00:00Z`);
+  const end = Date.parse(`${endYmd}T12:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.floor((end - start) / 86400000) + 1;
+}
+
 /** Mark every day in the requested range as fetched, even when Cal returned none. */
 function withLoadedDays(
   slots: Record<string, string[]>,
@@ -295,11 +314,13 @@ function BookDayScroller({
   slotsByDay,
   selectedDay,
   onSelectDay,
+  onApproachEnd,
 }: {
   dayOptions: string[];
   slotsByDay: Record<string, string[]>;
   selectedDay: string;
   onSelectDay: (ymd: string) => void;
+  onApproachEnd?: () => void;
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -314,7 +335,9 @@ function BookDayScroller({
     setCanScrollLeft(left > 4);
     setCanScrollRight(maxScroll > 4 && left < maxScroll - 4);
     if (left > 8) setHasScrolled(true);
-  }, []);
+    const nearEnd = maxScroll > 4 && left >= maxScroll - 140;
+    if (nearEnd) onApproachEnd?.();
+  }, [onApproachEnd]);
 
   useEffect(() => {
     updateFades();
@@ -341,7 +364,7 @@ function BookDayScroller({
       behavior: 'auto',
     });
     updateFades();
-  }, [selectedDay, dayOptions.length, updateFades]);
+  }, [selectedDay, updateFades]);
 
   return (
     <div className={styles.dayScrollerWrap}>
@@ -455,6 +478,10 @@ export default function BookClient({
   const slotsLoadGenRef = useRef(0);
   const slotsAbortRef = useRef<AbortController | null>(null);
   const slotsByDayRef = useRef<Record<string, string[]>>({});
+  const slotsFetchedDaysRef = useRef(0);
+  const slotsHorizonRef = useRef(0);
+  const slotsPrefetchingRef = useRef(false);
+  const fillAheadRef = useRef<(() => void) | null>(null);
   holdUidRef.current = holdUid;
   confirmedRef.current = confirmed;
   rememberActiveHoldUid(holdUid);
@@ -669,7 +696,7 @@ export default function BookClient({
         setSelectedStart(restoreStart);
       };
 
-      // Returning to this screen: keep the already-loaded 90-day map so
+      // Returning to this screen: keep the already-loaded map so
       // neighbors of a far-out day don't flash "unavailable" while chunks
       // refetch. Don't abort an in-flight background fill.
       if (keepSelection) {
@@ -705,6 +732,9 @@ export default function BookClient({
       slotsAbortRef.current?.abort();
       const loadAbort = new AbortController();
       slotsAbortRef.current = loadAbort;
+      slotsFetchedDaysRef.current = 0;
+      slotsHorizonRef.current = BOOK_SLOTS_INITIAL_DAYS;
+      slotsPrefetchingRef.current = false;
       const stillCurrent = () =>
         slotsLoadGenRef.current === loadGen && !loadAbort.signal.aborted;
 
@@ -714,12 +744,8 @@ export default function BookClient({
       setSlotsLoading(true);
       setSlotsError(null);
       const start = studioTodayYmd();
-      const lastDay = addDaysYmd(start, BOOK_AVAILABILITY_DAYS - 1);
-      const days: string[] = [];
-      for (let i = 0; i < BOOK_AVAILABILITY_DAYS; i += 1) {
-        days.push(addDaysYmd(start, i));
-      }
-      setDayOptions(days);
+      const lastDay = addDaysYmd(start, BOOK_SLOTS_MAX_HORIZON_DAYS - 1);
+      setDayOptions(buildDayList(start, BOOK_SLOTS_INITIAL_DAYS));
       const restoreDay = restoreStart ? isoToStudioYmd(restoreStart) : null;
       setSelectedDay(restoreDay || '');
       if (!restoreStart) setSelectedStart(null);
@@ -731,14 +757,61 @@ export default function BookClient({
       const paintSlots = (
         incoming: Record<string, string[]>,
         day: string,
-        startIso: string | null
+        startIso: string | null,
+        fetchedDays: number,
+        horizonDays: number
       ) => {
         if (!stillCurrent()) return;
+        const fetched = Math.min(BOOK_SLOTS_MAX_HORIZON_DAYS, fetchedDays);
+        const horizon = Math.min(
+          BOOK_SLOTS_MAX_HORIZON_DAYS,
+          Math.max(fetched, horizonDays)
+        );
+        slotsFetchedDaysRef.current = fetched;
+        slotsHorizonRef.current = horizon;
         setSlotsByDay(incoming);
+        setDayOptions(buildDayList(start, horizon));
         if (day) setSelectedDay(day);
         if (startIso) setSelectedStart(startIso);
         setSlotsLoading(false);
         setSlotsLoadingLabel('Checking the calendar…');
+      };
+
+      const fillAhead = async () => {
+        if (slotsPrefetchingRef.current) return;
+        slotsPrefetchingRef.current = true;
+        try {
+          while (stillCurrent()) {
+            const fetched = slotsFetchedDaysRef.current;
+            const horizon = slotsHorizonRef.current;
+            const target = Math.min(
+              BOOK_SLOTS_MAX_HORIZON_DAYS,
+              horizon + BOOK_SLOTS_CHUNK_DAYS * BOOK_SLOTS_PREFETCH_CHUNKS
+            );
+            if (fetched >= target) break;
+            const offset = fetched;
+            const chunk = Math.min(BOOK_SLOTS_CHUNK_DAYS, target - offset);
+            if (chunk <= 0) break;
+            const rangeStart = addDaysYmd(start, offset);
+            const rangeEnd = addDaysYmd(start, offset + chunk - 1);
+            const more = await fetchRange(rangeStart, rangeEnd);
+            if (!stillCurrent()) return;
+            slotsFetchedDaysRef.current = offset + chunk;
+            setSlotsByDay((prev) => applyRestore({ ...prev, ...more }));
+            const shown = Math.max(
+              slotsHorizonRef.current,
+              slotsFetchedDaysRef.current
+            );
+            setDayOptions(buildDayList(start, shown));
+          }
+        } catch (err) {
+          if (isAbortError(err)) return;
+        } finally {
+          slotsPrefetchingRef.current = false;
+        }
+      };
+      fillAheadRef.current = () => {
+        void fillAhead();
       };
 
       try {
@@ -765,13 +838,13 @@ export default function BookClient({
         let offset = 0;
         let painted = false;
 
-        while (offset < BOOK_AVAILABILITY_DAYS && stillCurrent()) {
+        while (offset < BOOK_SLOTS_MAX_HORIZON_DAYS && stillCurrent()) {
           const chunkDays =
             offset === 0 ? BOOK_SLOTS_INITIAL_DAYS : BOOK_SLOTS_CHUNK_DAYS;
           const rangeStart = addDaysYmd(start, offset);
           const rangeEnd = addDaysYmd(
             start,
-            Math.min(offset + chunkDays, BOOK_AVAILABILITY_DAYS) - 1
+            Math.min(offset + chunkDays, BOOK_SLOTS_MAX_HORIZON_DAYS) - 1
           );
 
           if (restoreStart && offset === 0) {
@@ -781,7 +854,13 @@ export default function BookClient({
               const more = await fetchRange(rangeStart, rangeEnd);
               if (!stillCurrent()) return;
               merged = { ...merged, ...more };
-              paintSlots(merged, start, restoreStart);
+              paintSlots(
+                merged,
+                start,
+                restoreStart,
+                offset + chunkDays,
+                offset + chunkDays
+              );
               painted = true;
               offset += chunkDays;
               break;
@@ -809,7 +888,20 @@ export default function BookClient({
             if (!slotsIncludeInstant(merged, restoreStart)) {
               merged = mergeSlotIntoDay(merged, restoreStart);
             }
-            paintSlots(merged, ymd, restoreStart);
+            const restoreHorizon = Math.min(
+              BOOK_SLOTS_MAX_HORIZON_DAYS,
+              Math.max(
+                offset + chunkDays,
+                inclusiveDayCount(start, ymd) + BOOK_SLOTS_NEIGHBORHOOD_DAYS
+              )
+            );
+            paintSlots(
+              merged,
+              ymd,
+              restoreStart,
+              offset + chunkDays,
+              restoreHorizon
+            );
             painted = true;
             offset += chunkDays;
             break;
@@ -819,9 +911,16 @@ export default function BookClient({
           if (!stillCurrent()) return;
           merged = { ...merged, ...more };
 
-          const first = firstDayWithSlots(days, merged);
+          const scanned = buildDayList(start, offset + chunkDays);
+          const first = firstDayWithSlots(scanned, merged);
           if (first) {
-            paintSlots(merged, first, null);
+            paintSlots(
+              merged,
+              first,
+              null,
+              offset + chunkDays,
+              offset + chunkDays
+            );
             painted = true;
             offset += chunkDays;
             break;
@@ -830,27 +929,12 @@ export default function BookClient({
         }
 
         if (!painted && stillCurrent()) {
-          paintSlots(merged, start, null);
+          const scanned = Math.max(offset, BOOK_SLOTS_INITIAL_DAYS);
+          paintSlots(merged, start, null, scanned, scanned);
         }
 
-        for (
-          ;
-          offset < BOOK_AVAILABILITY_DAYS && stillCurrent();
-          offset += BOOK_SLOTS_CHUNK_DAYS
-        ) {
-          const rangeStart = addDaysYmd(start, offset);
-          const rangeEnd = addDaysYmd(
-            start,
-            Math.min(offset + BOOK_SLOTS_CHUNK_DAYS, BOOK_AVAILABILITY_DAYS) - 1
-          );
-          try {
-            const more = await fetchRange(rangeStart, rangeEnd);
-            if (!stillCurrent()) return;
-            setSlotsByDay((prev) => applyRestore({ ...prev, ...more }));
-          } catch (err) {
-            if (isAbortError(err)) return;
-            break;
-          }
+        if (stillCurrent()) {
+          void fillAhead();
         }
       } catch (err) {
         if (!stillCurrent() || isAbortError(err)) return;
@@ -868,6 +952,16 @@ export default function BookClient({
     },
     []
   );
+
+  const requestMoreDays = useCallback(() => {
+    const fetched = slotsFetchedDaysRef.current;
+    const horizon = slotsHorizonRef.current;
+    if (horizon >= BOOK_SLOTS_MAX_HORIZON_DAYS) return;
+    if (fetched > horizon) {
+      slotsHorizonRef.current = Math.min(BOOK_SLOTS_MAX_HORIZON_DAYS, fetched);
+    }
+    fillAheadRef.current?.();
+  }, []);
 
   const slotsLoadedForSlugRef = useRef<string | null>(null);
 
@@ -1516,6 +1610,7 @@ export default function BookClient({
                   setSelectedDay(ymd);
                   setSelectedStart(null);
                 }}
+                onApproachEnd={requestMoreDays}
               />
             ) : null}
             {!slotsLoading && !slotsError && selectedDay && (

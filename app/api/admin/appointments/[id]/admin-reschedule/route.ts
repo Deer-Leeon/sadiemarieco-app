@@ -482,6 +482,12 @@ export async function POST(
         serviceName: row.service_name,
         smsOptIn: row.sms_opt_in,
         scheduleSmsReminders: true,
+        source: 'admin',
+        clientName: [row.client_first_name, row.client_last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim(),
+        appointmentId: String(row.id),
       });
     } catch (smsErr) {
       console.warn(

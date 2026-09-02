@@ -31,6 +31,7 @@ import { extractCalBookingNotes } from '@/lib/cal-booking-notes';
 import { upsertClientByPhonePrimary } from '@/lib/client-upsert';
 import { lookupBookingPhone } from '@/lib/phone-lookup';
 import { scheduleAbandonedHoldRelease } from '@/lib/schedule-abandoned-hold-release';
+import { canonicalAppointmentServiceName } from '@/lib/match-catalogue-service';
 import {
   clientIpFromRequest,
   RATE_LIMITS,
@@ -312,6 +313,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (needsHydrate) {
     data = await hydrateFromCal(data.calBookingUid, data);
   }
+
+  data = {
+    ...data,
+    serviceName: await canonicalAppointmentServiceName(
+      data.serviceName,
+      data.calEventTypeId
+    ),
+  };
 
   if (
     !hasBookingContactChannel({

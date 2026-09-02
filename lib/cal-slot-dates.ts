@@ -26,6 +26,22 @@ export function addCalendarDays(isoDate: string, days: number): string {
   return `${yy}-${mm}-${dd}`;
 }
 
+/** Inclusive YYYY-MM-DD span. Returns NaN when either side is not a calendar date. */
+export function inclusiveCalendarDayCount(
+  startYmd: string,
+  endYmd: string
+): number {
+  if (!ISO_DATE_RE.test(startYmd) || !ISO_DATE_RE.test(endYmd)) return Number.NaN;
+  const [sy, sm, sd] = startYmd.split('-').map(Number);
+  const [ey, em, ed] = endYmd.split('-').map(Number);
+  const start = Date.UTC(sy, sm - 1, sd);
+  const end = Date.UTC(ey, em - 1, ed);
+  return Math.floor((end - start) / 86_400_000) + 1;
+}
+
+/** Reject unbounded slot queries (one month, or a public 21-day chunk). */
+export const MAX_SLOT_QUERY_DAYS = 40;
+
 export function regroupSlotTimesByStudioDate(
   slots: Record<string, string[]>
 ): Record<string, string[]> {

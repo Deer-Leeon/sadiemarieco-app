@@ -5,6 +5,7 @@ import {
   appointmentServiceTitleKeyWithoutAddOn,
   BARE_FILL_TITLE_KEYS,
 } from '@/lib/appointment-service-title-key';
+import { applyCatalogueTitleToServiceName } from '@/lib/catalogue-service-title';
 
 export type CatalogueServiceRow = {
   title: string;
@@ -108,6 +109,7 @@ export function applyCatalogueService(
   service_color: string | null;
   service_slug: string | null;
   service_description: string | null;
+  service_name: string | null;
 } {
   const matched = matchCatalogueService(
     fields.service_name,
@@ -120,7 +122,53 @@ export function applyCatalogueService(
     service_color: fields.service_color ?? matched?.color ?? null,
     service_slug: fields.service_slug ?? matched?.slug ?? null,
     service_description: fields.service_description ?? matched?.description ?? null,
+    service_name: applyCatalogueTitleToServiceName(
+      fields.service_name,
+      matched?.title,
+    ),
   };
+}
+
+export async function lookupActiveCatalogueTitle(
+  calEventTypeId: number | null | undefined,
+): Promise<string | null> {
+  const id =
+    typeof calEventTypeId === 'number'
+      ? calEventTypeId
+      : Number(calEventTypeId);
+  if (!Number.isInteger(id) || id <= 0) {
+    return null;
+  }
+  const { rows } = await sql<{ title: string }>`
+    SELECT title
+    FROM site_services
+    WHERE cal_event_id = ${id}
+      AND is_active = TRUE
+    LIMIT 1
+  `;
+  const title = rows[0]?.title?.trim();
+  return title || null;
+}
+
+/** Persist the live catalogue title, keeping any Cal "between …" suffix. */
+export async function canonicalAppointmentServiceName(
+  storedName: string | null | undefined,
+  calEventTypeId: number | null | undefined,
+): Promise<string> {
+  const fallback =
+    storedName == null || String(storedName).trim() === ''
+      ? 'appointment'
+      : String(storedName);
+  try {
+    const title = await lookupActiveCatalogueTitle(calEventTypeId);
+    return applyCatalogueTitleToServiceName(fallback, title) ?? fallback;
+  } catch (err) {
+    console.warn('[canonicalAppointmentServiceName] catalogue lookup failed', {
+      calEventTypeId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return fallback;
+  }
 }
 
 export async function loadActiveCatalogueServices(): Promise<CatalogueServiceRow[]> {

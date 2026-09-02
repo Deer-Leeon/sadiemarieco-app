@@ -15,6 +15,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { loadBookableServiceBySlug } from '@/lib/book-public';
 import { listStudioAvailableSlots } from '@/lib/studio-available-slots';
 import {
+  inclusiveCalendarDayCount,
+  MAX_SLOT_QUERY_DAYS,
+} from '@/lib/cal-slot-dates';
+import {
   clientIpFromRequest,
   RATE_LIMITS,
   rejectUnlessRateAllowed,
@@ -58,6 +62,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (end < date) {
     return NextResponse.json(
       { error: 'invalid_range', message: 'end must be on or after date' },
+      { status: 400 }
+    );
+  }
+
+  const span = inclusiveCalendarDayCount(date, end);
+  if (!Number.isFinite(span) || span > MAX_SLOT_QUERY_DAYS) {
+    return NextResponse.json(
+      {
+        error: 'invalid_range',
+        message: `date range cannot exceed ${MAX_SLOT_QUERY_DAYS} days`,
+      },
       { status: 400 }
     );
   }

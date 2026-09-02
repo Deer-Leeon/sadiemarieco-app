@@ -54,11 +54,8 @@ interface Props {
   /**
    * Fired when the user clicks the day-header cell (weekday name +
    * date number) at the top of a column. Receives the local-time
-   * Date for that day (time portion is start-of-day). The time-grid
-   * body below the header is NOT clickable — empty space inside a
-   * day column intentionally does nothing, so the only ways to open
-   * the day modal are (a) clicking the day header, or (b) clicking
-   * an appointment pill (routed through `onAppointmentClick`).
+   * Date for that day (time portion is start-of-day). Empty hour
+   * bands in the column body fire `onHourClick` instead.
    */
   onDayClick?: (date: Date) => void;
   /**
@@ -69,6 +66,11 @@ interface Props {
   onAppointmentClick?: (appointment: Appointment) => void;
   /** Fired when the user clicks a blocked-time pill. */
   onBlockClick?: (block: TimeBlock) => void;
+  /**
+   * Empty hour-band click inside a day column (behind pills). Receives
+   * the column's studio date and the hour (9–20).
+   */
+  onHourClick?: (date: Date, hour: number) => void;
   /** Official weekly hours. Null until GET /api/admin/availability returns. */
   scheduleAvailability?: StudioAvailabilityBlock[] | null;
   /** Date overrides. Null until the schedule has loaded. */
@@ -133,13 +135,10 @@ function buildColumns(
  *
  * Interactivity:
  *   - When `onDayClick` is supplied, the day-HEADER cell at the top
- *     of each column becomes a clickable surface (cursor-pointer,
- *     subtle hover tint, role="button" for screen readers,
- *     Enter/Space keyboard support).
- *   - The time-grid body itself is intentionally NOT clickable —
- *     dead clicks inside the grid were too easy to trigger by
- *     accident while scrolling, and the day-header gives a clearer
- *     affordance for "I want to focus on this day".
+ *     of each column becomes a clickable surface.
+ *   - Empty hour bands in the column body open the appointment booker
+ *     (`onHourClick`) when supplied. Appointment and block pills sit
+ *     above those bands and keep their own click handlers.
  *   - Appointment pills route their clicks to `onAppointmentClick`
  *     and stop propagation so they never bubble.
  */
@@ -152,6 +151,7 @@ export default function TimeGrid({
   onDayClick,
   onAppointmentClick,
   onBlockClick,
+  onHourClick,
   scheduleAvailability = null,
   scheduleOverrides = null,
 }: Props) {
@@ -199,6 +199,7 @@ export default function TimeGrid({
             removingBlockId={removingBlockId}
             onAppointmentClick={onAppointmentClick}
             onBlockClick={onBlockClick}
+            onHourClick={onHourClick}
             hatchBands={closedBandPercentsForDay(
               col.date,
               col.items.map((item) => item.appointment),
@@ -308,26 +309,22 @@ function DayColumnView({
   removingBlockId,
   onAppointmentClick,
   onBlockClick,
+  onHourClick,
   hatchBands,
 }: {
   column: DayColumn;
   removingBlockId: string | null;
   onAppointmentClick?: (appointment: Appointment) => void;
   onBlockClick?: (block: TimeBlock) => void;
+  onHourClick?: (date: Date, hour: number) => void;
   hatchBands: { topPct: number; heightPct: number }[];
 }) {
-  // Day-column body is intentionally inert. The only clickable
-  // surfaces inside the time grid are (1) the day header above
-  // (handled in DayHeader) and (2) the appointment pills below.
-  //
   // Layered structure:
-  //   * `.relative` parent — owns the appointment-pill coordinate
-  //     space (percentages are computed against THIS element's height).
+  //   * `.relative` parent — appointment-pill coordinate space.
   //   * closed-hours hatch — background wash behind hour lines.
-  //   * inner `.absolute inset-0` grid — paints the hour gridlines
-  //     using `repeat(HOURS, 1fr)` so they stretch to fill any height.
-  //   * pills — absolutely positioned with topPct/heightPct, layered
-  //     above the gridlines.
+  //   * hour-band buttons (z-[2]) — empty-space clicks open the booker.
+  //   * inner gridlines — pointer-events-none so they don't steal clicks.
+  //   * blocks (z-10) and appointment pills (z-20) sit above the bands.
   return (
     <div className="relative border-l border-stone-200">
       <ClosedHoursHatch bands={hatchBands} />
@@ -340,6 +337,33 @@ function DayColumnView({
           <div key={i} className="border-t border-stone-200" />
         ))}
       </div>
+      {onHourClick ? (
+        <div
+          className="absolute inset-0 z-2 grid"
+          style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+        >
+          {Array.from({ length: HOURS }, (_, i) => {
+            const hour = START_HOUR + i;
+            const suffix =
+              hour === 0
+                ? '12 AM'
+                : hour < 12
+                  ? `${hour} AM`
+                  : hour === 12
+                    ? '12 PM'
+                    : `${hour - 12} PM`;
+            return (
+              <button
+                key={hour}
+                type="button"
+                aria-label={`Book or block time starting at ${suffix}`}
+                className="w-full border-t border-transparent transition-colors hover:bg-stone-900/[0.04] focus:outline-none focus-visible:bg-stone-900/[0.06] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-400/60"
+                onClick={() => onHourClick(column.date, hour)}
+              />
+            );
+          })}
+        </div>
+      ) : null}
       {column.blocks.map((pb) => (
         <TimeBlockPill
           key={pb.block.id}
@@ -433,6 +457,7 @@ function AppointmentBlock({
 
   const widthPct = 100 / totalCols;
   const leftPct = col * widthPct;
+  const gutterPx = totalCols > 1 ? 3 : 2;
 
   // stopPropagation is defensive — the day-column body no longer
   // has its own click handler (only the day-header at the top of
@@ -500,8 +525,8 @@ function AppointmentBlock({
         top: `${topPct}%`,
         height: `${heightPct}%`,
         minHeight: MIN_PILL_HEIGHT_PX,
-        left: `calc(${leftPct}% + 2px)`,
-        width: `calc(${widthPct}% - 4px)`,
+        left: `calc(${leftPct}% + ${gutterPx}px)`,
+        width: `calc(${widthPct}% - ${gutterPx * 2}px)`,
         ...(color && {
           backgroundColor: color.accent,
           color: color.text,

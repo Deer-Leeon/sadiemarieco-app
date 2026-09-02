@@ -100,6 +100,7 @@ export async function sendAppointmentReminderEmail(args: {
   timing: ReminderEmailTiming;
   minutesUntil?: number;
   expectedBookingTime?: string;
+  calEventTypeId?: number | null;
 }): Promise<{ ok: boolean; skipped?: string; error?: string; id?: string }> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
@@ -130,6 +131,7 @@ export async function sendAppointmentReminderEmail(args: {
     args.serviceName,
     args.bookingTime,
     args.endTime,
+    args.calEventTypeId,
   );
   const displayName = cleanEmailServiceTitle(
     resolved.displayName || args.serviceName
@@ -199,6 +201,7 @@ export interface AppointmentReminderRow {
   cal_event_id: string;
   status: string | null;
   service_name: string | null;
+  cal_event_type_id: number | null;
   booking_time: Date | string | null;
   end_time: Date | string | null;
   client_email: string | null;
@@ -215,6 +218,7 @@ export async function deliverScheduledReminderEmail(args: {
       cal_event_id,
       status,
       service_name,
+      cal_event_type_id,
       booking_time,
       end_time,
       client_email,
@@ -252,6 +256,7 @@ export async function deliverScheduledReminderEmail(args: {
     appointment.service_name || '',
     bookingTimeIso,
     appointment.end_time,
+    appointment.cal_event_type_id,
   );
 
   if (args.timing === 'lead' && !resolved.reminderKind) {
@@ -278,6 +283,7 @@ export async function deliverScheduledReminderEmail(args: {
     reminderKind: kind,
     timing: args.timing,
     expectedBookingTime: args.expectedBookingTime,
+    calEventTypeId: appointment.cal_event_type_id,
   });
 
   return result;

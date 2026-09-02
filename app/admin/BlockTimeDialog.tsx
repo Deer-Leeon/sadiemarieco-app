@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Loader2, X } from 'lucide-react';
 
 import { formatStudioDateShort } from '@/lib/studio-calendar';
@@ -18,6 +18,8 @@ interface Props {
   onUpdated?: (infoMessage?: string) => void;
   /** Opens the remove confirmation for the block being edited. */
   onRequestRemove?: (block: TimeBlock) => void;
+  /** Optional Book / Block time control (calendar hour click, create only). */
+  modeSwitch?: ReactNode;
 }
 
 function dateAtHour(base: Date, hour: number, minute = 0): Date {
@@ -58,6 +60,7 @@ export default function BlockTimeDialog({
   onCreated,
   onUpdated,
   onRequestRemove,
+  modeSwitch,
 }: Props) {
   const isEditing = Boolean(editingBlock);
 
@@ -219,6 +222,9 @@ export default function BlockTimeDialog({
                 ? 'Change the window or note. Clients still can’t book into this interval.'
                 : 'Clients won’t be able to book into this interval on the website. Any length works — we combine Cal slots automatically (30 min minimum).'}
             </p>
+            {modeSwitch && !isEditing ? (
+              <div className="mt-3">{modeSwitch}</div>
+            ) : null}
           </div>
           <button
             type="button"

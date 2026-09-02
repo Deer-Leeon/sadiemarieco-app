@@ -122,7 +122,7 @@ function rowToAppointment(
     client_last_name: row.client_last_name,
     booking_time: serializeDate(row.booking_time),
     end_time: serializeDate(row.end_time),
-    service_name: row.service_name,
+    service_name: catalogueFields.service_name,
     status: row.status,
     client_phone: row.client_phone,
     client_email: row.client_email,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Loader2, X } from 'lucide-react';
 
@@ -42,6 +42,12 @@ interface Props {
    * CRM client (service → schedule only).
    */
   prefilledClient?: Client;
+  /** Studio day to open the slot picker on (calendar hour click). */
+  seedDate?: Date;
+  /** 0–23 studio hour to pre-select after service + client. */
+  seedHour?: number;
+  /** Optional Book / Block time control in the header (calendar click). */
+  modeSwitch?: ReactNode;
   onClose: () => void;
   /**
    * Fired after each successful booking so the parent can toast + refresh.
@@ -141,6 +147,9 @@ export default function ManualBookingModal({
   services: servicesProp,
   groupHeaders: groupHeadersProp,
   prefilledClient,
+  seedDate,
+  seedHour,
+  modeSwitch,
   onClose,
   onSuccess,
 }: Props) {
@@ -575,6 +584,9 @@ export default function ManualBookingModal({
               {headerTitle}
             </h2>
             <p className="mt-0.5 text-xs text-stone-500">{headerSubtitle}</p>
+            {modeSwitch && !showingSuccess ? (
+              <div className="mt-2.5">{modeSwitch}</div>
+            ) : null}
           </div>
           <button
             type="button"
@@ -674,6 +686,8 @@ export default function ManualBookingModal({
                   clientName={displayName}
                   selectedSlot={selectedSlot}
                   onSelectSlot={setSelectedSlot}
+                  seedDate={seedDate}
+                  seedHour={seedHour}
                 />
               )}
             </>
