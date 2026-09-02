@@ -283,6 +283,32 @@ function packLanes(raw: RawPositioned[]): PositionedAppointment[] {
 }
 
 /**
+ * CSS left/width for an overlap lane inside a day column.
+ *
+ * Lanes share the column equally. A hairline gap sits *between* columns
+ * only — subtracting gutter from both sides of every pill (the previous
+ * `widthPct - gutter*2` formula) opened a 6–8px hole between overlapping
+ * appointments plus unused space on the outer edges.
+ */
+export function overlapLaneBoxStyle(
+  col: number,
+  totalCols: number,
+  options?: { outerPx?: number; gapPx?: number }
+): { left: string; width: string } {
+  const n = Math.max(totalCols, 1);
+  const i = Math.min(Math.max(col, 0), n - 1);
+  const overlapping = n > 1;
+  const outerPx = options?.outerPx ?? (overlapping ? 1 : 2);
+  const gapPx = options?.gapPx ?? (overlapping ? 1 : 0);
+  const innerGaps = (n - 1) * gapPx;
+  const laneWidth = `((100% - ${outerPx * 2}px - ${innerGaps}px) / ${n})`;
+  return {
+    left: `calc(${outerPx}px + ${i} * (${laneWidth} + ${gapPx}px))`,
+    width: `calc${laneWidth}`,
+  };
+}
+
+/**
  * Filter appointments to a single America/Denver calendar day and return
  * them with positioning + overlap-lane assignments. DB stores UTC; day
  * membership is always studio-local.

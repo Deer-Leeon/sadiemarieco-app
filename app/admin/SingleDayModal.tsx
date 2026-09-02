@@ -25,6 +25,7 @@ import {
   closedBandPercentsForDay,
   layoutBlocksForDay,
   layoutForDay,
+  overlapLaneBoxStyle,
   safeParseISO,
   type PositionedAppointment,
   type PositionedTimeBlock,
@@ -410,9 +411,11 @@ function ModalAppointment({
   const name = clientDisplayName(apt.client_first_name, apt.client_last_name);
   const service = appointmentServiceLabel(apt);
 
-  const widthPct = 100 / totalCols;
-  const leftPct = col * widthPct;
-  const gutterPx = totalCols > 1 ? 4 : 8;
+  const overlapping = totalCols > 1;
+  const laneBox = overlapLaneBoxStyle(col, totalCols, {
+    outerPx: overlapping ? 2 : 8,
+    gapPx: overlapping ? 1 : 0,
+  });
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -421,8 +424,9 @@ function ModalAppointment({
   const clickable = !!onClick;
 
   const color = isNoShow ? null : getServiceColor(apt);
-  const baseClasses =
-    'absolute z-20 overflow-hidden rounded-md p-2.5 shadow-sm transition-colors text-left';
+  const baseClasses = overlapping
+    ? 'absolute z-20 overflow-hidden rounded-md p-2.5 transition-colors text-left'
+    : 'absolute z-20 overflow-hidden rounded-md p-2.5 shadow-sm transition-colors text-left';
   const variantClasses = isNoShow
     ? 'border-l-[3px] border-stone-400 bg-stone-50 opacity-60'
     : color
@@ -447,8 +451,8 @@ function ModalAppointment({
         top: `${topPct}%`,
         height: `${heightPct}%`,
         minHeight: MIN_PILL_HEIGHT_PX,
-        left: `calc(${leftPct}% + ${gutterPx}px)`,
-        width: `calc(${widthPct}% - ${gutterPx * 2}px)`,
+        left: laneBox.left,
+        width: laneBox.width,
         ...(color && {
           backgroundColor: color.accent,
           color: color.text,

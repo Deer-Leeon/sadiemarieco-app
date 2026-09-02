@@ -27,6 +27,7 @@ import {
   closedBandPercentsForDay,
   layoutBlocksForDay,
   layoutForDay,
+  overlapLaneBoxStyle,
   safeParseISO,
   type PositionedAppointment,
   type PositionedTimeBlock,
@@ -455,9 +456,8 @@ function AppointmentBlock({
     .filter(Boolean)
     .join(' · ');
 
-  const widthPct = 100 / totalCols;
-  const leftPct = col * widthPct;
-  const gutterPx = totalCols > 1 ? 3 : 2;
+  const laneBox = overlapLaneBoxStyle(col, totalCols);
+  const overlapping = totalCols > 1;
 
   // stopPropagation is defensive — the day-column body no longer
   // has its own click handler (only the day-header at the top of
@@ -479,8 +479,9 @@ function AppointmentBlock({
   // Match SingleDayModal pills: solid fill, no black outline. Gap between
   // back-to-back same-colour bookings comes from layout packing / height,
   // not a stroke. No-show and unmapped services keep a left accent stripe.
-  const baseClasses =
-    'absolute z-20 overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left leading-tight';
+  const baseClasses = overlapping
+    ? 'absolute z-20 overflow-hidden rounded-sm p-1.5 transition-colors text-left leading-tight'
+    : 'absolute z-20 overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left leading-tight';
   const variantClasses = isNoShow
     ? 'border-l-[3px] border-l-stone-400 bg-stone-50 opacity-60'
     : color
@@ -525,8 +526,8 @@ function AppointmentBlock({
         top: `${topPct}%`,
         height: `${heightPct}%`,
         minHeight: MIN_PILL_HEIGHT_PX,
-        left: `calc(${leftPct}% + ${gutterPx}px)`,
-        width: `calc(${widthPct}% - ${gutterPx * 2}px)`,
+        left: laneBox.left,
+        width: laneBox.width,
         ...(color && {
           backgroundColor: color.accent,
           color: color.text,
