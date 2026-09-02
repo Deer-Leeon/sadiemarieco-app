@@ -871,19 +871,28 @@ function DossierSection({
       {openAppointment && (
         <AppointmentModal
           appointment={openAppointment}
+          siblingCandidates={appts ?? []}
           onClose={handleCloseStacked}
           onMutated={() => {
             mutatedRef.current = true;
           }}
-          onPaymentUpdated={(payment: TerminalPaymentSummary | null) => {
+          onPaymentUpdated={(
+            payment: TerminalPaymentSummary | null,
+            appointmentIds?: string[]
+          ) => {
             mutatedRef.current = true;
+            const ids = appointmentIds?.length
+              ? appointmentIds
+              : [openAppointment.id];
             setOpenAppointment((prev) =>
-              prev ? { ...prev, terminal_payment: payment } : null
+              prev && ids.includes(prev.id)
+                ? { ...prev, terminal_payment: payment }
+                : prev
             );
             setAppts((prev) =>
               prev
                 ? prev.map((a) =>
-                    a.id === openAppointment.id
+                    ids.includes(a.id)
                       ? { ...a, terminal_payment: payment }
                       : a
                   )
@@ -2261,19 +2270,28 @@ function AppointmentsView({ client }: { client: Client }) {
       {openAppointment && (
         <AppointmentModal
           appointment={openAppointment}
+          siblingCandidates={appts ?? []}
           onClose={handleCloseStacked}
           onMutated={() => {
             mutatedRef.current = true;
           }}
-          onPaymentUpdated={(payment: TerminalPaymentSummary | null) => {
+          onPaymentUpdated={(
+            payment: TerminalPaymentSummary | null,
+            appointmentIds?: string[]
+          ) => {
             mutatedRef.current = true;
+            const ids = appointmentIds?.length
+              ? appointmentIds
+              : [openAppointment.id];
             setOpenAppointment((prev) =>
-              prev ? { ...prev, terminal_payment: payment } : null
+              prev && ids.includes(prev.id)
+                ? { ...prev, terminal_payment: payment }
+                : prev
             );
             setAppts((prev) =>
               prev
                 ? prev.map((a) =>
-                    a.id === openAppointment.id
+                    ids.includes(a.id)
                       ? { ...a, terminal_payment: payment }
                       : a
                   )

@@ -39,6 +39,7 @@ export function paymentRowToSummary(
 ): TerminalPaymentSummary {
   return {
     id: row.id,
+    appointment_id: row.appointment_id,
     payment_kind: row.payment_kind,
     payment_intent_id: row.stripe_payment_intent_id,
     reader_id: row.stripe_reader_id,
@@ -201,6 +202,7 @@ export async function insertManualSettlement(args: {
   baseAmountCents: number;
   note: string | null;
   settledByEmail: string;
+  paymentGroupId?: string | null;
 }): Promise<TerminalPaymentSummary> {
   const tipAmountCents = 0;
   const totalAmountCents = args.baseAmountCents + tipAmountCents;
@@ -216,10 +218,11 @@ export async function insertManualSettlement(args: {
        status,
        note,
        settled_by_email,
-       paid_at
+       paid_at,
+       payment_group_id
      )
      VALUES (
-       $1, $2, $3, 'usd', $4, $5, $6, 'succeeded', $7, $8, NOW()
+       $1, $2, $3, 'usd', $4, $5, $6, 'succeeded', $7, $8, NOW(), $9
      )
      RETURNING ${PAYMENT_SELECT}`,
     [
@@ -231,9 +234,72 @@ export async function insertManualSettlement(args: {
       totalAmountCents,
       args.note,
       args.settledByEmail,
+      args.paymentGroupId ?? null,
     ]
   );
   return paymentRowToSummary(rows[0] as AppointmentPaymentRow);
+}
+
+export async function insertManualSettlements(args: {
+  kind: 'cash' | 'complimentary';
+  note: string | null;
+  settledByEmail: string;
+  paymentGroupId: string | null;
+  items: {
+    appointmentId: string;
+    calBookingUid: string | null;
+    baseAmountCents: number;
+  }[];
+}): Promise<TerminalPaymentSummary[]> {
+  if (args.items.length === 0) return [];
+  const ids = args.items.map((item) => item.appointmentId);
+  const uids = args.items.map((item) => item.calBookingUid ?? '');
+  const bases = args.items.map((item) => item.baseAmountCents);
+  const { rows } = await sql.query(
+    `INSERT INTO appointment_payments (
+       appointment_id,
+       cal_booking_uid,
+       payment_kind,
+       currency,
+       base_amount_cents,
+       tip_amount_cents,
+       total_amount_cents,
+       status,
+       note,
+       settled_by_email,
+       paid_at,
+       payment_group_id
+     )
+     SELECT
+       x.appointment_id,
+       NULLIF(x.cal_booking_uid, ''),
+       $1,
+       'usd',
+       x.base_amount_cents,
+       0,
+       x.base_amount_cents,
+       'succeeded',
+       $2,
+       $3,
+       NOW(),
+       $4::uuid
+     FROM unnest($5::text[], $6::text[], $7::integer[]) AS x(
+       appointment_id,
+       cal_booking_uid,
+       base_amount_cents
+     )
+     RETURNING ${PAYMENT_SELECT}`,
+    [
+      args.kind,
+      args.note,
+      args.settledByEmail,
+      args.paymentGroupId,
+      ids,
+      uids,
+      bases,
+    ]
+  );
+  return (rows as AppointmentPaymentRow[]).map(paymentRowToSummary);
 }
 
 export async function undoManualSettlement(

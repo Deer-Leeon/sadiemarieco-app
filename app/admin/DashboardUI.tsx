@@ -260,17 +260,25 @@ export default function DashboardUI({
   }
 
   /** Patch settlement markers in the open modal + calendar/list immediately. */
-  function handlePaymentUpdated(payment: TerminalPaymentSummary | null) {
+  function handlePaymentUpdated(
+    payment: TerminalPaymentSummary | null,
+    appointmentIds?: string[]
+  ) {
+    const ids = appointmentIds?.length
+      ? appointmentIds
+      : selectedAppointment
+        ? [selectedAppointment.id]
+        : [];
     setSelectedAppointment((prev) =>
-      prev ? { ...prev, terminal_payment: payment } : null
+      prev && ids.includes(prev.id)
+        ? { ...prev, terminal_payment: payment }
+        : prev
     );
-    setAppointments((prev) => {
-      const id = selectedAppointment?.id;
-      if (!id) return prev;
-      return prev.map((a) =>
-        a.id === id ? { ...a, terminal_payment: payment } : a
-      );
-    });
+    setAppointments((prev) =>
+      prev.map((a) =>
+        ids.includes(a.id) ? { ...a, terminal_payment: payment } : a
+      )
+    );
   }
 
   const showDateNav = view === '3day' || view === 'week';
@@ -442,6 +450,7 @@ export default function DashboardUI({
           onClose={() => setSelectedAppointment(null)}
           onClientUpdated={handleClientNoShowFlagChanged}
           onPaymentUpdated={handlePaymentUpdated}
+          siblingCandidates={appointments}
         />
       )}
 
