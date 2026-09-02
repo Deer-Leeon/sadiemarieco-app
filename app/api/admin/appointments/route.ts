@@ -23,7 +23,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Appointment } from '@/app/admin/types';
-import { normalizeStoredBookingNotes } from '@/lib/cal-booking-notes';
+import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
 import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
 import {
   applyCatalogueService,
@@ -98,7 +98,10 @@ function rowToAppointment(
     status: row.status,
     client_phone: row.client_phone,
     client_email: row.client_email,
-    booking_notes: normalizeStoredBookingNotes(row.booking_notes),
+    booking_notes: clientBookingNotesForDisplay(
+      row.booking_notes,
+      catalogueFields.service_description
+    ),
     service_price:
       row.service_price === null
         ? null

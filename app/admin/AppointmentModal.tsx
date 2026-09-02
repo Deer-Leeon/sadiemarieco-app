@@ -36,7 +36,7 @@ import {
   isSameAppointmentSlot,
   rescheduleSameSlotNotice,
 } from '@/lib/appointment-slot';
-import { normalizeStoredBookingNotes } from '@/lib/cal-booking-notes';
+import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
 import {
   ADMIN_CAL_UI_CONFIG,
   CAL_USERNAME,
@@ -484,8 +484,9 @@ export default function AppointmentModal({
   const cardHeightClass = isRescheduling
     ? 'h-[calc(100dvh-1.25rem)] max-h-[calc(100dvh-1.25rem)]'
     : 'max-h-[90dvh]';
-  const displayBookingNotes = normalizeStoredBookingNotes(
-    appointment.booking_notes
+  const displayBookingNotes = clientBookingNotesForDisplay(
+    appointment.booking_notes,
+    appointment.service_description
   );
 
   return (
@@ -2469,15 +2470,6 @@ function SettlementConfirmDialog({
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-stone-600">{body}</p>
           {kind !== 'undo' ? (
-            <SameDayVisitChecklist
-              primary={appointment}
-              siblings={siblings}
-              selectedExtraIds={selectedExtraIds}
-              onToggle={toggleExtra}
-              disabled={busy}
-            />
-          ) : null}
-          {kind !== 'undo' ? (
             <label className="mt-4 block">
               <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
                 Note (optional)
@@ -2492,6 +2484,15 @@ function SettlementConfirmDialog({
                 className="mt-1.5 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-stone-400"
               />
             </label>
+          ) : null}
+          {kind !== 'undo' ? (
+            <SameDayVisitChecklist
+              primary={appointment}
+              siblings={siblings}
+              selectedExtraIds={selectedExtraIds}
+              onToggle={toggleExtra}
+              disabled={busy}
+            />
           ) : null}
           {error ? (
             <p className="mt-3 text-sm text-rose-700" role="alert">

@@ -21,6 +21,12 @@ export interface SameDayUnsettledVisit {
   status: string | null;
 }
 
+function toIsoTimestamp(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 function quotedCents(visit: SameDayUnsettledVisit): number {
   const raw = Number(visit.quoted_service_price_cents);
   return Number.isSafeInteger(raw) && raw >= 0 ? raw : 0;
@@ -62,8 +68,8 @@ export async function findSameDayUnsettledSiblings(
     SELECT
       sib.id::text AS id,
       sib.cal_event_id AS cal_booking_uid,
-      sib.booking_time::text AS booking_time,
-      sib.end_time::text AS end_time,
+      sib.booking_time,
+      sib.end_time,
       sib.service_name,
       sib.quoted_service_price_cents,
       sib.status
@@ -117,7 +123,11 @@ export async function findSameDayUnsettledSiblings(
       )
     ORDER BY sib.booking_time ASC, sib.id::text ASC
   `;
-  return rows;
+  return rows.map((row) => ({
+    ...row,
+    booking_time: toIsoTimestamp(row.booking_time),
+    end_time: toIsoTimestamp(row.end_time),
+  }));
 }
 
 export async function resolveAdditionalUnsettledVisits(
