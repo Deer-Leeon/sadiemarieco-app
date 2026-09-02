@@ -44,6 +44,7 @@ import {
   Flag,
   Loader2,
   Mail,
+  MessageSquare,
   Pencil,
   Phone,
   Pin,
@@ -57,6 +58,7 @@ import {
 } from 'lucide-react';
 
 import ClientNotesHistoryModal from './components/ClientNotesHistoryModal';
+import ClientSmsHistoryModal from './components/ClientSmsHistoryModal';
 import ManualBookingModal from './components/ManualBookingModal';
 
 import {
@@ -437,6 +439,7 @@ function DossierSection({
   const [refreshKey, setRefreshKey] = useState(0);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingToast, setBookingToast] = useState<string | null>(null);
+  const [smsLogOpen, setSmsLogOpen] = useState(false);
   useEffect(() => {
     if (!bookingToast) return;
     const timer = window.setTimeout(() => setBookingToast(null), 5000);
@@ -837,6 +840,22 @@ function DossierSection({
           onSelect={setOpenAppointment}
         />
       )}
+
+      <ActionBox
+        icon={<MessageSquare className="h-3 w-3" />}
+        label="Text history"
+        helper="Every text sent to this client, including older messages from Twilio."
+        onClick={() => setSmsLogOpen(true)}
+        ariaLabel="Open text history for this client"
+      />
+
+      <ClientSmsHistoryModal
+        clientId={client.id}
+        clientName={clientDisplayName(client.first_name, client.last_name)}
+        clientPhone={client.phone}
+        open={smsLogOpen}
+        onClose={() => setSmsLogOpen(false)}
+      />
 
       {openAppointment && (
         <AppointmentModal

@@ -6,8 +6,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { requireAdminUser } from '@/app/admin/auth';
-import { SMS_TEMPLATE_META } from '@/lib/sms-templates';
-import { listOutboundSms } from '@/lib/sms-outbound-log';
+import {
+  displayTitleForTemplateKey,
+  listOutboundSms,
+} from '@/lib/sms-outbound-log';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,17 +38,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         row.created_at instanceof Date
           ? row.created_at.toISOString()
           : new Date(row.created_at).toISOString();
-      const meta =
-        row.template_key in SMS_TEMPLATE_META
-          ? SMS_TEMPLATE_META[
-              row.template_key as keyof typeof SMS_TEMPLATE_META
-            ]
-          : null;
       return {
         id: row.id,
         createdAt,
         templateKey: row.template_key,
-        title: meta?.title || row.template_key,
+        title: displayTitleForTemplateKey(row.template_key),
         body: row.body,
         to: row.to_e164,
         clientId: row.client_id,

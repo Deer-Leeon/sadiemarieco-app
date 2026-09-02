@@ -2,23 +2,6 @@
  * Typed façade over lib/sms-outbound-log.js.
  */
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const impl = require('./sms-outbound-log.js') as {
-  normalizeTemplateKey: (logLabel: string | null | undefined) => string;
-  recordOutboundSms: (args: {
-    logLabel?: string | null;
-    templateKey?: string | null;
-    body: string;
-    toE164: string;
-    bookingUid?: string | null;
-    twilioSid?: string | null;
-  }) => Promise<void>;
-  listOutboundSms: (args?: {
-    limit?: number;
-    before?: string | null;
-  }) => Promise<SmsOutboundLogRow[]>;
-};
-
 export type SmsOutboundLogRow = {
   id: string;
   created_at: Date | string;
@@ -31,6 +14,50 @@ export type SmsOutboundLogRow = {
   twilio_sid: string | null;
 };
 
+export type TwilioImportResult = {
+  imported: number;
+  scanned: number;
+  skipped: boolean;
+  reason?: string;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const impl = require('./sms-outbound-log.js') as {
+  normalizeTemplateKey: (logLabel: string | null | undefined) => string;
+  displayTitleForTemplateKey: (key: string | null | undefined) => string;
+  recordOutboundSms: (args: {
+    logLabel?: string | null;
+    templateKey?: string | null;
+    body: string;
+    toE164: string;
+    bookingUid?: string | null;
+    twilioSid?: string | null;
+  }) => Promise<void>;
+  listOutboundSms: (args?: {
+    limit?: number;
+    before?: string | null;
+  }) => Promise<SmsOutboundLogRow[]>;
+  listOutboundSmsForClient: (args: {
+    clientId: string;
+    phone?: string | null;
+    limit?: number;
+    before?: string | null;
+  }) => Promise<SmsOutboundLogRow[]>;
+  importTwilioOutboundForPhone: (args: {
+    toE164: string;
+    clientId?: string | null;
+    clientName?: string | null;
+    limit?: number;
+  }) => Promise<TwilioImportResult>;
+  importAllTwilioOutbound: (args?: {
+    limit?: number;
+  }) => Promise<TwilioImportResult>;
+};
+
 export const normalizeTemplateKey = impl.normalizeTemplateKey;
+export const displayTitleForTemplateKey = impl.displayTitleForTemplateKey;
 export const recordOutboundSms = impl.recordOutboundSms;
 export const listOutboundSms = impl.listOutboundSms;
+export const listOutboundSmsForClient = impl.listOutboundSmsForClient;
+export const importTwilioOutboundForPhone = impl.importTwilioOutboundForPhone;
+export const importAllTwilioOutbound = impl.importAllTwilioOutbound;
