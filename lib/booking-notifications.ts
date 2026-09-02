@@ -105,6 +105,11 @@ const impl = require('./booking-notifications.js') as {
     bookingUid: string;
     expectedBookingTime?: string | null;
   }) => Promise<Record<string, unknown>>;
+  sendManualClientSms: (args: {
+    clientId: string;
+    kind: 'consent_request' | 'review_request';
+  }) => Promise<Record<string, unknown>>;
+  MANUAL_SMS_SKIP_MESSAGES: Record<string, string>;
   notifyFeeFreePassSms: (args: {
     kind:
       | 'no_show_free_pass_used'
@@ -139,4 +144,6 @@ export const scheduleReviewRequestForClient =
   impl.scheduleReviewRequestForClient;
 export const fulfillReviewRequestForBooking =
   impl.fulfillReviewRequestForBooking;
+export const sendManualClientSms = impl.sendManualClientSms;
+export const MANUAL_SMS_SKIP_MESSAGES = impl.MANUAL_SMS_SKIP_MESSAGES;
 export const notifyFeeFreePassSms = impl.notifyFeeFreePassSms;

@@ -54,7 +54,8 @@ export type SmsTemplateKey =
   | 'client_cancel_late_no_fee'
   | 'checkout_abandoned'
   | 'feedback_day_after'
-  | 'review_request';
+  | 'review_request'
+  | 'review_request_manual';
 
 export interface SmsTemplateMeta {
   title: string;

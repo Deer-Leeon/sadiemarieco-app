@@ -58,6 +58,7 @@ import {
 } from 'lucide-react';
 
 import ClientNotesHistoryModal from './components/ClientNotesHistoryModal';
+import ClientSendSmsConfirmModal from './components/ClientSendSmsConfirmModal';
 import ClientSmsHistoryModal from './components/ClientSmsHistoryModal';
 import ManualBookingModal from './components/ManualBookingModal';
 
@@ -708,6 +709,9 @@ function DossierSection({
         onConfirmGrant={(kind) => void grantFeeWaive(kind)}
       />
       <GoogleReviewSmsBar
+        clientId={client.id}
+        clientName={clientDisplayName(client.first_name, client.last_name)}
+        clientPhone={client.phone}
         pending={Boolean(client.review_request_pending)}
         stars={client.google_review_stars ?? null}
         error={reviewFlagError}
@@ -716,6 +720,13 @@ function DossierSection({
         }
         onChangeStars={(next) =>
           void patchReviewFlags({ google_review_stars: next })
+        }
+        onReviewSent={() =>
+          onClientUpdated({
+            ...client,
+            review_request_pending: false,
+            review_request_last_sent_at: new Date().toISOString(),
+          })
         }
       />
 
@@ -917,19 +928,28 @@ function DossierSection({
 }
 
 function GoogleReviewSmsBar({
+  clientId,
+  clientName,
+  clientPhone,
   pending,
   stars,
   error,
   onTogglePending,
   onChangeStars,
+  onReviewSent,
 }: {
+  clientId: string;
+  clientName: string;
+  clientPhone: string | null;
   pending: boolean;
   stars: number | null;
   error: string | null;
   onTogglePending: (next: boolean) => void;
   onChangeStars: (next: number | null) => void;
+  onReviewSent?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
   const [draftPending, setDraftPending] = useState(pending);
   const [draftStars, setDraftStars] = useState<number | null>(stars);
 
@@ -949,35 +969,63 @@ function GoogleReviewSmsBar({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="w-full rounded-lg border border-stone-200 bg-white px-3.5 py-3 text-left transition-colors hover:bg-stone-50/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60"
-      >
-        <div className="min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <p className="text-sm font-medium text-stone-900">Google reviews</p>
-              <GoogleReviewStars value={draftStars} size="sm" />
+      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="w-full px-3.5 py-3 text-left transition-colors hover:bg-stone-50/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60"
+        >
+          <div className="min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <p className="text-sm font-medium text-stone-900">Google reviews</p>
+                <GoogleReviewStars value={draftStars} size="sm" />
+              </div>
+              <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium uppercase tracking-[0.12em] text-stone-500">
+                Edit
+                <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+              </span>
             </div>
-            <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium uppercase tracking-[0.12em] text-stone-500">
-              Edit
-              <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </span>
+            <div className="mt-3">
+              <GoogleReviewStatusRow
+                label="Ask after next visit"
+                on={draftPending}
+              />
+            </div>
+            {error && (
+              <p className="mt-2 text-xs text-rose-700" role="alert">
+                {error}
+              </p>
+            )}
           </div>
-          <div className="mt-3">
-            <GoogleReviewStatusRow
-              label="Ask after next visit"
-              on={draftPending}
-            />
+        </button>
+        {draftStars == null || draftStars < 1 ? (
+          <div className="border-t border-stone-100 px-3.5 py-3">
+            <button
+              type="button"
+              onClick={() => setSendOpen(true)}
+              className="w-full rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-left text-xs font-medium text-stone-800 transition-colors hover:border-stone-300 hover:bg-stone-100"
+            >
+              Send review text
+            </button>
           </div>
-          {error && (
-            <p className="mt-2 text-xs text-rose-700" role="alert">
-              {error}
-            </p>
-          )}
-        </div>
-      </button>
+        ) : null}
+      </div>
+
+      {sendOpen ? (
+        <ClientSendSmsConfirmModal
+          open
+          kind="review_request"
+          clientId={clientId}
+          clientName={clientName}
+          clientPhone={clientPhone}
+          onClose={() => setSendOpen(false)}
+          onSent={() => {
+            setDraftPending(false);
+            onReviewSent?.();
+          }}
+        />
+      ) : null}
 
       {open && (
         <div
@@ -1741,10 +1789,14 @@ function IdentityBox({
   );
 }
 
-const actionBoxClass = (interactive: boolean) =>
-  `group flex w-full items-center justify-between gap-3 rounded-lg border border-stone-200 bg-white p-4 text-left transition-colors ${
+const actionBoxClass = (interactive: boolean, embedded = false) =>
+  `group flex w-full items-center justify-between gap-3 bg-white p-4 text-left transition-colors ${
+    embedded ? '' : 'rounded-lg border border-stone-200'
+  } ${
     interactive
-      ? 'cursor-pointer hover:border-stone-300 hover:bg-stone-50'
+      ? embedded
+        ? 'cursor-pointer hover:bg-stone-50'
+        : 'cursor-pointer hover:border-stone-300 hover:bg-stone-50'
       : 'cursor-not-allowed opacity-70'
   }`;
 
@@ -1778,6 +1830,30 @@ function ConsentFormActionBox({
   const [confirmReview, setConfirmReview] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const [sendSmsOpen, setSendSmsOpen] = useState(false);
+
+  const sendConsentTextRow = (
+    <div className="border-t border-stone-100 px-4 py-3">
+      <button
+        type="button"
+        onClick={() => setSendSmsOpen(true)}
+        className="w-full rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-left text-xs font-medium text-stone-800 transition-colors hover:border-stone-300 hover:bg-stone-100"
+      >
+        Send consent text
+      </button>
+    </div>
+  );
+
+  const sendConsentModal = sendSmsOpen ? (
+    <ClientSendSmsConfirmModal
+      open
+      kind="consent_request"
+      clientId={client.id}
+      clientName={clientDisplayName(client.first_name, client.last_name)}
+      clientPhone={client.phone}
+      onClose={() => setSendSmsOpen(false)}
+    />
+  ) : null;
 
   const markReviewed = async () => {
     setReviewing(true);
@@ -1811,6 +1887,7 @@ function ConsentFormActionBox({
     return (
       <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
         <ActionBox
+          embedded
           icon={<ClipboardCheck className="h-3 w-3 shrink-0 text-emerald-700/80" />}
           label="Consent Form"
           helper={
@@ -1945,23 +2022,29 @@ function ConsentFormActionBox({
             </button>
           </div>
         </div>
+        {sendConsentModal}
       </div>
     );
   }
 
   return (
-    <ActionBox
-      icon={<ClipboardCheck className="h-3 w-3 shrink-0" />}
-      label="Consent Form"
-      helper="Send the client this link to complete intake."
-      href={href}
-      ariaLabel="Open consent form to fill out or share"
-      rightAccessory={
-        <span className="max-w-[7.5rem] text-right text-[10px] font-medium uppercase leading-tight tracking-[0.12em] text-stone-500">
-          Fill out / Send form link
-        </span>
-      }
-    />
+    <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+      <ActionBox
+        embedded
+        icon={<ClipboardCheck className="h-3 w-3 shrink-0" />}
+        label="Consent Form"
+        helper="Send the client this link to complete intake."
+        href={href}
+        ariaLabel="Open consent form to fill out or share"
+        rightAccessory={
+          <span className="max-w-[7.5rem] text-right text-[10px] font-medium uppercase leading-tight tracking-[0.12em] text-stone-500">
+            Fill out / Send form link
+          </span>
+        }
+      />
+      {sendConsentTextRow}
+      {sendConsentModal}
+    </div>
   );
 }
 
@@ -1974,6 +2057,7 @@ function ActionBox({
   ariaLabel,
   disabled,
   rightAccessory,
+  embedded,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -1983,9 +2067,10 @@ function ActionBox({
   ariaLabel?: string;
   disabled?: boolean;
   rightAccessory?: React.ReactNode;
+  embedded?: boolean;
 }) {
   const interactive = !disabled && (!!onClick || !!href);
-  const className = actionBoxClass(interactive);
+  const className = actionBoxClass(interactive, embedded);
   const inner = (
     <>
       <span className="min-w-0">
