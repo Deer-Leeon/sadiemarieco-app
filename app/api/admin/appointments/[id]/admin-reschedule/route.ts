@@ -345,6 +345,7 @@ export async function POST(
         manual_admin_booking: 'true',
         admin_reschedule: 'true',
         original_service_name: service.title,
+        original_cal_event_id: String(eventTypeId),
         original_service_duration_mins: String(service.duration_mins),
       },
     };

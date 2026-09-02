@@ -2,6 +2,7 @@ import { sql } from '@vercel/postgres';
 
 import {
   appointmentServiceTitleKey,
+  appointmentServiceTitleKeyWithoutAddOn,
   BARE_FILL_TITLE_KEYS,
 } from '@/lib/appointment-service-title-key';
 
@@ -12,6 +13,7 @@ export type CatalogueServiceRow = {
   slug: string | null;
   description: string | null;
   category?: string | null;
+  cal_event_id?: number | null;
 };
 
 function durationMinutes(
@@ -40,13 +42,38 @@ export function matchCatalogueService(
   bookingTime: Date | string | null | undefined,
   endTime: Date | string | null | undefined,
   catalogue: CatalogueServiceRow[],
+  calEventTypeId?: number | null,
 ): CatalogueServiceRow | null {
+  if (calEventTypeId != null) {
+    const byId = catalogue.filter(
+      (row) => Number(row.cal_event_id) === Number(calEventTypeId),
+    );
+    if (byId.length === 1) return byId[0];
+    if (byId.length > 1) {
+      return (
+        byId.find((row) => row.title.trim().toLowerCase() === primaryTitle(serviceName).toLowerCase()) ??
+        byId[0]
+      );
+    }
+  }
+
   const key = appointmentServiceTitleKey(serviceName);
   if (!key) return null;
 
   let matches = catalogue.filter(
     (row) => appointmentServiceTitleKey(row.title) === key,
   );
+
+  if (matches.length === 0) {
+    const stripped = appointmentServiceTitleKeyWithoutAddOn(serviceName);
+    if (stripped && stripped !== key) {
+      const addOnMatches = catalogue.filter(
+        (row) => appointmentServiceTitleKey(row.title) === stripped,
+      );
+      if (addOnMatches.length === 1) matches = addOnMatches;
+    }
+  }
+
   if (matches.length === 0) return null;
 
   if (BARE_FILL_TITLE_KEYS.has(key)) {
@@ -74,6 +101,7 @@ export function applyCatalogueService(
     service_color: string | null;
     service_slug: string | null;
     service_description: string | null;
+    cal_event_type_id?: number | null;
   },
   catalogue: CatalogueServiceRow[],
 ): {
@@ -81,18 +109,12 @@ export function applyCatalogueService(
   service_slug: string | null;
   service_description: string | null;
 } {
-  if (fields.service_color && fields.service_slug && fields.service_description) {
-    return {
-      service_color: fields.service_color,
-      service_slug: fields.service_slug,
-      service_description: fields.service_description,
-    };
-  }
   const matched = matchCatalogueService(
     fields.service_name,
     fields.booking_time,
     fields.end_time,
     catalogue,
+    fields.cal_event_type_id,
   );
   return {
     service_color: fields.service_color ?? matched?.color ?? null,
@@ -103,7 +125,7 @@ export function applyCatalogueService(
 
 export async function loadActiveCatalogueServices(): Promise<CatalogueServiceRow[]> {
   const { rows } = await sql<CatalogueServiceRow>`
-    SELECT title, color, duration_mins, slug, description, category
+    SELECT title, color, duration_mins, slug, description, category, cal_event_id
     FROM site_services
     WHERE is_active = TRUE
   `;

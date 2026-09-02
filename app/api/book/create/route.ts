@@ -532,6 +532,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         bookingTime: extracted.start || startUtc.toISOString(),
         endTime: extracted.end || null,
         smsOptIn,
+        eventTypeId: service.calEventId,
       }),
       cache: 'no-store',
     });

@@ -54,6 +54,7 @@ export async function resolveAppointmentService(
   serviceName: string,
   bookingTime?: string | Date | null,
   endTime?: string | Date | null,
+  calEventTypeId?: number | null,
 ): Promise<ResolvedAppointmentService> {
   const primary = primaryServiceTitle(serviceName);
   const fallbackName = primary || serviceName.trim() || 'appointment';
@@ -74,8 +75,9 @@ export async function resolveAppointmentService(
       color: string | null;
       slug: string | null;
       description: string | null;
+      cal_event_id: number | null;
     }>`
-      SELECT title, category, duration_mins, color, slug, description
+      SELECT title, category, duration_mins, color, slug, description, cal_event_id
       FROM site_services
       WHERE is_active = TRUE
     `;
@@ -84,6 +86,7 @@ export async function resolveAppointmentService(
       bookingTime,
       endTime,
       rows,
+      calEventTypeId,
     );
     if (!matched) {
       return {

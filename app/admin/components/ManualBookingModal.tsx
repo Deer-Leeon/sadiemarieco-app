@@ -372,6 +372,7 @@ export default function ManualBookingModal({
           bookingTime,
           endTime,
           durationMins: selectedService.durationMins,
+          eventTypeId: selectedService.eventTypeId,
         }),
       });
 

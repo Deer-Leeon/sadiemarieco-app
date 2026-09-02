@@ -63,6 +63,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import { rewriteAppointmentServiceNames } from '@/lib/rewrite-appointment-service-names';
 import {
   CAL_AFTER_EVENT_BUFFER_MIN,
   CAL_MIN_BOOKING_NOTICE_MIN,
@@ -618,6 +619,21 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       );
     }
     const service = rows[0];
+    try {
+      await rewriteAppointmentServiceNames({
+        calEventTypeId:
+          service.cal_event_id != null && Number(service.cal_event_id) > 0
+            ? Number(service.cal_event_id)
+            : null,
+        oldTitle: existing.title,
+        newTitle: service.title,
+      });
+    } catch (err) {
+      console.warn(
+        '[api/admin/services] PATCH: appointment title rewrite failed (non-fatal)',
+        err,
+      );
+    }
     return NextResponse.json({
       service: { ...service, price: Number(service.price) },
     });

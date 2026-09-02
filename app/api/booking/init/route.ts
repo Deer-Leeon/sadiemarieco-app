@@ -53,6 +53,7 @@ interface InitBody {
   endTime?: unknown;
   phone?: unknown;
   smsOptIn?: unknown;
+  eventTypeId?: unknown;
 }
 
 interface ParsedInit {
@@ -65,10 +66,34 @@ interface ParsedInit {
   phone: string;
   bookingNotes: string | null;
   smsOptIn: boolean | undefined;
+  calEventTypeId: number | null;
 }
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function extractCalEventTypeId(source: unknown): number | null {
+  if (!source || typeof source !== 'object') return null;
+  const record = source as Record<string, unknown>;
+  const metadata =
+    record.metadata && typeof record.metadata === 'object'
+      ? (record.metadata as Record<string, unknown>)
+      : null;
+  const nested =
+    record.eventType && typeof record.eventType === 'object'
+      ? (record.eventType as Record<string, unknown>)
+      : null;
+  const raw =
+    metadata?.original_cal_event_id ??
+    metadata?.originalCalEventId ??
+    record.eventTypeId ??
+    record.eventTypeID ??
+    nested?.id ??
+    nested?.eventTypeId ??
+    null;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 function splitName(fullName: string): { first: string; last: string } {
@@ -142,6 +167,7 @@ function parseInitBody(input: unknown): ParsedInit | { error: string } {
     phone,
     bookingNotes: null,
     smsOptIn,
+    calEventTypeId: extractCalEventTypeId(body),
   };
 }
 
@@ -241,6 +267,8 @@ async function hydrateFromCal(
             : partial.smsOptIn === false
               ? false
               : smsFromCal,
+      calEventTypeId:
+        partial.calEventTypeId ?? extractCalEventTypeId(booking),
     };
   } catch (err) {
     console.warn('[api/booking/init] Cal hydrate failed (non-fatal)', {
@@ -279,7 +307,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }) ||
     !data.bookingTime ||
     !data.bookingNotes ||
-    !data.phone;
+    !data.phone ||
+    data.calEventTypeId == null;
   if (needsHydrate) {
     data = await hydrateFromCal(data.calBookingUid, data);
   }
@@ -372,18 +401,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const { rowCount } = await sql`
       INSERT INTO appointments (
         client_id, service_name, booking_time, end_time, cal_event_id,
+        cal_event_type_id,
         client_first_name, client_last_name, client_email, client_phone,
         booking_notes, status, sms_opt_in
       )
       VALUES (
         ${clientId}, ${data.serviceName}, ${data.bookingTime}, ${data.endTime},
-        ${data.calBookingUid},
+        ${data.calBookingUid}, ${data.calEventTypeId},
         ${firstName}, ${lastName}, ${storedEmail}, ${appointmentPhone},
         ${data.bookingNotes}, 'pending', ${smsOptIn ? true : null}
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,
         service_name = EXCLUDED.service_name,
+        cal_event_type_id = COALESCE(
+          EXCLUDED.cal_event_type_id,
+          appointments.cal_event_type_id
+        ),
         quoted_service_price_cents = COALESCE(
           appointments.quoted_service_price_cents,
           EXCLUDED.quoted_service_price_cents

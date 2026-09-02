@@ -42,6 +42,7 @@ export const revalidate = 0;
 interface AppointmentRow {
   id: string;
   cal_event_id: string | null;
+  cal_event_type_id: number | null;
   service_slug: string | null;
   client_first_name: string | null;
   client_last_name: string | null;
@@ -133,6 +134,7 @@ export async function GET(): Promise<NextResponse> {
       SELECT
         a.id,
         a.cal_event_id,
+        a.cal_event_type_id,
         a.client_first_name,
         a.client_last_name,
         a.booking_time,
@@ -196,22 +198,31 @@ export async function GET(): Promise<NextResponse> {
       LEFT JOIN LATERAL (
         SELECT s.price, s.description, s.slug, s.color
         FROM site_services s
-        WHERE s.title = split_part(a.service_name, ' between ', 1)
-          AND s.is_active = TRUE
+        WHERE s.is_active = TRUE
           AND (
-            lower(trim(split_part(a.service_name, ' between ', 1))) NOT IN (
-              'classic', 'hybrid', 'volume'
+            (
+              a.cal_event_type_id IS NOT NULL
+              AND s.cal_event_id = a.cal_event_type_id
             )
             OR (
-              a.booking_time IS NOT NULL
-              AND a.end_time IS NOT NULL
-              AND s.duration_mins IS NOT NULL
-              AND s.duration_mins = GREATEST(
-                1,
-                ROUND(
-                  EXTRACT(EPOCH FROM (a.end_time - a.booking_time)) / 60.0
+              a.cal_event_type_id IS NULL
+              AND s.title = split_part(a.service_name, ' between ', 1)
+              AND (
+                lower(trim(split_part(a.service_name, ' between ', 1))) NOT IN (
+                  'classic', 'hybrid', 'volume'
                 )
-              )::integer
+                OR (
+                  a.booking_time IS NOT NULL
+                  AND a.end_time IS NOT NULL
+                  AND s.duration_mins IS NOT NULL
+                  AND s.duration_mins = GREATEST(
+                    1,
+                    ROUND(
+                      EXTRACT(EPOCH FROM (a.end_time - a.booking_time)) / 60.0
+                    )
+                  )::integer
+                )
+              )
             )
           )
         ORDER BY s.updated_at DESC NULLS LAST, s.id DESC
