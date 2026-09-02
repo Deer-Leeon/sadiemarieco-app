@@ -143,6 +143,16 @@ const EMPTY_FIELDS: ManualBookingClientFields = {
   email: '',
 };
 
+const NOTES_TEXTAREA_CLASS =
+  'mt-1.5 block w-full resize-y rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 transition-colors focus:border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-200 disabled:opacity-50';
+
+/** Optional visit notes for the API — null when blank. */
+function notesForApi(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  return trimmed.length > 4000 ? trimmed.slice(0, 4000) : trimmed;
+}
+
 export default function ManualBookingModal({
   services: servicesProp,
   groupHeaders: groupHeadersProp,
@@ -185,6 +195,7 @@ export default function ManualBookingModal({
   );
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [bookingNotes, setBookingNotes] = useState('');
   const [completing, setCompleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -323,6 +334,8 @@ export default function ManualBookingModal({
       return;
     }
 
+    const notes = notesForApi(bookingNotes);
+
     try {
       const createRes = await fetch('/api/admin/manual-booking/create', {
         method: 'POST',
@@ -335,6 +348,7 @@ export default function ManualBookingModal({
           clientName: trimmedName,
           clientEmail: trimmedEmail,
           clientPhone: parsedPhone.digits,
+          ...(notes ? { bookingNotes: notes } : {}),
         }),
       });
 
@@ -382,6 +396,7 @@ export default function ManualBookingModal({
           endTime,
           durationMins: selectedService.durationMins,
           eventTypeId: selectedService.eventTypeId,
+          ...(notes ? { bookingNotes: notes } : {}),
         }),
       });
 
@@ -429,6 +444,7 @@ export default function ManualBookingModal({
     setStep(1);
     setSelectedService(null);
     setSelectedSlot(null);
+    setBookingNotes('');
     setError(null);
     setCompleting(false);
   }
@@ -680,15 +696,33 @@ export default function ManualBookingModal({
               {completing ? (
                 <ManualBookingCompletingOverlay />
               ) : (
-                <ManualBookingSlotPicker
-                  eventTypeId={selectedService.eventTypeId}
-                  durationMins={selectedService.durationMins}
-                  clientName={displayName}
-                  selectedSlot={selectedSlot}
-                  onSelectSlot={setSelectedSlot}
-                  seedDate={seedDate}
-                  seedHour={seedHour}
-                />
+                <div className="space-y-4">
+                  <ManualBookingSlotPicker
+                    eventTypeId={selectedService.eventTypeId}
+                    durationMins={selectedService.durationMins}
+                    clientName={displayName}
+                    selectedSlot={selectedSlot}
+                    onSelectSlot={setSelectedSlot}
+                    seedDate={seedDate}
+                    seedHour={seedHour}
+                  />
+                  <label className="block">
+                    <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-stone-500">
+                      Booking notes
+                      <span className="ml-1.5 font-normal normal-case tracking-normal text-stone-400">
+                        Optional
+                      </span>
+                    </span>
+                    <textarea
+                      value={bookingNotes}
+                      onChange={(e) => setBookingNotes(e.target.value)}
+                      rows={3}
+                      maxLength={4000}
+                      placeholder="Anything to remember for this visit"
+                      className={NOTES_TEXTAREA_CLASS}
+                    />
+                  </label>
+                </div>
               )}
             </>
           )}

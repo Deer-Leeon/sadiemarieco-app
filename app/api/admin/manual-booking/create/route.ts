@@ -22,6 +22,7 @@ import {
   parseClientPhone,
   parseOptionalClientEmail,
 } from '@/lib/client-identity';
+import { clampNotes } from '@/lib/cal-booking-notes';
 import {
   CAL_BOOKINGS_ADMIN_CREATE_API_VERSION,
   CAL_BOOKINGS_API_VERSION,
@@ -42,6 +43,8 @@ interface CreateBody {
   clientName?: unknown;
   clientEmail?: unknown;
   clientPhone?: unknown;
+  bookingNotes?: unknown;
+  notes?: unknown;
 }
 
 function splitName(fullName: string): { first: string; last: string } {
@@ -59,6 +62,7 @@ function parseCreateBody(input: unknown):
       clientEmail: string | null;
       clientPhone: string;
       clientPhoneE164: string;
+      bookingNotes: string | null;
     }
   | { error: string; message: string } {
   if (!input || typeof input !== 'object') {
@@ -82,6 +86,13 @@ function parseCreateBody(input: unknown):
     typeof body.clientName === 'string' ? body.clientName.trim() : '';
   const clientEmail = parseOptionalClientEmail(body.clientEmail);
   const parsedPhone = parseClientPhone(body.clientPhone);
+  const bookingNotes = clampNotes(
+    typeof body.bookingNotes === 'string'
+      ? body.bookingNotes
+      : typeof body.notes === 'string'
+        ? body.notes
+        : null
+  );
 
   let clientFirst = clientFirstName;
   let clientLast = clientLastName;
@@ -132,6 +143,7 @@ function parseCreateBody(input: unknown):
     clientEmail,
     clientPhone: parsedPhone.digits,
     clientPhoneE164: parsedPhone.e164,
+    bookingNotes,
   };
 }
 
@@ -249,7 +261,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         lastName: parsed.clientLastName,
       },
       attendeePhoneNumber: parsed.clientPhoneE164,
+      ...(parsed.bookingNotes ? { notes: parsed.bookingNotes } : {}),
     },
+    ...(parsed.bookingNotes
+      ? { additionalNotes: parsed.bookingNotes }
+      : {}),
     location: studioBookingLocation(),
     metadata: {
       manual_admin_booking: 'true',

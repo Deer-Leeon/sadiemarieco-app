@@ -28,6 +28,7 @@ import {
   errorMessage,
   gateAdmin,
 } from '@/lib/cal-proxy';
+import { clampNotes } from '@/lib/cal-booking-notes';
 import {
   canonicalAppointmentServiceName,
   loadActiveCatalogueServices,
@@ -48,6 +49,8 @@ interface CompleteBody {
   endTime?: unknown;
   durationMins?: unknown;
   eventTypeId?: unknown;
+  bookingNotes?: unknown;
+  notes?: unknown;
 }
 
 function splitName(fullName: string): { first: string; last: string } {
@@ -98,6 +101,7 @@ function parseBody(input: unknown):
       endTime: string | null;
       durationMins: number | null;
       eventTypeId: number | null;
+      bookingNotes: string | null;
     }
   | { error: string; message: string } {
   if (!input || typeof input !== 'object') {
@@ -149,6 +153,13 @@ function parseBody(input: unknown):
     endTime,
     durationMins: parsedDurationMins,
     eventTypeId: parsePositiveInt(body.eventTypeId),
+    bookingNotes: clampNotes(
+      typeof body.bookingNotes === 'string'
+        ? body.bookingNotes
+        : typeof body.notes === 'string'
+          ? body.notes
+          : null
+    ),
   };
 }
 
@@ -445,13 +456,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         client_id, service_name, booking_time, end_time, cal_event_id,
         cal_event_type_id,
         client_first_name, client_last_name, client_email, client_phone,
-        status, sms_opt_in
+        booking_notes, status, sms_opt_in
       )
       VALUES (
         ${clientId}, ${appointmentServiceName}, ${bookingTime},
         ${endTime}, ${parsed.calBookingUid}, ${calEventTypeId},
         ${first}, ${last}, ${parsed.clientEmail}, ${parsed.clientPhone},
-        'confirmed', TRUE
+        ${parsed.bookingNotes}, 'confirmed', TRUE
       )
       ON CONFLICT (cal_event_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,
@@ -479,6 +490,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           END
         ),
         client_phone = EXCLUDED.client_phone,
+        booking_notes = COALESCE(
+          EXCLUDED.booking_notes,
+          appointments.booking_notes
+        ),
         status = 'confirmed',
         sms_opt_in = TRUE
     `;

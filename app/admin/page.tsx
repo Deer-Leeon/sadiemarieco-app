@@ -3,7 +3,7 @@ import { sql } from '@vercel/postgres';
 import { redirect } from 'next/navigation';
 
 import { loadCalEventTypeMaps } from '@/lib/cal-config';
-import { normalizeStoredBookingNotes } from '@/lib/cal-booking-notes';
+import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
 import { ALLOWED_ADMIN_EMAILS } from '@/lib/admin-allowlist';
 import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
 import {
@@ -314,7 +314,10 @@ export default async function AdminPage() {
       status: r.status,
       client_phone: r.client_phone,
       client_email: r.client_email,
-      booking_notes: normalizeStoredBookingNotes(r.booking_notes),
+      booking_notes: clientBookingNotesForDisplay(
+        r.booking_notes,
+        catalogueFields.service_description
+      ),
       // NUMERIC arrives stringified — coerce here so the client side
       // never has to think about parsing. Use Number() rather than
       // parseFloat so a non-numeric string surfaces as NaN, which we
