@@ -260,12 +260,13 @@ export default function ManualBookingClientStep({
           )}
 
           {!loading && !loadError && selectedClient && (
-            <div className="rounded-lg border border-stone-300 bg-white px-3 py-3">
+            <div className="rounded-lg border border-stone-900 bg-stone-900 px-3 py-3 text-white shadow-sm">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="flex items-center gap-1.5 font-serif text-base text-stone-900">
+                  <p className="flex items-center gap-1.5 font-serif text-base text-white">
                     <Check
-                      className="h-4 w-4 shrink-0 text-emerald-600"
+                      className="h-4 w-4 shrink-0 text-white"
+                      strokeWidth={2.5}
                       aria-hidden="true"
                     />
                     {clientDisplayName(
@@ -273,7 +274,7 @@ export default function ManualBookingClientStep({
                       selectedClient.last_name
                     )}
                   </p>
-                  <p className="mt-1 text-xs text-stone-500">
+                  <p className="mt-1 text-xs text-stone-300">
                     {[
                       formatPhone(selectedClient.phone, ''),
                       usableClientEmail(selectedClient.email) || null,
@@ -285,19 +286,19 @@ export default function ManualBookingClientStep({
                 <button
                   type="button"
                   onClick={() => onSelectClient(null)}
-                  className="shrink-0 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-500 hover:text-stone-800"
+                  className="shrink-0 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-300 hover:text-white"
                 >
                   Change
                 </button>
               </div>
               {!parseClientPhone(selectedClient.phone) && (
-                <p className="mt-2 text-xs text-rose-600" role="alert">
+                <p className="mt-2 text-xs text-rose-200" role="alert">
                   This client has no usable phone on file. Add one from their
                   profile, or book them as a new client.
                 </p>
               )}
               {!(selectedClient.first_name?.trim() && selectedClient.last_name?.trim()) && (
-                <p className="mt-2 text-xs text-rose-600" role="alert">
+                <p className="mt-2 text-xs text-rose-200" role="alert">
                   This client is missing a first or last name. Update their
                   profile, or book them as a new client.
                 </p>
