@@ -11,6 +11,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Appointment } from '@/app/admin/types';
+import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
 import { loadCalEventTypeMaps } from '@/lib/cal-config';
 import { isValidAppointmentId } from '@/lib/stripe-terminal';
 
@@ -61,6 +62,7 @@ function serializeDate(value: Date | string | null): string | null {
 }
 
 async function loadParent(id: string): Promise<ParentRow | null> {
+  await ensureAppointmentAttachedSchema();
   const { rows } = await sql<ParentRow>`
     SELECT
       a.id::text AS id,

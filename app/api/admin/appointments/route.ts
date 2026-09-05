@@ -23,6 +23,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Appointment } from '@/app/admin/types';
+import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
 import { nestAttachedExtras } from '@/lib/appointment-extras';
 import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
 import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
@@ -139,6 +140,7 @@ export async function GET(): Promise<NextResponse> {
   }
 
   try {
+    await ensureAppointmentAttachedSchema();
     const [{ rows }, catalogue] = await Promise.all([
       sql<AppointmentRow>`
       SELECT

@@ -34,6 +34,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Appointment } from '@/app/admin/types';
+import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
 import { nestAttachedExtras } from '@/lib/appointment-extras';
 import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
@@ -217,6 +218,7 @@ export async function GET(
     // "Hybrid" / "Volume") also require matching appointment duration
     // to the child's duration_mins so 2-/3-/4-week fills keep distinct
     // editor-assigned colours.
+    await ensureAppointmentAttachedSchema();
     const [{ rows }, catalogue] = await Promise.all([
       sql<AppointmentRow>`
       SELECT

@@ -10,6 +10,8 @@
 
 import { sql } from '@vercel/postgres';
 
+import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
+
 import {
   fetchDefaultScheduleCached,
   isUnavailableOverride,
@@ -122,6 +124,7 @@ export async function loadStudioBusyIntervals(
   const endIso = rangeEnd.toISOString();
   const busy: BusyInterval[] = [];
 
+  await ensureAppointmentAttachedSchema();
   const { rows: appointments } = await sql<{
     booking_time: Date | string | null;
     end_time: Date | string | null;

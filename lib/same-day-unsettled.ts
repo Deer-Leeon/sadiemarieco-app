@@ -2,6 +2,8 @@ import 'server-only';
 
 import { sql } from '@vercel/postgres';
 
+import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -64,6 +66,7 @@ export async function findSameDayUnsettledSiblings(
 ): Promise<SameDayUnsettledVisit[]> {
   if (!isAppointmentId(primaryId)) return [];
 
+  await ensureAppointmentAttachedSchema();
   const { rows } = await sql<SameDayUnsettledVisit>`
     SELECT
       sib.id::text AS id,
@@ -136,6 +139,7 @@ export async function findAttachedUnsettledExtras(
 ): Promise<SameDayUnsettledVisit[]> {
   if (!isAppointmentId(primaryId)) return [];
 
+  await ensureAppointmentAttachedSchema();
   const { rows } = await sql<SameDayUnsettledVisit>`
     SELECT
       extra.id::text AS id,

@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { loadCalEventTypeMaps } from '@/lib/cal-config';
 import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
 import { ALLOWED_ADMIN_EMAILS } from '@/lib/admin-allowlist';
+import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
 import { nestAttachedExtras } from '@/lib/appointment-extras';
 import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
 import {
@@ -175,6 +176,7 @@ export default async function AdminPage() {
     // (always the most-recently-updated "Volume" row). For those bare
     // fill titles we also match on appointment duration (120 / 150 /
     // 180 min) so each week group keeps its editor-assigned hex.
+    await ensureAppointmentAttachedSchema();
     const [{ rows }, catalogue] = await Promise.all([
       sql<DbRow>`
       SELECT
