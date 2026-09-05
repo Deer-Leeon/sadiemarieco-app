@@ -65,23 +65,97 @@ export function AppointmentStatusPill({ status }: { status: string | null }) {
   );
 }
 
-function extraHistoryLine(extra: Appointment): string {
-  const name = appointmentServiceLabel(extra);
-  const price =
-    extra.service_price == null
-      ? null
-      : Number.isInteger(extra.service_price)
-        ? `$${extra.service_price}`
-        : `$${extra.service_price.toFixed(2)}`;
-  const payment = extra.terminal_payment;
-  const paid = isAppointmentSettled(payment)
-    ? payment?.payment_kind === 'cash'
-      ? 'Paid cash'
-      : payment?.payment_kind === 'complimentary'
-        ? 'Complimentary'
-        : 'Paid in person'
-    : 'Unpaid';
-  return [name, price, paid, 'Done during this visit'].filter(Boolean).join(' · ');
+function extraPriceLabel(extra: Appointment): string | null {
+  if (extra.service_price == null) return null;
+  return Number.isInteger(extra.service_price)
+    ? `$${extra.service_price}`
+    : `$${extra.service_price.toFixed(2)}`;
+}
+
+function ExtraHistoryCard({
+  extra,
+  muted,
+  onSelect,
+}: {
+  extra: Appointment;
+  muted?: boolean;
+  onSelect?: () => void;
+}) {
+  const color = muted ? null : getServiceColor(extra);
+  const colorStyle = color
+    ? { backgroundColor: color.accent, color: color.text }
+    : undefined;
+  const nameStyle = color ? { color: color.text } : undefined;
+  const mutedStyle = color ? { color: color.textMuted } : undefined;
+  const price = extraPriceLabel(extra);
+  const settled = isAppointmentSettled(extra.terminal_payment);
+  const className = `grid w-full grid-cols-[1fr_auto] items-center gap-3 rounded-lg border px-3 py-2 text-left transition-shadow ${
+    color
+      ? 'border-black/5'
+      : 'border-stone-200 bg-white'
+  } ${muted ? 'opacity-70' : ''} ${
+    onSelect
+      ? 'hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FAF9F6]'
+      : ''
+  }`;
+
+  const inner = (
+    <>
+      <div className="min-w-0">
+        <p
+          className={`truncate text-sm font-medium ${color ? '' : 'text-stone-900'}`}
+          style={nameStyle}
+        >
+          {appointmentServiceLabel(extra)}
+        </p>
+        <p
+          className={`mt-0.5 text-[10px] font-medium uppercase tracking-[0.18em] ${
+            color ? '' : 'text-stone-400'
+          }`}
+          style={mutedStyle}
+        >
+          Extra
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {price ? (
+          <span
+            className={`text-xs font-medium ${color ? '' : 'text-stone-700'}`}
+            style={nameStyle}
+          >
+            {price}
+          </span>
+        ) : null}
+        {settled ? (
+          <SettlementBadge payment={extra.terminal_payment} />
+        ) : (
+          <span className="inline-flex items-center rounded-full border border-stone-200/80 bg-white/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-500">
+            Unpaid
+          </span>
+        )}
+      </div>
+    </>
+  );
+
+  if (onSelect) {
+    return (
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-label={`Open visit extra · ${appointmentServiceLabel(extra)}`}
+        className={className}
+        style={colorStyle}
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return (
+    <div className={className} style={colorStyle}>
+      {inner}
+    </div>
+  );
 }
 
 function isCanceledStatus(status: string | null): boolean {
@@ -188,10 +262,14 @@ export function AppointmentListRow({
   const extras = appointment.extras ?? [];
   const nestedExtras =
     variant === 'client' && extras.length > 0 ? (
-      <ul className="mt-1.5 space-y-0.5 border-l border-stone-200/80 pl-3">
+      <ul className="ml-24 space-y-1.5">
         {extras.map((extra) => (
-          <li key={extra.id} className="text-xs text-stone-500">
-            {extraHistoryLine(extra)}
+          <li key={extra.id}>
+            <ExtraHistoryCard
+              extra={extra}
+              muted={readOnly}
+              onSelect={onSelect}
+            />
           </li>
         ))}
       </ul>
@@ -199,7 +277,7 @@ export function AppointmentListRow({
 
   if (onSelect) {
     return (
-      <li>
+      <li className="space-y-1.5">
         <button
           type="button"
           onClick={onSelect}
@@ -213,7 +291,7 @@ export function AppointmentListRow({
         >
           {content}
         </button>
-        {nestedExtras ? <div className="px-4 pb-2">{nestedExtras}</div> : null}
+        {nestedExtras}
       </li>
     );
   }

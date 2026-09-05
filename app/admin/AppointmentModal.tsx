@@ -662,12 +662,21 @@ export default function AppointmentModal({
   const unpaidChargeItems = parentSettled
     ? liveUnpaidExtras
     : [appointment, ...liveUnpaidExtras];
-  const chargeSummary = unpaidChargeItems
-    .map(
-      (item) =>
-        `${appointmentServiceLabel(item)} ${formatCentsUsd(appointmentQuotedCents(item))}`
-    )
-    .join(' · ');
+  const chargeLines: ChargeLine[] = unpaidChargeItems.map((item) => {
+    const isExtra = Boolean(item.attached_to_appointment_id);
+    return {
+      id: item.id,
+      label: appointmentServiceLabel(item),
+      cents: appointmentQuotedCents(item),
+      detail:
+        unpaidChargeItems.length === 1 && !isExtra
+          ? undefined
+          : isExtra
+            ? 'Extra · during this visit'
+            : 'Scheduled service',
+    };
+  });
+  const chargeTotalCents = chargeLines.reduce((sum, line) => sum + line.cents, 0);
   const canChargeVisit =
     unpaidChargeItems.length > 0 &&
     unpaidChargeItems.every((item) => appointmentQuotedCents(item) >= 0) &&
@@ -725,6 +734,7 @@ export default function AppointmentModal({
             includedVisitIds={forcedAdditionalIds}
             includedQuotedCents={Math.max(0, forcedAdditionalCents)}
             baseQuotedCents={chargePrimaryCents}
+            chargeLines={chargeLines}
             onBack={() => setIsCollectingPayment(false)}
             onDone={onClose}
             onPaid={(payment, relatedIds, payments) => {
@@ -792,7 +802,8 @@ export default function AppointmentModal({
                       />
                     ) : (
                       <UnsettledPaymentBox
-                        summary={chargeSummary}
+                        lines={chargeLines}
+                        totalCents={chargeTotalCents}
                         canCharge={canChargeVisit}
                         busy={settlementBusy || statusAction !== null || extraBusy}
                         onCharge={() => setIsCollectingPayment(true)}
@@ -831,7 +842,8 @@ export default function AppointmentModal({
                       : null}
                     {parentSettled && liveUnpaidExtras.length > 0 ? (
                       <UnsettledPaymentBox
-                        summary={chargeSummary}
+                        lines={chargeLines}
+                        totalCents={chargeTotalCents}
                         caption="New extra · done during this visit"
                         canCharge={canChargeVisit}
                         busy={
@@ -876,6 +888,9 @@ export default function AppointmentModal({
                 siblingCandidates={siblingCandidates}
                 amountCents={
                   settlementConfirm === 'undo' ? 0 : chargePrimaryCents
+                }
+                chargeLines={
+                  settlementConfirm === 'undo' ? [] : chargeLines
                 }
                 forcedAdditionalIds={
                   settlementConfirm === 'undo' ? [] : forcedAdditionalIds
@@ -1381,13 +1396,75 @@ function PaymentBox({
   );
 }
 
+type ChargeLine = {
+  id: string;
+  label: string;
+  cents: number;
+  detail?: string;
+};
+
+function ChargeBreakdown({
+  lines,
+  totalCents,
+  heading,
+  className = 'mt-3',
+}: {
+  lines: ChargeLine[];
+  totalCents: number;
+  heading?: string;
+  className?: string;
+}) {
+  if (lines.length === 0) return null;
+  const showTotal = lines.length > 1;
+  return (
+    <div className={className}>
+      {heading ? (
+        <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
+          {heading}
+        </p>
+      ) : null}
+      <ul
+        className={`${heading ? 'mt-2' : ''} divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 bg-white text-left`}
+      >
+        {lines.map((line) => (
+          <li
+            key={line.id}
+            className="flex items-start justify-between gap-3 px-3 py-2.5"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-stone-900">
+                {line.label}
+              </span>
+              {line.detail ? (
+                <span className="block text-xs text-stone-500">{line.detail}</span>
+              ) : null}
+            </span>
+            <span className="shrink-0 text-sm text-stone-800">
+              {formatCentsUsd(line.cents)}
+            </span>
+          </li>
+        ))}
+        {showTotal ? (
+          <li className="flex items-center justify-between gap-3 bg-stone-50 px-3 py-2.5">
+            <span className="text-sm font-semibold text-stone-900">Total</span>
+            <span className="text-sm font-semibold text-stone-900">
+              {formatCentsUsd(totalCents)}
+            </span>
+          </li>
+        ) : null}
+      </ul>
+    </div>
+  );
+}
+
 function UnsettledPaymentBox({
   canCharge,
   busy,
   onCharge,
   onMarkCash,
   onMarkComplimentary,
-  summary,
+  lines = [],
+  totalCents = 0,
   caption,
 }: {
   canCharge: boolean;
@@ -1395,7 +1472,8 @@ function UnsettledPaymentBox({
   onCharge: () => void;
   onMarkCash: () => void;
   onMarkComplimentary: () => void;
-  summary?: string;
+  lines?: ChargeLine[];
+  totalCents?: number;
   caption?: string;
 }) {
   return (
@@ -1404,9 +1482,7 @@ function UnsettledPaymentBox({
       <p className="mt-1 text-sm text-stone-600">
         {caption || 'Choose how this appointment was settled.'}
       </p>
-      {summary ? (
-        <p className="mt-2 text-sm text-stone-800">{summary}</p>
-      ) : null}
+      <ChargeBreakdown lines={lines} totalCents={totalCents} />
       <div className="mt-3 grid grid-cols-3 gap-2">
         <button
           type="button"
@@ -2205,67 +2281,37 @@ function useSameDayUnsettled(
 }
 
 function SameDayVisitChecklist({
-  primary,
   siblings,
   selectedExtraIds,
   onToggle,
   disabled,
 }: {
-  primary: Appointment;
   siblings: SameDayVisit[];
   selectedExtraIds: string[];
   onToggle: (id: string) => void;
   disabled?: boolean;
 }) {
   if (siblings.length === 0) return null;
-  const rows: Array<{
-    id: string;
-    locked: boolean;
-    checked: boolean;
-    visit: SameDayVisit | Appointment;
-  }> = [
-    {
-      id: primary.id,
-      locked: true,
-      checked: true,
-      visit: primary,
-    },
-    ...siblings.map((visit) => ({
-      id: visit.id,
-      locked: false,
-      checked: selectedExtraIds.includes(visit.id),
-      visit,
-    })),
-  ];
 
   return (
     <div className="mt-5 w-full max-w-sm text-left">
       <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
-        Same-day visits
+        Also today
       </p>
       <p className="mt-1 text-xs text-stone-500">
-        Include other unpaid appointments for this client today.
+        Optionally include other unpaid appointments for this client.
       </p>
       <ul className="mt-2 divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 bg-white">
-        {rows.map((row) => {
-          const time =
-            'booking_time' in row.visit && row.visit.booking_time
-              ? formatStudioClockRange(
-                  parseISO(row.visit.booking_time),
-                  'end_time' in row.visit && row.visit.end_time
-                    ? parseISO(row.visit.end_time)
-                    : null
-                )
-              : '';
-          const service = appointmentServiceLabel(row.visit);
-          const cents =
-            'quoted_service_price_cents' in row.visit
-              ? visitQuotedCents(row.visit as SameDayVisit)
-              : row.visit.service_price == null
-                ? 0
-                : Math.round(row.visit.service_price * 100);
+        {siblings.map((visit) => {
+          const time = visit.booking_time
+            ? formatStudioClockRange(
+                parseISO(visit.booking_time),
+                visit.end_time ? parseISO(visit.end_time) : null
+              )
+            : 'Scheduled';
+          const checked = selectedExtraIds.includes(visit.id);
           return (
-            <li key={row.id}>
+            <li key={visit.id}>
               <label
                 className={`flex cursor-pointer items-start gap-3 px-3 py-2.5 ${
                   disabled ? 'cursor-not-allowed opacity-60' : ''
@@ -2273,24 +2319,19 @@ function SameDayVisitChecklist({
               >
                 <input
                   type="checkbox"
-                  checked={row.checked}
-                  disabled={row.locked || disabled}
-                  onChange={() => {
-                    if (!row.locked) onToggle(row.id);
-                  }}
+                  checked={checked}
+                  disabled={disabled}
+                  onChange={() => onToggle(visit.id)}
                   className="mt-1 h-4 w-4 rounded border-stone-300 text-stone-900"
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium text-stone-900">
-                    {service}
-                    {row.locked ? ' · this visit' : ''}
+                    {appointmentServiceLabel(visit)}
                   </span>
-                  <span className="block text-xs text-stone-500">
-                    {time || 'Scheduled'}
-                  </span>
+                  <span className="block text-xs text-stone-500">{time}</span>
                 </span>
                 <span className="shrink-0 text-sm text-stone-700">
-                  {formatCentsUsd(cents)}
+                  {formatCentsUsd(visitQuotedCents(visit))}
                 </span>
               </label>
             </li>
@@ -2308,6 +2349,7 @@ function TerminalChargeView({
   includedVisitIds = [],
   includedQuotedCents = 0,
   baseQuotedCents,
+  chargeLines = [],
   onBack,
   onDone,
   onPaid,
@@ -2318,6 +2360,7 @@ function TerminalChargeView({
   includedVisitIds?: string[];
   includedQuotedCents?: number;
   baseQuotedCents?: number;
+  chargeLines?: ChargeLine[];
   onBack: () => void;
   onDone: () => void;
   onPaid: (
@@ -2357,15 +2400,21 @@ function TerminalChargeView({
     appointment,
     siblingCandidates
   );
+  const otherVisits = siblings.filter(
+    (visit) => !chargeLines.some((line) => line.id === visit.id)
+  );
   const primaryQuotedCents =
     baseQuotedCents ??
     (appointment.service_price == null
       ? 0
       : Math.round(appointment.service_price * 100));
+  const thisVisitQuotedCents =
+    chargeLines.length > 0
+      ? chargeLines.reduce((sum, line) => sum + line.cents, 0)
+      : primaryQuotedCents + includedQuotedCents;
   const quotedCents =
-    primaryQuotedCents +
-    includedQuotedCents +
-    siblings
+    thisVisitQuotedCents +
+    otherVisits
       .filter((visit) => selectedExtraIds.includes(visit.id))
       .reduce((sum, visit) => sum + visitQuotedCents(visit), 0);
   const customCents = parseDollarsToCents(customDollars);
@@ -2677,18 +2726,49 @@ function TerminalChargeView({
             ) : null}
             <p className="mt-2 text-sm text-stone-600">
               {selectedExtraIds.length > 0
-                ? `${selectedExtraIds.length + 1} visits for ${clientName}`
-                : `${serviceLabel} for ${clientName}`}
+                ? `This visit + ${selectedExtraIds.length} other ${
+                    selectedExtraIds.length === 1 ? 'appointment' : 'appointments'
+                  } for ${clientName}`
+                : chargeLines.length > 1
+                  ? `This visit for ${clientName}`
+                  : `${serviceLabel} for ${clientName}`}
             </p>
+
+            {!isFailed &&
+            (chargeLines.length > 1 || otherVisits.length > 0) ? (
+              <ChargeBreakdown
+                heading="This visit"
+                lines={
+                  chargeLines.length > 0
+                    ? chargeLines
+                    : [
+                        {
+                          id: appointment.id,
+                          label: serviceLabel,
+                          cents: thisVisitQuotedCents,
+                          detail: 'Scheduled service',
+                        },
+                      ]
+                }
+                totalCents={thisVisitQuotedCents}
+                className="mt-5 w-full max-w-sm"
+              />
+            ) : null}
 
             {!isFailed ? (
               <SameDayVisitChecklist
-                primary={appointment}
-                siblings={siblings}
+                siblings={otherVisits}
                 selectedExtraIds={selectedExtraIds}
                 onToggle={toggleExtra}
                 disabled={busy !== null}
               />
+            ) : null}
+
+            {!isFailed && selectedExtraIds.length > 0 ? (
+              <div className="mt-3 flex w-full max-w-sm items-center justify-between rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm font-semibold text-stone-900">
+                <span>Charge</span>
+                <span>{formatCentsUsd(quotedCents)}</span>
+              </div>
             ) : null}
 
             {!isFailed ? (
@@ -2825,6 +2905,7 @@ function SettlementConfirmDialog({
   appointment,
   siblingCandidates = [],
   amountCents,
+  chargeLines = [],
   forcedAdditionalIds = [],
   forcedAdditionalCents = 0,
   note,
@@ -2838,6 +2919,7 @@ function SettlementConfirmDialog({
   appointment: Appointment;
   siblingCandidates?: Appointment[];
   amountCents: number;
+  chargeLines?: ChargeLine[];
   forcedAdditionalIds?: string[];
   forcedAdditionalCents?: number;
   note: string;
@@ -2851,11 +2933,18 @@ function SettlementConfirmDialog({
     appointment,
     siblingCandidates
   );
-  const extraQuoted = siblings
+  const otherVisits = siblings.filter(
+    (visit) => !chargeLines.some((line) => line.id === visit.id)
+  );
+  const extraQuoted = otherVisits
     .filter((visit) => selectedExtraIds.includes(visit.id))
     .reduce((sum, visit) => sum + visitQuotedCents(visit), 0);
-  const cashTotal = amountCents + forcedAdditionalCents + extraQuoted;
-  const visitCount = 1 + forcedAdditionalIds.length + selectedExtraIds.length;
+  const thisVisitTotal =
+    chargeLines.length > 0
+      ? chargeLines.reduce((sum, line) => sum + line.cents, 0)
+      : amountCents + forcedAdditionalCents;
+  const cashTotal = thisVisitTotal + extraQuoted;
+  const siblingCount = selectedExtraIds.length;
   const title =
     kind === 'undo'
       ? 'Undo settlement?'
@@ -2866,11 +2955,15 @@ function SettlementConfirmDialog({
     kind === 'undo'
       ? 'This clears the cash or complimentary mark so you can charge or settle again.'
       : kind === 'cash'
-        ? visitCount > 1
-          ? `Record ${formatCentsUsd(cashTotal)} across ${visitCount} visits as paid in cash. No card charge will be sent to the Terminal.`
-          : `Record ${formatCentsUsd(amountCents)} as paid in cash. No card charge will be sent to the Terminal.`
-        : visitCount > 1
-          ? `Mark ${visitCount} visits settled with no charge.`
+        ? siblingCount > 0
+          ? `Record ${formatCentsUsd(cashTotal)} for this visit plus ${siblingCount} other ${
+              siblingCount === 1 ? 'appointment' : 'appointments'
+            } as paid in cash. No card charge will be sent to the Terminal.`
+          : `Record ${formatCentsUsd(cashTotal)} as paid in cash. No card charge will be sent to the Terminal.`
+        : siblingCount > 0
+          ? `Mark this visit plus ${siblingCount} other ${
+              siblingCount === 1 ? 'appointment' : 'appointments'
+            } settled with no charge.`
           : 'Mark this appointment settled with no charge. Useful for friends, trades, or gifts.';
 
   return (
@@ -2909,14 +3002,27 @@ function SettlementConfirmDialog({
               />
             </label>
           ) : null}
+          {kind !== 'undo' && chargeLines.length > 0 ? (
+            <ChargeBreakdown
+              heading="This visit"
+              lines={chargeLines}
+              totalCents={thisVisitTotal}
+              className="mt-4"
+            />
+          ) : null}
           {kind !== 'undo' ? (
             <SameDayVisitChecklist
-              primary={appointment}
-              siblings={siblings}
+              siblings={otherVisits}
               selectedExtraIds={selectedExtraIds}
               onToggle={toggleExtra}
               disabled={busy}
             />
+          ) : null}
+          {kind !== 'undo' && selectedExtraIds.length > 0 ? (
+            <div className="mt-3 flex items-center justify-between rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm font-semibold text-stone-900">
+              <span>Charge</span>
+              <span>{formatCentsUsd(cashTotal)}</span>
+            </div>
           ) : null}
           {error ? (
             <p className="mt-3 text-sm text-rose-700" role="alert">
