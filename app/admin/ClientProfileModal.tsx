@@ -39,6 +39,7 @@ import {
   Camera,
   Check,
   ChevronRight,
+  ChevronUp,
   ClipboardCheck,
   CreditCard,
   Flag,
@@ -61,6 +62,7 @@ import ClientNotesHistoryModal from './components/ClientNotesHistoryModal';
 import ClientSendSmsConfirmModal from './components/ClientSendSmsConfirmModal';
 import ClientSmsHistoryModal from './components/ClientSmsHistoryModal';
 import ManualBookingModal from './components/ManualBookingModal';
+import PastAppointmentsPopup from './components/PastAppointmentsPopup';
 
 import {
   consentDocumentAbsoluteUrl,
@@ -850,6 +852,7 @@ function DossierSection({
         <InlineHistoryTable
           appointments={appts ?? []}
           onSelect={setOpenAppointment}
+          suspendEscape={Boolean(openAppointment)}
         />
       )}
 
@@ -1691,13 +1694,32 @@ function PrivateNotesSection({ clientId }: { clientId: string }) {
   );
 }
 
+function appointmentEndMs(appointment: Appointment): number {
+  if (appointment.end_time) {
+    const end = parseISO(appointment.end_time).getTime();
+    if (Number.isFinite(end)) return end;
+  }
+  if (!appointment.booking_time) return NaN;
+  const start = parseISO(appointment.booking_time).getTime();
+  if (!Number.isFinite(start)) return NaN;
+  return start + 60 * 60 * 1000;
+}
+
+function isUpcomingAppointment(appointment: Appointment, now = Date.now()) {
+  const end = appointmentEndMs(appointment);
+  return Number.isFinite(end) && end >= now;
+}
+
 function InlineHistoryTable({
   appointments,
   onSelect,
+  suspendEscape = false,
 }: {
   appointments: Appointment[];
   onSelect: (a: Appointment) => void;
+  suspendEscape?: boolean;
 }) {
+  const [pastOpen, setPastOpen] = useState(false);
   const visible = appointments.filter(
     (a) =>
       !isAttachedExtra(a) &&
@@ -1713,12 +1735,10 @@ function InlineHistoryTable({
     );
   }
 
-  const now = Date.now();
   const upcoming: Appointment[] = [];
   const past: Appointment[] = [];
   for (const a of visible) {
-    const t = a.booking_time ? parseISO(a.booking_time).getTime() : NaN;
-    if (Number.isFinite(t) && t >= now) upcoming.push(a);
+    if (isUpcomingAppointment(a)) upcoming.push(a);
     else past.push(a);
   }
   upcoming.sort((a, b) => {
@@ -1728,39 +1748,43 @@ function InlineHistoryTable({
   });
 
   return (
-    <div className="overflow-hidden rounded-lg border border-stone-200 bg-[#FAF9F6]">
-      <p className="border-b border-stone-200 bg-white px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-        Appointment history
-      </p>
-      <div className="px-4 py-4">
-        {upcoming.length > 0 && (
-          <div className="mb-6">
-            <p className="mb-3 text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-              Upcoming
-            </p>
+    <>
+      <div className="overflow-hidden rounded-lg border border-stone-200 bg-[#FAF9F6]">
+        <p className="border-b border-stone-200 bg-white px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+          Appointment history
+        </p>
+        <div className="px-4 py-4">
+          {past.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setPastOpen(true)}
+              className="mb-3 flex w-full items-center justify-center gap-1.5 py-2 text-[11px] font-medium uppercase tracking-[0.9px] text-stone-400 transition-colors hover:text-stone-600"
+            >
+              <ChevronUp className="h-2 w-2 stroke-[2.5]" aria-hidden />
+              Show Past Appointments
+            </button>
+          )}
+          {upcoming.length > 0 ? (
             <AppointmentHistoryList
               appointments={upcoming}
               dayOrder="asc"
               onSelect={onSelect}
             />
-          </div>
-        )}
-        {past.length > 0 && (
-          <div>
-            {upcoming.length > 0 && (
-              <p className="mb-3 text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
-                Past
-              </p>
-            )}
-            <AppointmentHistoryList
-              appointments={past}
-              dayOrder="desc"
-              onSelect={onSelect}
-            />
-          </div>
-        )}
+          ) : (
+            <p className="py-2 text-center text-sm text-stone-500">
+              No upcoming bookings
+            </p>
+          )}
+        </div>
       </div>
-    </div>
+      <PastAppointmentsPopup
+        appointments={past}
+        open={pastOpen}
+        onClose={() => setPastOpen(false)}
+        onSelect={onSelect}
+        captureEscape={!suspendEscape}
+      />
+    </>
   );
 }
 
