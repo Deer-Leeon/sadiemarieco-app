@@ -13,6 +13,12 @@ import {
   loadActiveCatalogueServices,
 } from '@/lib/match-catalogue-service';
 
+import { fetchDefaultScheduleCached } from './availability/calSchedules';
+import type {
+  StudioAvailabilityBlock,
+  StudioDateOverride,
+} from '@/lib/studio-schedule-windows';
+
 import DashboardUI from './DashboardUI';
 import type { Appointment, TimeBlock } from './types';
 
@@ -133,12 +139,25 @@ export default async function AdminPage() {
   let appointments: Appointment[] = [];
   let timeBlocks: TimeBlock[] = [];
   let dbError: string | null = null;
+  let initialAvailability: StudioAvailabilityBlock[] | null = null;
+  let initialOverrides: StudioDateOverride[] | null = null;
   let manualBookingServices: Awaited<
     ReturnType<typeof loadCalEventTypeMaps>
   >['services'] = [];
   let manualBookingGroupHeaders: Awaited<
     ReturnType<typeof loadCalEventTypeMaps>
   >['groupHeaders'] = [];
+
+  const schedulePromise = (async () => {
+    try {
+      const apiKey = process.env.CAL_API_KEY;
+      if (!apiKey) return null;
+      return await fetchDefaultScheduleCached(apiKey);
+    } catch (err) {
+      console.error('[admin] schedule fetch failed:', err);
+      return null;
+    }
+  })();
 
   try {
     const calMaps = await loadCalEventTypeMaps();
@@ -392,6 +411,12 @@ export default async function AdminPage() {
     }
   }
 
+  const schedule = await schedulePromise;
+  if (schedule) {
+    initialAvailability = schedule.availability;
+    initialOverrides = schedule.overrides;
+  }
+
   const displayName =
     user?.firstName || userEmails[0] || 'Admin';
 
@@ -403,6 +428,8 @@ export default async function AdminPage() {
       displayName={displayName}
       manualBookingServices={manualBookingServices}
       manualBookingGroupHeaders={manualBookingGroupHeaders}
+      initialAvailability={initialAvailability}
+      initialOverrides={initialOverrides}
     />
   );
 }
