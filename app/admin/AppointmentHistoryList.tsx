@@ -36,7 +36,7 @@ export default function AppointmentHistoryList({
               {group.label}
             </h2>
           </div>
-          <ul className="mt-4 space-y-2">
+          <ul className="mt-4 space-y-3">
             {group.appointments.map((a) => (
               <AppointmentListRow
                 key={a.id}
