@@ -321,12 +321,12 @@ function ClientProfileOverlay({
 
   return (
     <div
-      className="fixed inset-0 z-60 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-60 flex items-center justify-center bg-stone-900/15 p-4"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-[#FAF9F6] shadow-2xl"
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-stone-200/80 bg-[#FAF9F6]/90 shadow-2xl backdrop-blur-xl"
         onClick={stopProp}
         role="dialog"
         aria-modal="true"
