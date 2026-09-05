@@ -260,6 +260,32 @@ export function formatSlotInStudioTime(isoUtc: string): string {
   }).format(d);
 }
 
+export function formatVisitDateInStudio(isoUtc: string): string {
+  const d = new Date(isoUtc);
+  if (Number.isNaN(d.getTime())) return isoUtc;
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: STUDIO_TIMEZONE,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).format(d);
+}
+
+export function formatVisitTimeRange(
+  isoUtc: string,
+  durationMins: number | null
+): string {
+  const start = formatSlotInStudioTime(isoUtc);
+  const endIso = bookingEndFromDurationMins(isoUtc, durationMins);
+  if (!endIso) return start;
+  return `${start} – ${formatSlotInStudioTime(endIso)}`;
+}
+
+export function epochMsFromIsoUtc(isoUtc: string): number | null {
+  const n = new Date(isoUtc).getTime();
+  return Number.isNaN(n) ? null : n;
+}
+
 /**
  * Build a start value the API treats as studio-local wall time
  * (YYYY-MM-DDTHH:mm:ss with no offset).

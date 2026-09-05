@@ -3,6 +3,7 @@
 import type { Appointment } from './types';
 import { appointmentServiceLabel, clientDisplayName, isAppointmentCanceled } from './helpers';
 import { SettlementBadge } from './components/SettlementMarker';
+import { isAppointmentSettled } from './settlementDisplay';
 import { getServiceColor } from './serviceColors';
 import { formatStudioClock } from '@/lib/studio-calendar';
 
@@ -62,6 +63,25 @@ export function AppointmentStatusPill({ status }: { status: string | null }) {
       {status || 'Unknown'}
     </span>
   );
+}
+
+function extraHistoryLine(extra: Appointment): string {
+  const name = appointmentServiceLabel(extra);
+  const price =
+    extra.service_price == null
+      ? null
+      : Number.isInteger(extra.service_price)
+        ? `$${extra.service_price}`
+        : `$${extra.service_price.toFixed(2)}`;
+  const payment = extra.terminal_payment;
+  const paid = isAppointmentSettled(payment)
+    ? payment?.payment_kind === 'cash'
+      ? 'Paid cash'
+      : payment?.payment_kind === 'complimentary'
+        ? 'Complimentary'
+        : 'Paid in person'
+    : 'Unpaid';
+  return [name, price, paid, 'Done during this visit'].filter(Boolean).join(' · ');
 }
 
 function isCanceledStatus(status: string | null): boolean {
@@ -165,6 +185,18 @@ export function AppointmentListRow({
     </>
   );
 
+  const extras = appointment.extras ?? [];
+  const nestedExtras =
+    variant === 'client' && extras.length > 0 ? (
+      <ul className="mt-1.5 space-y-0.5 border-l border-stone-200/80 pl-3">
+        {extras.map((extra) => (
+          <li key={extra.id} className="text-xs text-stone-500">
+            {extraHistoryLine(extra)}
+          </li>
+        ))}
+      </ul>
+    ) : null;
+
   if (onSelect) {
     return (
       <li>
@@ -181,6 +213,7 @@ export function AppointmentListRow({
         >
           {content}
         </button>
+        {nestedExtras ? <div className="px-4 pb-2">{nestedExtras}</div> : null}
       </li>
     );
   }

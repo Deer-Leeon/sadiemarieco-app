@@ -48,6 +48,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import { deleteUnsettledAttachedExtras } from '@/lib/appointment-attached';
 import {
   APPOINTMENT_STATUSES,
   isAppointmentStatus,
@@ -655,6 +656,17 @@ export async function PATCH(
     );
     if (updated === null) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    }
+
+    if (targetStatus === 'canceled_by_admin') {
+      try {
+        await deleteUnsettledAttachedExtras(String(updated.id));
+      } catch (err) {
+        console.warn(
+          '[api/admin/appointments/[id]/status] extras cancel cleanup failed',
+          { error: errorMessage(err) }
+        );
+      }
     }
 
     let clientNoShowRecord:

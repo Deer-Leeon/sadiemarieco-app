@@ -118,6 +118,8 @@ interface Props {
   seedDate?: Date;
   /** 0–23 studio hour to pre-select once slots load. */
   seedHour?: number;
+  /** Extra busy starts (other pending cart visits), epoch ms. */
+  extraOccupiedStartMs?: number[];
 }
 
 export default function ManualBookingSlotPicker({
@@ -128,6 +130,7 @@ export default function ManualBookingSlotPicker({
   onSelectSlot,
   seedDate,
   seedHour,
+  extraOccupiedStartMs,
 }: Props) {
   const today = todayInStudio();
   const seedYmdRaw = seedDate ? studioDateKey(seedDate) : '';
@@ -164,6 +167,11 @@ export default function ManualBookingSlotPicker({
   useEffect(() => {
     onSelectSlotRef.current = onSelectSlot;
   }, [onSelectSlot]);
+
+  const extraOccupiedSet = useMemo(
+    () => new Set(extraOccupiedStartMs ?? []),
+    [extraOccupiedStartMs]
+  );
 
   const availableSet = useMemo(() => new Set(availableDates), [availableDates]);
 
@@ -588,9 +596,9 @@ export default function ManualBookingSlotPicker({
                     durationMins,
                     selectedDayWindows
                   );
-                const occupied = occupiedStartMs.has(
-                  new Date(slot).getTime()
-                );
+                const occupied =
+                  occupiedStartMs.has(new Date(slot).getTime()) ||
+                  extraOccupiedSet.has(new Date(slot).getTime());
                 return (
                   <button
                     key={slot}

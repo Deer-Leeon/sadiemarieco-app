@@ -23,6 +23,7 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Appointment } from '@/app/admin/types';
+import { nestAttachedExtras } from '@/lib/appointment-extras';
 import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
 import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
 import {
@@ -42,6 +43,7 @@ export const revalidate = 0;
 interface AppointmentRow {
   id: string;
   cal_event_id: string | null;
+  attached_to_appointment_id: string | null;
   cal_event_type_id: number | null;
   service_slug: string | null;
   client_first_name: string | null;
@@ -115,6 +117,11 @@ function rowToAppointment(
     stripe_customer_id: row.stripe_customer_id,
     terminal_payment: mapSqlPaymentFields(row),
     client_no_show_flag: Boolean(row.client_no_show_flag),
+    attached_to_appointment_id: row.attached_to_appointment_id
+      ? String(row.attached_to_appointment_id)
+      : null,
+    extras: [],
+    extra_count: 0,
   };
 }
 
@@ -137,6 +144,7 @@ export async function GET(): Promise<NextResponse> {
       SELECT
         a.id,
         a.cal_event_id,
+        a.attached_to_appointment_id,
         a.cal_event_type_id,
         a.client_first_name,
         a.client_last_name,
@@ -262,7 +270,9 @@ export async function GET(): Promise<NextResponse> {
     ]);
 
     return NextResponse.json({
-      appointments: rows.map((row) => rowToAppointment(row, catalogue)),
+      appointments: nestAttachedExtras(
+        rows.map((row) => rowToAppointment(row, catalogue))
+      ),
     });
   } catch (err) {
     console.error('[api/admin/appointments] GET failed:', errorMessage(err));

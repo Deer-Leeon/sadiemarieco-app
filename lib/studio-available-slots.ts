@@ -135,6 +135,7 @@ export async function loadStudioBusyIntervals(
         'accepted',
         'no-show'
       )
+      AND attached_to_appointment_id IS NULL
       AND booking_time < ${endIso}
       AND COALESCE(end_time, booking_time) > ${startIso}
   `;

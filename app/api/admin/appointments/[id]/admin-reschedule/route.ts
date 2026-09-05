@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import { syncAttachedExtrasTimes } from '@/lib/appointment-attached';
 import {
   isSameAppointmentSlot,
   RESCHEDULE_SAME_SLOT_MESSAGE,
@@ -468,6 +469,18 @@ export async function POST(
     }
 
     const row = rows[0];
+    try {
+      await syncAttachedExtrasTimes(
+        String(row.id),
+        row.booking_time,
+        row.end_time
+      );
+    } catch (err) {
+      console.warn(
+        '[api/admin/appointments/admin-reschedule] extras time sync failed',
+        { error: errorMessage(err) }
+      );
+    }
     const reminderEmails = await rescheduleAppointmentReminderEmails(
       row.cal_event_id || created.uid
     );

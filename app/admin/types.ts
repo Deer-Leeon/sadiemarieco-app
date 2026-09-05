@@ -226,6 +226,19 @@ export interface Appointment {
    * row itself. False when unknown or cleared.
    */
   client_no_show_flag: boolean;
+  /**
+   * Parent calendar visit when this row is a catalogue extra done
+   * during that booking. Null for standalone visits. Calendar queries
+   * omit rows where this is set so extras never get their own pill.
+   */
+  attached_to_appointment_id?: string | null;
+  /**
+   * Catalogue extras nested under this visit (same client and times,
+   * no Cal.com booking). Omitted or empty on child extras themselves.
+   */
+  extras?: Appointment[];
+  /** `extras.length` — compact +N cue on 3-day / week / 1-day pills. */
+  extra_count?: number;
 }
 
 export type TerminalPaymentStatus =
