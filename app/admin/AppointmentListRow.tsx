@@ -265,7 +265,7 @@ export function AppointmentListRow({
       <div className="relative mt-1 pl-19">
         <span
           aria-hidden
-          className="pointer-events-none absolute -top-1.5 left-8 h-4 w-11 rounded-bl-[5px] border-b border-l border-stone-300/70"
+          className="pointer-events-none absolute -top-2 left-8 h-5 w-11 rounded-bl-md border-b-2 border-l-2 border-stone-400/90"
         />
         <ul className="space-y-1">
           {extras.map((extra) => (
