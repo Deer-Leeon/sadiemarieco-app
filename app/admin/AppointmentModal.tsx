@@ -684,7 +684,7 @@ export default function AppointmentModal({
 
   return (
     <div
-      className={`fixed inset-0 flex items-center justify-center overflow-hidden overscroll-none bg-stone-900/15 p-2.5 sm:p-4 ${
+      className={`fixed inset-0 flex items-center justify-center overflow-hidden overscroll-none bg-stone-900/40 p-2.5 backdrop-blur-sm sm:p-4 ${
         stacked ? 'z-70' : 'z-60'
       }`}
       onClick={() => {
@@ -696,7 +696,7 @@ export default function AppointmentModal({
       role="presentation"
     >
       <div
-        className={`relative flex w-full ${cardWidthClass} ${cardHeightClass} flex-col overflow-hidden overscroll-contain rounded-2xl border border-stone-200/80 bg-[#FAF9F6]/90 shadow-2xl backdrop-blur-xl transition-[max-width] duration-200`}
+        className={`relative flex w-full ${cardWidthClass} ${cardHeightClass} flex-col overflow-hidden overscroll-contain rounded-2xl bg-[#FAF9F6] shadow-2xl transition-[max-width] duration-200`}
         onClick={(e) => e.stopPropagation()}
         onWheel={(e) => e.stopPropagation()}
         role="dialog"
