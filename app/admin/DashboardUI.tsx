@@ -65,6 +65,8 @@ interface Props {
   displayName: string;
   manualBookingServices: ManualBookingServiceOption[];
   manualBookingGroupHeaders: ManualBookingServiceGroupHeader[];
+  initialAvailability?: StudioAvailabilityBlock[] | null;
+  initialOverrides?: StudioDateOverride[] | null;
 }
 
 /**
@@ -96,6 +98,8 @@ export default function DashboardUI({
   displayName,
   manualBookingServices,
   manualBookingGroupHeaders,
+  initialAvailability = null,
+  initialOverrides = null,
 }: Props) {
   const router = useRouter();
   // Desktop Bookings lands on the Sun–Sat week grid (today's week).
@@ -152,10 +156,10 @@ export default function DashboardUI({
   );
   const [scheduleAvailability, setScheduleAvailability] = useState<
     StudioAvailabilityBlock[] | null
-  >(null);
+  >(initialAvailability);
   const [scheduleOverrides, setScheduleOverrides] = useState<
     StudioDateOverride[] | null
-  >(null);
+  >(initialOverrides);
 
   useEffect(() => {
     let cancelled = false;
