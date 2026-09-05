@@ -17,7 +17,7 @@ interface Props {
 
 /**
  * Centered past-history overlay matching the iOS client-profile popup:
- * cream/blur backdrop, white card, day-grouped visits with nested extras.
+ * sharp calendar behind, frosted card, day-grouped visits with nested extras.
  */
 export default function PastAppointmentsPopup({
   appointments,
@@ -48,12 +48,12 @@ export default function PastAppointmentsPopup({
 
   return (
     <div
-      className="fixed inset-0 z-65 flex items-center justify-center bg-[#FAF9F6]/75 p-5 backdrop-blur-md"
+      className="fixed inset-0 z-65 flex items-center justify-center bg-stone-900/15 p-5"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="flex max-h-[calc(100vh-48px)] w-full max-w-130 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+        className="flex max-h-[calc(100vh-48px)] w-full max-w-130 flex-col overflow-hidden rounded-2xl border border-stone-200/80 bg-white/90 shadow-2xl backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
