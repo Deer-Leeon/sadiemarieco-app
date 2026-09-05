@@ -78,6 +78,7 @@ import type {
   TerminalPaymentSummary,
 } from './types';
 import AppointmentHistoryList from './AppointmentHistoryList';
+import { isAttachedExtra, withPatchedPayments } from '@/lib/appointment-extras';
 import { appointmentServiceLabel, clientDisplayName, formatLifetimeSpend } from './helpers';
 // Circular import: AppointmentModal imports ClientProfileModal (for the
 // "Client" tab) and ClientProfileModal imports AppointmentModal (for
@@ -878,22 +879,41 @@ function DossierSection({
           }}
           onPaymentUpdated={(
             payment: TerminalPaymentSummary | null,
-            appointmentIds?: string[]
+            appointmentIds?: string[],
+            payments?: TerminalPaymentSummary[] | null
           ) => {
             mutatedRef.current = true;
             const ids = appointmentIds?.length
               ? appointmentIds
               : [openAppointment.id];
             setOpenAppointment((prev) =>
-              prev && ids.includes(prev.id)
-                ? { ...prev, terminal_payment: payment }
+              prev &&
+              (ids.includes(prev.id) ||
+                prev.extras?.some((e) => ids.includes(e.id)))
+                ? withPatchedPayments(prev, ids, payment, payments)
                 : prev
             );
             setAppts((prev) =>
               prev
                 ? prev.map((a) =>
-                    ids.includes(a.id)
-                      ? { ...a, terminal_payment: payment }
+                    ids.includes(a.id) ||
+                    a.extras?.some((e) => ids.includes(e.id))
+                      ? withPatchedPayments(a, ids, payment, payments)
+                      : a
+                  )
+                : prev
+            );
+          }}
+          onExtrasUpdated={(extras) => {
+            mutatedRef.current = true;
+            setOpenAppointment((prev) =>
+              prev ? { ...prev, extras, extra_count: extras.length } : prev
+            );
+            setAppts((prev) =>
+              prev
+                ? prev.map((a) =>
+                    a.id === openAppointment.id
+                      ? { ...a, extras, extra_count: extras.length }
                       : a
                   )
                 : prev
@@ -1679,7 +1699,9 @@ function InlineHistoryTable({
   onSelect: (a: Appointment) => void;
 }) {
   const visible = appointments.filter(
-    (a) => (a.status || '').toLowerCase() !== 'pending'
+    (a) =>
+      !isAttachedExtra(a) &&
+      (a.status || '').toLowerCase() !== 'pending'
   );
 
   if (visible.length === 0) {
@@ -2200,7 +2222,9 @@ function AppointmentsView({ client }: { client: Client }) {
   // Pending rows (slot picked, checkout not finished) never belong in
   // a client's history — only confirmed bookings and cancellations.
   const visibleAppts = appts.filter(
-    (a) => (a.status || '').toLowerCase() !== 'pending'
+    (a) =>
+      !isAttachedExtra(a) &&
+      (a.status || '').toLowerCase() !== 'pending'
   );
   if (visibleAppts.length === 0) {
     return (
@@ -2277,22 +2301,41 @@ function AppointmentsView({ client }: { client: Client }) {
           }}
           onPaymentUpdated={(
             payment: TerminalPaymentSummary | null,
-            appointmentIds?: string[]
+            appointmentIds?: string[],
+            payments?: TerminalPaymentSummary[] | null
           ) => {
             mutatedRef.current = true;
             const ids = appointmentIds?.length
               ? appointmentIds
               : [openAppointment.id];
             setOpenAppointment((prev) =>
-              prev && ids.includes(prev.id)
-                ? { ...prev, terminal_payment: payment }
+              prev &&
+              (ids.includes(prev.id) ||
+                prev.extras?.some((e) => ids.includes(e.id)))
+                ? withPatchedPayments(prev, ids, payment, payments)
                 : prev
             );
             setAppts((prev) =>
               prev
                 ? prev.map((a) =>
-                    ids.includes(a.id)
-                      ? { ...a, terminal_payment: payment }
+                    ids.includes(a.id) ||
+                    a.extras?.some((e) => ids.includes(e.id))
+                      ? withPatchedPayments(a, ids, payment, payments)
+                      : a
+                  )
+                : prev
+            );
+          }}
+          onExtrasUpdated={(extras) => {
+            mutatedRef.current = true;
+            setOpenAppointment((prev) =>
+              prev ? { ...prev, extras, extra_count: extras.length } : prev
+            );
+            setAppts((prev) =>
+              prev
+                ? prev.map((a) =>
+                    a.id === openAppointment.id
+                      ? { ...a, extras, extra_count: extras.length }
                       : a
                   )
                 : prev

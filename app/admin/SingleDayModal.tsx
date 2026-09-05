@@ -11,6 +11,7 @@ import {
 } from '@/lib/studio-calendar';
 
 import ClosedHoursHatch from './components/ClosedHoursHatch';
+import { ExtraCountBadge } from './components/ExtraCountBadge';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
 import type { Appointment, TimeBlock } from './types';
@@ -463,6 +464,7 @@ function ModalAppointment({
     >
       <span className="pointer-events-none absolute right-1 top-1 z-10 flex items-start gap-0.5">
         <SettlementCheckMarker payment={apt.terminal_payment} size={dense ? 'sm' : 'md'} />
+        <ExtraCountBadge count={apt.extra_count} size={dense ? 'sm' : 'md'} />
         {hasNoShowFlag ? (
           <span
             className="inline-flex h-4 w-4 items-center justify-center rounded-sm bg-amber-50/95 text-amber-800 shadow-sm"

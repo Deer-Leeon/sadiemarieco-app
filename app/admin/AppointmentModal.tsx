@@ -26,8 +26,10 @@ import {
   Mail,
   MessageSquare,
   Phone,
+  Plus,
   RefreshCw,
   Scissors,
+  Trash2,
   Wifi,
   X,
 } from 'lucide-react';
@@ -66,6 +68,17 @@ import {
 } from '@/lib/no-show-penalty';
 import { appointmentHasVaultedCard } from '@/lib/client-crm-stats';
 import ClientProfileModal from './ClientProfileModal';
+import {
+  appointmentQuotedCents,
+  unpaidExtras,
+  withPatchedPayments,
+} from '@/lib/appointment-extras';
+import { isAppointmentSettled } from './settlementDisplay';
+import ManualBookingServicePicker from './components/ManualBookingServicePicker';
+import type {
+  ManualBookingServiceGroupHeader,
+  ManualBookingServiceOption,
+} from './components/manual-booking-utils';
 
 // Cal.com embed namespace. Used both as the React component's
 // `namespace` prop and as the key passed to `getCalApi({ namespace })`
@@ -126,8 +139,12 @@ interface Props {
    */
   onPaymentUpdated?: (
     payment: TerminalPaymentSummary | null,
-    appointmentIds?: string[]
+    appointmentIds?: string[],
+    payments?: TerminalPaymentSummary[] | null
   ) => void;
+  onExtrasUpdated?: (extras: Appointment[]) => void;
+  catalogueServices?: ManualBookingServiceOption[];
+  catalogueGroupHeaders?: ManualBookingServiceGroupHeader[];
 }
 
 /**
@@ -199,6 +216,9 @@ export default function AppointmentModal({
   allowClientProfileLink = true,
   onClientUpdated,
   onPaymentUpdated,
+  onExtrasUpdated,
+  catalogueServices,
+  catalogueGroupHeaders,
 }: Props) {
   const router = useRouter();
 
@@ -222,9 +242,28 @@ export default function AppointmentModal({
   const [livePayment, setLivePayment] = useState<TerminalPaymentSummary | null>(
     appointment.terminal_payment
   );
+  const [liveExtras, setLiveExtras] = useState<Appointment[]>(
+    () => appointment.extras ?? []
+  );
   useEffect(() => {
     setLivePayment(appointment.terminal_payment);
   }, [appointment.id, appointment.terminal_payment]);
+  useEffect(() => {
+    setLiveExtras(appointment.extras ?? []);
+  }, [appointment.id, appointment.extras]);
+
+  const [addingExtra, setAddingExtra] = useState(false);
+  const [extraBusy, setExtraBusy] = useState(false);
+  const [extraError, setExtraError] = useState<string | null>(null);
+  const [pickerServices, setPickerServices] = useState<
+    ManualBookingServiceOption[]
+  >(catalogueServices ?? []);
+  const [pickerHeaders, setPickerHeaders] = useState<
+    ManualBookingServiceGroupHeader[]
+  >(catalogueGroupHeaders ?? []);
+  const [settlementTargetId, setSettlementTargetId] = useState<string | null>(
+    null
+  );
 
   // Loading state for the No-show / Cancel status PATCH. We disable
   // BOTH buttons (not just the clicked one) while one request is in
@@ -246,12 +285,114 @@ export default function AppointmentModal({
 
   const applyLivePayment = (
     payment: TerminalPaymentSummary | null,
-    appointmentIds?: string[]
+    appointmentIds?: string[],
+    payments?: TerminalPaymentSummary[] | null
   ) => {
-    setLivePayment(payment);
-    onPaymentUpdated?.(payment, appointmentIds);
+    const ids = appointmentIds?.length ? appointmentIds : [appointment.id];
+    const next = withPatchedPayments(
+      {
+        ...appointment,
+        terminal_payment: livePayment,
+        extras: liveExtras,
+      },
+      ids,
+      payment,
+      payments
+    );
+    setLivePayment(next.terminal_payment);
+    setLiveExtras(next.extras ?? []);
+    onPaymentUpdated?.(payment, ids, payments);
     router.refresh();
     onMutated?.();
+  };
+
+  const commitExtras = (next: Appointment[]) => {
+    setLiveExtras(next);
+    onExtrasUpdated?.(next);
+    router.refresh();
+    onMutated?.();
+  };
+
+  const openExtraPicker = async () => {
+    if (extraBusy) return;
+    setExtraError(null);
+    setAddingExtra(true);
+    if (pickerServices.length > 0) return;
+    try {
+      const res = await fetch(
+        `/api/admin/appointments/${appointment.id}/add-ons`,
+        { cache: 'no-store' }
+      );
+      const data = (await res.json().catch(() => null)) as {
+        services?: ManualBookingServiceOption[];
+        groupHeaders?: ManualBookingServiceGroupHeader[];
+        message?: string;
+      } | null;
+      if (!res.ok) {
+        setExtraError(data?.message || `HTTP ${res.status}`);
+        return;
+      }
+      setPickerServices(data?.services ?? []);
+      setPickerHeaders(data?.groupHeaders ?? []);
+    } catch (err) {
+      setExtraError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const addCatalogueExtra = async (service: ManualBookingServiceOption) => {
+    if (extraBusy) return;
+    setExtraBusy(true);
+    setExtraError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/appointments/${appointment.id}/add-ons`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventTypeId: service.eventTypeId }),
+        }
+      );
+      const data = (await res.json().catch(() => null)) as {
+        extra?: Appointment;
+        message?: string;
+        error?: string;
+      } | null;
+      if (!res.ok || !data?.extra) {
+        setExtraError(data?.message || data?.error || `HTTP ${res.status}`);
+        return;
+      }
+      commitExtras([...liveExtras, data.extra]);
+      setAddingExtra(false);
+    } catch (err) {
+      setExtraError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExtraBusy(false);
+    }
+  };
+
+  const removeExtra = async (extraId: string) => {
+    if (extraBusy) return;
+    setExtraBusy(true);
+    setExtraError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/appointments/${appointment.id}/add-ons/${extraId}`,
+        { method: 'DELETE' }
+      );
+      const data = (await res.json().catch(() => null)) as {
+        message?: string;
+        error?: string;
+      } | null;
+      if (!res.ok) {
+        setExtraError(data?.message || data?.error || `HTTP ${res.status}`);
+        return;
+      }
+      commitExtras(liveExtras.filter((extra) => extra.id !== extraId));
+    } catch (err) {
+      setExtraError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExtraBusy(false);
+    }
   };
 
   const canChargeNoShow =
@@ -359,26 +500,29 @@ export default function AppointmentModal({
   };
 
   const openSettlementConfirm = (
-    kind: 'cash' | 'complimentary' | 'undo'
+    kind: 'cash' | 'complimentary' | 'undo',
+    targetId: string = appointment.id
   ) => {
     if (statusAction !== null || settlementBusy || readOnly) return;
     setSettlementError(null);
     setSettlementNote('');
+    setSettlementTargetId(targetId);
     setSettlementConfirm(kind);
   };
 
   const submitSettlement = async (additionalAppointmentIds: string[] = []) => {
     if (!settlementConfirm || settlementBusy) return;
+    const targetId = settlementTargetId || appointment.id;
     setSettlementBusy(true);
     setSettlementError(null);
     try {
       const isUndo = settlementConfirm === 'undo';
       const res = await fetch(
-        `/api/admin/appointments/${appointment.id}/settlement${
+        `/api/admin/appointments/${targetId}/settlement${
           isUndo ? '/undo' : ''
         }`,
         {
-          method: 'POST',
+          method: isUndo ? 'POST' : 'POST',
           headers: isUndo ? undefined : { 'Content-Type': 'application/json' },
           body: isUndo
             ? undefined
@@ -406,17 +550,16 @@ export default function AppointmentModal({
       }
       setSettlementConfirm(null);
       setSettlementNote('');
-      const relatedIds = [
-        appointment.id,
-        ...additionalAppointmentIds,
-      ];
+      setSettlementTargetId(null);
+      const relatedIds = [targetId, ...additionalAppointmentIds];
       applyLivePayment(
         isUndo
           ? null
           : data?.payment?.status === 'succeeded'
             ? data.payment
             : data?.payment ?? null,
-        isUndo ? [appointment.id] : relatedIds
+        isUndo ? [targetId] : relatedIds,
+        isUndo ? undefined : data?.payments
       );
     } catch (err) {
       setSettlementError(err instanceof Error ? err.message : String(err));
@@ -448,6 +591,10 @@ export default function AppointmentModal({
         setSettlementConfirm(null);
         return;
       }
+      if (addingExtra) {
+        setAddingExtra(false);
+        return;
+      }
       onClose();
     }
     window.addEventListener('keydown', onKey);
@@ -456,7 +603,7 @@ export default function AppointmentModal({
       if (i >= 0) escStack.splice(i, 1);
       window.removeEventListener('keydown', onKey);
     };
-  }, [onClose, statusConfirm, settlementConfirm]);
+  }, [onClose, statusConfirm, settlementConfirm, addingExtra]);
 
   // Body scroll lock + restore. Snapshotting `previous` rather than
   // hard-coding '' on cleanup means we cooperate with any parent
@@ -488,6 +635,52 @@ export default function AppointmentModal({
     appointment.booking_notes,
     appointment.service_description
   );
+  const visitWithExtras: Appointment = {
+    ...appointment,
+    extras: liveExtras,
+    extra_count: liveExtras.length,
+  };
+  const liveUnpaidExtras = unpaidExtras(visitWithExtras);
+  const parentSettled = isAppointmentSettled(livePayment);
+  const extrasQuotedCents = liveUnpaidExtras.reduce(
+    (sum, extra) => sum + appointmentQuotedCents(extra),
+    0
+  );
+  const parentQuotedCents = appointmentQuotedCents(appointment);
+  const chargeTargetId = parentSettled
+    ? (liveUnpaidExtras[0]?.id ?? appointment.id)
+    : appointment.id;
+  const forcedAdditionalIds = parentSettled
+    ? liveUnpaidExtras.slice(1).map((extra) => extra.id)
+    : liveUnpaidExtras.map((extra) => extra.id);
+  const chargePrimaryCents = parentSettled
+    ? appointmentQuotedCents(liveUnpaidExtras[0] ?? { service_price: 0 })
+    : parentQuotedCents;
+  const forcedAdditionalCents = parentSettled
+    ? extrasQuotedCents - chargePrimaryCents
+    : extrasQuotedCents;
+  const unpaidChargeItems = parentSettled
+    ? liveUnpaidExtras
+    : [appointment, ...liveUnpaidExtras];
+  const chargeLines: ChargeLine[] = unpaidChargeItems.map((item) => {
+    const isExtra = Boolean(item.attached_to_appointment_id);
+    return {
+      id: item.id,
+      label: appointmentServiceLabel(item),
+      cents: appointmentQuotedCents(item),
+      detail:
+        unpaidChargeItems.length === 1 && !isExtra
+          ? undefined
+          : isExtra
+            ? 'Extra · during this visit'
+            : 'Scheduled service',
+    };
+  });
+  const chargeTotalCents = chargeLines.reduce((sum, line) => sum + line.cents, 0);
+  const canChargeVisit =
+    unpaidChargeItems.length > 0 &&
+    unpaidChargeItems.every((item) => appointmentQuotedCents(item) >= 0) &&
+    unpaidChargeItems.some((item) => appointmentQuotedCents(item) > 0);
 
   return (
     <div
@@ -537,10 +730,15 @@ export default function AppointmentModal({
           <TerminalChargeView
             appointment={appointment}
             siblingCandidates={siblingCandidates}
+            chargeAppointmentId={chargeTargetId}
+            includedVisitIds={forcedAdditionalIds}
+            includedQuotedCents={Math.max(0, forcedAdditionalCents)}
+            baseQuotedCents={chargePrimaryCents}
+            chargeLines={chargeLines}
             onBack={() => setIsCollectingPayment(false)}
             onDone={onClose}
-            onPaid={(payment, relatedIds) => {
-              applyLivePayment(payment, relatedIds);
+            onPaid={(payment, relatedIds, payments) => {
+              applyLivePayment(payment, relatedIds, payments);
             }}
           />
         ) : view === 'client' && allowClientProfileLink ? (
@@ -570,33 +768,100 @@ export default function AppointmentModal({
                 ) : null}
                 <DateTimeBox appointment={appointment} />
                 <ServiceBox appointment={appointment} />
+                {!readOnly || liveExtras.length > 0 ? (
+                <VisitExtrasBox
+                  extras={liveExtras}
+                  readOnly={readOnly}
+                  busy={extraBusy}
+                  error={extraError}
+                  adding={addingExtra}
+                  services={pickerServices}
+                  groupHeaders={pickerHeaders}
+                  onStartAdd={() => void openExtraPicker()}
+                  onCancelAdd={() => {
+                    if (extraBusy) return;
+                    setAddingExtra(false);
+                    setExtraError(null);
+                  }}
+                  onSelectService={(service) => void addCatalogueExtra(service)}
+                  onRemove={(extraId) => void removeExtra(extraId)}
+                />
+                ) : null}
                 {!readOnly ? (
-                  livePayment?.status === 'succeeded' ? (
-                    <PaymentBox
-                      payment={livePayment}
-                      onUndo={
-                        livePayment.payment_kind === 'cash' ||
-                        livePayment.payment_kind === 'complimentary'
-                          ? () => openSettlementConfirm('undo')
-                          : undefined
-                      }
-                      undoBusy={settlementBusy}
-                    />
-                  ) : (
-                    <UnsettledPaymentBox
-                      canCharge={
-                        appointment.service_price != null &&
-                        Number.isFinite(appointment.service_price) &&
-                        appointment.service_price > 0
-                      }
-                      busy={settlementBusy || statusAction !== null}
-                      onCharge={() => setIsCollectingPayment(true)}
-                      onMarkCash={() => openSettlementConfirm('cash')}
-                      onMarkComplimentary={() =>
-                        openSettlementConfirm('complimentary')
-                      }
-                    />
-                  )
+                  <>
+                    {parentSettled && livePayment ? (
+                      <PaymentBox
+                        payment={livePayment}
+                        onUndo={
+                          livePayment?.payment_kind === 'cash' ||
+                          livePayment?.payment_kind === 'complimentary'
+                            ? () => openSettlementConfirm('undo', appointment.id)
+                            : undefined
+                        }
+                        undoBusy={settlementBusy}
+                      />
+                    ) : (
+                      <UnsettledPaymentBox
+                        lines={chargeLines}
+                        totalCents={chargeTotalCents}
+                        canCharge={canChargeVisit}
+                        busy={settlementBusy || statusAction !== null || extraBusy}
+                        onCharge={() => setIsCollectingPayment(true)}
+                        onMarkCash={() =>
+                          openSettlementConfirm('cash', chargeTargetId)
+                        }
+                        onMarkComplimentary={() =>
+                          openSettlementConfirm(
+                            'complimentary',
+                            chargeTargetId
+                          )
+                        }
+                      />
+                    )}
+                    {parentSettled
+                      ? liveExtras.map((extra) =>
+                          isAppointmentSettled(extra.terminal_payment) &&
+                          extra.terminal_payment ? (
+                            <PaymentBox
+                              key={extra.id}
+                              payment={extra.terminal_payment}
+                              heading={`${appointmentServiceLabel(extra)} · done during this visit`}
+                              onUndo={
+                                extra.terminal_payment.payment_kind ===
+                                  'cash' ||
+                                extra.terminal_payment.payment_kind ===
+                                  'complimentary'
+                                  ? () =>
+                                      openSettlementConfirm('undo', extra.id)
+                                  : undefined
+                              }
+                              undoBusy={settlementBusy}
+                            />
+                          ) : null
+                        )
+                      : null}
+                    {parentSettled && liveUnpaidExtras.length > 0 ? (
+                      <UnsettledPaymentBox
+                        lines={chargeLines}
+                        totalCents={chargeTotalCents}
+                        caption="New extra · done during this visit"
+                        canCharge={canChargeVisit}
+                        busy={
+                          settlementBusy || statusAction !== null || extraBusy
+                        }
+                        onCharge={() => setIsCollectingPayment(true)}
+                        onMarkCash={() =>
+                          openSettlementConfirm('cash', chargeTargetId)
+                        }
+                        onMarkComplimentary={() =>
+                          openSettlementConfirm(
+                            'complimentary',
+                            chargeTargetId
+                          )
+                        }
+                      />
+                    ) : null}
+                  </>
                 ) : livePayment?.status === 'succeeded' ? (
                   <PaymentBox payment={livePayment} />
                 ) : null}
@@ -622,9 +887,16 @@ export default function AppointmentModal({
                 appointment={appointment}
                 siblingCandidates={siblingCandidates}
                 amountCents={
-                  appointment.service_price == null
-                    ? 0
-                    : Math.round(appointment.service_price * 100)
+                  settlementConfirm === 'undo' ? 0 : chargePrimaryCents
+                }
+                chargeLines={
+                  settlementConfirm === 'undo' ? [] : chargeLines
+                }
+                forcedAdditionalIds={
+                  settlementConfirm === 'undo' ? [] : forcedAdditionalIds
+                }
+                forcedAdditionalCents={
+                  settlementConfirm === 'undo' ? 0 : Math.max(0, forcedAdditionalCents)
                 }
                 note={settlementNote}
                 onNoteChange={setSettlementNote}
@@ -634,8 +906,15 @@ export default function AppointmentModal({
                   if (settlementBusy) return;
                   setSettlementConfirm(null);
                   setSettlementError(null);
+                  setSettlementTargetId(null);
                 }}
-                onConfirm={(extraIds) => void submitSettlement(extraIds)}
+                onConfirm={(extraIds) =>
+                  void submitSettlement(
+                    settlementConfirm === 'undo'
+                      ? []
+                      : [...forcedAdditionalIds, ...extraIds]
+                  )
+                }
               />
             )}
 
@@ -913,6 +1192,129 @@ function ServiceBox({ appointment }: { appointment: Appointment }) {
   );
 }
 
+function VisitExtrasBox({
+  extras,
+  readOnly,
+  busy,
+  error,
+  adding,
+  services,
+  groupHeaders,
+  onStartAdd,
+  onCancelAdd,
+  onSelectService,
+  onRemove,
+}: {
+  extras: Appointment[];
+  readOnly: boolean;
+  busy: boolean;
+  error: string | null;
+  adding: boolean;
+  services: ManualBookingServiceOption[];
+  groupHeaders: ManualBookingServiceGroupHeader[];
+  onStartAdd: () => void;
+  onCancelAdd: () => void;
+  onSelectService: (service: ManualBookingServiceOption) => void;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+          Extras
+        </p>
+        {!readOnly && !adding ? (
+          <button
+            type="button"
+            onClick={onStartAdd}
+            disabled={busy}
+            className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:text-stone-900 disabled:opacity-50"
+          >
+            <Plus className="h-3 w-3" />
+            Add extra
+          </button>
+        ) : null}
+      </div>
+      <p className="mt-1 text-xs text-stone-500">Done during this visit.</p>
+      {extras.length === 0 && !adding ? (
+        <p className="mt-3 text-sm italic text-stone-400">No extras yet.</p>
+      ) : (
+        <ul className="mt-3 divide-y divide-stone-100">
+          {extras.map((extra) => {
+            const settled = isAppointmentSettled(extra.terminal_payment);
+            return (
+              <li
+                key={extra.id}
+                className="flex items-start justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-stone-900">
+                    {appointmentServiceLabel(extra)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-stone-500">
+                    {extra.service_price != null
+                      ? `$${formatPrice(extra.service_price)}`
+                      : 'No price'}
+                    {settled
+                      ? ` · ${settlementLabel(extra.terminal_payment?.payment_kind)}`
+                      : ' · Unpaid'}
+                  </p>
+                </div>
+                {!readOnly && !settled ? (
+                  <button
+                    type="button"
+                    onClick={() => onRemove(extra.id)}
+                    disabled={busy}
+                    aria-label={`Remove ${appointmentServiceLabel(extra)}`}
+                    className="rounded-md p-1.5 text-stone-400 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {adding ? (
+        <div className="mt-3 rounded-xl border border-stone-200 bg-[#FAF9F6] p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
+              Studio services
+            </p>
+            <button
+              type="button"
+              onClick={onCancelAdd}
+              disabled={busy}
+              className="text-[10px] font-medium uppercase tracking-[0.16em] text-stone-500 hover:text-stone-800 disabled:opacity-50"
+            >
+              Close
+            </button>
+          </div>
+          {busy ? (
+            <p className="flex items-center gap-2 text-sm text-stone-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Adding extra…
+            </p>
+          ) : (
+            <ManualBookingServicePicker
+              services={services}
+              groupHeaders={groupHeaders}
+              selectedService={null}
+              onSelectService={onSelectService}
+            />
+          )}
+        </div>
+      ) : null}
+      {error ? (
+        <p className="mt-2 text-sm text-rose-700" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function settlementLabel(kind: AppointmentPaymentKind | null | undefined): string {
   if (kind === 'cash') return 'Paid cash';
   if (kind === 'complimentary') return 'Complimentary';
@@ -930,10 +1332,12 @@ function isOnlinePrepaidPayment(payment: TerminalPaymentSummary): boolean {
 
 function PaymentBox({
   payment,
+  heading,
   onUndo,
   undoBusy,
 }: {
   payment: TerminalPaymentSummary;
+  heading?: string;
   onUndo?: () => void;
   undoBusy?: boolean;
 }) {
@@ -950,9 +1354,11 @@ function PaymentBox({
           </span>
           <div>
             <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-emerald-700">
-              {isOnlinePrepaid
-                ? 'Paid online'
-                : settlementLabel(payment.payment_kind)}
+              {heading
+                ? heading
+                : isOnlinePrepaid
+                  ? 'Paid online'
+                  : settlementLabel(payment.payment_kind)}
             </p>
             <p className="text-sm text-emerald-950">
               {isComp
@@ -990,25 +1396,93 @@ function PaymentBox({
   );
 }
 
+type ChargeLine = {
+  id: string;
+  label: string;
+  cents: number;
+  detail?: string;
+};
+
+function ChargeBreakdown({
+  lines,
+  totalCents,
+  heading,
+  className = 'mt-3',
+}: {
+  lines: ChargeLine[];
+  totalCents: number;
+  heading?: string;
+  className?: string;
+}) {
+  if (lines.length === 0) return null;
+  const showTotal = lines.length > 1;
+  return (
+    <div className={className}>
+      {heading ? (
+        <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
+          {heading}
+        </p>
+      ) : null}
+      <ul
+        className={`${heading ? 'mt-2' : ''} divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 bg-white text-left`}
+      >
+        {lines.map((line) => (
+          <li
+            key={line.id}
+            className="flex items-start justify-between gap-3 px-3 py-2.5"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-stone-900">
+                {line.label}
+              </span>
+              {line.detail ? (
+                <span className="block text-xs text-stone-500">{line.detail}</span>
+              ) : null}
+            </span>
+            <span className="shrink-0 text-sm text-stone-800">
+              {formatCentsUsd(line.cents)}
+            </span>
+          </li>
+        ))}
+        {showTotal ? (
+          <li className="flex items-center justify-between gap-3 bg-stone-50 px-3 py-2.5">
+            <span className="text-sm font-semibold text-stone-900">Total</span>
+            <span className="text-sm font-semibold text-stone-900">
+              {formatCentsUsd(totalCents)}
+            </span>
+          </li>
+        ) : null}
+      </ul>
+    </div>
+  );
+}
+
 function UnsettledPaymentBox({
   canCharge,
   busy,
   onCharge,
   onMarkCash,
   onMarkComplimentary,
+  lines = [],
+  totalCents = 0,
+  caption,
 }: {
   canCharge: boolean;
   busy: boolean;
   onCharge: () => void;
   onMarkCash: () => void;
   onMarkComplimentary: () => void;
+  lines?: ChargeLine[];
+  totalCents?: number;
+  caption?: string;
 }) {
   return (
     <div className="rounded-lg border border-stone-200 bg-white p-4">
       <p className="text-xs font-medium text-stone-700">Payment</p>
       <p className="mt-1 text-sm text-stone-600">
-        Choose how this appointment was settled.
+        {caption || 'Choose how this appointment was settled.'}
       </p>
+      <ChargeBreakdown lines={lines} totalCents={totalCents} />
       <div className="mt-3 grid grid-cols-3 gap-2">
         <button
           type="button"
@@ -1664,6 +2138,7 @@ function RescheduleView({
 
 interface TerminalApiPayload {
   payment?: TerminalPaymentSummary | null;
+  payments?: TerminalPaymentSummary[] | null;
   reader?: {
     id?: string;
     label?: string;
@@ -1731,6 +2206,7 @@ function sameDayUnsettledFromList(
   return candidates
     .filter((row) => {
       if (row.id === primary.id) return false;
+      if (row.attached_to_appointment_id) return false;
       if ((row.status || '').toLowerCase() !== 'confirmed') return false;
       if (row.terminal_payment?.status === 'succeeded') return false;
       if (
@@ -1805,67 +2281,37 @@ function useSameDayUnsettled(
 }
 
 function SameDayVisitChecklist({
-  primary,
   siblings,
   selectedExtraIds,
   onToggle,
   disabled,
 }: {
-  primary: Appointment;
   siblings: SameDayVisit[];
   selectedExtraIds: string[];
   onToggle: (id: string) => void;
   disabled?: boolean;
 }) {
   if (siblings.length === 0) return null;
-  const rows: Array<{
-    id: string;
-    locked: boolean;
-    checked: boolean;
-    visit: SameDayVisit | Appointment;
-  }> = [
-    {
-      id: primary.id,
-      locked: true,
-      checked: true,
-      visit: primary,
-    },
-    ...siblings.map((visit) => ({
-      id: visit.id,
-      locked: false,
-      checked: selectedExtraIds.includes(visit.id),
-      visit,
-    })),
-  ];
 
   return (
     <div className="mt-5 w-full max-w-sm text-left">
       <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-stone-500">
-        Same-day visits
+        Also today
       </p>
       <p className="mt-1 text-xs text-stone-500">
-        Include other unpaid appointments for this client today.
+        Optionally include other unpaid appointments for this client.
       </p>
       <ul className="mt-2 divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 bg-white">
-        {rows.map((row) => {
-          const time =
-            'booking_time' in row.visit && row.visit.booking_time
-              ? formatStudioClockRange(
-                  parseISO(row.visit.booking_time),
-                  'end_time' in row.visit && row.visit.end_time
-                    ? parseISO(row.visit.end_time)
-                    : null
-                )
-              : '';
-          const service = appointmentServiceLabel(row.visit);
-          const cents =
-            'quoted_service_price_cents' in row.visit
-              ? visitQuotedCents(row.visit as SameDayVisit)
-              : row.visit.service_price == null
-                ? 0
-                : Math.round(row.visit.service_price * 100);
+        {siblings.map((visit) => {
+          const time = visit.booking_time
+            ? formatStudioClockRange(
+                parseISO(visit.booking_time),
+                visit.end_time ? parseISO(visit.end_time) : null
+              )
+            : 'Scheduled';
+          const checked = selectedExtraIds.includes(visit.id);
           return (
-            <li key={row.id}>
+            <li key={visit.id}>
               <label
                 className={`flex cursor-pointer items-start gap-3 px-3 py-2.5 ${
                   disabled ? 'cursor-not-allowed opacity-60' : ''
@@ -1873,24 +2319,19 @@ function SameDayVisitChecklist({
               >
                 <input
                   type="checkbox"
-                  checked={row.checked}
-                  disabled={row.locked || disabled}
-                  onChange={() => {
-                    if (!row.locked) onToggle(row.id);
-                  }}
+                  checked={checked}
+                  disabled={disabled}
+                  onChange={() => onToggle(visit.id)}
                   className="mt-1 h-4 w-4 rounded border-stone-300 text-stone-900"
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium text-stone-900">
-                    {service}
-                    {row.locked ? ' · this visit' : ''}
+                    {appointmentServiceLabel(visit)}
                   </span>
-                  <span className="block text-xs text-stone-500">
-                    {time || 'Scheduled'}
-                  </span>
+                  <span className="block text-xs text-stone-500">{time}</span>
                 </span>
                 <span className="shrink-0 text-sm text-stone-700">
-                  {formatCentsUsd(cents)}
+                  {formatCentsUsd(visitQuotedCents(visit))}
                 </span>
               </label>
             </li>
@@ -1904,19 +2345,37 @@ function SameDayVisitChecklist({
 function TerminalChargeView({
   appointment,
   siblingCandidates = [],
+  chargeAppointmentId,
+  includedVisitIds = [],
+  includedQuotedCents = 0,
+  baseQuotedCents,
+  chargeLines = [],
   onBack,
   onDone,
   onPaid,
 }: {
   appointment: Appointment;
   siblingCandidates?: Appointment[];
+  chargeAppointmentId?: string;
+  includedVisitIds?: string[];
+  includedQuotedCents?: number;
+  baseQuotedCents?: number;
+  chargeLines?: ChargeLine[];
   onBack: () => void;
   onDone: () => void;
-  onPaid: (payment: TerminalPaymentSummary, relatedIds: string[]) => void;
+  onPaid: (
+    payment: TerminalPaymentSummary,
+    relatedIds: string[],
+    payments?: TerminalPaymentSummary[] | null
+  ) => void;
 }) {
+  const chargeId = chargeAppointmentId || appointment.id;
   const [payment, setPayment] = useState<TerminalPaymentSummary | null>(
-    appointment.terminal_payment
+    chargeId === appointment.id ? appointment.terminal_payment : null
   );
+  const [groupedPayments, setGroupedPayments] = useState<
+    TerminalPaymentSummary[] | null
+  >(null);
   const [reader, setReader] = useState<
     TerminalApiPayload['reader'] | null
   >(null);
@@ -1930,9 +2389,10 @@ function TerminalChargeView({
   );
   const [customDollars, setCustomDollars] = useState(() =>
     formatCentsAsDollarInput(
-      appointment.service_price == null
-        ? 0
-        : Math.round(appointment.service_price * 100)
+      (baseQuotedCents ??
+        (appointment.service_price == null
+          ? 0
+          : Math.round(appointment.service_price * 100))) + includedQuotedCents
     )
   );
   const paidNotified = useRef(false);
@@ -1940,13 +2400,21 @@ function TerminalChargeView({
     appointment,
     siblingCandidates
   );
+  const otherVisits = siblings.filter(
+    (visit) => !chargeLines.some((line) => line.id === visit.id)
+  );
   const primaryQuotedCents =
-    appointment.service_price == null
+    baseQuotedCents ??
+    (appointment.service_price == null
       ? 0
-      : Math.round(appointment.service_price * 100);
+      : Math.round(appointment.service_price * 100));
+  const thisVisitQuotedCents =
+    chargeLines.length > 0
+      ? chargeLines.reduce((sum, line) => sum + line.cents, 0)
+      : primaryQuotedCents + includedQuotedCents;
   const quotedCents =
-    primaryQuotedCents +
-    siblings
+    thisVisitQuotedCents +
+    otherVisits
       .filter((visit) => selectedExtraIds.includes(visit.id))
       .reduce((sum, visit) => sum + visitQuotedCents(visit), 0);
   const customCents = parseDollarsToCents(customDollars);
@@ -1960,7 +2428,10 @@ function TerminalChargeView({
     amountMode === 'custom'
       ? customCents ?? 0
       : applyTerminalDiscount(quotedCents, discountPercent);
-  const relatedIds = [appointment.id, ...selectedExtraIds];
+  const additionalIds = [
+    ...new Set([...includedVisitIds, ...selectedExtraIds]),
+  ];
+  const relatedIds = [chargeId, ...additionalIds];
   const clientName = clientDisplayName(
     appointment.client_first_name,
     appointment.client_last_name
@@ -1973,8 +2444,8 @@ function TerminalChargeView({
   useEffect(() => {
     if (payment?.status !== 'succeeded' || paidNotified.current) return;
     paidNotified.current = true;
-    onPaid(payment, relatedIds);
-  }, [payment, onPaid, relatedIds]);
+    onPaid(payment, relatedIds, groupedPayments);
+  }, [payment, onPaid, relatedIds, groupedPayments]);
 
   useEffect(() => {
     if (!active || !payment?.payment_intent_id) return;
@@ -1983,7 +2454,7 @@ function TerminalChargeView({
     const check = async () => {
       try {
         const res = await fetch(
-          `/api/admin/appointments/${appointment.id}/terminal-payment`,
+          `/api/admin/appointments/${chargeId}/terminal-payment`,
           { cache: 'no-store' }
         );
         const data = (await res.json().catch(() => null)) as
@@ -1992,6 +2463,7 @@ function TerminalChargeView({
         if (disposed) return;
         if (data?.payment) {
           setPayment(data.payment);
+          if (data.payments) setGroupedPayments(data.payments);
           if (
             data.payment.status === 'failed' ||
             data.payment.status === 'canceled'
@@ -2012,7 +2484,7 @@ function TerminalChargeView({
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [active, appointment.id, payment?.payment_intent_id]);
+  }, [active, chargeId, payment?.payment_intent_id]);
 
   async function runAction(kind: 'start' | 'retry' | 'cancel') {
     if (busy) return;
@@ -2027,7 +2499,7 @@ function TerminalChargeView({
           : '/cancel';
     try {
       const res = await fetch(
-        `/api/admin/appointments/${appointment.id}/terminal-payment${suffix}`,
+        `/api/admin/appointments/${chargeId}/terminal-payment${suffix}`,
         {
           method: 'POST',
           ...(kind === 'start'
@@ -2038,16 +2510,12 @@ function TerminalChargeView({
                     ? {
                         custom_amount_cents: amountCents,
                         additional_appointment_ids:
-                          selectedExtraIds.length > 0
-                            ? selectedExtraIds
-                            : undefined,
+                          additionalIds.length > 0 ? additionalIds : undefined,
                       }
                     : {
                         discount_percent: discountPercent,
                         additional_appointment_ids:
-                          selectedExtraIds.length > 0
-                            ? selectedExtraIds
-                            : undefined,
+                          additionalIds.length > 0 ? additionalIds : undefined,
                       }
                 ),
               }
@@ -2059,6 +2527,7 @@ function TerminalChargeView({
         | null;
       if (data?.payment) {
         setPayment(data.payment);
+        if (data.payments) setGroupedPayments(data.payments);
         const staleRetryRequired =
           kind === 'start' && data.error === 'retry_required';
         if (
@@ -2257,18 +2726,49 @@ function TerminalChargeView({
             ) : null}
             <p className="mt-2 text-sm text-stone-600">
               {selectedExtraIds.length > 0
-                ? `${selectedExtraIds.length + 1} visits for ${clientName}`
-                : `${serviceLabel} for ${clientName}`}
+                ? `This visit + ${selectedExtraIds.length} other ${
+                    selectedExtraIds.length === 1 ? 'appointment' : 'appointments'
+                  } for ${clientName}`
+                : chargeLines.length > 1
+                  ? `This visit for ${clientName}`
+                  : `${serviceLabel} for ${clientName}`}
             </p>
+
+            {!isFailed &&
+            (chargeLines.length > 1 || otherVisits.length > 0) ? (
+              <ChargeBreakdown
+                heading="This visit"
+                lines={
+                  chargeLines.length > 0
+                    ? chargeLines
+                    : [
+                        {
+                          id: appointment.id,
+                          label: serviceLabel,
+                          cents: thisVisitQuotedCents,
+                          detail: 'Scheduled service',
+                        },
+                      ]
+                }
+                totalCents={thisVisitQuotedCents}
+                className="mt-5 w-full max-w-sm"
+              />
+            ) : null}
 
             {!isFailed ? (
               <SameDayVisitChecklist
-                primary={appointment}
-                siblings={siblings}
+                siblings={otherVisits}
                 selectedExtraIds={selectedExtraIds}
                 onToggle={toggleExtra}
                 disabled={busy !== null}
               />
+            ) : null}
+
+            {!isFailed && selectedExtraIds.length > 0 ? (
+              <div className="mt-3 flex w-full max-w-sm items-center justify-between rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm font-semibold text-stone-900">
+                <span>Charge</span>
+                <span>{formatCentsUsd(quotedCents)}</span>
+              </div>
             ) : null}
 
             {!isFailed ? (
@@ -2405,6 +2905,9 @@ function SettlementConfirmDialog({
   appointment,
   siblingCandidates = [],
   amountCents,
+  chargeLines = [],
+  forcedAdditionalIds = [],
+  forcedAdditionalCents = 0,
   note,
   onNoteChange,
   busy,
@@ -2416,6 +2919,9 @@ function SettlementConfirmDialog({
   appointment: Appointment;
   siblingCandidates?: Appointment[];
   amountCents: number;
+  chargeLines?: ChargeLine[];
+  forcedAdditionalIds?: string[];
+  forcedAdditionalCents?: number;
   note: string;
   onNoteChange: (value: string) => void;
   busy: boolean;
@@ -2427,11 +2933,18 @@ function SettlementConfirmDialog({
     appointment,
     siblingCandidates
   );
-  const extraQuoted = siblings
+  const otherVisits = siblings.filter(
+    (visit) => !chargeLines.some((line) => line.id === visit.id)
+  );
+  const extraQuoted = otherVisits
     .filter((visit) => selectedExtraIds.includes(visit.id))
     .reduce((sum, visit) => sum + visitQuotedCents(visit), 0);
-  const cashTotal = amountCents + extraQuoted;
-  const visitCount = 1 + selectedExtraIds.length;
+  const thisVisitTotal =
+    chargeLines.length > 0
+      ? chargeLines.reduce((sum, line) => sum + line.cents, 0)
+      : amountCents + forcedAdditionalCents;
+  const cashTotal = thisVisitTotal + extraQuoted;
+  const siblingCount = selectedExtraIds.length;
   const title =
     kind === 'undo'
       ? 'Undo settlement?'
@@ -2442,11 +2955,15 @@ function SettlementConfirmDialog({
     kind === 'undo'
       ? 'This clears the cash or complimentary mark so you can charge or settle again.'
       : kind === 'cash'
-        ? visitCount > 1
-          ? `Record ${formatCentsUsd(cashTotal)} across ${visitCount} visits as paid in cash. No card charge will be sent to the Terminal.`
-          : `Record ${formatCentsUsd(amountCents)} as paid in cash. No card charge will be sent to the Terminal.`
-        : visitCount > 1
-          ? `Mark ${visitCount} visits settled with no charge.`
+        ? siblingCount > 0
+          ? `Record ${formatCentsUsd(cashTotal)} for this visit plus ${siblingCount} other ${
+              siblingCount === 1 ? 'appointment' : 'appointments'
+            } as paid in cash. No card charge will be sent to the Terminal.`
+          : `Record ${formatCentsUsd(cashTotal)} as paid in cash. No card charge will be sent to the Terminal.`
+        : siblingCount > 0
+          ? `Mark this visit plus ${siblingCount} other ${
+              siblingCount === 1 ? 'appointment' : 'appointments'
+            } settled with no charge.`
           : 'Mark this appointment settled with no charge. Useful for friends, trades, or gifts.';
 
   return (
@@ -2485,14 +3002,27 @@ function SettlementConfirmDialog({
               />
             </label>
           ) : null}
+          {kind !== 'undo' && chargeLines.length > 0 ? (
+            <ChargeBreakdown
+              heading="This visit"
+              lines={chargeLines}
+              totalCents={thisVisitTotal}
+              className="mt-4"
+            />
+          ) : null}
           {kind !== 'undo' ? (
             <SameDayVisitChecklist
-              primary={appointment}
-              siblings={siblings}
+              siblings={otherVisits}
               selectedExtraIds={selectedExtraIds}
               onToggle={toggleExtra}
               disabled={busy}
             />
+          ) : null}
+          {kind !== 'undo' && selectedExtraIds.length > 0 ? (
+            <div className="mt-3 flex items-center justify-between rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm font-semibold text-stone-900">
+              <span>Charge</span>
+              <span>{formatCentsUsd(cashTotal)}</span>
+            </div>
           ) : null}
           {error ? (
             <p className="mt-3 text-sm text-rose-700" role="alert">

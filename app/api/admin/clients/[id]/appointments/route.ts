@@ -34,6 +34,8 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Appointment } from '@/app/admin/types';
+import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
+import { nestAttachedExtras } from '@/lib/appointment-extras';
 import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
 import { sqlPhoneVariants } from '@/lib/client-identity';
@@ -62,6 +64,7 @@ interface AppointmentRow {
   // appointments.cal_event_id — actually stores the Cal.com booking
   // UID. Surfaced as `cal_uid` on the wire to match the type.
   cal_event_id: string | null;
+  attached_to_appointment_id: string | null;
   cal_event_type_id: number | null;
   // site_services.slug — joined in below. Required by the reschedule
   // embed; the cancel/no-show paths don't need it.
@@ -143,6 +146,11 @@ function rowToAppointment(
     stripe_customer_id: row.stripe_customer_id,
     terminal_payment: mapSqlPaymentFields(row),
     client_no_show_flag: Boolean(row.client_no_show_flag),
+    attached_to_appointment_id: row.attached_to_appointment_id
+      ? String(row.attached_to_appointment_id)
+      : null,
+    extras: [],
+    extra_count: 0,
   };
 }
 
@@ -210,11 +218,13 @@ export async function GET(
     // "Hybrid" / "Volume") also require matching appointment duration
     // to the child's duration_mins so 2-/3-/4-week fills keep distinct
     // editor-assigned colours.
+    await ensureAppointmentAttachedSchema();
     const [{ rows }, catalogue] = await Promise.all([
       sql<AppointmentRow>`
       SELECT
         a.id,
         a.cal_event_id,
+        a.attached_to_appointment_id,
         a.cal_event_type_id,
         a.client_first_name,
         a.client_last_name,
@@ -331,13 +341,15 @@ export async function GET(
     });
 
     return NextResponse.json({
-      appointments: rows.map((row) =>
-        rowToAppointment(
-          {
-            ...row,
-            client_no_show_flag: crm_stats.no_show_flag,
-          },
-          catalogue,
+      appointments: nestAttachedExtras(
+        rows.map((row) =>
+          rowToAppointment(
+            {
+              ...row,
+              client_no_show_flag: crm_stats.no_show_flag,
+            },
+            catalogue,
+          )
         )
       ),
       crm_stats,

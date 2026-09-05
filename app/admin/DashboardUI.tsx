@@ -40,6 +40,7 @@ import {
   appointmentBelongsToClient,
   withClientNoShowFlag,
 } from './clientNoShowFlagSync';
+import { isAttachedExtra, withPatchedPayments } from '@/lib/appointment-extras';
 import AdminHeader from './AdminHeader';
 import AdminSectionTabs from './AdminSectionTabs';
 import ListView from './ListView';
@@ -262,7 +263,8 @@ export default function DashboardUI({
   /** Patch settlement markers in the open modal + calendar/list immediately. */
   function handlePaymentUpdated(
     payment: TerminalPaymentSummary | null,
-    appointmentIds?: string[]
+    appointmentIds?: string[],
+    payments?: TerminalPaymentSummary[] | null
   ) {
     const ids = appointmentIds?.length
       ? appointmentIds
@@ -270,13 +272,15 @@ export default function DashboardUI({
         ? [selectedAppointment.id]
         : [];
     setSelectedAppointment((prev) =>
-      prev && ids.includes(prev.id)
-        ? { ...prev, terminal_payment: payment }
+      prev && (ids.includes(prev.id) || prev.extras?.some((e) => ids.includes(e.id)))
+        ? withPatchedPayments(prev, ids, payment, payments)
         : prev
     );
     setAppointments((prev) =>
       prev.map((a) =>
-        ids.includes(a.id) ? { ...a, terminal_payment: payment } : a
+        ids.includes(a.id) || a.extras?.some((e) => ids.includes(e.id))
+          ? withPatchedPayments(a, ids, payment, payments)
+          : a
       )
     );
   }
@@ -291,6 +295,7 @@ export default function DashboardUI({
       appointmentsWithoutTimeBlockGhosts.filter((a) => {
         const s = (a.status || '').toLowerCase();
         return (
+          !isAttachedExtra(a) &&
           s !== 'pending' &&
           s !== 'canceled_by_admin' &&
           s !== 'canceled_by_client' &&
@@ -450,7 +455,23 @@ export default function DashboardUI({
           onClose={() => setSelectedAppointment(null)}
           onClientUpdated={handleClientNoShowFlagChanged}
           onPaymentUpdated={handlePaymentUpdated}
+          onExtrasUpdated={(extras) => {
+            setSelectedAppointment((prev) =>
+              prev
+                ? { ...prev, extras, extra_count: extras.length }
+                : prev
+            );
+            setAppointments((prev) =>
+              prev.map((a) =>
+                a.id === selectedAppointment.id
+                  ? { ...a, extras, extra_count: extras.length }
+                  : a
+              )
+            );
+          }}
           siblingCandidates={appointments}
+          catalogueServices={manualBookingServices}
+          catalogueGroupHeaders={manualBookingGroupHeaders}
         />
       )}
 

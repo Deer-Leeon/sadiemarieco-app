@@ -18,6 +18,7 @@ import {
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import ClosedHoursHatch from './components/ClosedHoursHatch';
+import { ExtraCountBadge } from './components/ExtraCountBadge';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
 import { settlementAriaLabel } from './settlementDisplay';
@@ -579,6 +580,7 @@ function AppointmentBlock({
       {peekingUnder ? null : (
       <span className="pointer-events-none absolute right-0.5 top-0.5 z-10 flex items-start gap-0.5">
         <SettlementCheckMarker payment={apt.terminal_payment} />
+        <ExtraCountBadge count={apt.extra_count} />
         {hasNoShowFlag ? (
           <span
             className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm bg-amber-50/95 text-amber-800 shadow-sm"

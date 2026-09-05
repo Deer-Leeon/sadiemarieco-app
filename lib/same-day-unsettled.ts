@@ -2,6 +2,8 @@ import 'server-only';
 
 import { sql } from '@vercel/postgres';
 
+import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -64,6 +66,7 @@ export async function findSameDayUnsettledSiblings(
 ): Promise<SameDayUnsettledVisit[]> {
   if (!isAppointmentId(primaryId)) return [];
 
+  await ensureAppointmentAttachedSchema();
   const { rows } = await sql<SameDayUnsettledVisit>`
     SELECT
       sib.id::text AS id,
@@ -76,7 +79,8 @@ export async function findSameDayUnsettledSiblings(
     FROM appointments primary_apt
     JOIN appointments sib
       ON sib.id::text <> primary_apt.id::text
-     AND sib.status = 'confirmed'
+      AND sib.status = 'confirmed'
+     AND sib.attached_to_appointment_id IS NULL
      AND sib.booking_time IS NOT NULL
      AND primary_apt.booking_time IS NOT NULL
      AND (sib.booking_time AT TIME ZONE 'America/Denver')::date
@@ -130,6 +134,57 @@ export async function findSameDayUnsettledSiblings(
   }));
 }
 
+export async function findAttachedUnsettledExtras(
+  primaryId: string
+): Promise<SameDayUnsettledVisit[]> {
+  if (!isAppointmentId(primaryId)) return [];
+
+  await ensureAppointmentAttachedSchema();
+  const { rows } = await sql<SameDayUnsettledVisit>`
+    SELECT
+      extra.id::text AS id,
+      extra.cal_event_id AS cal_booking_uid,
+      extra.booking_time,
+      extra.end_time,
+      extra.service_name,
+      extra.quoted_service_price_cents,
+      extra.status
+    FROM appointments extra
+    WHERE extra.id::text <> ${primaryId}
+      AND extra.status = 'confirmed'
+      AND (
+        extra.attached_to_appointment_id::text = ${primaryId}
+        OR (
+          extra.attached_to_appointment_id IS NOT NULL
+          AND extra.attached_to_appointment_id = (
+            SELECT parent.attached_to_appointment_id
+            FROM appointments parent
+            WHERE parent.id::text = ${primaryId}
+            LIMIT 1
+          )
+        )
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM appointment_payments p
+        WHERE p.appointment_id = extra.id::text
+          AND (
+            p.status = 'succeeded'
+            OR (
+              p.payment_kind = 'service_payment'
+              AND p.status IN ('pending', 'processing')
+            )
+          )
+      )
+    ORDER BY extra.service_name ASC NULLS LAST, extra.id::text ASC
+  `;
+  return rows.map((row) => ({
+    ...row,
+    booking_time: toIsoTimestamp(row.booking_time),
+    end_time: toIsoTimestamp(row.end_time),
+  }));
+}
+
 export async function resolveAdditionalUnsettledVisits(
   primaryId: string,
   additionalIds: string[]
@@ -140,7 +195,10 @@ export async function resolveAdditionalUnsettledVisits(
   if (additionalIds.length === 0) return { ok: true, visits: [] };
 
   const siblings = await findSameDayUnsettledSiblings(primaryId);
-  const byId = new Map(siblings.map((visit) => [visit.id, visit]));
+  const attached = await findAttachedUnsettledExtras(primaryId);
+  const byId = new Map(
+    [...siblings, ...attached].map((visit) => [visit.id, visit])
+  );
   const visits: SameDayUnsettledVisit[] = [];
   for (const id of additionalIds) {
     const visit = byId.get(id);
@@ -149,7 +207,7 @@ export async function resolveAdditionalUnsettledVisits(
         ok: false,
         error: 'invalid_additional_appointments',
         message:
-          'Additional appointments must be unpaid confirmed visits for this client on the same day.',
+          'Additional appointments must be unpaid confirmed extras of this visit or unpaid confirmed visits for this client on the same day.',
       };
     }
     visits.push(visit);

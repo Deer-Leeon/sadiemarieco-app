@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation';
 import { loadCalEventTypeMaps } from '@/lib/cal-config';
 import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
 import { ALLOWED_ADMIN_EMAILS } from '@/lib/admin-allowlist';
+import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
+import { nestAttachedExtras } from '@/lib/appointment-extras';
 import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
 import {
   applyCatalogueService,
@@ -78,6 +80,7 @@ interface DbRow {
   terminal_settled_by_email: string | null;
   terminal_paid_at: Date | string | null;
   client_no_show_flag: boolean | null;
+  attached_to_appointment_id: string | null;
 }
 
 function serializeDate(value: Date | string | null): string | null {
@@ -173,11 +176,13 @@ export default async function AdminPage() {
     // (always the most-recently-updated "Volume" row). For those bare
     // fill titles we also match on appointment duration (120 / 150 /
     // 180 min) so each week group keeps its editor-assigned hex.
+    await ensureAppointmentAttachedSchema();
     const [{ rows }, catalogue] = await Promise.all([
       sql<DbRow>`
       SELECT
         a.id,
         a.cal_event_id,
+        a.attached_to_appointment_id,
         a.cal_event_type_id,
         a.client_first_name,
         a.client_last_name,
@@ -335,8 +340,14 @@ export default async function AdminPage() {
       stripe_customer_id: r.stripe_customer_id,
       terminal_payment: mapSqlPaymentFields(r),
       client_no_show_flag: Boolean(r.client_no_show_flag),
+      attached_to_appointment_id: r.attached_to_appointment_id
+        ? String(r.attached_to_appointment_id)
+        : null,
+      extras: [],
+      extra_count: 0,
     };
     });
+    appointments = nestAttachedExtras(appointments);
   } catch (err) {
     console.error('[admin] appointments query failed:', err);
     dbError = err instanceof Error ? err.message : 'Unknown DB error';
