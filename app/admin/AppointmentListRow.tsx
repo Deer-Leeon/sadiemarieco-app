@@ -262,10 +262,10 @@ export function AppointmentListRow({
   const extras = appointment.extras ?? [];
   const nestedExtras =
     variant === 'client' && extras.length > 0 ? (
-      <div className="relative mt-1 pl-19">
+      <div className="relative mt-1.5 pl-[68px]">
         <span
           aria-hidden
-          className="pointer-events-none absolute -top-2 left-8 h-5 w-11 rounded-bl-md border-b-2 border-l-2 border-stone-400/90"
+          className="pointer-events-none absolute top-0 left-8 h-7 w-9 rounded-bl-md border-b border-l border-stone-400/70"
         />
         <ul className="space-y-1">
           {extras.map((extra) => (
