@@ -11,7 +11,7 @@ import {
 } from '@/lib/studio-calendar';
 
 import ClosedHoursHatch from './components/ClosedHoursHatch';
-import HourAxisColumn, { HourRules } from './components/HourAxisColumn';
+import HourAxisColumn from './components/HourAxisColumn';
 import { ExtraCountBadge } from './components/ExtraCountBadge';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
@@ -303,7 +303,15 @@ function DayBody({
     <div className="flex h-full min-h-0 flex-col">
       <div className="relative min-h-0 flex-1 isolate">
         <ClosedHoursHatch bands={hatchBands} />
-        <HourRules />
+        <div
+          className="pointer-events-none absolute inset-0 z-1 grid h-full"
+          style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+          aria-hidden="true"
+        >
+          {Array.from({ length: HOURS }, (_, i) => (
+            <div key={i} className="border-t border-stone-200" />
+          ))}
+        </div>
         <div
           className="absolute inset-0 z-2 grid h-full"
           style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
