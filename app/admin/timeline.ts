@@ -63,6 +63,11 @@ export const PHONE_CALENDAR_MQ = '(max-width: 767px)';
 // ──────────────────────────────────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────────────────────────────────
+/** Overlapping visits shorter than this sit in equal-width columns
+ *  instead of cascading — two 30-minute add-ons must stay side by side.
+ *  A longer booking in the cluster keeps the full-width cascade. */
+export const SIDE_BY_SIDE_OVERLAP_MAX_MINUTES = 40;
+
 export interface PositionedAppointment {
   appointment: Appointment;
   /** Top offset as a percentage (0-100) of the visible day window. */
@@ -75,6 +80,9 @@ export interface PositionedAppointment {
   col: number;
   /** Lane count for this overlap cluster only — 1 means full-width. */
   totalCols: number;
+  /** True when this overlapping cluster is all short visits and should
+   *  split into equal-width lanes instead of a Fresha-style cascade. */
+  sideBySide: boolean;
 }
 
 export interface PositionedTimeBlock {
@@ -296,16 +304,27 @@ function packLanes(raw: RawPositioned[]): PositionedAppointment[] {
     }
 
     const totalCols = Math.max(lanes.length, 1);
-    members.forEach(({ i, item }, memberOrder) => {
-      const overlapsAnyone = members.some(
+    const overlapFlags = members.map(({ item }, memberOrder) =>
+      members.some(
         (other, k) => k !== memberOrder && minutesOverlap(item, other.item)
-      );
+      )
+    );
+    const clusterSideBySide =
+      overlapFlags.some(Boolean) &&
+      members.every(({ item }, memberOrder) => {
+        if (!overlapFlags[memberOrder]) return true;
+        return item.endMin - item.startMin < SIDE_BY_SIDE_OVERLAP_MAX_MINUTES;
+      });
+
+    members.forEach(({ i, item }, memberOrder) => {
+      const overlapsAnyone = overlapFlags[memberOrder];
       out[i] = {
         appointment: item.apt,
         topPct: item.topPct,
         heightPct: item.heightPct,
         col: overlapsAnyone ? colByMember[memberOrder] : 0,
         totalCols: overlapsAnyone ? totalCols : 1,
+        sideBySide: overlapsAnyone && clusterSideBySide,
       };
     });
   }
@@ -341,10 +360,11 @@ export function overlapLaneBoxStyle(
 }
 
 /**
- * Fresha-style cascade for narrow viewports: later overlapping pills
- * indent to the right and sit on top, leaving a tappable colour strip
- * of the booking underneath. Lane 0 stays nearly full width so names
- * stay readable instead of splitting a ~40px phone column in half.
+ * Fresha-style cascade for overlapping longer visits: later pills indent
+ * to the right and sit on top, leaving a tappable colour strip of the
+ * booking underneath. Short overlapping visits (under
+ * `SIDE_BY_SIDE_OVERLAP_MAX_MINUTES`) use `overlapLaneBoxStyle` instead
+ * so two 30-minute add-ons stay next to each other.
  */
 export function overlapLaneCascadeStyle(
   col: number,
