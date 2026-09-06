@@ -74,6 +74,17 @@ export function clientDisplayName(
   return name || 'Unknown client';
 }
 
+/** True when the visit's end (or start, if no end) is already in the past. */
+export function appointmentHasEnded(
+  appointment: { booking_time: string | null; end_time: string | null },
+  nowMs: number = Date.now()
+): boolean {
+  const iso = appointment.end_time || appointment.booking_time;
+  if (!iso) return false;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) && ms <= nowMs;
+}
+
 /** Cancelled lifecycle statuses (any party). */
 export function isAppointmentCanceled(status: string | null): boolean {
   const s = (status || '').toLowerCase().trim();
