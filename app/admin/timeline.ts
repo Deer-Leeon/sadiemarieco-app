@@ -45,6 +45,28 @@ export const START_HOUR = 9;  // 9 AM — first visible hour
 export const END_HOUR = 21;   // 9 PM — last visible hour (exclusive end)
 export const HOURS = END_HOUR - START_HOUR; // 12
 
+/** Labels for the start of each visible hour row (9 AM … 8 PM). */
+export const HOUR_AXIS_START_LABELS = [
+  '9 AM',
+  '10 AM',
+  '11 AM',
+  '12 PM',
+  '1 PM',
+  '2 PM',
+  '3 PM',
+  '4 PM',
+  '5 PM',
+  '6 PM',
+  '7 PM',
+  '8 PM',
+] as const;
+
+/** Caption sitting on the closing 9 PM rule, below the last hour row. */
+export const HOUR_AXIS_END_LABEL = '9 PM';
+
+/** Strip under the 8–9 PM hour so the 9 PM label stays visible. */
+export const HOUR_END_CAPTION_PX = 18;
+
 /**
  * Minimum pill height in pixels. Micro-appointments (e.g. 15-min touch-ups)
  * would otherwise become unclickable slivers as the parent shrinks. We
