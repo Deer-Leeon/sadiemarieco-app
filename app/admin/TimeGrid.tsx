@@ -17,8 +17,6 @@ import {
 
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
-import ClosedHoursHatch from './components/ClosedHoursHatch';
-import HourAxisColumn, { HourRules } from './components/HourAxisColumn';
 import { ExtraCountBadge } from './components/ExtraCountBadge';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
@@ -26,10 +24,9 @@ import { settlementAriaLabel } from './settlementDisplay';
 import { getServiceColor } from './serviceColors';
 import {
   HOURS,
-  HOUR_END_CAPTION_PX,
+  HOUR_AXIS_START_LABELS,
   MIN_PILL_HEIGHT_PX,
   START_HOUR,
-  closedBandPercentsForDay,
   layoutBlocksForDay,
   layoutForDay,
   overlapLaneBoxStyle,
@@ -174,8 +171,6 @@ export default function TimeGrid({
   onAppointmentClick,
   onBlockClick,
   onHourClick,
-  scheduleAvailability = null,
-  scheduleOverrides = null,
 }: Props) {
   const days = buildDays(currentDate, daysToShow);
   const columns = buildColumns(days, appointments, timeBlocks);
@@ -223,12 +218,6 @@ export default function TimeGrid({
             onAppointmentClick={onAppointmentClick}
             onBlockClick={onBlockClick}
             onHourClick={onHourClick}
-            hatchBands={closedBandPercentsForDay(
-              col.date,
-              col.items.map((item) => item.appointment),
-              scheduleAvailability,
-              scheduleOverrides
-            )}
             cascadeOverlap={cascadeOverlap}
           />
         ))}
@@ -301,7 +290,19 @@ function DayHeader({
 
 function TimeLabelColumn() {
   return (
-    <HourAxisColumn labelClassName="pr-2 text-[10px] uppercase tracking-widest text-stone-400 leading-none" />
+    <div
+      className="grid border-r border-stone-200"
+      style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+    >
+      {HOUR_AXIS_START_LABELS.map((label) => (
+        <div
+          key={label}
+          className="border-t border-stone-200 pr-2 pt-1 text-right text-[10px] uppercase tracking-widest text-stone-400"
+        >
+          {label}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -311,7 +312,6 @@ function DayColumnView({
   onAppointmentClick,
   onBlockClick,
   onHourClick,
-  hatchBands,
   cascadeOverlap,
 }: {
   column: DayColumn;
@@ -319,73 +319,66 @@ function DayColumnView({
   onAppointmentClick?: (appointment: Appointment) => void;
   onBlockClick?: (block: TimeBlock) => void;
   onHourClick?: (date: Date, hour: number) => void;
-  hatchBands: { topPct: number; heightPct: number }[];
   cascadeOverlap: boolean;
 }) {
-  // Layered structure:
-  //   * `.relative` parent — appointment-pill coordinate space.
-  //   * closed-hours hatch — background wash behind hour lines.
-  //   * hour-band buttons (z-[2]) — empty-space clicks open the booker.
-  //   * inner gridlines — pointer-events-none so they don't steal clicks.
-  //   * blocks (z-10) and appointment pills (z-20) sit above the bands.
   return (
-    <div className="flex h-full min-h-0 flex-col border-l border-stone-200">
-      <div className="relative min-h-0 flex-1 isolate">
-        <ClosedHoursHatch bands={hatchBands} />
-        <HourRules />
-        {onHourClick ? (
-          <div
-            className="absolute inset-0 z-2 grid"
-            style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
-          >
-            {Array.from({ length: HOURS }, (_, i) => {
-              const hour = START_HOUR + i;
-              const suffix =
-                hour === 0
-                  ? '12 AM'
-                  : hour < 12
-                    ? `${hour} AM`
-                    : hour === 12
-                      ? '12 PM'
-                      : `${hour - 12} PM`;
-              return (
-                <button
-                  key={hour}
-                  type="button"
-                  aria-label={`Book or block time starting at ${suffix}`}
-                  className="w-full border-t border-transparent transition-colors hover:bg-stone-900/[0.04] focus:outline-none focus-visible:bg-stone-900/[0.06] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-400/60"
-                  onClick={() => onHourClick(column.date, hour)}
-                />
-              );
-            })}
-          </div>
-        ) : null}
-        {column.blocks.map((pb) => (
-          <TimeBlockPill
-            key={pb.block.id}
-            block={pb.block}
-            topPct={pb.topPct}
-            heightPct={pb.heightPct}
-            compact
-            removing={removingBlockId === pb.block.id}
-            className="ml-0.5 w-[calc(100%-4px)]"
-            onClick={onBlockClick ? () => onBlockClick(pb.block) : undefined}
-          />
-        ))}
-        {column.items.map((pa) => (
-          <AppointmentBlock
-            key={pa.appointment.id}
-            positioned={pa}
-            onClick={onAppointmentClick}
-            cascadeOverlap={cascadeOverlap}
-          />
+    <div className="relative border-l border-stone-200">
+      <div
+        className="pointer-events-none absolute inset-0 z-1 grid"
+        style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+        aria-hidden="true"
+      >
+        {Array.from({ length: HOURS }, (_, i) => (
+          <div key={i} className="border-t border-stone-200" />
         ))}
       </div>
-      <div
-        className="shrink-0"
-        style={{ height: HOUR_END_CAPTION_PX }}
-        aria-hidden="true"
-      />
+      {onHourClick ? (
+        <div
+          className="absolute inset-0 z-2 grid"
+          style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+        >
+          {Array.from({ length: HOURS }, (_, i) => {
+            const hour = START_HOUR + i;
+            const suffix =
+              hour === 0
+                ? '12 AM'
+                : hour < 12
+                  ? `${hour} AM`
+                  : hour === 12
+                    ? '12 PM'
+                    : `${hour - 12} PM`;
+            return (
+              <button
+                key={hour}
+                type="button"
+                aria-label={`Book or block time starting at ${suffix}`}
+                className="w-full border-t border-transparent transition-colors hover:bg-stone-900/[0.04] focus:outline-none focus-visible:bg-stone-900/[0.06] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-400/60"
+                onClick={() => onHourClick(column.date, hour)}
+              />
+            );
+          })}
+        </div>
+      ) : null}
+      {column.blocks.map((pb) => (
+        <TimeBlockPill
+          key={pb.block.id}
+          block={pb.block}
+          topPct={pb.topPct}
+          heightPct={pb.heightPct}
+          compact
+          removing={removingBlockId === pb.block.id}
+          className="ml-0.5 w-[calc(100%-4px)]"
+          onClick={onBlockClick ? () => onBlockClick(pb.block) : undefined}
+        />
+      ))}
+      {column.items.map((pa) => (
+        <AppointmentBlock
+          key={pa.appointment.id}
+          positioned={pa}
+          onClick={onAppointmentClick}
+          cascadeOverlap={cascadeOverlap}
+        />
+      ))}
     </div>
   );
 }
