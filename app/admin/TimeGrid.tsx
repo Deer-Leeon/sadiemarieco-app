@@ -17,6 +17,7 @@ import {
 
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
+import ClosedHoursHatch from './components/ClosedHoursHatch';
 import { ExtraCountBadge } from './components/ExtraCountBadge';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
@@ -27,6 +28,7 @@ import {
   HOUR_AXIS_START_LABELS,
   MIN_PILL_HEIGHT_PX,
   START_HOUR,
+  closedBandPercentsForDay,
   layoutBlocksForDay,
   layoutForDay,
   overlapLaneBoxStyle,
@@ -171,6 +173,8 @@ export default function TimeGrid({
   onAppointmentClick,
   onBlockClick,
   onHourClick,
+  scheduleAvailability = null,
+  scheduleOverrides = null,
 }: Props) {
   const days = buildDays(currentDate, daysToShow);
   const columns = buildColumns(days, appointments, timeBlocks);
@@ -218,6 +222,12 @@ export default function TimeGrid({
             onAppointmentClick={onAppointmentClick}
             onBlockClick={onBlockClick}
             onHourClick={onHourClick}
+            hatchBands={closedBandPercentsForDay(
+              col.date,
+              col.items.map((item) => item.appointment),
+              scheduleAvailability,
+              scheduleOverrides
+            )}
             cascadeOverlap={cascadeOverlap}
           />
         ))}
@@ -312,6 +322,7 @@ function DayColumnView({
   onAppointmentClick,
   onBlockClick,
   onHourClick,
+  hatchBands,
   cascadeOverlap,
 }: {
   column: DayColumn;
@@ -319,10 +330,12 @@ function DayColumnView({
   onAppointmentClick?: (appointment: Appointment) => void;
   onBlockClick?: (block: TimeBlock) => void;
   onHourClick?: (date: Date, hour: number) => void;
+  hatchBands: { topPct: number; heightPct: number }[];
   cascadeOverlap: boolean;
 }) {
   return (
     <div className="relative border-l border-stone-200">
+      <ClosedHoursHatch bands={hatchBands} />
       <div
         className="pointer-events-none absolute inset-0 z-1 grid"
         style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
