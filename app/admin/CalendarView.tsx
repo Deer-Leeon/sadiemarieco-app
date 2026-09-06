@@ -352,7 +352,6 @@ function DayCellView({
         {onDayClick ? (
           <button
             type="button"
-            onClick={() => onDayClick(cell.date)}
             title={`Open day view for ${cell.dateKey}`}
             aria-label={`Open day view for ${cell.dateKey}`}
             className={`${dayNumClass} transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/30 ${
@@ -360,6 +359,8 @@ function DayCellView({
                 ? 'hover:bg-stone-800'
                 : 'hover:bg-stone-900 hover:text-stone-50'
             }`}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onDayClick(cell.date)}
           >
             {dayNum}
           </button>

@@ -11,6 +11,7 @@ import {
 } from '@/lib/studio-calendar';
 
 import ClosedHoursHatch from './components/ClosedHoursHatch';
+import HourAxisColumn, { HourRules } from './components/HourAxisColumn';
 import { ExtraCountBadge } from './components/ExtraCountBadge';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
@@ -20,8 +21,9 @@ import { settlementAriaLabel } from './settlementDisplay';
 import { getServiceColor } from './serviceColors';
 import {
   HOURS,
+  HOUR_AXIS_START_LABELS,
+  HOUR_END_CAPTION_PX,
   MIN_PILL_HEIGHT_PX,
-  MODAL_HOUR_GRID_ROWS,
   START_HOUR,
   closedBandPercentsForDay,
   layoutBlocksForDay,
@@ -35,21 +37,6 @@ import type {
   StudioAvailabilityBlock,
   StudioDateOverride,
 } from '@/lib/studio-schedule-windows';
-
-const HOUR_LABELS = [
-  '9 AM',
-  '10 AM',
-  '11 AM',
-  '12 PM',
-  '1 PM',
-  '2 PM',
-  '3 PM',
-  '4 PM',
-  '5 PM',
-  '6 PM',
-  '7 PM',
-  '8 PM',
-] as const;
 
 function studioHeaderParts(date: Date): { weekday: string; monthDay: string } {
   const key = studioDateKey(date);
@@ -178,7 +165,7 @@ export default function SingleDayModal({
             Click an hour to book or block · click a block to edit
           </p>
 
-          <div className="min-h-0 flex-1 overflow-hidden px-1 pb-1 pt-1">
+          <div className="min-h-0 flex-1 overflow-hidden px-1 pb-1">
             <DayTimeline
               positioned={positioned}
               positionedBlocks={positionedBlocks}
@@ -289,22 +276,7 @@ function DayTimeline({
 
 function TimeLabelColumn() {
   return (
-    <div
-      className="grid h-full min-h-0 border-r border-stone-200"
-      style={{ gridTemplateRows: MODAL_HOUR_GRID_ROWS }}
-    >
-      {Array.from({ length: HOURS }, (_, i) => {
-        const hour = START_HOUR + i;
-        return (
-          <div
-            key={hour}
-            className="flex items-start justify-end border-t border-stone-200 pr-3 pt-2 text-[11px] font-medium uppercase tracking-widest text-stone-400"
-          >
-            {HOUR_LABELS[i]}
-          </div>
-        );
-      })}
-    </div>
+    <HourAxisColumn labelClassName="pr-3 text-[11px] font-medium uppercase tracking-widest text-stone-400 leading-none" />
   );
 }
 
@@ -328,67 +300,65 @@ function DayBody({
   const isEmpty = positioned.length === 0 && positionedBlocks.length === 0;
 
   return (
-    <div className="relative h-full min-h-0">
-      <ClosedHoursHatch bands={hatchBands} />
-      <div
-        className="pointer-events-none absolute inset-0 z-1 grid h-full"
-        style={{ gridTemplateRows: MODAL_HOUR_GRID_ROWS }}
-        aria-hidden="true"
-      >
-        {Array.from({ length: HOURS }, (_, i) => (
-          <div key={i} className="border-t border-stone-200" />
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="relative min-h-0 flex-1 isolate">
+        <ClosedHoursHatch bands={hatchBands} />
+        <HourRules />
+        <div
+          className="absolute inset-0 z-2 grid h-full"
+          style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+        >
+          {Array.from({ length: HOURS }, (_, i) => {
+            const hour = START_HOUR + i;
+            return (
+              <button
+                key={hour}
+                type="button"
+                aria-label={`Book or block time starting at ${HOUR_AXIS_START_LABELS[i]}`}
+                className="w-full border-t border-transparent transition-colors hover:bg-stone-900/[0.04] focus:outline-none focus-visible:bg-stone-900/[0.06] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-400/60"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onHourClick(hour);
+                }}
+              />
+            );
+          })}
+        </div>
+
+        {isEmpty && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <p className="text-xs uppercase tracking-[0.28em] text-stone-400">
+              No bookings — click an hour to book or block
+            </p>
+          </div>
+        )}
+
+        {positionedBlocks.map((pb) => (
+          <TimeBlockPill
+            key={pb.block.id}
+            block={pb.block}
+            topPct={pb.topPct}
+            heightPct={pb.heightPct}
+            removing={removingBlockId === pb.block.id}
+            spacious
+            className="ml-0.5 w-[calc(100%-0.25rem)] rounded-md"
+            onClick={onBlockClick ? () => onBlockClick(pb.block) : undefined}
+          />
+        ))}
+
+        {positioned.map((pa) => (
+          <ModalAppointment
+            key={pa.appointment.id}
+            positioned={pa}
+            onClick={onAppointmentClick}
+          />
         ))}
       </div>
-
       <div
-        className="absolute inset-0 grid h-full"
-        style={{ gridTemplateRows: MODAL_HOUR_GRID_ROWS }}
-      >
-        {Array.from({ length: HOURS }, (_, i) => {
-          const hour = START_HOUR + i;
-          return (
-            <button
-              key={hour}
-              type="button"
-              aria-label={`Book or block time starting at ${HOUR_LABELS[i]}`}
-              className="w-full border-t border-transparent transition-colors hover:bg-stone-900/[0.04] focus:outline-none focus-visible:bg-stone-900/[0.06] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-400/60"
-              onClick={(e) => {
-                e.stopPropagation();
-                onHourClick(hour);
-              }}
-            />
-          );
-        })}
-      </div>
-
-      {isEmpty && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <p className="text-xs uppercase tracking-[0.28em] text-stone-400">
-            No bookings — click an hour to book or block
-          </p>
-        </div>
-      )}
-
-      {positionedBlocks.map((pb) => (
-        <TimeBlockPill
-          key={pb.block.id}
-          block={pb.block}
-          topPct={pb.topPct}
-          heightPct={pb.heightPct}
-          removing={removingBlockId === pb.block.id}
-          spacious
-          className="ml-0.5 w-[calc(100%-0.25rem)] rounded-md"
-          onClick={onBlockClick ? () => onBlockClick(pb.block) : undefined}
-        />
-      ))}
-
-      {positioned.map((pa) => (
-        <ModalAppointment
-          key={pa.appointment.id}
-          positioned={pa}
-          onClick={onAppointmentClick}
-        />
-      ))}
+        className="shrink-0"
+        style={{ height: HOUR_END_CAPTION_PX }}
+        aria-hidden="true"
+      />
     </div>
   );
 }

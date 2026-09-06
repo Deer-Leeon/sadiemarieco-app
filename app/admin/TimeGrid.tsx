@@ -18,6 +18,7 @@ import {
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import ClosedHoursHatch from './components/ClosedHoursHatch';
+import HourAxisColumn, { HourRules } from './components/HourAxisColumn';
 import { ExtraCountBadge } from './components/ExtraCountBadge';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
@@ -25,6 +26,7 @@ import { settlementAriaLabel } from './settlementDisplay';
 import { getServiceColor } from './serviceColors';
 import {
   HOURS,
+  HOUR_END_CAPTION_PX,
   MIN_PILL_HEIGHT_PX,
   START_HOUR,
   closedBandPercentsForDay,
@@ -249,28 +251,35 @@ function DayHeader({
   const dayNum = formatStudioDayOfMonth(dateKey || date);
 
   const handleClick = () => onClick?.(date);
-  const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!onClick) return;
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onClick(date);
-    }
-  };
+
+  if (!clickable) {
+    return (
+      <div className="px-2 py-3 text-center">
+        <div className="font-serif text-sm tracking-wide text-stone-900">
+          {weekday}
+        </div>
+        <div className="mt-1 flex items-center justify-center">
+          <span
+            className={
+              today
+                ? 'inline-flex h-7 w-7 items-center justify-center rounded-full bg-stone-900 font-serif text-sm text-stone-50'
+                : 'font-serif text-xl text-stone-900'
+            }
+          >
+            {dayNum}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div
-      onClick={clickable ? handleClick : undefined}
-      onKeyDown={clickable ? handleKey : undefined}
-      role={clickable ? 'button' : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      aria-label={
-        clickable ? `Open day view for ${weekday} ${dayNum}` : undefined
-      }
-      className={`px-2 py-3 text-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/30 ${
-        clickable
-          ? 'cursor-pointer hover:bg-stone-100/70 active:bg-stone-200/60'
-          : ''
-      }`}
+    <button
+      type="button"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={handleClick}
+      aria-label={`Open day view for ${weekday} ${dayNum}`}
+      className="w-full px-2 py-3 text-center transition-colors cursor-pointer hover:bg-stone-100/70 active:bg-stone-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-900/30"
     >
       <div className="font-serif text-sm tracking-wide text-stone-900">
         {weekday}
@@ -286,43 +295,13 @@ function DayHeader({
           {dayNum}
         </span>
       </div>
-    </div>
+    </button>
   );
 }
 
-const HOUR_LABELS = [
-  '9 AM',
-  '10 AM',
-  '11 AM',
-  '12 PM',
-  '1 PM',
-  '2 PM',
-  '3 PM',
-  '4 PM',
-  '5 PM',
-  '6 PM',
-  '7 PM',
-  '8 PM',
-] as const;
-
 function TimeLabelColumn() {
   return (
-    <div
-      className="grid border-r border-stone-200"
-      style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
-    >
-      {Array.from({ length: HOURS }, (_, i) => {
-        const hour = START_HOUR + i;
-        return (
-          <div
-            key={hour}
-            className="border-t border-stone-200 pr-2 pt-1 text-right text-[10px] uppercase tracking-widest text-stone-400"
-          >
-            {HOUR_LABELS[i]}
-          </div>
-        );
-      })}
-    </div>
+    <HourAxisColumn labelClassName="pr-2 text-[10px] uppercase tracking-widest text-stone-400 leading-none" />
   );
 }
 
@@ -350,64 +329,63 @@ function DayColumnView({
   //   * inner gridlines — pointer-events-none so they don't steal clicks.
   //   * blocks (z-10) and appointment pills (z-20) sit above the bands.
   return (
-    <div className="relative border-l border-stone-200">
-      <ClosedHoursHatch bands={hatchBands} />
-      <div
-        className="pointer-events-none absolute inset-0 z-1 grid"
-        style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
-        aria-hidden="true"
-      >
-        {Array.from({ length: HOURS }, (_, i) => (
-          <div key={i} className="border-t border-stone-200" />
+    <div className="flex h-full min-h-0 flex-col border-l border-stone-200">
+      <div className="relative min-h-0 flex-1 isolate">
+        <ClosedHoursHatch bands={hatchBands} />
+        <HourRules />
+        {onHourClick ? (
+          <div
+            className="absolute inset-0 z-2 grid"
+            style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
+          >
+            {Array.from({ length: HOURS }, (_, i) => {
+              const hour = START_HOUR + i;
+              const suffix =
+                hour === 0
+                  ? '12 AM'
+                  : hour < 12
+                    ? `${hour} AM`
+                    : hour === 12
+                      ? '12 PM'
+                      : `${hour - 12} PM`;
+              return (
+                <button
+                  key={hour}
+                  type="button"
+                  aria-label={`Book or block time starting at ${suffix}`}
+                  className="w-full border-t border-transparent transition-colors hover:bg-stone-900/[0.04] focus:outline-none focus-visible:bg-stone-900/[0.06] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-400/60"
+                  onClick={() => onHourClick(column.date, hour)}
+                />
+              );
+            })}
+          </div>
+        ) : null}
+        {column.blocks.map((pb) => (
+          <TimeBlockPill
+            key={pb.block.id}
+            block={pb.block}
+            topPct={pb.topPct}
+            heightPct={pb.heightPct}
+            compact
+            removing={removingBlockId === pb.block.id}
+            className="ml-0.5 w-[calc(100%-4px)]"
+            onClick={onBlockClick ? () => onBlockClick(pb.block) : undefined}
+          />
+        ))}
+        {column.items.map((pa) => (
+          <AppointmentBlock
+            key={pa.appointment.id}
+            positioned={pa}
+            onClick={onAppointmentClick}
+            cascadeOverlap={cascadeOverlap}
+          />
         ))}
       </div>
-      {onHourClick ? (
-        <div
-          className="absolute inset-0 z-2 grid"
-          style={{ gridTemplateRows: `repeat(${HOURS}, minmax(0, 1fr))` }}
-        >
-          {Array.from({ length: HOURS }, (_, i) => {
-            const hour = START_HOUR + i;
-            const suffix =
-              hour === 0
-                ? '12 AM'
-                : hour < 12
-                  ? `${hour} AM`
-                  : hour === 12
-                    ? '12 PM'
-                    : `${hour - 12} PM`;
-            return (
-              <button
-                key={hour}
-                type="button"
-                aria-label={`Book or block time starting at ${suffix}`}
-                className="w-full border-t border-transparent transition-colors hover:bg-stone-900/[0.04] focus:outline-none focus-visible:bg-stone-900/[0.06] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-400/60"
-                onClick={() => onHourClick(column.date, hour)}
-              />
-            );
-          })}
-        </div>
-      ) : null}
-      {column.blocks.map((pb) => (
-        <TimeBlockPill
-          key={pb.block.id}
-          block={pb.block}
-          topPct={pb.topPct}
-          heightPct={pb.heightPct}
-          compact
-          removing={removingBlockId === pb.block.id}
-          className="ml-0.5 w-[calc(100%-4px)]"
-          onClick={onBlockClick ? () => onBlockClick(pb.block) : undefined}
-        />
-      ))}
-      {column.items.map((pa) => (
-        <AppointmentBlock
-          key={pa.appointment.id}
-          positioned={pa}
-          onClick={onAppointmentClick}
-          cascadeOverlap={cascadeOverlap}
-        />
-      ))}
+      <div
+        className="shrink-0"
+        style={{ height: HOUR_END_CAPTION_PX }}
+        aria-hidden="true"
+      />
     </div>
   );
 }
