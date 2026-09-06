@@ -3,6 +3,7 @@
 import type { Appointment } from './types';
 import { appointmentServiceLabel, clientDisplayName, isAppointmentCanceled } from './helpers';
 import { SettlementBadge } from './components/SettlementMarker';
+import { isAppointmentSettled } from './settlementDisplay';
 import { getServiceColor } from './serviceColors';
 import { formatStudioClock } from '@/lib/studio-calendar';
 
@@ -70,7 +71,8 @@ function isCanceledStatus(status: string | null): boolean {
 
 /**
  * Bookings-list row — shared by /admin list view and client appointment
- * history. Full-width service colour block, time column, status pill.
+ * history. Full-width service colour block, time column, trailing
+ * payment/status. Client history omits the Confirmed pill.
  */
 export function AppointmentListRow({
   appointment,
@@ -93,6 +95,9 @@ export function AppointmentListRow({
   const isCanceled = isCanceledStatus(appointment.status);
   const readOnly = isNoShow || isCanceled;
   const strike = isNoShow || (variant === 'client' && isCanceled);
+  const showStatusPill = variant !== 'client' || statusLower !== 'confirmed';
+  const showTrailingBadges =
+    showStatusPill || isAppointmentSettled(appointment.terminal_payment);
 
   const color =
     isNoShow || isPending || (variant === 'client' && isCanceled)
@@ -158,10 +163,16 @@ export function AppointmentListRow({
           </p>
         )}
       </div>
-      <div className="flex flex-col items-end gap-1">
-        <AppointmentStatusPill status={appointment.status} />
-        <SettlementBadge payment={appointment.terminal_payment} />
-      </div>
+      {showTrailingBadges ? (
+        <div className="flex flex-col items-end gap-1">
+          {showStatusPill ? (
+            <AppointmentStatusPill status={appointment.status} />
+          ) : null}
+          <SettlementBadge payment={appointment.terminal_payment} />
+        </div>
+      ) : (
+        <span />
+      )}
     </>
   );
 
