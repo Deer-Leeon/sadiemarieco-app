@@ -32,7 +32,7 @@ function copyForKind(kind: ManualSmsKind): { title: string; body: string } {
   }
   return {
     title: 'Send review text?',
-    body: 'They will get a general Google review request by text — no service name — with the usual rates and STOP / HELP footer. “Ask after next visit” will turn off so a scheduled send does not go out too.',
+    body: 'They will get a general Google review request by text — no service name — with the usual rates and STOP / HELP footer. “Ask after next visit” will turn off. The automatic 30-minute thank-you still goes; it just will not ask for a review again.',
   };
 }
 

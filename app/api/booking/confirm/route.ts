@@ -16,7 +16,7 @@
  *      dashboard + attendee emails show "Confirmed" (not
  *      "Unconfirmed"). Runs AFTER Postgres so a Cal hiccup never
  *      blocks the card vault. Local DB is source of truth.
- *   4. Notifications — confirmation SMS + QStash 24h/1h reminders
+ *   4. Notifications — confirmation SMS + QStash 48h/24h reminders
  *      (and reminder emails) via `notifyBookingConfirmed`, gated on
  *      `appointments.sms_opt_in` from the Cal sms-consent checkbox.
  *

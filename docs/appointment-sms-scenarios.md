@@ -73,36 +73,20 @@ Sadie Marie: Reminder — your Brow Lamination is in two days at 10:00am. Please
 
 ---
 
-### Gets the one-hour reminder
+### Gets a post-visit text (~30 minutes after the visit)
 
-**SMS** (lash/fill example)
+Sent for everyone who opted into texts (cancel / no-show skip). If **Ask after next visit** is on, this same text also asks for a Google review and then turns the box off.
 
-```
-Sadie Marie: Your 2 Week Fill is in one hour. Please arrive with clean lashes and no eye makeup. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
-```
-
----
-
-### Gets a Google review request (~30 minutes after the visit)
-
-Only if they opted into texts **and** **Ask for a Google review after their next visit** is on in their profile. The box turns off after this text is sent. Cancel / no-show skip the text and leave the box on.
-
-**SMS**
-
-```
-Sadie Marie: Hi Sarah! I hope you loved your 2 Week Fill today. If you have a moment, a Google review would mean the world: https://g.page/r/CQ0Tmk7shapREBM/review. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
-```
-
----
-
-### Gets the day-after thank-you
-
-Sent about 24 hours after a confirmed visit for everyone who opted in (separate from the review ask).
-
-**SMS**
+**SMS** — thank-you only (toggle off)
 
 ```
 Sadie Marie: Hi Sarah! Thank you for visiting Sadie Marie, I loved having you in! Book your next visit anytime: https://www.sadiemarie.co. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+**SMS** — thank-you + review (toggle on)
+
+```
+Sadie Marie: Hi Sarah! Thank you for visiting Sadie Marie, I loved having you in! Book your next visit anytime: https://www.sadiemarie.co. If you have a moment, a Google review would mean the world: https://g.page/r/CQ0Tmk7shapREBM/review. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 ---
@@ -183,9 +167,7 @@ Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July
 | Client | Cancel late, no charge | none |
 | Client | ~48h before (brows) | Reminder |
 | Client | ~24h before (lashes) | Reminder |
-| Client | ~1h before | Reminder |
-| Client | ~30 min after visit (profile box on) | Google review request |
-| Client | Day after visit | Thank-you |
+| Client | ~30 min after visit | Thank-you (plus Google review ask if profile box on) |
 | Client | Abandon checkout | none |
 | Admin | Book for client | Confirmation |
 | Admin | Cancel | Cancel |

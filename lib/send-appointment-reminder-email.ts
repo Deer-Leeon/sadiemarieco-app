@@ -12,7 +12,6 @@ import {
 } from '@/lib/appointment-service-lookup';
 import {
   reminderEmailTemplateKey,
-  reminderSoonTimePhrase,
   resolveEmailCopy,
 } from '@/lib/email-message-templates';
 import {
@@ -98,7 +97,6 @@ export async function sendAppointmentReminderEmail(args: {
   endTime?: string | null;
   reminderKind: ReminderServiceKind;
   timing: ReminderEmailTiming;
-  minutesUntil?: number;
   expectedBookingTime?: string;
   calEventTypeId?: number | null;
 }): Promise<{ ok: boolean; skipped?: string; error?: string; id?: string }> {
@@ -139,9 +137,6 @@ export async function sendAppointmentReminderEmail(args: {
   const kind = args.reminderKind;
   const templateKey = reminderEmailTemplateKey(kind, args.timing);
   const vars: Record<string, string> = { service: displayName };
-  if (args.timing === 'immediate') {
-    vars.timePhrase = reminderSoonTimePhrase(kind, args.minutesUntil);
-  }
   const bodyCopy = await resolveEmailCopy(templateKey, vars);
 
   const { date, time } = formatBookingStartParts(args.bookingTime);
@@ -213,6 +208,9 @@ export async function deliverScheduledReminderEmail(args: {
   expectedBookingTime: string;
   timing: 'lead' | '1h';
 }): Promise<{ ok: boolean; skipped?: string; error?: string }> {
+  if (args.timing === '1h') {
+    return { ok: true, skipped: 'kind_retired' };
+  }
   const { rows } = await sql<AppointmentReminderRow>`
     SELECT
       cal_event_id,

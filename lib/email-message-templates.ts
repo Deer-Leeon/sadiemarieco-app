@@ -14,11 +14,7 @@ export type EmailTemplateKey =
   | 'confirmation'
   | 'consent_request'
   | 'reminder_lead_brows'
-  | 'reminder_lead_lashes'
-  | 'reminder_1h_brows'
-  | 'reminder_1h_lashes'
-  | 'reminder_soon_brows'
-  | 'reminder_soon_lashes';
+  | 'reminder_lead_lashes';
 
 export interface EmailTemplateMeta {
   title: string;
@@ -34,10 +30,6 @@ export const EMAIL_TEMPLATE_KEYS: readonly EmailTemplateKey[] = [
   'consent_request',
   'reminder_lead_brows',
   'reminder_lead_lashes',
-  'reminder_1h_brows',
-  'reminder_1h_lashes',
-  'reminder_soon_brows',
-  'reminder_soon_lashes',
 ] as const;
 
 export const EMAIL_TEMPLATE_META: Record<EmailTemplateKey, EmailTemplateMeta> =
@@ -84,51 +76,10 @@ export const EMAIL_TEMPLATE_META: Record<EmailTemplateKey, EmailTemplateMeta> =
         "Your appointment for {{service}} is tomorrow! Please come with clean lashes and no eye makeup. Please refrain from drinking caffeine for at least 4-6 hours before your appointment as it can cause fluttery eyelids. Feel free to bring earbuds with you. I'm so excited to see you!",
       sendingLive: true,
     },
-    reminder_1h_brows: {
-      title: '1-hour reminder — brows',
-      triggers: ['QStash 1-hour reminder for brow / non-lash services.'],
-      allowedPlaceholders: ['service'],
-      requiredPlaceholders: ['service'],
-      defaultBody:
-        "Your appointment for {{service}} is in 1 hour! Please come with clean brows and no makeup. Feel free to bring earbuds with you. I'm so excited to see you!",
-      sendingLive: true,
-    },
-    reminder_1h_lashes: {
-      title: '1-hour reminder — lashes',
-      triggers: ['QStash 1-hour reminder for lash services.'],
-      allowedPlaceholders: ['service'],
-      requiredPlaceholders: ['service'],
-      defaultBody:
-        "Your appointment for {{service}} is in one hour! Please come with clean lashes and no eye makeup. Feel free to bring earbuds with you. I'm so excited to see you!",
-      sendingLive: true,
-    },
-    reminder_soon_brows: {
-      title: 'Soon reminder — brows (fallback timing)',
-      triggers: [
-        'Rare path when the 1h job fires with a custom minutes-until window.',
-      ],
-      allowedPlaceholders: ['service', 'timePhrase'],
-      requiredPlaceholders: ['service', 'timePhrase'],
-      defaultBody:
-        "Your appointment for {{service}} is {{timePhrase}}! Please come with clean brows and no makeup. Feel free to bring earbuds with you. I'm so excited to see you!",
-      sendingLive: true,
-    },
-    reminder_soon_lashes: {
-      title: 'Soon reminder — lashes (fallback timing)',
-      triggers: [
-        'Rare path when the 1h job fires with a custom minutes-until window.',
-      ],
-      allowedPlaceholders: ['service', 'timePhrase'],
-      requiredPlaceholders: ['service', 'timePhrase'],
-      defaultBody:
-        "Your appointment for {{service}} is {{timePhrase}}! Please come with clean lashes and no eye makeup. Feel free to bring earbuds with you. I'm so excited to see you!",
-      sendingLive: true,
-    },
   };
 
 export const SAMPLE_EMAIL_PREVIEW_VARS: Record<string, string> = {
   service: 'Touch Up',
-  timePhrase: 'in 45 minutes',
 };
 
 const MAX_BODY_LENGTH = 2000;
@@ -347,26 +298,8 @@ export async function listEmailTemplateCards(): Promise<EmailTemplateCardWire[]>
 
 export function reminderEmailTemplateKey(
   kind: ReminderServiceKind,
-  timing: ReminderEmailTiming
+  _timing: ReminderEmailTiming
 ): EmailTemplateKey {
   const lash = kind === 'lashes';
-  if (timing === 'lead') {
-    return lash ? 'reminder_lead_lashes' : 'reminder_lead_brows';
-  }
-  if (timing === '1h') {
-    return lash ? 'reminder_1h_lashes' : 'reminder_1h_brows';
-  }
-  // timing === 'immediate'
-  return lash ? 'reminder_soon_lashes' : 'reminder_soon_brows';
-}
-
-export function reminderSoonTimePhrase(
-  kind: ReminderServiceKind,
-  minutesUntil?: number
-): string {
-  const minutes = Math.max(1, Math.round(minutesUntil ?? 1));
-  if (minutes >= 55) {
-    return kind === 'lashes' ? 'in one hour' : 'in 1 hour';
-  }
-  return `in ${minutes} minute${minutes === 1 ? '' : 's'}`;
+  return lash ? 'reminder_lead_lashes' : 'reminder_lead_brows';
 }

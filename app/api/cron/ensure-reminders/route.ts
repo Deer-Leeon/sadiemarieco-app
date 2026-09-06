@@ -1,9 +1,8 @@
 /**
  * GET /api/cron/ensure-reminders
  *
- * Backfill QStash 48h/24h + 1h reminder, day-after feedback, and
- * end+30m Google review-request jobs for confirmed appointments that
- * should receive SMS. Catches admin bookings whose complete/webhook
+ * Backfill QStash 48h/24h reminder and end+30m post-visit SMS jobs
+ * for confirmed appointments that should receive SMS. Catches admin bookings whose complete/webhook
  * notify never published, QStash publish failures, and confirm retries
  * that skipped scheduling.
  *
