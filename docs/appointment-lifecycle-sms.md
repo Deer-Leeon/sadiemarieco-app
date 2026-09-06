@@ -28,7 +28,7 @@ Every way an appointment can be created or altered in the Sadie Marie app, with 
 | **Who** | Client |
 | **Status** | `confirmed` |
 | **SMS** | Yes — confirmation (below) |
-| **Notes** | Also schedules 24h + 1h reminder SMS (QStash) and reminder emails. |
+| **Notes** | Also schedules 48h (brows) / 24h (lashes) reminder SMS (QStash) and reminder emails. |
 
 ```
 Sadie Marie: Your 2 Week Fill is confirmed for Saturday, July 25 at 10:00am. Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
@@ -41,7 +41,7 @@ Sadie Marie: Your 2 Week Fill is confirmed for Saturday, July 25 at 10:00am. Man
 | **Who** | Admin |
 | **Status** | `confirmed` |
 | **SMS** | Yes — same confirmation as checkout |
-| **Notes** | No Stripe vault. `sms_opt_in` forced true. Confirmation + QStash 48h/24h + 1h reminders are queued from both `/api/admin/manual-booking/complete` and the Cal webhook (whichever lands first; the other is idempotent). A 15-minute cron backfills any confirmed booking still missing jobs. |
+| **Notes** | No Stripe vault. `sms_opt_in` forced true. Confirmation + QStash 48h/24h reminders are queued from both `/api/admin/manual-booking/complete` and the Cal webhook (whichever lands first; the other is idempotent). A 15-minute cron backfills any confirmed booking still missing jobs. |
 
 ```
 Sadie Marie: Your 2 Week Fill is confirmed for Saturday, July 25 at 10:00am. Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
@@ -231,64 +231,35 @@ Sadie Marie: Reminder — your 2 Week Fill is tomorrow at 10:00am. Please arrive
 Sadie Marie: Reminder — your Brow Lamination is tomorrow at 10:00am. Please arrive with clean brows and no makeup. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
-### 20. 1h reminder — lash / fill services
-
-| | |
-|---|---|
-| **Who** | System (QStash) |
-| **Status gate** | Must still be `confirmed` |
-| **SMS** | Yes (below) |
-| **Notes** | **No manage link** by design. |
-
-```
-Sadie Marie: Your 2 Week Fill is in one hour. Please arrive with clean lashes and no eye makeup. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
-```
-
-### 21. 1h reminder — brow services
-
-| | |
-|---|---|
-| **Who** | System (QStash) |
-| **Status gate** | Must still be `confirmed` |
-| **SMS** | Yes (below) |
-
-```
-Sadie Marie: Your Brow Lamination is in one hour. Please arrive with clean brows and no makeup. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
-```
-
-### 22. 1h reminder — other services
-
-| | |
-|---|---|
-| **Who** | System (QStash) |
-| **Status gate** | Must still be `confirmed` |
-| **SMS** | Yes (below) |
-
-```
-Sadie Marie: Your Consultation is in one hour. Please arrive a few minutes early. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
-```
-
-### 23. Google review request (~30 min after visit)
+### 23. Post-visit SMS (~30 min after visit)
 
 | | |
 |---|---|
 | **Who** | System (QStash → `/api/qstash/review-request`) |
-| **Status gate** | Must still be `confirmed`; `sms_opt_in`; `clients.review_request_pending` |
+| **Status gate** | Must still be `confirmed`; `sms_opt_in` |
 | **SMS** | Yes (below) |
-| **Notes** | Fire at visit end + 30 minutes. Successful send unchecks the profile box. Cancel / no-show / opt-out skip and leave the box on. Day-after thank-you (`/api/feedback`) still sends separately. |
+| **Notes** | Fire at visit end + 30 minutes. If **Ask after next visit** is on, the text also asks for a Google review and then unchecks the profile box. Cancel / no-show / opt-out skip and leave the box on. |
+
+Thank-you only (toggle off):
 
 ```
-Sadie Marie: Hi Sarah! I hope you loved your 2 Week Fill today. If you have a moment, a Google review would mean the world: https://g.page/r/CQ0Tmk7shapREBM/review. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: Hi Sarah! Thank you for visiting Sadie Marie, I loved having you in! Book your next visit anytime: https://www.sadiemarie.co. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
-### 24. Reminder emails (lead + 1h)
+Thank-you + review (toggle on):
+
+```
+Sadie Marie: Hi Sarah! Thank you for visiting Sadie Marie, I loved having you in! Book your next visit anytime: https://www.sadiemarie.co. If you have a moment, a Google review would mean the world: https://g.page/r/CQ0Tmk7shapREBM/review. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+### 24. Reminder emails (48h / 24h lead)
 
 | | |
 |---|---|
 | **Who** | System (QStash + Resend) |
 | **Status gate** | Must still be `confirmed` |
 | **SMS** | none |
-| **Notes** | Email only (not SMS). Lead: ~48h brows / ~24h lashes; plus 1h before. |
+| **Notes** | Email only (not SMS). Lead: ~48h brows / ~24h lashes. |
 
 ### 25. App booking confirmation email
 

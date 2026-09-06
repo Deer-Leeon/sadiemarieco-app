@@ -133,8 +133,9 @@ idempotency and graceful degradation:
 4. `POST /api/webhook` (legacy handler) receives Cal.com's
    `BOOKING_CREATED`/`BOOKING_CANCELLED`/`BOOKING_RESCHEDULED`/
    `BOOKING_REQUESTED` events, dedupes via `webhook_events`, and dispatches
-   Twilio SMS confirmations + schedules `/api/remind` (24h reminder) and
-   `/api/feedback` (24h follow-up) through Upstash QStash.
+   Twilio SMS confirmations + schedules `/api/remind` (48h/24h reminders) and
+   `/api/qstash/review-request` (post-visit SMS ~30 minutes after the visit)
+   through Upstash QStash.
 
 When changing any piece of this chain, trace forward through all four steps —
 each assumes idempotency and ordering guarantees the others rely on.

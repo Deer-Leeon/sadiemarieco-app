@@ -853,7 +853,7 @@ async function checkTwilio(): Promise<HealthCheckResult[]> {
           name: 'Twilio account',
           category: 'SMS (Twilio)',
           message: `Account active — sender ${from}`,
-          detail: 'Used for booking confirmation, 24h reminders, and feedback SMS',
+          detail: 'Used for booking confirmation, reminders, and post-visit SMS',
         },
         latencyMs
       ),
@@ -1045,7 +1045,7 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
         name: 'QStash API',
         category: 'Scheduled jobs (QStash)',
         status: 'unhealthy',
-        message: 'QSTASH_TOKEN missing — reminder/feedback SMS and abandoned-hold release will not be scheduled',
+        message: 'QSTASH_TOKEN missing — reminder/post-visit SMS and abandoned-hold release will not be scheduled',
       })
     );
   } else {
@@ -1073,7 +1073,7 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
             category: 'Scheduled jobs (QStash)',
             message: `Connected (${qstashUrl}) — ${schedules.length} recurring schedule(s)`,
             detail:
-              'Publishes reminder/feedback SMS, reminder emails, and delayed hold release',
+              'Publishes reminder/post-visit SMS, reminder emails, and delayed hold release',
           },
           latencyMs
         )
@@ -1146,7 +1146,7 @@ async function checkQStash(): Promise<HealthCheckResult[]> {
         name: 'QStash callback URLs',
         category: 'Scheduled jobs (QStash)',
         status: 'healthy',
-        message: 'Reminder, feedback, review-request, reminder-email, and hold-release endpoints',
+        message: 'Reminder, post-visit, reminder-email, and hold-release endpoints',
         detail: `${publicBase}/api/remind · ${publicBase}/api/feedback · ${publicBase}/api/remind-email · ${publicBase}/api/qstash/release-hold · ${publicBase}/api/qstash/review-request · ${publicBase}/api/cron/ensure-reminders`,
       })
     );
@@ -1321,7 +1321,7 @@ async function checkJobFreshness(): Promise<HealthCheckResult[]> {
       warnAfterMs: 45 * 60 * 1000,
       failAfterMs: 3 * 60 * 60 * 1000,
       whatBreaks:
-        'Confirmed bookings can miss 48h/24h/1h reminder texts. Scheduled every 15 minutes via QStash + Vercel Cron.',
+        'Confirmed bookings can miss 48h/24h reminder or 30-minute post-visit texts. Scheduled every 15 minutes via QStash + Vercel Cron.',
     },
   ];
 

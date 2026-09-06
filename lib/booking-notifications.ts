@@ -83,6 +83,7 @@ const impl = require('./booking-notifications.js') as {
     firstName?: string | null;
     serviceName?: string | null;
     bookingUid?: string | null;
+    claimOnce?: boolean;
   }) => Promise<Record<string, unknown>>;
   notifyReviewRequestSms: (args: {
     clientPhone: string | null;

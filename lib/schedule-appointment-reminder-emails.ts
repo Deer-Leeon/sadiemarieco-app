@@ -2,23 +2,20 @@ import {
   createQStashClient,
 } from '@/lib/qstash-client';
 import {
-  inferReminderKindFromServiceName,
   resolveAppointmentService,
-  type ReminderServiceKind,
 } from '@/lib/appointment-service-lookup';
 import {
   normaliseBookingTimeIso,
-  sendAppointmentReminderEmail,
 } from '@/lib/send-appointment-reminder-email';
 
 const PUBLIC_BASE_URL =
   process.env.PUBLIC_BASE_URL || 'https://www.sadiemarie.co';
 
 const HOUR_MS = 60 * 60 * 1000;
-const LEAD_OFFSET_MS: Record<ReminderServiceKind, number> = {
+const LEAD_OFFSET_MS = {
   brows: 48 * HOUR_MS,
   lashes: 24 * HOUR_MS,
-};
+} as const;
 
 export interface ScheduleReminderEmailsArgs {
   bookingUid: string;
@@ -33,14 +30,11 @@ export interface ScheduleReminderEmailsResult {
   scheduled: boolean;
   reason?: string;
   lead?: unknown;
-  oneHour?: unknown;
-  immediateOneHour?: unknown;
 }
 
 async function publishReminderJob(args: {
   bookingUid: string;
   expectedBookingTime: string;
-  timing: 'lead' | '1h';
   notBefore: number;
 }): Promise<unknown> {
   const qstash = createQStashClient();
@@ -52,7 +46,7 @@ async function publishReminderJob(args: {
     body: {
       bookingUid: args.bookingUid,
       expectedBookingTime: args.expectedBookingTime,
-      timing: args.timing,
+      timing: 'lead',
     },
     notBefore: args.notBefore,
   });
@@ -60,10 +54,10 @@ async function publishReminderJob(args: {
 }
 
 /**
- * Queue (or immediately send) pre-appointment reminder emails.
- * Lead timing: 48h for brows, 24h for lashes — skipped when booked inside
- * that window. One-hour reminder is always attempted; sends immediately with
- * dynamic copy when the appointment is less than an hour away.
+ * Queue pre-appointment reminder emails.
+ * Lead timing: 48h for brows, 24h for lashes. If the visit is already
+ * inside that window (including the last 90 minutes), send immediately.
+ * There is no 1-hour reminder email.
  */
 export async function scheduleAppointmentReminderEmails(
   args: ScheduleReminderEmailsArgs,
@@ -74,6 +68,7 @@ export async function scheduleAppointmentReminderEmails(
   }
 
   const nowMs = Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
   const msUntilAppt = appointmentMs - nowMs;
   if (msUntilAppt <= 0) {
     return { scheduled: false, reason: 'appointment_in_past' };
@@ -88,62 +83,22 @@ export async function scheduleAppointmentReminderEmails(
   );
 
   const out: ScheduleReminderEmailsResult = { scheduled: true };
-  const reminderKind =
-    resolved.reminderKind ??
-    inferReminderKindFromServiceName(args.serviceName);
 
   if (process.env.QSTASH_TOKEN) {
     if (resolved.reminderKind) {
       const leadOffset = LEAD_OFFSET_MS[resolved.reminderKind];
-      if (msUntilAppt >= leadOffset) {
-        const notBefore = Math.floor((appointmentMs - leadOffset) / 1000);
-        try {
-          out.lead = await publishReminderJob({
-            bookingUid: args.bookingUid,
-            expectedBookingTime,
-            timing: 'lead',
-            notBefore,
-          });
-        } catch (err) {
-          console.error('[schedule-reminder-emails] lead queue failed', {
-            bookingUid: args.bookingUid,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-    }
-
-    if (msUntilAppt >= HOUR_MS && reminderKind) {
-      const notBefore = Math.floor((appointmentMs - HOUR_MS) / 1000);
+      const notBefore =
+        msUntilAppt >= leadOffset
+          ? Math.floor((appointmentMs - leadOffset) / 1000)
+          : nowSec + 2;
       try {
-        out.oneHour = await publishReminderJob({
+        out.lead = await publishReminderJob({
           bookingUid: args.bookingUid,
           expectedBookingTime,
-          timing: '1h',
           notBefore,
         });
       } catch (err) {
-        console.error('[schedule-reminder-emails] 1h queue failed', {
-          bookingUid: args.bookingUid,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    } else if (args.clientEmail?.trim() && reminderKind) {
-      const minutesUntil = Math.max(1, Math.round(msUntilAppt / 60_000));
-      try {
-        out.immediateOneHour = await sendAppointmentReminderEmail({
-          bookingUid: args.bookingUid,
-          clientEmail: args.clientEmail.trim(),
-          serviceName: args.serviceName,
-          bookingTime: expectedBookingTime,
-          endTime: args.endTime,
-          reminderKind,
-          timing: 'immediate',
-          minutesUntil,
-          expectedBookingTime,
-        });
-      } catch (err) {
-        console.error('[schedule-reminder-emails] immediate 1h send failed', {
+        console.error('[schedule-reminder-emails] lead queue failed', {
           bookingUid: args.bookingUid,
           error: err instanceof Error ? err.message : String(err),
         });

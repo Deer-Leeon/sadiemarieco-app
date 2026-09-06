@@ -1,12 +1,13 @@
 /**
  * POST /api/qstash/review-request
  *
- * Delayed Google-review SMS (~30 minutes after a confirmed visit ends).
+ * Delayed post-visit SMS (~30 minutes after a confirmed visit ends).
+ * Thank-you always (if opted in); Google review ask only when
+ * “Ask after next visit” is on at send time.
  * Scheduled from notifyBookingConfirmed / reschedule / ensure-reminders /
  * admin profile PATCH when “Ask after next visit” is turned back on.
  *
- * Always 200 on logical skips so QStash does not retry. The send path
- * still requires sms_opt_in and clients.review_request_pending.
+ * Always 200 on logical skips so QStash does not retry. Requires sms_opt_in.
  */
 
 import { Receiver } from '@upstash/qstash';

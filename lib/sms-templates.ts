@@ -39,7 +39,6 @@ export type SmsTemplateKey =
   | 'confirmation'
   | 'reminder_48h'
   | 'reminder_24h'
-  | 'reminder_1h'
   | 'reschedule'
   | 'admin_cancel'
   | 'no_show_no_charge'

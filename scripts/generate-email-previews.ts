@@ -27,8 +27,7 @@ interface PreviewVariant {
   title: string;
   category: 'Brows' | 'Lashes';
   kind: 'brows' | 'lashes';
-  timing: 'lead' | '1h' | 'immediate';
-  minutesUntil?: number;
+  timing: 'lead';
   serviceName: string;
   whenSent: string;
   skipNote: string;
@@ -43,7 +42,8 @@ const VARIANTS: PreviewVariant[] = [
     timing: 'lead',
     serviceName: SAMPLE.browsService,
     whenSent: '48 hours before the appointment',
-    skipNote: 'Not sent if the client books less than 48 hours before.',
+    skipNote:
+      'Queued 48 hours before; sent immediately if booked or moved inside that window.',
   },
   {
     id: 'lashes-24h',
@@ -53,49 +53,8 @@ const VARIANTS: PreviewVariant[] = [
     timing: 'lead',
     serviceName: SAMPLE.lashesService,
     whenSent: '24 hours before the appointment',
-    skipNote: 'Not sent if the client books less than 24 hours before.',
-  },
-  {
-    id: 'brows-1h',
-    title: 'Brows — 1 hour before',
-    category: 'Brows',
-    kind: 'brows',
-    timing: '1h',
-    serviceName: SAMPLE.browsService,
-    whenSent: '1 hour before the appointment',
-    skipNote: 'Always scheduled when the appointment is more than 1 hour away.',
-  },
-  {
-    id: 'lashes-1h',
-    title: 'Lashes — 1 hour before',
-    category: 'Lashes',
-    kind: 'lashes',
-    timing: '1h',
-    serviceName: SAMPLE.lashesService,
-    whenSent: '1 hour before the appointment',
-    skipNote: 'Always scheduled when the appointment is more than 1 hour away.',
-  },
-  {
-    id: 'brows-immediate-30m',
-    title: 'Brows — immediate (booked ~30 min before)',
-    category: 'Brows',
-    kind: 'brows',
-    timing: 'immediate',
-    minutesUntil: 30,
-    serviceName: SAMPLE.browsService,
-    whenSent: 'Immediately at booking (appointment less than 1 hour away)',
-    skipNote: 'Time phrase is dynamic, e.g. “in 30 minutes!”',
-  },
-  {
-    id: 'lashes-immediate-30m',
-    title: 'Lashes — immediate (booked ~30 min before)',
-    category: 'Lashes',
-    kind: 'lashes',
-    timing: 'immediate',
-    minutesUntil: 30,
-    serviceName: SAMPLE.lashesService,
-    whenSent: 'Immediately at booking (appointment less than 1 hour away)',
-    skipNote: 'Time phrase is dynamic, e.g. “in 30 minutes!”',
+    skipNote:
+      'Queued 24 hours before; sent immediately if booked or moved inside that window.',
   },
 ];
 
@@ -104,7 +63,6 @@ function buildPreviewHtml(variant: PreviewVariant): string {
     serviceName: variant.serviceName,
     kind: variant.kind,
     timing: variant.timing,
-    minutesUntil: variant.minutesUntil,
   });
 
   return generateReminderHtml({
@@ -123,7 +81,6 @@ function buildIndexHtml(): string {
       serviceName: variant.serviceName,
       kind: variant.kind,
       timing: variant.timing,
-      minutesUntil: variant.minutesUntil,
     });
 
     return `
@@ -293,19 +250,16 @@ function buildIndexHtml(): string {
           <tr>
             <th>Appointment type</th>
             <th>Lead reminder</th>
-            <th>1-hour reminder</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td><strong>Brow Services</strong> (incl. Teeth Whitening)</td>
-            <td>48 hours before — skipped if booked &lt; 48h out</td>
-            <td>1 hour before — or sent immediately with dynamic time if booked &lt; 1h out</td>
+            <td>48 hours before — sent immediately if booked or moved inside that window</td>
           </tr>
           <tr>
             <td><strong>Lash Services</strong></td>
-            <td>24 hours before — skipped if booked &lt; 24h out</td>
-            <td>1 hour before — or sent immediately with dynamic time if booked &lt; 1h out</td>
+            <td>24 hours before — sent immediately if booked or moved inside that window</td>
           </tr>
         </tbody>
       </table>
