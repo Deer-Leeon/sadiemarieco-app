@@ -26,7 +26,7 @@ import {
   closedBandPercentsForDay,
   layoutBlocksForDay,
   layoutForDay,
-  overlapLaneBoxStyle,
+  overlapLaneCascadeStyle,
   safeParseISO,
   type PositionedAppointment,
   type PositionedTimeBlock,
@@ -377,7 +377,7 @@ function DayBody({
           heightPct={pb.heightPct}
           removing={removingBlockId === pb.block.id}
           spacious
-          className="ml-3 w-[calc(100%-1.25rem)] rounded-md"
+          className="ml-0.5 w-[calc(100%-0.25rem)] rounded-md"
           onClick={onBlockClick ? () => onBlockClick(pb.block) : undefined}
         />
       ))}
@@ -408,15 +408,18 @@ function ModalAppointment({
   const start = safeParseISO(apt.booking_time);
   const end = safeParseISO(apt.end_time);
   const timeLabel = start ? formatStudioClockRange(start, end) : '';
+  const durationMinutes =
+    start && end
+      ? Math.max(0, (end.getTime() - start.getTime()) / 60_000)
+      : null;
+  const stacked = durationMinutes == null || durationMinutes >= 40;
 
   const name = clientDisplayName(apt.client_first_name, apt.client_last_name);
   const service = appointmentServiceLabel(apt);
   const overlapping = totalCols > 1;
-  const dense = overlapping;
-
-  const laneBox = overlapLaneBoxStyle(col, totalCols, {
-    outerPx: overlapping ? 2 : 8,
-    gapPx: overlapping ? 2 : 0,
+  const laneBox = overlapLaneCascadeStyle(col, totalCols, {
+    outerPx: 2,
+    indentPx: 12,
   });
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -426,9 +429,9 @@ function ModalAppointment({
   const clickable = !!onClick;
 
   const color = isNoShow ? null : getServiceColor(apt);
-  const baseClasses = dense
-    ? 'absolute z-20 overflow-hidden rounded-md px-1.5 py-1.5 text-left leading-tight shadow-sm transition-colors'
-    : 'absolute z-20 overflow-hidden rounded-md p-2.5 shadow-sm transition-colors text-left';
+  const baseClasses =
+    'absolute z-20 overflow-hidden rounded-md text-left leading-tight shadow-sm transition-colors';
+  const paddingClasses = stacked ? 'px-2.5 py-2 pr-8' : 'px-2.5 py-1 pr-8';
   const variantClasses = isNoShow
     ? 'border-l-[3px] border-stone-400 bg-stone-50 opacity-60'
     : color
@@ -446,16 +449,22 @@ function ModalAppointment({
       type="button"
       onClick={clickable ? handleClick : undefined}
       disabled={!clickable}
-      className={`${baseClasses} ${variantClasses} ${flaggedClasses} ${interactiveClasses}`}
+      className={`${baseClasses} ${paddingClasses} ${variantClasses} ${flaggedClasses} ${interactiveClasses}`}
       title={`${timeLabel}${timeLabel ? ' · ' : ''}${name} — ${service}${isNoShow ? ' (no-show)' : ''}${hasNoShowFlag ? ' · flagged' : ''}${settledLabel ? ` · ${settledLabel}` : ''}`}
       aria-label={`Open booking: ${name}, ${service}${timeLabel ? `, ${timeLabel}` : ''}${isNoShow ? ', no-show' : ''}${hasNoShowFlag ? ', no-show flag' : ''}${settledLabel ? `, ${settledLabel}` : ''}`}
       style={{
         top: `${topPct}%`,
         height: `${heightPct}%`,
-        minHeight: MIN_PILL_HEIGHT_PX,
+        minHeight: stacked ? MIN_PILL_HEIGHT_PX : 34,
         left: laneBox.left,
         width: laneBox.width,
         zIndex: laneBox.zIndex,
+        boxShadow:
+          overlapping && col > 0
+            ? '0 1px 1px rgba(28,25,23,0.06), 0 4px 12px rgba(28,25,23,0.12), 0 0 0 1px rgba(255,255,255,0.75)'
+            : overlapping
+              ? '0 0 0 1px rgba(255,255,255,0.5)'
+              : undefined,
         ...(color && {
           backgroundColor: color.accent,
           color: color.text,
@@ -463,8 +472,8 @@ function ModalAppointment({
       }}
     >
       <span className="pointer-events-none absolute right-1 top-1 z-10 flex items-start gap-0.5">
-        <SettlementCheckMarker payment={apt.terminal_payment} size={dense ? 'sm' : 'md'} />
-        <ExtraCountBadge count={apt.extra_count} size={dense ? 'sm' : 'md'} />
+        <SettlementCheckMarker payment={apt.terminal_payment} size={stacked ? 'md' : 'sm'} />
+        <ExtraCountBadge count={apt.extra_count} size={stacked ? 'md' : 'sm'} />
         {hasNoShowFlag ? (
           <span
             className="inline-flex h-4 w-4 items-center justify-center rounded-sm bg-amber-50/95 text-amber-800 shadow-sm"
@@ -474,36 +483,62 @@ function ModalAppointment({
           </span>
         ) : null}
       </span>
-      <div
-        className={`truncate font-medium ${
-          dense ? 'text-[13px] leading-tight' : 'text-sm'
-        } ${
-          isNoShow
-            ? 'text-gray-400 line-through'
-            : color
-              ? ''
-              : 'text-stone-900'
-        }`}
-        style={color ? { color: color.text } : undefined}
-      >
-        {name}
-      </div>
-      <div
-        className={`mt-0.5 truncate leading-snug ${
-          dense ? 'text-[10px]' : 'text-[11px]'
-        } ${
-          isNoShow
-            ? 'text-gray-400 line-through'
-            : color
-              ? ''
-              : 'text-stone-500'
-        }`}
-        style={color ? { color: color.textMuted } : undefined}
-      >
-        {timeLabel}
-        {timeLabel && service ? ' · ' : ''}
-        {service}
-      </div>
+      {stacked ? (
+        <>
+          <div
+            className={`font-medium leading-tight ${
+              isNoShow
+                ? 'text-gray-400 line-through'
+                : color
+                  ? ''
+                  : 'text-stone-900'
+            }`}
+            style={color ? { color: color.text } : undefined}
+          >
+            {name}
+          </div>
+          <div
+            className={`mt-0.5 text-[11px] leading-snug ${
+              isNoShow
+                ? 'text-gray-400 line-through'
+                : color
+                  ? ''
+                  : 'text-stone-500'
+            }`}
+            style={color ? { color: color.textMuted } : undefined}
+          >
+            {timeLabel}
+            {timeLabel && service ? ' · ' : ''}
+            {service}
+          </div>
+        </>
+      ) : (
+        <div
+          className={`text-[13px] leading-tight ${
+            isNoShow ? 'line-through' : ''
+          }`}
+        >
+          <span
+            className={`font-medium ${
+              isNoShow ? 'text-gray-400' : color ? '' : 'text-stone-900'
+            }`}
+            style={color ? { color: color.text } : undefined}
+          >
+            {name}
+          </span>
+          {timeLabel || service ? (
+            <span
+              className={
+                isNoShow ? 'text-gray-400' : color ? '' : 'text-stone-500'
+              }
+              style={color ? { color: color.textMuted } : undefined}
+            >
+              {timeLabel ? ` / ${timeLabel}` : ''}
+              {service ? ` · ${service}` : ''}
+            </span>
+          ) : null}
+        </div>
+      )}
     </button>
   );
 }
