@@ -14,6 +14,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Calendar,
+  Check,
   CheckCircle2,
   ChevronRight,
   Clock,
@@ -60,7 +61,12 @@ import type {
   Client,
   TerminalPaymentSummary,
 } from './types';
-import { appointmentServiceLabel, clientDisplayName, isAppointmentReadOnly } from './helpers';
+import {
+  appointmentHasEnded,
+  appointmentServiceLabel,
+  clientDisplayName,
+  isAppointmentReadOnly,
+} from './helpers';
 import { getServiceColor } from './serviceColors';
 import {
   NO_SHOW_PENALTY_FRACTION,
@@ -276,6 +282,7 @@ export default function AppointmentModal({
   const [statusConfirm, setStatusConfirm] = useState<StatusConfirmKind | null>(
     null
   );
+  const [calCancelNotice, setCalCancelNotice] = useState<string | null>(null);
   const [settlementConfirm, setSettlementConfirm] = useState<
     'cash' | 'complimentary' | 'undo' | null
   >(null);
@@ -465,23 +472,23 @@ export default function AppointmentModal({
         setStatusAction(null);
         return;
       }
-      // Non-fatal Cal cancel error: the local DB row was updated but
-      // Cal didn't accept the cancellation. We surface this as a
-      // warning rather than blocking the close, because the admin's
-      // intent ("this is no longer on my calendar") is now reflected
-      // locally. They can manually reconcile in Cal's dashboard.
+      // Past visits: Cal rejects "already ended" and the confirm
+      // dialog already said so — close quietly. Unexpected Cal
+      // failures still get a styled notice instead of window.alert.
       if (data?.cal_cancel_error) {
         console.warn(
           '[AppointmentModal] cal cancel warning',
           data.cal_cancel_error
         );
-        // Surface to the admin via a transient alert. We deliberately
-        // don't block the close — a future polish pass could swap
-        // this for a toast component, but alert is the least-bad
-        // option without one wired up.
-        alert(
-          `Saved locally, but Cal.com didn't confirm the cancellation:\n${data.cal_cancel_error}\n\nThe appointment will still disappear from your dashboard. You may want to verify the booking in Cal.com.`
-        );
+        const expectedPastReject =
+          appointmentHasEnded(appointment) &&
+          /already ended/i.test(data.cal_cancel_error);
+        if (!expectedPastReject) {
+          setStatusConfirm(null);
+          setStatusAction(null);
+          setCalCancelNotice(data.cal_cancel_error);
+          return;
+        }
       }
       router.refresh();
       // Signal mutation to any list rendering this appointment so
@@ -928,6 +935,7 @@ export default function AppointmentModal({
                   appointment.client_first_name,
                   appointment.client_last_name
                 )}
+                bookingHasEnded={appointmentHasEnded(appointment)}
                 canChargeNoShow={canChargeNoShow}
                 noShowFeeCents={noShowFeeCents}
                 busy={statusAction !== null}
@@ -938,6 +946,18 @@ export default function AppointmentModal({
                 onConfirmCancel={(sendSms) =>
                   submitStatusChange('canceled_by_admin', { sendSms })
                 }
+              />
+            )}
+
+            {calCancelNotice && (
+              <CalCancelNoticeDialog
+                message={calCancelNotice}
+                onAcknowledge={() => {
+                  setCalCancelNotice(null);
+                  router.refresh();
+                  onMutated?.();
+                  onClose();
+                }}
               />
             )}
           </>
@@ -2020,7 +2040,7 @@ function RescheduleView({
         </button>
       </div>
 
-      <div className="shrink-0 border-b border-stone-200 bg-white px-4 py-3 sm:px-6">
+      <div className="shrink-0 border-b border-stone-200 bg-[#FAF9F6] px-4 py-3 sm:px-6">
         <AdminSendSmsCheckbox
           checked={sendSms}
           onChange={setSendSms}
@@ -3093,6 +3113,7 @@ function SettlementConfirmDialog({
 function StatusActionConfirmDialog({
   kind,
   clientName,
+  bookingHasEnded = false,
   canChargeNoShow,
   noShowFeeCents,
   busy,
@@ -3102,6 +3123,7 @@ function StatusActionConfirmDialog({
 }: {
   kind: StatusConfirmKind;
   clientName: string;
+  bookingHasEnded?: boolean;
   canChargeNoShow: boolean;
   noShowFeeCents: number;
   busy: boolean;
@@ -3116,7 +3138,7 @@ function StatusActionConfirmDialog({
   return (
     <div
       className="absolute inset-0 z-10 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-[2px]"
-      onClick={onDismiss}
+      onClick={busy ? undefined : onDismiss}
       role="dialog"
       aria-modal="true"
       aria-labelledby="status-confirm-title"
@@ -3219,11 +3241,78 @@ function StatusActionConfirmDialog({
               )}
             </div>
           ) : (
-            <p className="mt-4 text-sm leading-relaxed text-stone-600">
-              This will cancel the booking for{' '}
-              <span className="font-medium text-stone-900">{clientName}</span>.
-              Cal.com will send them a cancellation notification.
-            </p>
+            <div className="mt-4 space-y-3">
+              {bookingHasEnded ? (
+                <p className="text-sm leading-relaxed text-stone-600">
+                  This booking for{' '}
+                  <span className="font-medium text-stone-900">
+                    {clientName}
+                  </span>{' '}
+                  has already ended.
+                </p>
+              ) : (
+                <p className="text-sm leading-relaxed text-stone-600">
+                  This will cancel the booking for{' '}
+                  <span className="font-medium text-stone-900">
+                    {clientName}
+                  </span>
+                  .
+                </p>
+              )}
+
+              <ul className="space-y-2 rounded-xl border border-stone-200 bg-white px-3.5 py-3">
+                <li className="flex gap-2.5 text-sm leading-snug text-stone-700">
+                  <span
+                    className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-stone-100 text-[11px] font-semibold text-stone-600"
+                    aria-hidden
+                  >
+                    1
+                  </span>
+                  <span>It comes off your dashboard.</span>
+                </li>
+                <li className="flex gap-2.5 text-sm leading-snug text-stone-700">
+                  <span
+                    className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-stone-100 text-[11px] font-semibold text-stone-600"
+                    aria-hidden
+                  >
+                    2
+                  </span>
+                  <span>
+                    {bookingHasEnded ? (
+                      <>
+                        Cal.com keeps it as a completed visit. They
+                        don&apos;t allow cancelling a booking that has
+                        already ended.
+                      </>
+                    ) : (
+                      <>
+                        Cal.com cancels the booking, including their
+                        cancellation email to the client.
+                      </>
+                    )}
+                  </span>
+                </li>
+                <li className="flex gap-2.5 text-sm leading-snug text-stone-700">
+                  <span
+                    className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-stone-100 text-[11px] font-semibold text-stone-600"
+                    aria-hidden
+                  >
+                    3
+                  </span>
+                  <span>
+                    A studio text still goes out unless you uncheck
+                    below.
+                  </span>
+                </li>
+              </ul>
+
+              {bookingHasEnded ? (
+                <p className="text-xs leading-relaxed text-stone-500">
+                  If they didn&apos;t come, go back and use No-show
+                  instead.
+                </p>
+              ) : null}
+            </div>
           )}
           {!isNoShow && (
             <AdminSendSmsCheckbox
@@ -3315,6 +3404,65 @@ function StatusActionConfirmDialog({
   );
 }
 
+function CalCancelNoticeDialog({
+  message,
+  onAcknowledge,
+}: {
+  message: string;
+  onAcknowledge: () => void;
+}) {
+  return (
+    <div
+      className="absolute inset-0 z-10 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-[2px]"
+      onClick={onAcknowledge}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="cal-cancel-notice-title"
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-stone-200/80 bg-[#FAF9F6] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 pt-6">
+          <div className="flex items-start gap-3.5">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-800">
+              <AlertCircle className="h-5 w-5" strokeWidth={1.7} />
+            </span>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
+                Saved on your dashboard
+              </p>
+              <h3
+                id="cal-cancel-notice-title"
+                className="mt-1 font-serif text-2xl leading-tight text-stone-900"
+              >
+                Cal.com didn&apos;t confirm
+              </h3>
+            </div>
+          </div>
+          <p className="mt-4 text-sm leading-relaxed text-stone-600">
+            The appointment is gone from your calendar. Cal.com did not
+            cancel it:{' '}
+            <span className="font-medium text-stone-900">{message}</span>
+          </p>
+          <p className="mt-3 text-xs leading-relaxed text-stone-500">
+            You may want to check the booking in Cal.com.
+          </p>
+        </div>
+        <div className="mt-6 flex justify-end border-t border-stone-200/70 bg-white/70 px-5 py-4">
+          <button
+            type="button"
+            onClick={onAcknowledge}
+            className="rounded-full border border-stone-900 bg-stone-900 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-stone-50 transition-colors hover:bg-stone-800"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function patchClientSmsIntent(appointmentId: string, skipClientSms: boolean) {
   return fetch(`/api/admin/appointments/${appointmentId}/client-sms-intent`, {
     method: 'PATCH',
@@ -3339,7 +3487,7 @@ function AdminSendSmsCheckbox({
 }) {
   return (
     <label
-      className={`flex cursor-pointer items-start gap-3 rounded-xl border border-stone-200 bg-white px-3.5 py-3 ${
+      className={`flex cursor-pointer items-start gap-3 ${
         disabled ? 'cursor-not-allowed opacity-60' : ''
       } ${className ?? ''}`}
     >
@@ -3348,8 +3496,17 @@ function AdminSendSmsCheckbox({
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900"
+        className="peer sr-only"
       />
+      <span
+        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] border border-stone-300 bg-white transition-colors peer-checked:border-stone-900 peer-checked:bg-stone-900 peer-focus-visible:ring-2 peer-focus-visible:ring-stone-400 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[#FAF9F6]"
+        aria-hidden
+      >
+        <Check
+          className={`h-3 w-3 text-white ${checked ? 'opacity-100' : 'opacity-0'}`}
+          strokeWidth={3}
+        />
+      </span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-stone-900">
           Text the client
