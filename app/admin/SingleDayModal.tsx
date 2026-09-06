@@ -27,7 +27,6 @@ import {
   layoutBlocksForDay,
   layoutForDay,
   overlapLaneBoxStyle,
-  overlapLaneCascadeStyle,
   safeParseISO,
   type PositionedAppointment,
   type PositionedTimeBlock,
@@ -417,14 +416,7 @@ function ModalAppointment({
 
   const name = clientDisplayName(apt.client_first_name, apt.client_last_name);
   const service = appointmentServiceLabel(apt);
-  const overlapping = totalCols > 1;
-  const sideBySide = overlapping && positioned.sideBySide;
-  const laneBox = sideBySide
-    ? overlapLaneBoxStyle(col, totalCols, { outerPx: 2, gapPx: 2 })
-    : overlapLaneCascadeStyle(col, totalCols, {
-        outerPx: 2,
-        indentPx: 12,
-      });
+  const laneBox = overlapLaneBoxStyle(col, totalCols, { outerPx: 2, gapPx: 2 });
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -463,12 +455,6 @@ function ModalAppointment({
         left: laneBox.left,
         width: laneBox.width,
         zIndex: laneBox.zIndex,
-        boxShadow:
-          overlapping && !sideBySide && col > 0
-            ? '0 1px 1px rgba(28,25,23,0.06), 0 4px 12px rgba(28,25,23,0.12), 0 0 0 1px rgba(255,255,255,0.75)'
-            : overlapping && !sideBySide
-              ? '0 0 0 1px rgba(255,255,255,0.5)'
-              : undefined,
         ...(color && {
           backgroundColor: color.accent,
           color: color.text,
