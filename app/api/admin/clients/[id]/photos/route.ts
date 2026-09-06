@@ -30,7 +30,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { del, put } from '@vercel/blob';
 import { sql } from '@vercel/postgres';
-import sharp from 'sharp';
+import type { Sharp } from 'sharp';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import type { ClientPhoto } from '@/app/admin/types';
@@ -159,10 +159,15 @@ interface ProcessedImage {
   contentType: string;
 }
 
+async function loadSharp(): Promise<typeof import('sharp').default> {
+  const mod = await import('sharp');
+  return mod.default;
+}
+
 /** Encode the (already-built) sharp pipeline to a final
  *  format-appropriate buffer. Settings match /api/upload exactly. */
 async function encodeNormalised(
-  pipe: ReturnType<typeof sharp>,
+  pipe: Sharp,
   sourceMime: string
 ): Promise<{ buffer: Buffer; mime: string; ext: string }> {
   if (sourceMime === 'image/png') {
@@ -203,6 +208,7 @@ async function applyNormalisationAndEncode(
   outputMime: string,
   filename: string
 ): Promise<ProcessedImage> {
+  const sharp = await loadSharp();
   const pipe = sharp(input, {
     failOn: 'truncated',
     limitInputPixels: SHARP_PIXEL_LIMIT,
@@ -266,6 +272,28 @@ interface Context {
   params: Promise<{ id: string }>;
 }
 
+let ensurePhotosSchemaPromise: Promise<void> | null = null;
+
+async function ensureClientPhotosSchema(): Promise<void> {
+  if (!ensurePhotosSchemaPromise) {
+    ensurePhotosSchemaPromise = (async () => {
+      await sql.query(`
+        CREATE TABLE IF NOT EXISTS client_photos (
+          id SERIAL PRIMARY KEY,
+          client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+          blob_url TEXT NOT NULL,
+          uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await sql.query(`
+        CREATE INDEX IF NOT EXISTS client_photos_client_id_idx
+          ON client_photos (client_id)
+      `);
+    })();
+  }
+  await ensurePhotosSchemaPromise;
+}
+
 // Verify the client exists before doing storage I/O. Cheap, and
 // gives a clearer error than "FK violation" for the common
 // "stale modal URL" failure mode.
@@ -295,6 +323,7 @@ export async function GET(
   }
 
   try {
+    await ensureClientPhotosSchema();
     const { rows } = await sql<PhotoRow>`
       SELECT id, blob_url, uploaded_at
       FROM client_photos
@@ -338,6 +367,7 @@ export async function POST(
   // blob put — which then needs a best-effort cleanup. Cheaper to
   // bail here.
   try {
+    await ensureClientPhotosSchema();
     if (!(await assertClientExists(id))) {
       return NextResponse.json(
         { error: 'client_not_found' },
@@ -580,6 +610,7 @@ export async function DELETE(
   // us the authoritative storage target without a second round-trip.
   let deletedBlobUrl: string;
   try {
+    await ensureClientPhotosSchema();
     const { rows } = await sql<{ blob_url: string }>`
       DELETE FROM client_photos
       WHERE id = ${photoId} AND client_id = ${id}::uuid

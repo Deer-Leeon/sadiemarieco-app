@@ -63,6 +63,10 @@ import ClientSendSmsConfirmModal from './components/ClientSendSmsConfirmModal';
 import ClientSmsHistoryModal from './components/ClientSmsHistoryModal';
 import ManualBookingModal from './components/ManualBookingModal';
 import PastAppointmentsPopup from './components/PastAppointmentsPopup';
+import {
+  readAdminFetchError,
+  userFacingAdminError,
+} from './admin-api-error';
 
 import {
   consentDocumentAbsoluteUrl,
@@ -2536,8 +2540,12 @@ function PicturesView({ client }: { client: Client }) {
     fetch(`/api/admin/clients/${client.id}/photos`)
       .then(async (res) => {
         if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+          throw new Error(
+            await readAdminFetchError(
+              res,
+              "Couldn't load photos. Please try again."
+            )
+          );
         }
         return res.json() as Promise<{ photos: ClientPhoto[] }>;
       })
@@ -2659,8 +2667,12 @@ function PicturesView({ client }: { client: Client }) {
           body: form,
         });
         if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+          throw new Error(
+            await readAdminFetchError(
+              res,
+              "Couldn't upload that photo. Please try again."
+            )
+          );
         }
         const data = (await res.json()) as { photo: ClientPhoto };
         setPhotos((prev) => (prev ? [data.photo, ...prev] : [data.photo]));
@@ -2687,8 +2699,12 @@ function PicturesView({ client }: { client: Client }) {
         body: JSON.stringify({ photoId, blobUrl }),
       });
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+        throw new Error(
+          await readAdminFetchError(
+            res,
+            "Couldn't delete that photo. Please try again."
+          )
+        );
       }
       setPhotos((prev) =>
         prev ? prev.filter((p) => p.id !== photoId) : prev
@@ -2705,7 +2721,7 @@ function PicturesView({ client }: { client: Client }) {
     <div className="flex flex-col gap-3">
       {uploadError && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
-          Upload failed — {uploadError}
+          Upload failed — {userFacingAdminError(uploadError)}
         </div>
       )}
 
@@ -3217,7 +3233,9 @@ function InlineError({
   return (
     <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
       <p className="font-medium">Something went wrong</p>
-      <p className="mt-1 text-xs">{message}</p>
+      <p className="mt-1 text-xs leading-relaxed break-words">
+        {userFacingAdminError(message)}
+      </p>
       {onRetry && (
         <button
           type="button"
