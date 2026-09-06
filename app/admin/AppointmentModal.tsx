@@ -9,18 +9,15 @@ import {
   formatStudioDateShort,
   isSameStudioDay,
 } from '@/lib/studio-calendar';
-import Cal, { getCalApi, type EmbedEvent } from '@calcom/embed-react';
 import {
   AlertCircle,
   ArrowLeft,
   Calendar,
-  Check,
   CheckCircle2,
   ChevronRight,
   Clock,
   CreditCard,
   DollarSign,
-  ExternalLink,
   Flag,
   Heart,
   Loader2,
@@ -35,16 +32,7 @@ import {
   X,
 } from 'lucide-react';
 
-import {
-  isSameAppointmentSlot,
-  rescheduleSameSlotNotice,
-} from '@/lib/appointment-slot';
 import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
-import {
-  ADMIN_CAL_UI_CONFIG,
-  CAL_USERNAME,
-  extractBookingDataFromEvent,
-} from '@/lib/cal-embed-shared';
 import {
   applyTerminalDiscount,
   formatCentsAsDollarInput,
@@ -81,16 +69,12 @@ import {
 } from '@/lib/appointment-extras';
 import { isAppointmentSettled } from './settlementDisplay';
 import ManualBookingServicePicker from './components/ManualBookingServicePicker';
+import AdminRescheduleView from './components/AdminRescheduleView';
+import AdminSendSmsCheckbox from './components/AdminSendSmsCheckbox';
 import type {
   ManualBookingServiceGroupHeader,
   ManualBookingServiceOption,
 } from './components/manual-booking-utils';
-
-// Cal.com embed namespace. Used both as the React component's
-// `namespace` prop and as the key passed to `getCalApi({ namespace })`
-// so the event listener attaches to the same iframe instance. Kept as
-// a module-level constant to guarantee both call sites always agree.
-const CAL_RESCHEDULE_NAMESPACE = 'reschedule';
 
 interface Props {
   appointment: Appointment;
@@ -632,14 +616,11 @@ export default function AppointmentModal({
     };
   }, []);
 
-  // The reschedule embed needs noticeably more width than the
-  // details view — Cal's month picker + the time-slot column don't
-  // breathe at `max-w-lg`. When rescheduling we also pin height to
-  // the viewport so Cal can't grow the card and scroll the page
-  // behind it (same approach as the public booking drawer).
-  const cardWidthClass = isRescheduling ? 'max-w-4xl' : 'max-w-lg';
+  // The reschedule slot picker is taller than the details view but
+  // does not need Cal embed width — keep it near the booking wizard.
+  const cardWidthClass = isRescheduling ? 'max-w-xl' : 'max-w-lg';
   const cardHeightClass = isRescheduling
-    ? 'h-[calc(100dvh-1.25rem)] max-h-[calc(100dvh-1.25rem)]'
+    ? 'h-[min(92vh,880px)] max-h-[calc(100dvh-1.25rem)]'
     : 'max-h-[90dvh]';
   const displayBookingNotes = clientBookingNotesForDisplay(
     appointment.booking_notes,
@@ -724,13 +705,11 @@ export default function AppointmentModal({
         }
       >
         {isRescheduling ? (
-          <RescheduleView
+          <AdminRescheduleView
             appointment={appointment}
+            initialServices={pickerServices}
+            initialGroupHeaders={pickerHeaders}
             onBack={() => setIsRescheduling(false)}
-            // RescheduleView only calls onClose after a successful
-            // reschedule (the Back button uses onBack instead), so
-            // wrapping with onMutated here is precise: it fires
-            // exactly when the booking actually changed time.
             onClose={() => {
               onMutated?.();
               onClose();
@@ -882,7 +861,7 @@ export default function AppointmentModal({
               <ReadOnlyFooter status={appointment.status} />
             ) : (
               <ActionFooter
-                canReschedule={Boolean(appointment.service_slug)}
+                canReschedule
                 onReschedule={() => setIsRescheduling(true)}
                 onNoShow={() => openStatusConfirm('no-show')}
                 onCancel={() => openStatusConfirm('cancel')}
@@ -1588,7 +1567,7 @@ function ActionFooter({
           title={
             canReschedule
               ? undefined
-              : 'Cannot reschedule — no Cal.com service link on this appointment.'
+              : 'Cannot reschedule this appointment.'
           }
           className="rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-700 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
         >
@@ -1670,520 +1649,6 @@ function ReadOnlyFooter({ status }: { status: string | null }) {
         This booking is closed ({label.toLowerCase()}) and can&apos;t be
         changed here.
       </p>
-    </div>
-  );
-}
-
-/** Cal embed mode: true reschedule vs fresh slot on the same service. */
-type RescheduleEmbedMode = 'reschedule' | 'new_slot';
-
-type ReschedulePhase = 'embed' | 'error' | 'completing';
-
-/**
- * Build the calLink string the same way our public manage portal does
- * (`public/js/manage.js`): put `rescheduleUid` in the URL query string,
- * not in the React `config` prop — Cal's embed reliably reads it there.
- */
-function buildRescheduleCalLink(
-  serviceSlug: string,
-  calUid: string | null,
-  mode: RescheduleEmbedMode
-): string {
-  const base = `${CAL_USERNAME}/${serviceSlug}`;
-  if (mode === 'reschedule' && calUid) {
-    return `${base}?rescheduleUid=${encodeURIComponent(calUid)}`;
-  }
-  return base;
-}
-
-/**
- * Embedded Cal.com reschedule flow.
- *
- * On success we POST the new slot to our backend (update in place),
- * refresh the dashboard, and close — before Cal's iframe can navigate
- * to a post-success URL that sometimes 404s inside embed mode.
- */
-function RescheduleView({
-  appointment,
-  onBack,
-  onClose,
-}: {
-  appointment: Appointment;
-  onBack: () => void;
-  onClose: () => void;
-}) {
-  const router = useRouter();
-  const serviceSlug = appointment.service_slug;
-
-  const [embedMode, setEmbedMode] = useState<RescheduleEmbedMode>(() =>
-    appointment.cal_uid ? 'reschedule' : 'new_slot'
-  );
-  const [phase, setPhase] = useState<ReschedulePhase>('embed');
-  const [embedKey, setEmbedKey] = useState(0);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [sameSlotNotice, setSameSlotNotice] = useState(false);
-  const [sendSms, setSendSms] = useState(true);
-  const sendSmsRef = useRef(true);
-
-  // Cal fires multiple success events in quick succession; guard so we
-  // only apply the DB update + close once.
-  const completedRef = useRef(false);
-  // After blocking a no-op reschedule, Cal sometimes emits linkFailed
-  // while its iframe settles — ignore those for a few seconds.
-  const ignoreLinkFailedRef = useRef(false);
-  const embedMountRef = useRef<HTMLDivElement | null>(null);
-
-  // Cal's inline embed grows the iframe to content height and asks the
-  // parent to scroll. Pin the iframe to the mount's remaining height so
-  // the booker scrolls internally and the admin calendar stays put.
-  useEffect(() => {
-    if (phase !== 'embed') return;
-    const mount = embedMountRef.current;
-    if (!mount) return;
-
-    const applyFrameBounds = () => {
-      const iframe = mount.querySelector('iframe');
-      if (!iframe) return;
-      const h = mount.clientHeight;
-      if (h <= 0) return;
-      iframe.style.setProperty('width', '100%', 'important');
-      iframe.style.setProperty('height', `${h}px`, 'important');
-      iframe.style.setProperty('max-height', `${h}px`, 'important');
-      iframe.style.setProperty('min-height', '0', 'important');
-    };
-
-    const ro = new ResizeObserver(applyFrameBounds);
-    ro.observe(mount);
-
-    const mo = new MutationObserver(applyFrameBounds);
-    mo.observe(mount, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['style', 'height'],
-    });
-
-    applyFrameBounds();
-    const raf = requestAnimationFrame(applyFrameBounds);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-      mo.disconnect();
-    };
-  }, [phase, embedKey]);
-
-  useEffect(() => {
-    sendSmsRef.current = sendSms;
-  }, [sendSms]);
-
-  useEffect(() => {
-    if (!appointment.cal_uid) return;
-    void patchClientSmsIntent(appointment.id, !sendSms);
-  }, [sendSms, appointment.id, appointment.cal_uid]);
-
-  useEffect(() => {
-    return () => {
-      if (completedRef.current) return;
-      if (sendSmsRef.current) return;
-      if (!appointment.cal_uid) return;
-      void patchClientSmsIntent(appointment.id, false);
-    };
-  }, [appointment.id, appointment.cal_uid]);
-
-  useEffect(() => {
-    if (!serviceSlug || phase !== 'embed') return;
-
-    let cancelled = false;
-    type CalApi = Awaited<ReturnType<typeof getCalApi>>;
-    let api: CalApi | null = null;
-
-    const persistReschedule = async (event: unknown): Promise<boolean> => {
-      const newData = extractBookingDataFromEvent(event);
-      if (!newData.uid || !newData.startTime) return false;
-
-      if (
-        isSameAppointmentSlot(
-          appointment.booking_time,
-          appointment.end_time,
-          newData.startTime,
-          newData.endTime
-        )
-      ) {
-        return false;
-      }
-
-      const res = await fetch(
-        `/api/admin/appointments/${appointment.id}/reschedule`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            newCalUid: newData.uid,
-            newBookingTime: newData.startTime,
-            newEndTime: newData.endTime ?? null,
-            oldCalUid: appointment.cal_uid,
-            send_sms: sendSmsRef.current,
-          }),
-        }
-      );
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        console.warn('[AppointmentModal] reschedule persist failed', {
-          status: res.status,
-          body: text,
-        });
-        return false;
-      }
-      return true;
-    };
-
-    const handleSuccess = async (event: unknown) => {
-      if (completedRef.current) return;
-
-      const newData = extractBookingDataFromEvent(event);
-      if (
-        newData.startTime &&
-        isSameAppointmentSlot(
-          appointment.booking_time,
-          appointment.end_time,
-          newData.startTime,
-          newData.endTime
-        )
-      ) {
-        ignoreLinkFailedRef.current = true;
-        window.setTimeout(() => {
-          ignoreLinkFailedRef.current = false;
-        }, 4000);
-        setSameSlotNotice(true);
-        setPhase('embed');
-        return;
-      }
-
-      completedRef.current = true;
-      setPhase('completing');
-      setErrorMessage(null);
-      setSameSlotNotice(false);
-
-      const saved = await persistReschedule(event);
-      if (!saved) {
-        completedRef.current = false;
-        setPhase('embed');
-        setSameSlotNotice(true);
-        return;
-      }
-
-      router.refresh();
-      onClose();
-    };
-
-    const handleLinkFailed = (e: EmbedEvent<'linkFailed'>) => {
-      if (cancelled || completedRef.current || ignoreLinkFailedRef.current) {
-        return;
-      }
-      const code = e.detail?.data?.code ?? 'unknown';
-      if (embedMode === 'reschedule') {
-        setErrorMessage(
-          "Cal.com couldn't find this booking — it may have already been moved or cancelled in Cal. You can pick a new time below and we'll update this appointment on your calendar."
-        );
-      } else {
-        setErrorMessage(
-          `Cal.com couldn't load the booking page (error ${code}). Try opening Cal.com directly, or go back and try again.`
-        );
-      }
-      setPhase('error');
-    };
-
-    (async () => {
-      try {
-        const resolved = await getCalApi({
-          namespace: CAL_RESCHEDULE_NAMESPACE,
-        });
-        if (cancelled) return;
-        api = resolved;
-        // Brand the iframe BEFORE Cal paints — `ui` is idempotent
-        // (Cal applies the latest config to any current + future
-        // iframes in this namespace). Without this, the embed
-        // renders Cal's dark default theme and clashes badly with
-        // our cream/stone modal surface.
-        try {
-          api('ui', ADMIN_CAL_UI_CONFIG);
-        } catch (uiErr) {
-          console.warn('[AppointmentModal] cal ui config failed', uiErr);
-        }
-        api('on', {
-          action: 'rescheduleBookingSuccessful',
-          callback: handleSuccess,
-        });
-        api('on', {
-          action: 'rescheduleBookingSuccessfulV2',
-          callback: handleSuccess,
-        });
-        api('on', {
-          action: 'bookingSuccessful',
-          callback: handleSuccess,
-        });
-        api('on', {
-          action: 'bookingSuccessfulV2',
-          callback: handleSuccess,
-        });
-        api('on', { action: 'linkFailed', callback: handleLinkFailed });
-      } catch (err) {
-        console.error('[AppointmentModal] failed to attach Cal listener', err);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      if (!api) return;
-      try {
-        api('off', {
-          action: 'rescheduleBookingSuccessful',
-          callback: handleSuccess,
-        });
-        api('off', {
-          action: 'rescheduleBookingSuccessfulV2',
-          callback: handleSuccess,
-        });
-        api('off', { action: 'bookingSuccessful', callback: handleSuccess });
-        api('off', {
-          action: 'bookingSuccessfulV2',
-          callback: handleSuccess,
-        });
-        api('off', { action: 'linkFailed', callback: handleLinkFailed });
-      } catch (err) {
-        console.error('[AppointmentModal] failed to detach Cal listener', err);
-      }
-    };
-  }, [
-    router,
-    onClose,
-    appointment.id,
-    appointment.cal_uid,
-    serviceSlug,
-    embedMode,
-    phase,
-    embedKey,
-  ]);
-
-  const retryAsNewSlot = () => {
-    completedRef.current = false;
-    ignoreLinkFailedRef.current = false;
-    setEmbedMode('new_slot');
-    setErrorMessage(null);
-    setSameSlotNotice(false);
-    setPhase('embed');
-    setEmbedKey((k) => k + 1);
-  };
-
-  const retryReschedule = () => {
-    completedRef.current = false;
-    ignoreLinkFailedRef.current = false;
-    setEmbedMode('reschedule');
-    setErrorMessage(null);
-    setSameSlotNotice(false);
-    setPhase('embed');
-    setEmbedKey((k) => k + 1);
-  };
-
-  const currentSlotLabel = (() => {
-    if (!appointment.booking_time) return 'this time';
-    try {
-      return `${formatStudioDateShort(appointment.booking_time)} · ${formatStudioClockRange(appointment.booking_time)}`;
-    } catch {
-      return 'this time';
-    }
-  })();
-
-  const sameSlotCopy = rescheduleSameSlotNotice(currentSlotLabel);
-
-  const calLink =
-    serviceSlug != null
-      ? buildRescheduleCalLink(serviceSlug, appointment.cal_uid, embedMode)
-      : null;
-
-  const calOpenUrl = appointment.cal_uid
-    ? `https://cal.com/reschedule/${encodeURIComponent(appointment.cal_uid)}`
-    : serviceSlug != null
-      ? `https://cal.com/${CAL_USERNAME}/${serviceSlug}`
-      : null;
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between border-b border-stone-200 bg-[#FAF9F6] px-4 py-3 sm:px-6 sm:py-4">
-        <button
-          type="button"
-          onClick={onBack}
-          disabled={phase === 'completing'}
-          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900 disabled:opacity-50"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Back
-        </button>
-        <div className="text-center">
-          <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
-            Reschedule
-          </p>
-          <h2 className="font-serif text-lg text-stone-900 sm:text-xl">
-            {embedMode === 'new_slot' ? 'Pick a new time' : 'Move appointment'}
-          </h2>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={phase === 'completing'}
-          aria-label="Close"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 disabled:opacity-50"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      <div className="shrink-0 border-b border-stone-200 bg-[#FAF9F6] px-4 py-3 sm:px-6">
-        <AdminSendSmsCheckbox
-          checked={sendSms}
-          onChange={setSendSms}
-          disabled={phase === 'completing'}
-        />
-      </div>
-
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#FAF9F6]">
-        {phase === 'completing' && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#FAF9F6]/95 px-6 text-center">
-            <div className="mb-4 h-8 w-8 animate-spin rounded-full border-2 border-stone-300 border-t-stone-800" />
-            <p className="font-serif text-lg text-stone-900">
-              Updating your calendar…
-            </p>
-            <p className="mt-1 text-sm text-stone-500">
-              Saving the new time to your dashboard.
-            </p>
-          </div>
-        )}
-
-        {phase === 'error' && errorMessage && (
-          <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-8 text-center">
-            <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-700">
-              <AlertCircle className="h-6 w-6" />
-            </div>
-            <p className="max-w-md text-sm leading-relaxed text-stone-700">
-              {errorMessage}
-            </p>
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-              {embedMode === 'reschedule' && (
-                <button
-                  type="button"
-                  onClick={retryAsNewSlot}
-                  className="rounded-full border border-stone-900 bg-stone-900 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-50 transition-colors hover:bg-stone-800"
-                >
-                  Pick a new time
-                </button>
-              )}
-              {embedMode === 'new_slot' && appointment.cal_uid && (
-                <button
-                  type="button"
-                  onClick={retryReschedule}
-                  className="rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-700 transition-colors hover:bg-stone-100"
-                >
-                  Try reschedule link
-                </button>
-              )}
-              {calOpenUrl && (
-                <a
-                  href={calOpenUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-700 transition-colors hover:bg-stone-100"
-                >
-                  Open in Cal.com
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={onBack}
-                className="rounded-full px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-500 transition-colors hover:text-stone-800"
-              >
-                Back to details
-              </button>
-            </div>
-          </div>
-        )}
-
-        {phase === 'embed' && calLink && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 sm:p-4">
-            {!sameSlotNotice && (
-              <p className="mb-2 shrink-0 text-center text-xs leading-relaxed text-stone-500 sm:mb-3">
-                Pick a new date or time below — your current booking stays
-                until you confirm a different slot.
-              </p>
-            )}
-            <div
-              ref={embedMountRef}
-              className="relative flex min-h-0 flex-1 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm"
-            >
-              <Cal
-                key={embedKey}
-                namespace={CAL_RESCHEDULE_NAMESPACE}
-                calLink={calLink}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  overflow: 'auto',
-                }}
-                config={{
-                  layout: 'month_view',
-                  theme: 'light',
-                  // Cal's typed config is string-valued; auto-scroll is
-                  // also disabled via ADMIN_CAL_UI_CONFIG in getCalApi.
-                  disableAutoScroll: 'true',
-                }}
-              />
-              {sameSlotNotice && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center overflow-y-auto bg-[#FAF9F6]/90 p-6 backdrop-blur-[2px]">
-                  <div className="max-w-sm rounded-2xl border border-stone-200 bg-white px-6 py-7 text-center shadow-sm">
-                    <div className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-stone-100 text-stone-600">
-                      <Calendar className="h-5 w-5" aria-hidden="true" />
-                    </div>
-                    <h3 className="font-serif text-lg text-stone-900">
-                      {sameSlotCopy.title}
-                    </h3>
-                    <p className="mt-2 text-sm leading-relaxed text-stone-600">
-                      {sameSlotCopy.body}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSameSlotNotice(false);
-                        retryReschedule();
-                      }}
-                      className="mt-6 w-full rounded-full border border-stone-900 bg-stone-900 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.18em] text-stone-50 transition-colors hover:bg-stone-800"
-                    >
-                      Choose another time
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSameSlotNotice(false)}
-                      className="mt-3 w-full text-xs font-medium uppercase tracking-[0.16em] text-stone-500 transition-colors hover:text-stone-800"
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {phase === 'embed' && !calLink && (
-          <div className="flex flex-1 items-center justify-center px-6 text-center">
-            <p className="max-w-sm text-sm text-stone-500">
-              This booking is missing a Cal.com service link and can&apos;t be
-              rescheduled from the dashboard.
-            </p>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -3460,62 +2925,6 @@ function CalCancelNoticeDialog({
         </div>
       </div>
     </div>
-  );
-}
-
-function patchClientSmsIntent(appointmentId: string, skipClientSms: boolean) {
-  return fetch(`/api/admin/appointments/${appointmentId}/client-sms-intent`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ skip_client_sms: skipClientSms }),
-    keepalive: true,
-  }).catch((err) => {
-    console.warn('[AppointmentModal] client SMS intent failed', err);
-  });
-}
-
-function AdminSendSmsCheckbox({
-  checked,
-  onChange,
-  disabled,
-  className,
-}: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  disabled?: boolean;
-  className?: string;
-}) {
-  return (
-    <label
-      className={`flex cursor-pointer items-start gap-3 ${
-        disabled ? 'cursor-not-allowed opacity-60' : ''
-      } ${className ?? ''}`}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-        className="peer sr-only"
-      />
-      <span
-        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] border border-stone-300 bg-white transition-colors peer-checked:border-stone-900 peer-checked:bg-stone-900 peer-focus-visible:ring-2 peer-focus-visible:ring-stone-400 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[#FAF9F6]"
-        aria-hidden
-      >
-        <Check
-          className={`h-3 w-3 text-white ${checked ? 'opacity-100' : 'opacity-0'}`}
-          strokeWidth={3}
-        />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium text-stone-900">
-          Text the client
-        </span>
-        <span className="mt-0.5 block text-xs leading-relaxed text-stone-500">
-          Uncheck to cancel/move this booking without a studio text.
-        </span>
-      </span>
-    </label>
   );
 }
 
