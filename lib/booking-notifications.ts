@@ -46,6 +46,7 @@ const impl = require('./booking-notifications.js') as {
     source?: 'client' | 'admin';
     clientName?: string | null;
     appointmentId?: string | null;
+    sendClientSms?: boolean;
   }) => Promise<Record<string, unknown>>;
   notifyLateCancelFeeSms: (args: {
     clientPhone: string | null;
@@ -122,6 +123,10 @@ const impl = require('./booking-notifications.js') as {
     bookingTime?: string | null;
     bookingUid?: string | null;
   }) => Promise<Record<string, unknown>>;
+  claimSkipClientSms: (calUid: string) => Promise<boolean>;
+  releaseSkipClientSms: (calUid: string) => Promise<void>;
+  hasSkipClientSms: (calUid: string) => Promise<boolean>;
+  skipClientSmsClaimKey: (calUid: string) => string;
 };
 
 export const notifyBookingConfirmed = impl.notifyBookingConfirmed;
@@ -132,6 +137,10 @@ export const rescheduleAppointmentReminderEmails =
 export const notifyAdminAppointmentStatusSms =
   impl.notifyAdminAppointmentStatusSms;
 export const notifyAppointmentRescheduled = impl.notifyAppointmentRescheduled;
+export const claimSkipClientSms = impl.claimSkipClientSms;
+export const releaseSkipClientSms = impl.releaseSkipClientSms;
+export const hasSkipClientSms = impl.hasSkipClientSms;
+export const skipClientSmsClaimKey = impl.skipClientSmsClaimKey;
 export const notifyLateCancelFeeSms = impl.notifyLateCancelFeeSms;
 export const notifyClientCancelEarlySms = impl.notifyClientCancelEarlySms;
 export const notifyClientCancelLateNoFeeSms =

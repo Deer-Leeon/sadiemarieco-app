@@ -29,6 +29,7 @@ import {
   isSameAppointmentSlot,
   RESCHEDULE_SAME_SLOT_MESSAGE,
 } from '@/lib/appointment-slot';
+import { parseSendSmsFromBody } from '@/lib/admin-send-sms-flag';
 import {
   notifyAppointmentRescheduled,
   rescheduleAppointmentReminderEmails,
@@ -47,6 +48,7 @@ interface RescheduleBody {
   newBookingTime?: unknown;
   newEndTime?: unknown;
   oldCalUid?: unknown;
+  send_sms?: unknown;
 }
 
 const UUID_RE =
@@ -127,6 +129,7 @@ export async function POST(
   }
 
   const body = raw as RescheduleBody;
+  const sendSms = parseSendSmsFromBody(body);
   const newCalUid = sanitiseCalUid(body.newCalUid);
   const newBookingTime = parseIsoTimestamp(body.newBookingTime);
   const oldCalUid = sanitiseCalUid(body.oldCalUid);
@@ -283,6 +286,7 @@ export async function POST(
         scheduleSmsReminders: true,
         source: 'admin',
         appointmentId: String(row.id),
+        sendClientSms: sendSms,
       });
     } catch (smsErr) {
       console.warn(

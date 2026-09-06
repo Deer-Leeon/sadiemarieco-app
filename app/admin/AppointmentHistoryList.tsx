@@ -1,11 +1,14 @@
 'use client';
 
+import { Fragment } from 'react';
+
 import type { Appointment } from './types';
 import { AppointmentListRow } from './AppointmentListRow';
 import { groupAppointmentsByDay } from './groupAppointmentsByDay';
 
 /**
  * Day-grouped appointment list matching /admin bookings ListView chrome.
+ * Catalogue extras render as the same full-width cards as the parent visit.
  */
 export default function AppointmentHistoryList({
   appointments,
@@ -38,12 +41,21 @@ export default function AppointmentHistoryList({
           </div>
           <ul className="mt-4 space-y-3">
             {group.appointments.map((a) => (
-              <AppointmentListRow
-                key={a.id}
-                appointment={a}
-                variant="client"
-                onSelect={onSelect ? () => onSelect(a) : undefined}
-              />
+              <Fragment key={a.id}>
+                <AppointmentListRow
+                  appointment={a}
+                  variant="client"
+                  onSelect={onSelect ? () => onSelect(a) : undefined}
+                />
+                {(a.extras ?? []).map((extra) => (
+                  <AppointmentListRow
+                    key={extra.id}
+                    appointment={extra}
+                    variant="client"
+                    onSelect={onSelect ? () => onSelect(a) : undefined}
+                  />
+                ))}
+              </Fragment>
             ))}
           </ul>
         </section>

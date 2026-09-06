@@ -4,6 +4,10 @@
  * Updates an appointment's lifecycle status from the admin dashboard.
  * Body: { status: AppointmentStatus }
  *
+ * Optional `send_sms` (default true) on `canceled_by_admin`: when false,
+ * Cal cancel + local status + admin iOS push still run; studio SMS to the
+ * client is skipped.
+ *
  * Behaviours per target status:
  *   • 'no-show'
  *       → optionally charge 100% of the matched service price off-session
@@ -60,6 +64,7 @@ import {
   isPrepaidPayNowAppointment,
   refundPrepaidBooking,
 } from '@/lib/prepaid-booking-refund';
+import { parseSendSmsFromBody } from '@/lib/admin-send-sms-flag';
 import {
   notifyAdminAppointmentStatusSms,
   notifyFeeFreePassSms,
@@ -90,6 +95,11 @@ interface PatchBody {
   status?: unknown;
   /** When status is `no-show`, charge 100% off-session only if true. */
   charge_no_show?: unknown;
+  /**
+   * When status is `canceled_by_admin`, studio SMS to the client.
+   * Defaults true; explicit false still cancels on Cal + locally.
+   */
+  send_sms?: unknown;
 }
 
 interface AppointmentRow {
@@ -485,6 +495,7 @@ export async function PATCH(
     body.charge_no_show === true ||
     body.charge_no_show === 'true' ||
     body.charge_no_show === 1;
+  const sendSms = parseSendSmsFromBody(body);
 
   try {
     let calCancelError: string | null = null;
@@ -794,14 +805,18 @@ export async function PATCH(
               { id: idParam, error: errorMessage(pushErr) }
             );
           }
-          lifecycleSms = await notifyAdminAppointmentStatusSms({
-            kind: 'admin_cancel',
-            clientPhone: row.client_phone,
-            smsOptIn: row.sms_opt_in,
-            serviceName: row.service_name,
-            bookingTime,
-            bookingUid: row.cal_event_id,
-          });
+          if (sendSms) {
+            lifecycleSms = await notifyAdminAppointmentStatusSms({
+              kind: 'admin_cancel',
+              clientPhone: row.client_phone,
+              smsOptIn: row.sms_opt_in,
+              serviceName: row.service_name,
+              bookingTime,
+              bookingUid: row.cal_event_id,
+            });
+          } else {
+            lifecycleSms = { ok: true, skipped: 'admin_send_sms_false' };
+          }
         }
       }
     } catch (smsErr) {
