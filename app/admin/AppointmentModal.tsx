@@ -413,7 +413,7 @@ export default function AppointmentModal({
 
   const submitStatusChange = async (
     next: AppointmentStatus,
-    options?: { chargeNoShow?: boolean }
+    options?: { chargeNoShow?: boolean; sendSms?: boolean }
   ) => {
     if (statusAction !== null) return;
 
@@ -431,6 +431,9 @@ export default function AppointmentModal({
             status: next,
             ...(next === 'no-show'
               ? { charge_no_show: options?.chargeNoShow === true }
+              : {}),
+            ...(next === 'canceled_by_admin'
+              ? { send_sms: options?.sendSms !== false }
               : {}),
           }),
         }
@@ -932,8 +935,8 @@ export default function AppointmentModal({
                 onConfirmNoShow={(charge) =>
                   submitStatusChange('no-show', { chargeNoShow: charge })
                 }
-                onConfirmCancel={() =>
-                  submitStatusChange('canceled_by_admin')
+                onConfirmCancel={(sendSms) =>
+                  submitStatusChange('canceled_by_admin', { sendSms })
                 }
               />
             )}
@@ -1699,6 +1702,8 @@ function RescheduleView({
   const [embedKey, setEmbedKey] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sameSlotNotice, setSameSlotNotice] = useState(false);
+  const [sendSms, setSendSms] = useState(true);
+  const sendSmsRef = useRef(true);
 
   // Cal fires multiple success events in quick succession; guard so we
   // only apply the DB update + close once.
@@ -1749,6 +1754,24 @@ function RescheduleView({
   }, [phase, embedKey]);
 
   useEffect(() => {
+    sendSmsRef.current = sendSms;
+  }, [sendSms]);
+
+  useEffect(() => {
+    if (!appointment.cal_uid) return;
+    void patchClientSmsIntent(appointment.id, !sendSms);
+  }, [sendSms, appointment.id, appointment.cal_uid]);
+
+  useEffect(() => {
+    return () => {
+      if (completedRef.current) return;
+      if (sendSmsRef.current) return;
+      if (!appointment.cal_uid) return;
+      void patchClientSmsIntent(appointment.id, false);
+    };
+  }, [appointment.id, appointment.cal_uid]);
+
+  useEffect(() => {
     if (!serviceSlug || phase !== 'embed') return;
 
     let cancelled = false;
@@ -1780,6 +1803,7 @@ function RescheduleView({
             newBookingTime: newData.startTime,
             newEndTime: newData.endTime ?? null,
             oldCalUid: appointment.cal_uid,
+            send_sms: sendSmsRef.current,
           }),
         }
       );
@@ -1994,6 +2018,14 @@ function RescheduleView({
         >
           <X className="h-4 w-4" />
         </button>
+      </div>
+
+      <div className="shrink-0 border-b border-stone-200 bg-white px-4 py-3 sm:px-6">
+        <AdminSendSmsCheckbox
+          checked={sendSms}
+          onChange={setSendSms}
+          disabled={phase === 'completing'}
+        />
       </div>
 
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#FAF9F6]">
@@ -3075,10 +3107,11 @@ function StatusActionConfirmDialog({
   busy: boolean;
   onDismiss: () => void;
   onConfirmNoShow: (charge: boolean) => void;
-  onConfirmCancel: () => void;
+  onConfirmCancel: (sendSms: boolean) => void;
 }) {
   const feeLabel = formatCentsUsd(noShowFeeCents);
   const isNoShow = kind === 'no-show';
+  const [sendSms, setSendSms] = useState(true);
 
   return (
     <div
@@ -3192,6 +3225,14 @@ function StatusActionConfirmDialog({
               Cal.com will send them a cancellation notification.
             </p>
           )}
+          {!isNoShow && (
+            <AdminSendSmsCheckbox
+              className="mt-4"
+              checked={sendSms}
+              onChange={setSendSms}
+              disabled={busy}
+            />
+          )}
         </div>
 
         <div className="mt-6 flex flex-col-reverse gap-2 border-t border-stone-200/70 bg-white/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
@@ -3254,7 +3295,7 @@ function StatusActionConfirmDialog({
           ) : (
             <button
               type="button"
-              onClick={onConfirmCancel}
+              onClick={() => onConfirmCancel(sendSms)}
               disabled={busy}
               className="rounded-full border border-rose-600 bg-rose-600 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-white transition-colors hover:bg-rose-700 disabled:opacity-50"
             >
@@ -3271,6 +3312,53 @@ function StatusActionConfirmDialog({
         </div>
       </div>
     </div>
+  );
+}
+
+function patchClientSmsIntent(appointmentId: string, skipClientSms: boolean) {
+  return fetch(`/api/admin/appointments/${appointmentId}/client-sms-intent`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skip_client_sms: skipClientSms }),
+    keepalive: true,
+  }).catch((err) => {
+    console.warn('[AppointmentModal] client SMS intent failed', err);
+  });
+}
+
+function AdminSendSmsCheckbox({
+  checked,
+  onChange,
+  disabled,
+  className,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <label
+      className={`flex cursor-pointer items-start gap-3 rounded-xl border border-stone-200 bg-white px-3.5 py-3 ${
+        disabled ? 'cursor-not-allowed opacity-60' : ''
+      } ${className ?? ''}`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900"
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-stone-900">
+          Text the client
+        </span>
+        <span className="mt-0.5 block text-xs leading-relaxed text-stone-500">
+          Uncheck to cancel/move this booking without a studio text.
+        </span>
+      </span>
+    </label>
   );
 }
 

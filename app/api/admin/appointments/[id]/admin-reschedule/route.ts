@@ -19,6 +19,7 @@ import {
   RESCHEDULE_SAME_SLOT_MESSAGE,
 } from '@/lib/appointment-slot';
 import { bookingEndFromDurationMins } from '@/lib/booking-duration';
+import { parseSendSmsFromBody } from '@/lib/admin-send-sms-flag';
 import {
   notifyAppointmentRescheduled,
   rescheduleAppointmentReminderEmails,
@@ -64,6 +65,8 @@ interface Context {
 interface Body {
   start?: unknown;
   eventTypeId?: unknown;
+  send_sms?: unknown;
+  sendSms?: unknown;
 }
 
 interface AppointmentRow {
@@ -234,6 +237,7 @@ export async function POST(
   }
 
   const body = raw as Body;
+  const sendSms = parseSendSmsFromBody(body);
   const startRaw = typeof body.start === 'string' ? body.start.trim() : '';
   const eventTypeId =
     typeof body.eventTypeId === 'number'
@@ -501,6 +505,7 @@ export async function POST(
           .join(' ')
           .trim(),
         appointmentId: String(row.id),
+        sendClientSms: sendSms,
       });
     } catch (smsErr) {
       console.warn(
