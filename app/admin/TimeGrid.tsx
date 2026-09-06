@@ -471,7 +471,8 @@ function AppointmentBlock({
   const fullName = clientDisplayName(apt.client_first_name, apt.client_last_name);
   const service = appointmentServiceLabel(apt);
   const overlapping = totalCols > 1;
-  const compactLabel = cascadeOverlap && overlapping;
+  const useCascade = cascadeOverlap && overlapping && !positioned.sideBySide;
+  const compactLabel = useCascade;
   const peekingUnder = compactLabel && col === 0;
   const name = compactLabel
     ? (apt.client_first_name?.trim() || fullName)
@@ -486,7 +487,7 @@ function AppointmentBlock({
       : startLabel
     : [timeLabel, showService ? service : ''].filter(Boolean).join(' · ');
 
-  const laneBox = cascadeOverlap
+  const laneBox = useCascade
     ? overlapLaneCascadeStyle(col, totalCols)
     : overlapLaneBoxStyle(col, totalCols);
 
@@ -511,7 +512,7 @@ function AppointmentBlock({
   // back-to-back same-colour bookings comes from layout packing / height,
   // not a stroke. No-show and unmapped services keep a left accent stripe.
   const overlapShadow =
-    overlapping && cascadeOverlap
+    overlapping && useCascade
       ? col > 0
         ? '0 1px 1px rgba(28,25,23,0.06), 0 4px 12px rgba(28,25,23,0.12), 0 0 0 1px rgba(255,255,255,0.75)'
         : '0 0 0 1px rgba(255,255,255,0.5)'
