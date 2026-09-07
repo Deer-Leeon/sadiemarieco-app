@@ -13,9 +13,6 @@
     html { background-color: #0D1B2A; }
     html.hash-landing { background-color: #F5F3F0; }
     html:not(.hero-ready) body { visibility: hidden; }
-    /* /#services (Reverie desktop) — first paint is the catalogue, not the hero. */
-    html.hash-landing #hero,
-    html.hash-landing .marquee-strip { display: none !important; }
     html.hash-landing .reveal {
       opacity: 1 !important;
       transform: none !important;
@@ -27,10 +24,16 @@
     (function () {
       var h = location.hash;
       if (h && h !== '#' && h !== '#hero') {
-        document.documentElement.classList.add('hero-ready', 'hash-landing');
+        document.documentElement.classList.add('hash-landing');
         if (history.scrollRestoration) history.scrollRestoration = 'manual';
         document.addEventListener('DOMContentLoaded', function () {
-          window.scrollTo(0, 0);
+          var id = h.slice(1);
+          try { id = decodeURIComponent(id); } catch (e) {}
+          var el = id && document.getElementById(id);
+          if (el) {
+            window.scrollTo(0, el.getBoundingClientRect().top + window.pageYOffset);
+          }
+          document.documentElement.classList.add('hero-ready');
         });
       }
     })();

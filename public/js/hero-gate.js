@@ -5,7 +5,10 @@
 (function () {
   'use strict';
 
-  if (document.documentElement.classList.contains('hero-ready')) {
+  if (
+    document.documentElement.classList.contains('hero-ready') ||
+    document.documentElement.classList.contains('hash-landing')
+  ) {
     return;
   }
 
