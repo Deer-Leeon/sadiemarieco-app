@@ -90,6 +90,12 @@
         <header class="reviews-section__header">
           <span class="section-label">Kind Words</span>
           <h2 class="section-title">Client <em>Love</em></h2>
+          <a
+            class="reviews-section__cta"
+            href="https://g.page/r/CQ0Tmk7shapREBM/review"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Leave a Google review</a>
         </header>
         <div class="reviews-carousel">
           <button
