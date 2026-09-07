@@ -37,6 +37,10 @@ export const STUDIO_INSTAGRAM_URL = 'https://www.instagram.com/sadiemarie.co';
 export const STUDIO_GOOGLE_MAPS_URL =
   'https://www.google.com/maps/search/?api=1&query=Sadie+Marie+61+W+3200+N+Suite+10+Lehi+UT';
 
+/** Public “leave a review” URL (same destination as post-visit SMS). */
+export const STUDIO_GOOGLE_REVIEW_URL =
+  'https://g.page/r/CQ0Tmk7shapREBM/review';
+
 export const STUDIO_HOST_VENUE = 'Serenity Studios';
 
 export const STUDIO_AREA_SERVED = [
@@ -48,6 +52,9 @@ export const STUDIO_AREA_SERVED = [
   'Pleasant Grove, UT',
   'Cedar Hills, UT',
   'Alpine, UT',
+  'Draper, UT',
+  'Vineyard, UT',
+  'Provo, UT',
 ] as const;
 
 export const STUDIO_LOGO_URL = `${STUDIO_SITE_URL}/assets/brand/logo-512.png`;

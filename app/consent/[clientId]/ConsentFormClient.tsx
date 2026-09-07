@@ -10,6 +10,10 @@ import {
   isValidClientUuid,
   resolveConsentPdfUrl,
 } from '@/lib/consent';
+import {
+  STUDIO_ADDRESS_LINE1,
+  STUDIO_ADDRESS_LINE2,
+} from '@/lib/studio-nap';
 
 import {
   allConsentStatementsAccepted,
@@ -494,7 +498,7 @@ function EditableForm({
       <header className="text-center">
         <p className="font-serif text-lg text-stone-800">Sadie Marie</p>
         <p className="mt-1 text-[10px] uppercase tracking-[0.2em] text-stone-500">
-          61 W 3200 N Suite C · Lehi, UT 84043
+          {STUDIO_ADDRESS_LINE1} · {STUDIO_ADDRESS_LINE2}
         </p>
         <h1 className="mt-4 font-serif text-2xl uppercase tracking-wide text-stone-900">
           Lash &amp; Brow Intake &amp; Consent Form
