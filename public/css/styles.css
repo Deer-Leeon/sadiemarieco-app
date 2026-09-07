@@ -3160,7 +3160,10 @@ button.btn-outline-navy:disabled {
   .seo-city-list { columns: 1; }
 }
 
-/* ── Reverie Beauty handoff ── */
+/* ── Reverie Beauty handoff ──
+   Topbar stays in normal flex flow (not position:fixed). In-app browsers
+   like Google Maps WKWebView often break fixed headers with overflow:hidden
+   / 100svh locking, which scrolled the Sadie Marie banner off-screen. */
 html:has(.reverie-landing) {
   height: 100%;
   background-color: var(--off-white);
@@ -3170,28 +3173,40 @@ html:has(.reverie-landing) {
 html:has(.reverie-landing) body {
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 .reverie-landing {
-  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100dvh;
   overflow: hidden;
   background: var(--off-white);
-  --reverie-bar: 88px;
+  box-sizing: border-box;
 }
 html.reverie-handoff .reverie-hero {
   opacity: 0;
   pointer-events: none;
 }
 .reverie-landing .reverie-topbar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  /* Override global `nav { position: fixed }` — keep banner in document flow. */
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  inset: auto;
+  flex: 0 0 auto;
   z-index: 200;
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  min-height: var(--reverie-bar);
-  padding: 0 clamp(24px, 5vw, 64px);
+  width: 100%;
+  min-height: calc(88px + env(safe-area-inset-top, 0px));
+  padding:
+    env(safe-area-inset-top, 0px)
+    clamp(24px, 5vw, 64px)
+    0;
+  box-sizing: border-box;
   background: #0d1b2a;
   color: #f5f3f0;
   border-bottom: 1px solid rgba(245, 243, 240, 0.1);
@@ -3221,16 +3236,16 @@ html.reverie-handoff .reverie-hero {
   color: #f5f3f0;
 }
 .reverie-hero {
+  flex: 1 1 auto;
+  min-height: 0;
   width: min(1080px, 100%);
-  height: 100dvh;
-  max-height: 100dvh;
   overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 400px);
   column-gap: clamp(28px, 4vw, 48px);
   align-items: center;
   margin: 0 auto;
-  padding: 0 clamp(28px, 5vw, 56px);
+  padding: 16px clamp(28px, 5vw, 56px) clamp(20px, 3vh, 40px);
   box-sizing: border-box;
   background: var(--off-white);
   transition: opacity 0.45s ease;
@@ -3243,7 +3258,7 @@ html.reverie-handoff .reverie-hero {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: calc(var(--reverie-bar) + 16px) 0 clamp(20px, 3vh, 40px);
+  padding: 0;
 }
 .reverie-intro {
   position: relative;
@@ -3309,18 +3324,19 @@ html.reverie-handoff .reverie-hero {
 }
 .reverie-img-col {
   min-height: 0;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: calc(var(--reverie-bar) + 28px) 0 28px;
+  padding: 12px 0;
   background: var(--off-white);
 }
 .reverie-img-frame {
   position: relative;
-  width: min(100%, calc((100dvh - var(--reverie-bar) - 56px) * 4 / 5));
+  width: min(100%, calc((100% - 24px) * 4 / 5));
   aspect-ratio: 4 / 5;
   height: auto;
-  max-height: calc(100dvh - var(--reverie-bar) - 56px);
+  max-height: 100%;
   overflow: hidden;
   background: var(--off-white);
   border: 1px solid rgba(13, 27, 42, 0.35);
@@ -3342,19 +3358,21 @@ html.reverie-handoff .reverie-hero {
 
 @media (max-width: 860px) {
   html:has(.reverie-landing),
-  html:has(.reverie-landing) body,
-  .reverie-landing,
-  .reverie-hero {
-    height: 100svh;
+  html:has(.reverie-landing) body {
+    height: 100%;
     max-height: 100svh;
   }
   .reverie-landing {
-    --reverie-bar: 64px;
+    height: 100svh;
+    max-height: 100svh;
   }
   .reverie-landing .reverie-topbar {
     min-height: 0;
     justify-content: space-between;
-    padding: 14px 16px;
+    padding:
+      max(14px, env(safe-area-inset-top, 0px))
+      16px
+      14px;
     border-bottom: 0;
   }
   .reverie-topbar-slot[aria-hidden="true"] {
@@ -3369,6 +3387,8 @@ html.reverie-handoff .reverie-hero {
   .reverie-hero {
     --reverie-gutter: 24px;
     position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
     width: 100%;
     max-width: 100%;
     min-width: 0;
@@ -3379,7 +3399,7 @@ html.reverie-handoff .reverie-hero {
     column-gap: 0;
     align-items: stretch;
     overflow: hidden;
-    padding: calc(var(--reverie-bar) + var(--reverie-gutter))
+    padding: var(--reverie-gutter)
       max(var(--reverie-gutter), env(safe-area-inset-right))
       max(var(--reverie-gutter), env(safe-area-inset-bottom))
       max(var(--reverie-gutter), env(safe-area-inset-left));
@@ -3387,7 +3407,7 @@ html.reverie-handoff .reverie-hero {
   .reverie-hero::before {
     content: '';
     position: absolute;
-    top: calc(var(--reverie-bar) + 6px);
+    top: 6px;
     left: 8%;
     right: 6%;
     height: clamp(120px, 22svh, 180px);

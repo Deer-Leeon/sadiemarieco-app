@@ -74,6 +74,25 @@
 
 <script>
   (function () {
+    // In-app browsers (Google Maps, etc.) sometimes open with a non-zero
+    // scroll offset that hides the in-flow topbar. Pin to the top on load.
+    function pinTop() {
+      window.scrollTo(0, 0);
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+    }
+    pinTop();
+    window.addEventListener('pageshow', pinTop);
+    window.addEventListener('orientationchange', function () {
+      window.setTimeout(pinTop, 50);
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') pinTop();
+    });
+  })();
+</script>
+<script>
+  (function () {
     var done = false;
     function reveal() {
       if (done) return;
