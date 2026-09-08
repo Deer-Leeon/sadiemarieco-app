@@ -44,7 +44,7 @@
       color: #f5f3f0;
     }
   </style>
-  <link rel="stylesheet" href="/css/styles.css?v=reverie-banner-3">
+  <link rel="stylesheet" href="/css/styles.css?v=reverie-banner-4">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@200;300;400&display=swap" rel="stylesheet">
@@ -93,37 +93,76 @@
     var landing = document.body;
 
     // Pin the welcome card to the *visible* WebView, not 100vh. Google Maps
-    // Chrome/Safari overlay their toolbars on the layout viewport, which
-    // otherwise hides the Sadie Marie bar and leaves a dead gap at the bottom.
-    function fitShell() {
+    // in-app Chrome reports the wrong height on first paint; switching tabs
+    // forces a resize. Retry until the visual viewport settles.
+    function measure() {
       var vv = window.visualViewport;
-      var height = Math.round((vv && vv.height) || window.innerHeight || 0);
-      var top = Math.round((vv && vv.offsetTop) || 0);
-      if (height < 1) return;
-      document.documentElement.style.setProperty('--app-height', height + 'px');
+      var inner = Math.round(window.innerHeight || 0);
+      var client = Math.round(
+        (document.documentElement && document.documentElement.clientHeight) || 0
+      );
+      var vvH = vv ? Math.round(vv.height) : 0;
+      var top = vv ? Math.round(vv.offsetTop) : 0;
+      var heights = [vvH, inner, client].filter(function (h) {
+        return h > 80;
+      });
+      var height = heights.length ? Math.min.apply(null, heights) : inner;
+      return { height: height, top: top };
+    }
+
+    function fitShell() {
+      var box = measure();
+      if (box.height < 1) return;
+      document.documentElement.style.setProperty('--app-height', box.height + 'px');
       if (!landing || !landing.classList.contains('reverie-landing')) return;
       landing.style.position = 'fixed';
       landing.style.left = '0';
       landing.style.right = '0';
       landing.style.width = '100%';
-      landing.style.top = top + 'px';
-      landing.style.height = height + 'px';
+      landing.style.top = box.top + 'px';
+      landing.style.height = box.height + 'px';
       landing.style.overflow = 'hidden';
     }
 
-    fitShell();
-    window.__reverieFitBanner = fitShell;
-    window.addEventListener('pageshow', fitShell);
+    function settle(ms) {
+      fitShell();
+      var delays = [0, 32, 80, 160, 320, 640, 1200];
+      delays.forEach(function (delay) {
+        window.setTimeout(fitShell, delay + (ms || 0));
+      });
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(function () {
+          fitShell();
+          requestAnimationFrame(fitShell);
+        });
+      }
+    }
+
+    settle();
+    window.__reverieFitBanner = function () {
+      settle(0);
+    };
+    window.addEventListener('pageshow', function () {
+      settle(0);
+    });
+    window.addEventListener('load', function () {
+      settle(0);
+    });
     window.addEventListener('resize', fitShell);
     window.addEventListener('orientationchange', function () {
-      window.setTimeout(fitShell, 50);
+      settle(50);
     });
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', fitShell);
       window.visualViewport.addEventListener('scroll', fitShell);
     }
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function () {
+        settle(0);
+      });
+    }
     document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'visible') fitShell();
+      if (document.visibilityState === 'visible') settle(0);
     });
   })();
 </script>
