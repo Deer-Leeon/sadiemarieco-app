@@ -37,8 +37,11 @@ const impl = require('./sms-templates.js') as {
 
 export type SmsTemplateKey =
   | 'confirmation'
+  | 'confirmation_visit'
   | 'reminder_48h'
   | 'reminder_24h'
+  | 'reminder_visit'
+  | 'visit_update'
   | 'reschedule'
   | 'admin_cancel'
   | 'no_show_no_charge'

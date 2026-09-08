@@ -8,6 +8,20 @@ import {
   normaliseBookingTimeIso,
 } from '@/lib/send-appointment-reminder-email';
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const visitSms = require('./same-day-visit.js') as {
+  loadVisitForBookingUid: (
+    uid: string,
+  ) => Promise<{
+    canonicalUid: string | null;
+    arrivalTime: string | null;
+    leadKind: '48h' | '24h';
+    leadOffsetMs: number;
+    services: unknown[];
+    fingerprint: string;
+  } | null>;
+};
+
 const PUBLIC_BASE_URL =
   process.env.PUBLIC_BASE_URL || 'https://www.sadiemarie.co';
 
@@ -62,9 +76,31 @@ async function publishReminderJob(args: {
 export async function scheduleAppointmentReminderEmails(
   args: ScheduleReminderEmailsArgs,
 ): Promise<ScheduleReminderEmailsResult> {
-  const appointmentMs = new Date(args.bookingTime).getTime();
+  let appointmentMs = new Date(args.bookingTime).getTime();
   if (!Number.isFinite(appointmentMs)) {
     return { scheduled: false, reason: 'invalid_booking_time' };
+  }
+
+  let bookingUid = args.bookingUid;
+  let leadOffset = LEAD_OFFSET_MS.lashes;
+  let expectedBookingTime = normaliseBookingTimeIso(args.bookingTime);
+
+  let usedVisit = false;
+  try {
+    const visit = await visitSms.loadVisitForBookingUid(args.bookingUid);
+    if (visit?.services?.length && visit.arrivalTime && visit.canonicalUid) {
+      bookingUid = visit.canonicalUid;
+      appointmentMs = new Date(visit.arrivalTime).getTime();
+      expectedBookingTime = normaliseBookingTimeIso(visit.arrivalTime);
+      leadOffset =
+        visit.leadKind === '48h' ? LEAD_OFFSET_MS.brows : LEAD_OFFSET_MS.lashes;
+      usedVisit = true;
+    }
+  } catch (err) {
+    console.warn('[schedule-reminder-emails] visit lookup failed', {
+      bookingUid: args.bookingUid,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   const nowMs = Date.now();
@@ -74,7 +110,6 @@ export async function scheduleAppointmentReminderEmails(
     return { scheduled: false, reason: 'appointment_in_past' };
   }
 
-  const expectedBookingTime = normaliseBookingTimeIso(args.bookingTime);
   const resolved = await resolveAppointmentService(
     args.serviceName,
     args.bookingTime,
@@ -85,21 +120,23 @@ export async function scheduleAppointmentReminderEmails(
   const out: ScheduleReminderEmailsResult = { scheduled: true };
 
   if (process.env.QSTASH_TOKEN) {
-    if (resolved.reminderKind) {
-      const leadOffset = LEAD_OFFSET_MS[resolved.reminderKind];
+    if (usedVisit || resolved.reminderKind) {
+      if (!usedVisit && resolved.reminderKind) {
+        leadOffset = LEAD_OFFSET_MS[resolved.reminderKind];
+      }
       const notBefore =
         msUntilAppt >= leadOffset
           ? Math.floor((appointmentMs - leadOffset) / 1000)
           : nowSec + 2;
       try {
         out.lead = await publishReminderJob({
-          bookingUid: args.bookingUid,
+          bookingUid,
           expectedBookingTime,
           notBefore,
         });
       } catch (err) {
         console.error('[schedule-reminder-emails] lead queue failed', {
-          bookingUid: args.bookingUid,
+          bookingUid,
           error: err instanceof Error ? err.message : String(err),
         });
       }

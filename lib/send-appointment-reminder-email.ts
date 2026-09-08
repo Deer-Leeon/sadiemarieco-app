@@ -235,8 +235,32 @@ export async function deliverScheduledReminderEmail(args: {
     return { ok: true, skipped: 'status_not_confirmed' };
   }
 
-  if (!bookingTimesMatch(appointment.booking_time, args.expectedBookingTime)) {
-    return { ok: true, skipped: 'booking_time_changed' };
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const visitMod = require('./same-day-visit.js') as {
+    loadVisitForBookingUid: (uid: string) => Promise<{
+      canonicalUid: string | null;
+      arrivalTime: string | null;
+      leadKind: '48h' | '24h';
+      isMulti?: boolean;
+      services: Array<{ displayName?: string; serviceName?: string }>;
+      visitServices?: string;
+    } | null>;
+  };
+  let visit: Awaited<ReturnType<typeof visitMod.loadVisitForBookingUid>> = null;
+  try {
+    visit = await visitMod.loadVisitForBookingUid(args.bookingUid);
+  } catch {
+    visit = null;
+  }
+  if (visit?.canonicalUid && visit.canonicalUid !== args.bookingUid) {
+    return { ok: true, skipped: 'not_canonical_visit' };
+  }
+
+  const matchTime = visit?.arrivalTime || appointment.booking_time;
+  if (!bookingTimesMatch(matchTime, args.expectedBookingTime)) {
+    if (!bookingTimesMatch(appointment.booking_time, args.expectedBookingTime)) {
+      return { ok: true, skipped: 'booking_time_changed' };
+    }
   }
 
   const clientEmail = appointment.client_email?.trim();
@@ -245,9 +269,10 @@ export async function deliverScheduledReminderEmail(args: {
   }
 
   const bookingTimeIso = normaliseBookingTimeIso(
-    appointment.booking_time instanceof Date
-      ? appointment.booking_time.toISOString()
-      : String(appointment.booking_time),
+    visit?.arrivalTime ||
+      (appointment.booking_time instanceof Date
+        ? appointment.booking_time.toISOString()
+        : String(appointment.booking_time)),
   );
 
   const resolved = await resolveAppointmentService(
@@ -257,22 +282,30 @@ export async function deliverScheduledReminderEmail(args: {
     appointment.cal_event_type_id,
   );
 
-  if (args.timing === 'lead' && !resolved.reminderKind) {
+  const kind =
+    visit?.leadKind === '48h'
+      ? 'brows'
+      : visit?.leadKind === '24h'
+        ? 'lashes'
+        : resolved.reminderKind ??
+          inferReminderKindFromServiceName(appointment.service_name || '');
+  if (args.timing === 'lead' && !kind) {
     return { ok: true, skipped: 'unknown_service_category' };
   }
-
-  const kind =
-    resolved.reminderKind ??
-    inferReminderKindFromServiceName(appointment.service_name || '');
   if (!kind) {
     return { ok: true, skipped: 'unknown_service_category' };
   }
+
+  const serviceName =
+    visit?.services && visit.services.length > 1 && visit.visitServices
+      ? visit.visitServices
+      : appointment.service_name || '';
 
   const result = await sendAppointmentReminderEmail({
     bookingUid: args.bookingUid,
     clientEmail,
     clientName: appointment.client_first_name,
-    serviceName: appointment.service_name || '',
+    serviceName,
     bookingTime: bookingTimeIso,
     endTime:
       appointment.end_time instanceof Date
