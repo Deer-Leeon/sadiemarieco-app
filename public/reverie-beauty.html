@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0D1B2A">
   <meta name="color-scheme" content="light">
   <title>Welcome · Sadie Marie</title>
@@ -27,11 +27,27 @@
   <style>
     html { background-color: #F5F3F0; }
     html:not(.hero-ready) body { visibility: hidden; }
+    /*
+      In-app browsers (Google Maps) cache /css/styles.css aggressively.
+      Keep the Sadie Marie banner in document flow even if that file is stale.
+    */
+    body.reverie-landing nav.reverie-topbar {
+      position: relative !important;
+      top: auto !important;
+      left: auto !important;
+      right: auto !important;
+      inset: auto !important;
+      flex: 0 0 auto;
+      width: 100%;
+      box-sizing: border-box;
+      background: #0d1b2a;
+      color: #f5f3f0;
+    }
   </style>
+  <link rel="stylesheet" href="/css/styles.css?v=reverie-banner-2">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@200;300;400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body class="reverie-landing">
 
@@ -74,20 +90,50 @@
 
 <script>
   (function () {
-    // In-app browsers (Google Maps, etc.) sometimes open with a non-zero
-    // scroll offset that hides the in-flow topbar. Pin to the top on load.
     function pinTop() {
       window.scrollTo(0, 0);
       if (document.documentElement) document.documentElement.scrollTop = 0;
       if (document.body) document.body.scrollTop = 0;
     }
+
+    // Maps / Chrome in-app overlay sits on top of the WebView. Pad the navy
+    // bar until "Sadie Marie" is inside the visual viewport.
+    function fitBanner() {
+      pinTop();
+      var brand = document.querySelector('.reverie-brand');
+      if (!brand) return;
+      var vv = window.visualViewport;
+      var visibleTop = vv ? Math.max(0, vv.offsetTop) : 0;
+      var top = brand.getBoundingClientRect().top;
+      var minVisible = visibleTop + 12;
+      var current =
+        parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue(
+            '--reverie-chrome-top'
+          )
+        ) || 0;
+      if (top < minVisible) {
+        var next = Math.min(96, current + (minVisible - top));
+        document.documentElement.style.setProperty(
+          '--reverie-chrome-top',
+          next + 'px'
+        );
+      }
+    }
+
     pinTop();
-    window.addEventListener('pageshow', pinTop);
+    fitBanner();
+    window.__reverieFitBanner = fitBanner;
+    window.addEventListener('pageshow', fitBanner);
     window.addEventListener('orientationchange', function () {
-      window.setTimeout(pinTop, 50);
+      window.setTimeout(fitBanner, 50);
     });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', fitBanner);
+      window.visualViewport.addEventListener('scroll', fitBanner);
+    }
     document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'visible') pinTop();
+      if (document.visibilityState === 'visible') fitBanner();
     });
   })();
 </script>
@@ -98,6 +144,9 @@
       if (done) return;
       done = true;
       document.documentElement.classList.add('hero-ready');
+      if (typeof window.__reverieFitBanner === 'function') {
+        window.__reverieFitBanner();
+      }
     }
     var img = document.querySelector('.reverie-portrait img, .reverie-img-frame img');
     function finish() {

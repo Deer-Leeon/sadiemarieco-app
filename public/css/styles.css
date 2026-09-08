@@ -3212,22 +3212,18 @@ button.btn-outline-navy:disabled {
    like Google Maps WKWebView often break fixed headers with overflow:hidden
    / 100svh locking, which scrolled the Sadie Marie banner off-screen. */
 html:has(.reverie-landing) {
-  height: 100%;
+  min-height: 100%;
   background-color: var(--off-white);
-  overflow: hidden;
   overscroll-behavior: none;
 }
 html:has(.reverie-landing) body {
-  height: 100%;
-  overflow: hidden;
+  min-height: 100%;
   overscroll-behavior: none;
 }
 .reverie-landing {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  max-height: 100dvh;
-  overflow: hidden;
+  min-height: 100dvh;
   background: var(--off-white);
   box-sizing: border-box;
 }
@@ -3248,9 +3244,9 @@ html.reverie-handoff .reverie-hero {
   align-items: center;
   justify-content: flex-start;
   width: 100%;
-  min-height: calc(88px + env(safe-area-inset-top, 0px));
+  min-height: calc(88px + env(safe-area-inset-top, 0px) + var(--reverie-chrome-top, 0px));
   padding:
-    env(safe-area-inset-top, 0px)
+    calc(env(safe-area-inset-top, 0px) + var(--reverie-chrome-top, 0px))
     clamp(24px, 5vw, 64px)
     0;
   box-sizing: border-box;
@@ -3406,20 +3402,23 @@ html.reverie-handoff .reverie-hero {
 @media (max-width: 860px) {
   html:has(.reverie-landing),
   html:has(.reverie-landing) body {
-    height: 100%;
-    max-height: 100svh;
+    height: auto;
+    max-height: none;
+    overflow: auto;
   }
   .reverie-landing {
-    height: 100svh;
-    max-height: 100svh;
+    height: auto;
+    min-height: 100svh;
+    max-height: none;
+    overflow: visible;
   }
   .reverie-landing .reverie-topbar {
-    min-height: 0;
+    min-height: calc(56px + env(safe-area-inset-top, 0px) + var(--reverie-chrome-top, 0px));
     justify-content: space-between;
     padding:
-      max(14px, env(safe-area-inset-top, 0px))
+      max(20px, calc(env(safe-area-inset-top, 0px) + var(--reverie-chrome-top, 0px) + 8px))
       16px
-      14px;
+      16px;
     border-bottom: 0;
   }
   .reverie-topbar-slot[aria-hidden="true"] {
