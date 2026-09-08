@@ -3208,26 +3208,21 @@ button.btn-outline-navy:disabled {
 }
 
 /* ── Reverie Beauty handoff ──
-   Topbar stays in normal flex flow (not position:fixed). In-app browsers
-   like Google Maps WKWebView often break fixed headers with overflow:hidden
-   / 100svh locking, which scrolled the Sadie Marie banner off-screen. */
+   Ordinary scrolling document, deliberately. In-app browsers (Google Maps,
+   Instagram, Facebook) report a viewport height that doesn't match what the
+   user sees until they interact with the tab, so any height lock either hid
+   the Sadie Marie banner under the toolbar or left dead space below the CTA.
+   `min-height` + normal overflow degrades to a short scroll instead. */
 html:has(.reverie-landing) {
-  height: 100%;
+  min-height: 100%;
   background-color: var(--off-white);
-  overflow: hidden;
-  overscroll-behavior: none;
-}
-html:has(.reverie-landing) body {
-  height: 100%;
-  overflow: hidden;
-  overscroll-behavior: none;
+  overscroll-behavior-y: none;
 }
 .reverie-landing {
   display: flex;
   flex-direction: column;
-  height: var(--app-height, 100dvh);
-  max-height: var(--app-height, 100dvh);
-  overflow: hidden;
+  min-height: 100vh;
+  min-height: 100svh;
   background: var(--off-white);
   box-sizing: border-box;
 }
@@ -3286,7 +3281,6 @@ html.reverie-handoff .reverie-hero {
   flex: 1 1 auto;
   min-height: 0;
   width: min(1080px, 100%);
-  overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 400px);
   column-gap: clamp(28px, 4vw, 48px);
@@ -3301,7 +3295,6 @@ html.reverie-handoff .reverie-hero {
   position: relative;
   z-index: 2;
   min-height: 0;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -3404,17 +3397,9 @@ html.reverie-handoff .reverie-hero {
 }
 
 @media (max-width: 860px) {
-  html:has(.reverie-landing),
-  html:has(.reverie-landing) body {
-    height: 100%;
-    max-height: none;
-    overflow: hidden;
-  }
   .reverie-landing {
-    height: var(--app-height, 100svh);
-    max-height: var(--app-height, 100svh);
-    min-height: 0;
-    overflow: hidden;
+    min-height: 100vh;
+    min-height: 100svh;
   }
   .reverie-landing .reverie-topbar {
     min-height: 0;
@@ -3445,7 +3430,6 @@ html.reverie-handoff .reverie-hero {
     grid-template-rows: none;
     column-gap: 0;
     align-items: stretch;
-    overflow: hidden;
     padding: var(--reverie-gutter)
       max(var(--reverie-gutter), env(safe-area-inset-right))
       max(var(--reverie-gutter), env(safe-area-inset-bottom))
