@@ -41,6 +41,9 @@ result logo also depend on work outside the codebase.
 
 - Keep asking happy clients for Google reviews
 - Site carousel syncs via `/api/cron/sync-reviews` (QStash daily schedule — not Vercel Cron)
+- Google Place Details only returns ~5 reviews per request. The sync merges
+  `newest` + `most_relevant` and **keeps** earlier rows so the site can grow
+  toward the full Maps count as new reviews appear.
 
 ## Validate after deploy
 

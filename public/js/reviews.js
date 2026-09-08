@@ -85,11 +85,17 @@
     const reviews = payload && Array.isArray(payload.reviews) ? payload.reviews : [];
     if (reviews.length === 0) return;
 
+    const countLabel =
+      reviews.length === 1
+        ? '1 Google review'
+        : `${reviews.length} Google reviews`;
+
     root.innerHTML = `
       <section class="reviews-section" aria-label="Client reviews">
         <header class="reviews-section__header">
           <span class="section-label">Kind Words</span>
           <h2 class="section-title">Client <em>Love</em></h2>
+          <p class="reviews-section__count">${escapeHtml(countLabel)}</p>
           <a
             class="reviews-section__cta"
             href="https://g.page/r/CQ0Tmk7shapREBM/review"

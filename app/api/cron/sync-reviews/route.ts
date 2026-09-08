@@ -3,9 +3,12 @@
  *
  * Mirrors Google Places reviews into `google_reviews`:
  * - Upsert each review by stable `author_url` (edits update the same row)
- * - Delete DB rows that are no longer returned by Google (e.g. user deleted)
+ * - Fetch both `newest` and `most_relevant` sorts and merge — Place Details
+ *   only returns ~5 reviews per call, so one sort misses older or newer ones
+ * - Keep rows Google stops including in those five (accumulate over time)
  *
- * Google only exposes a small set of recent reviews per place (~5).
+ * Google Maps can show the full listing; this API cannot. Accumulation plus
+ * both sorts is the supported way to approach a complete on-site set.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -32,27 +35,48 @@ interface GooglePlaceDetailsResponse {
   error_message?: string;
   result?: {
     reviews?: GooglePlaceReview[];
+    rating?: number;
+    user_ratings_total?: number;
   };
 }
+
+type ReviewsSort = 'newest' | 'most_relevant';
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Remove rows not present in the current Places API payload. */
-async function deleteReviewsNotInApi(authorUrls: string[]): Promise<number> {
-  if (authorUrls.length === 0) {
-    const { rowCount } = await sql`DELETE FROM google_reviews`;
-    return rowCount ?? 0;
-  }
-
-  const { rowCount } = await sql.query(
-    `DELETE FROM google_reviews
-     WHERE author_url IS NOT NULL
-       AND NOT (author_url = ANY($1::text[]))`,
-    [authorUrls]
+function usableReview(review: GooglePlaceReview): boolean {
+  return (
+    typeof review.text === 'string' &&
+    review.text.trim().length > 0 &&
+    typeof review.author_url === 'string' &&
+    review.author_url.trim().length > 0
   );
-  return rowCount ?? 0;
+}
+
+async function fetchPlaceDetails(
+  placeId: string,
+  apiKey: string,
+  reviewsSort: ReviewsSort,
+  extraFields: string[] = []
+): Promise<GooglePlaceDetailsResponse> {
+  const url = new URL('https://maps.googleapis.com/maps/api/place/details/json');
+  url.searchParams.set('place_id', placeId);
+  url.searchParams.set(
+    'fields',
+    ['reviews', ...extraFields].filter(Boolean).join(',')
+  );
+  url.searchParams.set('key', apiKey);
+  url.searchParams.set('reviews_sort', reviewsSort);
+  // Without this, Google auto-translates reviews (e.g. "cutie!" → "box!").
+  url.searchParams.set('reviews_no_translations', 'true');
+
+  const upstream = await fetch(url.toString());
+  if (!upstream.ok) {
+    throw new Error(`HTTP ${upstream.status}`);
+  }
+  return (await upstream.json()) as GooglePlaceDetailsResponse;
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -71,23 +95,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const url = new URL('https://maps.googleapis.com/maps/api/place/details/json');
-  url.searchParams.set('place_id', placeId);
-  url.searchParams.set('fields', 'reviews');
-  url.searchParams.set('key', apiKey);
-  // Without this, Google auto-translates reviews (e.g. "cutie!" → "box!").
-  url.searchParams.set('reviews_no_translations', 'true');
-
-  let payload: GooglePlaceDetailsResponse;
+  let newestPayload: GooglePlaceDetailsResponse;
+  let relevantPayload: GooglePlaceDetailsResponse;
   try {
-    const upstream = await fetch(url.toString());
-    if (!upstream.ok) {
-      return NextResponse.json(
-        { error: 'google_fetch_failed', message: `HTTP ${upstream.status}` },
-        { status: 502 }
-      );
-    }
-    payload = (await upstream.json()) as GooglePlaceDetailsResponse;
+    [newestPayload, relevantPayload] = await Promise.all([
+      fetchPlaceDetails(placeId, apiKey, 'newest', [
+        'rating',
+        'user_ratings_total',
+      ]),
+      fetchPlaceDetails(placeId, apiKey, 'most_relevant'),
+    ]);
   } catch (err) {
     const msg = errorMessage(err);
     console.error('[api/cron/sync-reviews] google fetch failed:', msg);
@@ -97,33 +114,40 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  if (payload.status !== 'OK') {
-    console.error('[api/cron/sync-reviews] google status not OK', {
-      status: payload.status,
-      error_message: payload.error_message,
-    });
-    return NextResponse.json(
-      {
-        error: 'google_api_error',
+  for (const payload of [newestPayload, relevantPayload]) {
+    if (payload.status !== 'OK') {
+      console.error('[api/cron/sync-reviews] google status not OK', {
         status: payload.status,
-        message: payload.error_message ?? null,
-      },
-      { status: 502 }
-    );
+        error_message: payload.error_message,
+      });
+      return NextResponse.json(
+        {
+          error: 'google_api_error',
+          status: payload.status,
+          message: payload.error_message ?? null,
+        },
+        { status: 502 }
+      );
+    }
   }
 
-  const reviews = (payload.result?.reviews ?? []).filter(
-    (r) =>
-      typeof r.text === 'string' &&
-      r.text.trim().length > 0 &&
-      typeof r.author_url === 'string' &&
-      r.author_url.trim().length > 0
-  );
+  const byAuthorUrl = new Map<string, GooglePlaceReview>();
+  for (const review of [
+    ...(newestPayload.result?.reviews ?? []),
+    ...(relevantPayload.result?.reviews ?? []),
+  ]) {
+    if (!usableReview(review)) continue;
+    const authorUrl = review.author_url!.trim();
+    const existing = byAuthorUrl.get(authorUrl);
+    if (!existing || review.time >= existing.time) {
+      byAuthorUrl.set(authorUrl, review);
+    }
+  }
+  const reviews = [...byAuthorUrl.values()];
 
   let addedCount = 0;
   let updatedCount = 0;
   let removedCount = 0;
-  const authorUrls: string[] = [];
 
   try {
     const { rowCount: legacyRemoved } = await sql`
@@ -142,7 +166,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   for (const review of reviews) {
     const authorUrl = review.author_url!.trim();
-    authorUrls.push(authorUrl);
 
     const reviewTime = new Date(review.time * 1000);
     if (Number.isNaN(reviewTime.getTime())) {
@@ -208,21 +231,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  try {
-    removedCount += await deleteReviewsNotInApi(authorUrls);
-  } catch (err) {
-    const msg = errorMessage(err);
-    console.error('[api/cron/sync-reviews] stale review removal failed', msg);
-    return NextResponse.json(
-      { error: 'db_cleanup_failed', message: msg },
-      { status: 500 }
-    );
-  }
+  const googleRating = newestPayload.result?.rating ?? null;
+  const googleTotal = newestPayload.result?.user_ratings_total ?? null;
 
   await recordJobHeartbeat(JOB_HEARTBEAT_KEYS.syncReviews, {
     addedCount,
     updatedCount,
     removedCount,
+    fetchedCount: reviews.length,
+    googleRating,
+    googleTotal,
   });
 
   return NextResponse.json({
@@ -231,6 +249,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     updatedCount,
     removedCount,
     fetchedCount: reviews.length,
-    activeOnGoogle: authorUrls.length,
+    googleRating,
+    googleTotal,
   });
 }
