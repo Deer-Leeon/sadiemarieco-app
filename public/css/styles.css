@@ -3212,18 +3212,22 @@ button.btn-outline-navy:disabled {
    like Google Maps WKWebView often break fixed headers with overflow:hidden
    / 100svh locking, which scrolled the Sadie Marie banner off-screen. */
 html:has(.reverie-landing) {
-  min-height: 100%;
+  height: 100%;
   background-color: var(--off-white);
+  overflow: hidden;
   overscroll-behavior: none;
 }
 html:has(.reverie-landing) body {
-  min-height: 100%;
+  height: 100%;
+  overflow: hidden;
   overscroll-behavior: none;
 }
 .reverie-landing {
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  height: var(--app-height, 100dvh);
+  max-height: var(--app-height, 100dvh);
+  overflow: hidden;
   background: var(--off-white);
   box-sizing: border-box;
 }
@@ -3244,9 +3248,9 @@ html.reverie-handoff .reverie-hero {
   align-items: center;
   justify-content: flex-start;
   width: 100%;
-  min-height: calc(88px + env(safe-area-inset-top, 0px) + var(--reverie-chrome-top, 0px));
+  min-height: calc(88px + env(safe-area-inset-top, 0px));
   padding:
-    calc(env(safe-area-inset-top, 0px) + var(--reverie-chrome-top, 0px))
+    env(safe-area-inset-top, 0px)
     clamp(24px, 5vw, 64px)
     0;
   box-sizing: border-box;
@@ -3402,23 +3406,20 @@ html.reverie-handoff .reverie-hero {
 @media (max-width: 860px) {
   html:has(.reverie-landing),
   html:has(.reverie-landing) body {
-    height: auto;
+    height: 100%;
     max-height: none;
-    overflow: auto;
+    overflow: hidden;
   }
   .reverie-landing {
-    height: auto;
-    min-height: 100svh;
-    max-height: none;
-    overflow: visible;
+    height: var(--app-height, 100svh);
+    max-height: var(--app-height, 100svh);
+    min-height: 0;
+    overflow: hidden;
   }
   .reverie-landing .reverie-topbar {
-    min-height: calc(56px + env(safe-area-inset-top, 0px) + var(--reverie-chrome-top, 0px));
+    min-height: 0;
     justify-content: space-between;
-    padding:
-      max(20px, calc(env(safe-area-inset-top, 0px) + var(--reverie-chrome-top, 0px) + 8px))
-      16px
-      16px;
+    padding: 14px 16px;
     border-bottom: 0;
   }
   .reverie-topbar-slot[aria-hidden="true"] {

@@ -44,7 +44,7 @@
       color: #f5f3f0;
     }
   </style>
-  <link rel="stylesheet" href="/css/styles.css?v=reverie-banner-2">
+  <link rel="stylesheet" href="/css/styles.css?v=reverie-banner-3">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@200;300;400&display=swap" rel="stylesheet">
@@ -90,50 +90,40 @@
 
 <script>
   (function () {
-    function pinTop() {
-      window.scrollTo(0, 0);
-      if (document.documentElement) document.documentElement.scrollTop = 0;
-      if (document.body) document.body.scrollTop = 0;
-    }
+    var landing = document.body;
 
-    // Maps / Chrome in-app overlay sits on top of the WebView. Pad the navy
-    // bar until "Sadie Marie" is inside the visual viewport.
-    function fitBanner() {
-      pinTop();
-      var brand = document.querySelector('.reverie-brand');
-      if (!brand) return;
+    // Pin the welcome card to the *visible* WebView, not 100vh. Google Maps
+    // Chrome/Safari overlay their toolbars on the layout viewport, which
+    // otherwise hides the Sadie Marie bar and leaves a dead gap at the bottom.
+    function fitShell() {
       var vv = window.visualViewport;
-      var visibleTop = vv ? Math.max(0, vv.offsetTop) : 0;
-      var top = brand.getBoundingClientRect().top;
-      var minVisible = visibleTop + 12;
-      var current =
-        parseFloat(
-          getComputedStyle(document.documentElement).getPropertyValue(
-            '--reverie-chrome-top'
-          )
-        ) || 0;
-      if (top < minVisible) {
-        var next = Math.min(96, current + (minVisible - top));
-        document.documentElement.style.setProperty(
-          '--reverie-chrome-top',
-          next + 'px'
-        );
-      }
+      var height = Math.round((vv && vv.height) || window.innerHeight || 0);
+      var top = Math.round((vv && vv.offsetTop) || 0);
+      if (height < 1) return;
+      document.documentElement.style.setProperty('--app-height', height + 'px');
+      if (!landing || !landing.classList.contains('reverie-landing')) return;
+      landing.style.position = 'fixed';
+      landing.style.left = '0';
+      landing.style.right = '0';
+      landing.style.width = '100%';
+      landing.style.top = top + 'px';
+      landing.style.height = height + 'px';
+      landing.style.overflow = 'hidden';
     }
 
-    pinTop();
-    fitBanner();
-    window.__reverieFitBanner = fitBanner;
-    window.addEventListener('pageshow', fitBanner);
+    fitShell();
+    window.__reverieFitBanner = fitShell;
+    window.addEventListener('pageshow', fitShell);
+    window.addEventListener('resize', fitShell);
     window.addEventListener('orientationchange', function () {
-      window.setTimeout(fitBanner, 50);
+      window.setTimeout(fitShell, 50);
     });
     if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', fitBanner);
-      window.visualViewport.addEventListener('scroll', fitBanner);
+      window.visualViewport.addEventListener('resize', fitShell);
+      window.visualViewport.addEventListener('scroll', fitShell);
     }
     document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'visible') fitBanner();
+      if (document.visibilityState === 'visible') fitShell();
     });
   })();
 </script>
