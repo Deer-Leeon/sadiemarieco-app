@@ -175,7 +175,7 @@ Sadie Marie: You were marked as a no-show for your [service] on [date] at [time]
 **#7 – Reschedule** (admin dashboard or client via Cal/manage):
 
 ```text
-Sadie Marie: Your [service] has been rescheduled to [date] at [time]. [prep instructions]. I'm so excited to see you! Manage, reschedule, or cancel: [link]. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: Your [service] has been rescheduled to [date] at [time]. You'll receive a reminder with pre-arrival instructions before your visit. I'm so excited to see you! Manage, reschedule, or cancel: [link]. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 **#8 – Late-change fee (50% of service, 2–24h before start; cancel or reschedule)**:
