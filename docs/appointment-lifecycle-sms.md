@@ -137,7 +137,7 @@ Sadie Marie: Your 2 Week Fill on Saturday, July 25 at 10:00am was canceled. A la
 | **Notes** | Manage link uses the **new** Cal UID. Reminder emails + SMS jobs re-queued. Cal may also fire `BOOKING_CREATED` for the new UID; that path must **not** send confirmation SMS. |
 
 ```
-Sadie Marie: Your 2 Week Fill has been rescheduled to Sunday, July 26 at 2:00pm. Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: Your 2 Week Fill has been rescheduled to Sunday, July 26 at 2:00pm. For lashes: come with clean lashes and no eye makeup, and skip caffeine for at least 4-6 hours before. I'm so excited to see you! Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 ### 13. Admin cancel from dashboard
@@ -189,7 +189,7 @@ Sadie Marie: You were marked as a no-show for your 2 Week Fill on Saturday, July
 | **Notes** | Checkbox is **on by default** (website Cal embed + iOS god-mode). Unchecking still moves the booking, re-queues reminder jobs, and fires admin iOS push. Silent reschedule pre-claims `{newUid}:reschedule_sms` (and the web embed claims `{oldUid}:skip_client_sms` so Cal’s `BOOKING_RESCHEDULED` webhook cannot send the text if it beats `POST /reschedule`). Deduped if Cal `BOOKING_RESCHEDULED` webhook also fires. God-mode reschedule creates a new Cal booking (`manual_admin_booking` + `admin_reschedule`); the following `BOOKING_CREATED` must **not** send confirmation SMS — only this reschedule template (when SMS is left on). |
 
 ```
-Sadie Marie: Your 2 Week Fill has been rescheduled to Sunday, July 26 at 2:00pm. Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: Your 2 Week Fill has been rescheduled to Sunday, July 26 at 2:00pm. For lashes: come with clean lashes and no eye makeup, and skip caffeine for at least 4-6 hours before. I'm so excited to see you! Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 ### 17. Admin PATCH other status (e.g. phone cancel → `canceled_by_client`)

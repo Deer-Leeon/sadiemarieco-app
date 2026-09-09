@@ -25,7 +25,7 @@ Sadie Marie: Your 2 Week Fill is confirmed for Saturday, July 25 at 10:00am. Man
 **SMS**
 
 ```
-Sadie Marie: Your 2 Week Fill has been rescheduled to Sunday, July 26 at 2:00pm. Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=EXAMPLE. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: Your 2 Week Fill has been rescheduled to Sunday, July 26 at 2:00pm. For lashes: come with clean lashes and no eye makeup, and skip caffeine for at least 4-6 hours before. I'm so excited to see you! Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=EXAMPLE. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 ---
@@ -125,7 +125,7 @@ Sadie Marie: Your 2 Week Fill on Saturday, July 25 at 10:00am has been canceled.
 **SMS** — same as client reschedule
 
 ```
-Sadie Marie: Your 2 Week Fill has been rescheduled to Sunday, July 26 at 2:00pm. Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=EXAMPLE. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: Your 2 Week Fill has been rescheduled to Sunday, July 26 at 2:00pm. For lashes: come with clean lashes and no eye makeup, and skip caffeine for at least 4-6 hours before. I'm so excited to see you! Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=EXAMPLE. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 ---
