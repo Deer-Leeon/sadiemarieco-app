@@ -21,6 +21,18 @@ export function isStagingDeployment(): boolean {
   return false;
 }
 
+/**
+ * Live marketing hosts must never use the staging gate, even if this build
+ * was created on the staging git branch (e.g. a Preview promoted to
+ * Production). Middleware inlines APP_ENV / VERCEL_GIT_COMMIT_REF at
+ * build time, so a promoted staging build would otherwise 307 www → www.
+ */
+function isProductionPublicHost(hostHeader: string | null): boolean {
+  const host = (hostHeader || '').split(':')[0].toLowerCase();
+  return host === 'www.sadiemarie.co' || host === 'sadiemarie.co';
+}
+
 export function shouldGateAsStaging(hostHeader: string | null): boolean {
+  if (isProductionPublicHost(hostHeader)) return false;
   return isStagingHost(hostHeader) || isStagingDeployment();
 }
