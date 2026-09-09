@@ -6,7 +6,8 @@
    ────
    1. Read `uid` from the query string.
    2. Fetch booking details through /api/booking (server-side proxy to Cal.com).
-   3. Render the details + actions, or an error/expired state.
+   3. Render upcoming appointments (when more than one) + details/actions,
+      or an error/expired state.
    4. Reschedule → fee confirmation modal → Cal.com inline embed with `rescheduleUid`
       → on success, show confirmed new time + manage link (not the old cancelled booking).
    5. Cancel → confirmation modal (with fee callout) → POST /api/cancel-booking → success state.
@@ -18,9 +19,10 @@
   const STUDIO_ADDRESS = '61 W 3200 N, Suite #10, Lehi, UT 84043';
 
   // ── STATE ──
-  const STATES = ['loading', 'error', 'loaded', 'reschedule', 'cancelled', 'rescheduled'];
+  const STATES = ['loading', 'error', 'loaded', 'reschedule', 'cancelled', 'rescheduled', 'empty'];
   let booking = null;
   let rescheduleMounted = false;
+  let loadToken = 0;
 
   // ── DOM REFS ──
   const el = (id) => document.getElementById(id);
@@ -31,7 +33,8 @@
     loaded: el('portal-loaded'),
     reschedule: el('portal-reschedule'),
     cancelled: el('portal-cancelled'),
-    rescheduled: el('portal-rescheduled')
+    rescheduled: el('portal-rescheduled'),
+    empty: el('portal-empty')
   };
 
   const detail = {
@@ -73,6 +76,9 @@
   const rescheduledManage = el('portal-rescheduled-manage');
   const rescheduledSummary = el('portal-rescheduled-summary');
   const inlineNotice = el('portal-inline-notice');
+  const upcomingWrap = el('portal-upcoming');
+  const upcomingList = el('portal-upcoming-list');
+  const emptyMessage = el('portal-empty-message');
 
   // ── HELPERS ──
   const setState = (name) => {
@@ -218,6 +224,15 @@
       const tzLabel = tzName ? ` (${tzName.value})` : '';
       return `${fmt.format(new Date(startIso))} – ${fmt.format(new Date(endIso))}${tzLabel}`;
     } catch (e) { return '—'; }
+  };
+
+  const formatListWhen = (startIso, endIso, tz) => {
+    const date = formatDate(startIso, tz);
+    const time = formatTimeRange(startIso, endIso || startIso, tz);
+    if (date === '—' && time === '—') return 'Time to be confirmed';
+    if (date === '—') return time;
+    if (time === '—') return date;
+    return `${date} · ${time}`;
   };
 
   const toIsoMaybe = (value) => {
@@ -397,6 +412,15 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const showEmptyUpcoming = (message) => {
+    if (message && emptyMessage) emptyMessage.textContent = message;
+    booking = null;
+    if (upcomingList) upcomingList.innerHTML = '';
+    if (upcomingWrap) upcomingWrap.hidden = true;
+    setState('empty');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const isSameAppointmentSlot = (existingStart, existingEnd, newStart, newEnd) => {
     if (!existingStart || !newStart) return false;
     const toMinute = (iso) => {
@@ -432,6 +456,69 @@
   };
 
   // ── RENDER ──
+  const renderUpcomingList = (b) => {
+    if (!upcomingWrap || !upcomingList) return;
+    const items = Array.isArray(b && b.upcoming) ? b.upcoming : [];
+    const selectedUid = b && b.uid;
+    const showList =
+      items.length > 1 ||
+      (items.length === 1 && items[0] && items[0].uid !== selectedUid);
+
+    if (!showList) {
+      upcomingWrap.hidden = true;
+      upcomingList.innerHTML = '';
+      return;
+    }
+
+    const tz = tzForDisplay(b);
+    upcomingList.innerHTML = '';
+    items.forEach((item) => {
+      if (!item || !item.uid) return;
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'portal-upcoming-item';
+      const isSelected = item.uid === selectedUid;
+      if (isSelected) btn.classList.add('is-selected');
+      btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+
+      const copy = document.createElement('span');
+      copy.className = 'portal-upcoming-item-copy';
+      const service = document.createElement('span');
+      service.className = 'portal-upcoming-item-service';
+      service.textContent = item.service_name || 'Appointment';
+      const when = document.createElement('span');
+      when.className = 'portal-upcoming-item-when';
+      when.textContent = formatListWhen(item.start, item.end, tz);
+      copy.appendChild(service);
+      copy.appendChild(when);
+
+      const mark = document.createElement('span');
+      mark.className = 'portal-upcoming-item-mark';
+      mark.textContent = isSelected ? 'Selected' : 'View';
+
+      btn.appendChild(copy);
+      btn.appendChild(mark);
+      btn.addEventListener('click', async () => {
+        if (!item.uid || item.uid === (booking && booking.uid)) return;
+        const previousUid = booking && booking.uid;
+        setInlineNotice('');
+        replaceManageUidInUrl(item.uid);
+        const ok = await loadBooking(item.uid, { keepView: true, silentError: true });
+        if (ok) return;
+        if (previousUid) replaceManageUidInUrl(previousUid);
+        setInlineNotice(
+          "We couldn't load that appointment. Please try again or contact the studio."
+        );
+        if (booking) renderBooking(booking);
+      });
+
+      li.appendChild(btn);
+      upcomingList.appendChild(li);
+    });
+    upcomingWrap.hidden = false;
+  };
+
   const renderBooking = (b) => {
     booking = b;
     const tz = tzForDisplay(b);
@@ -496,35 +583,75 @@
     rescheduleBtn.title = actionable ? '' : lockedTitle;
     cancelBtn.title = actionable ? '' : lockedTitle;
 
+    renderUpcomingList(b);
     setState('loaded');
   };
 
   // ── FETCH ──
-  const loadBooking = async (uid) => {
-    setState('loading');
+  const loadBooking = async (uid, options = {}) => {
+    const token = ++loadToken;
+    const keepView = options.keepView === true && Boolean(booking);
+    if (!keepView) setState('loading');
+    else {
+      rescheduleBtn.disabled = true;
+      cancelBtn.disabled = true;
+    }
     try {
       const res = await fetch(`/api/booking?uid=${encodeURIComponent(uid)}`, {
         headers: { Accept: 'application/json' }
       });
       const payload = await res.json().catch(() => null);
+      if (token !== loadToken) return false;
 
       if (res.status === 404) {
-        return showError("We couldn't find an appointment matching this link. It may have been cancelled, rescheduled, or the link copied incorrectly.");
+        if (options.silentError) return false;
+        showError("We couldn't find an appointment matching this link. It may have been cancelled, rescheduled, or the link copied incorrectly.");
+        return false;
       }
       if (res.status === 400) {
-        return showError('This link is missing required information. Please use the link from your confirmation email.');
+        if (options.silentError) return false;
+        showError('This link is missing required information. Please use the link from your confirmation email.');
+        return false;
       }
       if (!res.ok) {
-        return showError("We hit a snag loading your appointment. Please refresh, or contact the studio if this keeps happening.");
+        if (options.silentError) return false;
+        showError("We hit a snag loading your appointment. Please refresh, or contact the studio if this keeps happening.");
+        return false;
       }
       if (!payload || !payload.uid) {
-        return showError("We couldn't load your appointment details. Please try again in a moment.");
+        if (options.silentError) return false;
+        showError("We couldn't load your appointment details. Please try again in a moment.");
+        return false;
       }
       renderBooking(payload);
+      return true;
     } catch (err) {
+      if (token !== loadToken) return false;
       console.error('[manage] loadBooking failed:', err);
+      if (options.silentError) return false;
       showError("We couldn't reach the booking service. Check your connection and try again.");
+      return false;
     }
+  };
+
+  const remainingUpcoming = (excludeUid, upcoming) => {
+    return (Array.isArray(upcoming) ? upcoming : []).filter(
+      (item) => item && item.uid && item.uid !== excludeUid
+    );
+  };
+
+  const selectNextUpcoming = async (excludeUid, upcoming, notice) => {
+    const rest = remainingUpcoming(excludeUid, upcoming);
+    for (let i = 0; i < rest.length; i += 1) {
+      const nextUid = rest[i].uid;
+      replaceManageUidInUrl(nextUid);
+      const ok = await loadBooking(nextUid, { silentError: true });
+      if (ok) {
+        if (notice) setInlineNotice(notice);
+        return true;
+      }
+    }
+    return false;
   };
 
   // ── RESCHEDULE ──
@@ -820,7 +947,20 @@
       }
 
       closeCancelModal();
-      setState('cancelled');
+      modalConfirm.disabled = false;
+      modalDismiss.disabled = false;
+      modalConfirm.textContent = 'Yes, cancel it';
+      const cancelledUid = booking.uid;
+      const siblings = booking.upcoming;
+      const moved = await selectNextUpcoming(
+        cancelledUid,
+        siblings,
+        'That appointment was cancelled. Your other upcoming visits are still listed.'
+      );
+      if (moved) return;
+      showEmptyUpcoming(
+        'That appointment was cancelled. You have no other upcoming visits scheduled. Book a new session whenever you\'re ready.'
+      );
     } catch (err) {
       console.error('[manage] cancel failed:', err);
       modalError.textContent = "We couldn't reach the booking service. Please try again.";
@@ -846,6 +986,22 @@
   }
   if (rescheduleModalDismiss) {
     rescheduleModalDismiss.addEventListener('click', closeRescheduleModal);
+  }
+  if (rescheduledManage) {
+    rescheduledManage.addEventListener('click', (event) => {
+      event.preventDefault();
+      const href = rescheduledManage.getAttribute('href') || '';
+      let nextUid = '';
+      try {
+        nextUid = new URL(href, window.location.origin).searchParams.get('uid') || '';
+      } catch (err) {
+        nextUid = '';
+      }
+      if (!nextUid && booking) nextUid = booking.uid;
+      if (!nextUid) return;
+      setInlineNotice('');
+      loadBooking(nextUid);
+    });
   }
 
   document.addEventListener('keydown', (event) => {

@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Manage your appointment with Sadie Marie — reschedule or cancel using your private booking link.">
+  <meta name="description" content="Manage your upcoming appointments with Sadie Marie — reschedule or cancel using your private booking link.">
   <meta name="theme-color" content="#0D1B2A">
   <meta name="color-scheme" content="light">
   <meta name="robots" content="noindex, nofollow">
-  <title>Manage Your Appointment — Sadie Marie</title>
+  <title>Manage Your Appointments — Sadie Marie</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png">
@@ -30,11 +30,11 @@
 <main class="portal-main">
 
   <header class="portal-masthead">
-    <span class="section-label">Your Appointment</span>
-    <h1 class="portal-title">Manage Your<br><em>Reservation</em></h1>
+    <span class="section-label">Your Appointments</span>
+    <h1 class="portal-title">Manage Your<br><em>Reservations</em></h1>
     <div class="section-divider"></div>
     <p class="portal-intro">
-      This private link lets you view, reschedule, or cancel your upcoming session — no account required.
+      This private link lets you view, reschedule, or cancel your upcoming appointments — no account required.
     </p>
   </header>
 
@@ -46,7 +46,7 @@
       <div class="portal-skeleton-bar"></div>
       <div class="portal-skeleton-bar portal-skeleton-bar--sm"></div>
     </div>
-    <p class="portal-skeleton-note">Loading your appointment…</p>
+    <p class="portal-skeleton-note">Loading your appointments…</p>
   </section>
 
   <!-- ERROR / INVALID LINK STATE -->
@@ -68,6 +68,11 @@
   <!-- LOADED / DEFAULT STATE -->
   <section id="portal-loaded" class="portal-state" hidden>
     <p class="portal-inline-notice" id="portal-inline-notice" hidden role="status"></p>
+    <div id="portal-upcoming" class="portal-upcoming" hidden>
+      <span class="portal-eyebrow">Upcoming appointments</span>
+      <h2 class="portal-card-title portal-upcoming-heading">Choose a visit to change</h2>
+      <ul id="portal-upcoming-list" class="portal-upcoming-list"></ul>
+    </div>
     <div class="portal-grid">
 
       <article class="portal-card portal-card--details">
@@ -140,6 +145,22 @@
       Choose a different time than your current appointment. Confirming the same slot keeps your existing booking.
     </p>
     <div class="portal-reschedule-mount" id="portal-reschedule-mount"></div>
+  </section>
+
+  <!-- NO REMAINING UPCOMING APPOINTMENTS -->
+  <section id="portal-empty" class="portal-state" hidden aria-live="polite">
+    <div class="portal-card portal-card--center">
+      <span class="portal-eyebrow">All set</span>
+      <h2 class="portal-card-title">You have no upcoming<br><em>appointments</em>.</h2>
+      <p class="portal-card-body" id="portal-empty-message">
+        There are no scheduled visits on this link. Book a new session whenever you&rsquo;re ready,
+        or reach out if you think something is missing.
+      </p>
+      <div class="portal-actions">
+        <a class="btn-navy" href="/#services">Book a new session</a>
+        <a class="btn-outline-navy" href="/">Return to site</a>
+      </div>
+    </div>
   </section>
 
   <!-- CANCELLED SUCCESS STATE -->
