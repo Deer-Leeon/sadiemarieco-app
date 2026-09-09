@@ -540,21 +540,35 @@
     const parsed = parseBookingFromEvent(event);
     const { uid: newUid, start, end, title, eventType } = parsed;
 
-    // Wildcard listeners can emit noise. Prefer typed success events; still
-    // proceed when we have a concrete booking payload (uid and/or start).
-    const typedSuccess = isCalRescheduleSuccessType(eventType);
-    if (eventType && !typedSuccess && !newUid && !start) return;
-
+    // Cal emits the same success on the namespaced API and a wildcard `*`.
+    // After we apply the new slot, `booking.start` already matches the event,
+    // so a second pass used to look like a same-slot noop and flash
+    // "already booked" on the manage page.
     if (
-      start &&
-      isSameAppointmentSlot(booking.start, booking.end, start, end)
+      newUid &&
+      (handledRescheduleUids.has(newUid) ||
+        handledRescheduleUids.has(`same:${newUid}`))
     ) {
+      return;
+    }
+
+    const typedSuccess = isCalRescheduleSuccessType(eventType);
+    // Ignore availability/slot events that happen to include a uid + start.
+    if (eventType && !typedSuccess) return;
+
+    const movedToNewUid = Boolean(newUid && newUid !== booking.uid);
+    const sameSlot =
+      !movedToNewUid &&
+      start &&
+      isSameAppointmentSlot(booking.start, booking.end, start, end);
+
+    if (sameSlot) {
       if (rescheduleMount) rescheduleMount.innerHTML = '';
       rescheduleMounted = false;
       const uidToLoad = newUid || booking.uid;
       if (newUid) {
-        if (handledRescheduleUids.has(`same:${newUid}`)) return;
         handledRescheduleUids.add(`same:${newUid}`);
+        handledRescheduleUids.add(newUid);
         replaceManageUidInUrl(newUid);
       }
       setInlineNotice(
@@ -569,6 +583,8 @@
     if (newUid && newUid === booking.uid && !start) {
       if (rescheduleMount) rescheduleMount.innerHTML = '';
       rescheduleMounted = false;
+      handledRescheduleUids.add(`same:${newUid}`);
+      handledRescheduleUids.add(newUid);
       setInlineNotice(
         "You're already booked for this time. Pick a different date or time if you want to move your appointment."
       );
@@ -587,8 +603,8 @@
       return;
     }
 
-    if (handledRescheduleUids.has(newUid)) return;
     handledRescheduleUids.add(newUid);
+    setInlineNotice('');
     showRescheduledSuccess({ uid: newUid, start, end, title });
   };
 
@@ -613,6 +629,11 @@
           const ns =
             (event && event.detail && event.detail.namespace) || '';
           if (ns && ns !== RESCHEDULE_NS) return;
+          const type =
+            (event && event.detail && (event.detail.type || event.detail.action)) ||
+            (event && event.type) ||
+            '';
+          if (!isCalRescheduleSuccessType(type)) return;
           handleRescheduleSuccess(event);
         },
       });
