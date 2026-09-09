@@ -1112,9 +1112,32 @@
     if (event.persisted) closeDrawer();
   });
 
+  // Keep in sync with lib/abandon-hold-client.ts KEEP_HOLD_STORAGE_KEY.
+  const KEEP_CHECKOUT_HOLD_KEY = 'sadieMarieKeepCheckoutHold';
+  let drawerKeepHoldThroughUnload = false;
+
+  const shouldKeepDrawerHold = () => {
+    if (drawerKeepHoldThroughUnload) return true;
+    const uid = drawerHoldUid;
+    if (!uid) return false;
+    try {
+      if (window.__sadieKeepCheckoutHold === uid) return true;
+    } catch {
+      /* ignore */
+    }
+    try {
+      return sessionStorage.getItem(KEEP_CHECKOUT_HOLD_KEY) === uid;
+    } catch {
+      return false;
+    }
+  };
+
   window.addEventListener('pagehide', (event) => {
     if (event.persisted) return;
     if (!drawerHoldUid || drawerHoldConfirmed) return;
+    // "Continue with card" promotes the iframe to top-level /checkout.
+    // That unloads this page — do not treat it as abandoning the hold.
+    if (shouldKeepDrawerHold()) return;
     abandonDrawerHold();
   });
 
@@ -1274,6 +1297,9 @@
     }
     if (type === 'sadie-checkout:confirmed') {
       drawerHoldConfirmed = true;
+    }
+    if (type === 'sadie-checkout:keep-hold') {
+      drawerKeepHoldThroughUnload = true;
     }
   });
 

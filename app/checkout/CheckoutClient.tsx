@@ -33,6 +33,7 @@ import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
 import { stripePromise } from '@/lib/stripe-browser';
 import {
   isKeepHoldThroughUnload,
+  markKeepHoldThroughNavigation,
   sendAbandonHoldBeacon,
   setKeepHoldThroughUnload,
 } from '@/lib/abandon-hold-client';
@@ -515,7 +516,7 @@ export default function CheckoutClient({
       else url.searchParams.delete('email');
       const target =
         window.top && window.top !== window ? window.top : window;
-      setKeepHoldThroughUnload(true);
+      markKeepHoldThroughNavigation(uid);
       target.location.replace(url.toString());
     },
     [uid, contactName, contactEmail]
@@ -547,7 +548,7 @@ export default function CheckoutClient({
     });
     const target =
       window.top && window.top !== window ? window.top : window;
-    setKeepHoldThroughUnload(true);
+    markKeepHoldThroughNavigation(uid);
     target.location.assign(resume);
   }, [
     embedInDrawer,
@@ -565,9 +566,10 @@ export default function CheckoutClient({
     if (embedInDrawer) return;
     if (typeof window === 'undefined') return;
     if (window.top && window.top !== window) {
+      markKeepHoldThroughNavigation(uid);
       window.top.location.replace(window.location.href);
     }
-  }, [embedInDrawer]);
+  }, [embedInDrawer, uid]);
 
   useEffect(() => {
     if (!embedInDrawer) return;
