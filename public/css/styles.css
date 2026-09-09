@@ -2870,6 +2870,20 @@ footer {
 .portal-actions--stack .btn-navy,
 .portal-actions--stack .btn-outline-navy { text-align: center; }
 .portal-actions--end { justify-content: flex-end; }
+.portal-card--center .portal-actions {
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+.portal-card--center .portal-actions .btn-navy,
+.portal-card--center .portal-actions .btn-outline-navy {
+  align-self: center;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
 
 .portal-cancel-btn { /* override only when the cancel button should look destructive */ }
 .portal-cancel-btn:hover {
@@ -3022,12 +3036,16 @@ button.btn-outline-navy:disabled {
 .portal-rescheduled-actions {
   margin-top: 22px;
   justify-content: center;
+  align-items: center;
 }
 .portal-rescheduled-actions .btn-navy,
 .portal-rescheduled-actions .btn-outline-navy {
-  width: 100%;
-  max-width: 280px;
+  width: auto;
+  max-width: 100%;
   justify-content: center;
+  align-self: center;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* ── LOADING SKELETON ── */
@@ -3181,6 +3199,17 @@ button.btn-outline-navy:disabled {
   .portal-actions { flex-direction: column; align-items: stretch; }
   .portal-actions .btn-navy,
   .portal-actions .btn-outline-navy { width: 100%; text-align: center; padding-left: 24px; padding-right: 24px; }
+  .portal-card--center .portal-actions {
+    align-items: center;
+  }
+  .portal-card--center .portal-actions .btn-navy,
+  .portal-card--center .portal-actions .btn-outline-navy {
+    width: auto;
+    max-width: 100%;
+    align-self: center;
+    margin-left: auto;
+    margin-right: auto;
+  }
   .portal-actions--end { flex-direction: column-reverse; }
   .portal-detail-row { grid-template-columns: 1fr; gap: 4px; padding-bottom: 12px; }
   .portal-detail-row dt { font-size: 0.52rem; }
