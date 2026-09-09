@@ -53,6 +53,40 @@ export function isHoldExpired(
   return nowMs >= holdDeadlineMs(createdAt);
 }
 
+function normalizeAppointmentStatus(
+  status: string | null | undefined
+): string {
+  return (status || '').toLowerCase();
+}
+
+export function isPendingCheckoutHoldStatus(
+  status: string | null | undefined
+): boolean {
+  return normalizeAppointmentStatus(status) === 'pending';
+}
+
+export function isConfirmedBookingStatus(
+  status: string | null | undefined
+): boolean {
+  return normalizeAppointmentStatus(status) === 'confirmed';
+}
+
+/**
+ * Checkout UI + hold-release: only a still-pending (or already system-
+ * canceled) hold can expire. Confirmed bookings keep their slot even
+ * after the original 10-minute window.
+ */
+export function isAbandonedCheckoutHold(
+  status: string | null | undefined,
+  createdAt: Date | string | null | undefined,
+  nowMs: number = Date.now()
+): boolean {
+  const normalized = normalizeAppointmentStatus(status);
+  if (normalized === 'canceled_by_system') return true;
+  if (normalized !== 'pending') return false;
+  return isHoldExpired(createdAt, nowMs);
+}
+
 export function formatCountdownMmSs(remainingMs: number): string {
   const totalSec = Math.max(0, Math.ceil(remainingMs / 1000));
   const mm = Math.floor(totalSec / 60);

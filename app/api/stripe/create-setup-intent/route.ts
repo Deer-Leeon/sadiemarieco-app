@@ -17,7 +17,7 @@ import {
   STRIPE_SETUP_INTENT_ID_RE,
 } from '@/lib/appointment-stripe';
 import { getAppointmentHoldByCalUid } from '@/lib/appointment-hold';
-import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
+import { HOLD_EXPIRED_MESSAGE, isAbandonedCheckoutHold } from '@/lib/booking-hold';
 import { isValidEmail } from '@/lib/client-identity';
 import {
   clientIpFromRequest,
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // cards against a hold that has already expired (confirm would reject
     // it anyway).
     const hold = await getAppointmentHoldByCalUid(calBookingUid);
-    if (hold && isHoldExpired(hold.created_at)) {
+    if (hold && isAbandonedCheckoutHold(hold.status, hold.created_at)) {
       return NextResponse.json(
         { error: 'cart_hold_expired', message: HOLD_EXPIRED_MESSAGE },
         { status: 400 }

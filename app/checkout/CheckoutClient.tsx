@@ -397,6 +397,7 @@ const STRIPE_APPEARANCE: StripeElementsOptions['appearance'] = {
 interface CheckoutClientProps {
   initialHoldCreatedAt?: string | null;
   initialHoldExpired?: boolean;
+  initialBookingConfirmed?: boolean;
   initialBookingTime?: string | null;
   initialEndTime?: string | null;
   initialServiceName?: string | null;
@@ -406,6 +407,7 @@ interface CheckoutClientProps {
 export default function CheckoutClient({
   initialHoldCreatedAt = null,
   initialHoldExpired = false,
+  initialBookingConfirmed = false,
   initialBookingTime = null,
   initialEndTime = null,
   initialServiceName = null,
@@ -441,7 +443,15 @@ export default function CheckoutClient({
   const [payPhase, setPayPhase] = useState<'choose' | 'card' | 'details'>(
     skipChoose ? 'card' : 'choose'
   );
-  const [confirmed, setConfirmed] = useState<CheckoutConfirmed | null>(null);
+  const [confirmed, setConfirmed] = useState<CheckoutConfirmed | null>(() =>
+    initialBookingConfirmed
+      ? {
+          name,
+          calWarning: null,
+          contact: { sms: false, email: Boolean(email) },
+        }
+      : null
+  );
   const [mountApplePay, setMountApplePay] = useState(false);
   const [applePayAvailable, setApplePayAvailable] = useState<boolean | null>(
     null
@@ -461,7 +471,9 @@ export default function CheckoutClient({
   const [holdCreatedAt, setHoldCreatedAt] = useState<string | null>(
     initialHoldCreatedAt
   );
-  const [holdExpired, setHoldExpired] = useState(initialHoldExpired);
+  const [holdExpired, setHoldExpired] = useState(
+    initialHoldExpired && !initialBookingConfirmed
+  );
   const [countdownLabel, setCountdownLabel] = useState('');
   const [bookingTime, setBookingTime] = useState<string | null>(
     initialBookingTime
@@ -588,6 +600,18 @@ export default function CheckoutClient({
         calWarning: result.calWarning,
         contact: result.contact,
       });
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('booked') !== '1') {
+          url.searchParams.set('booked', '1');
+          const search = url.searchParams.toString();
+          window.history.replaceState(
+            {},
+            '',
+            search ? `${url.pathname}?${search}` : url.pathname
+          );
+        }
+      }
       if (embedInDrawer && window.parent && window.parent !== window) {
         window.parent.postMessage(
           { type: 'sadie-checkout:confirmed' },
@@ -649,6 +673,7 @@ export default function CheckoutClient({
   const expiredTrackedRef = useRef(false);
   useEffect(() => {
     if (!holdExpired || expiredTrackedRef.current) return;
+    if (checkoutConfirmedRef.current) return;
     expiredTrackedRef.current = true;
     trackCheckoutEvent(BOOKING_ANALYTICS_EVENTS.CHECKOUT_EXPIRED, {
       service: analyticsService,
@@ -662,7 +687,7 @@ export default function CheckoutClient({
   // otherwise hit Postgres forever (Chrome throttles background timers to
   // ~60s, which is enough to keep Neon from scaling to zero).
   useEffect(() => {
-    if (!uid || holdExpired) return;
+    if (!uid || holdExpired || confirmed) return;
 
     let cancelled = false;
     let foundHold = Boolean(initialHoldCreatedAt);
@@ -704,10 +729,20 @@ export default function CheckoutClient({
         const data = (await res.json()) as {
           createdAt?: string | null;
           expired?: boolean;
+          status?: string | null;
           bookingTime?: string | null;
           endTime?: string | null;
           serviceName?: string | null;
         };
+        if ((data.status || '').toLowerCase() === 'confirmed') {
+          markConfirmed({
+            name: contactName || name,
+            calWarning: null,
+            contact: { sms: false, email: Boolean(email) },
+          });
+          stopPolling();
+          return;
+        }
         if (data.createdAt) {
           setHoldCreatedAt(data.createdAt);
           if (!foundHold) {
@@ -743,10 +778,23 @@ export default function CheckoutClient({
       cancelled = true;
       stopPolling();
     };
-  }, [uid, initialHoldCreatedAt, holdExpired]);
+  }, [
+    uid,
+    initialHoldCreatedAt,
+    holdExpired,
+    confirmed,
+    markConfirmed,
+    contactName,
+    name,
+    email,
+  ]);
 
   // Countdown from `appointments.created_at` using CHECKOUT_HOLD_SECONDS.
   useEffect(() => {
+    if (confirmed) {
+      setCountdownLabel('');
+      return;
+    }
     if (!holdCreatedAt) {
       setCountdownLabel('');
       return;
@@ -769,7 +817,7 @@ export default function CheckoutClient({
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [holdCreatedAt, holdExpired]);
+  }, [holdCreatedAt, holdExpired, confirmed]);
 
   // When the local countdown expires, release the Cal hold immediately so
   // the slot reopens even if the QStash delayed job never fired. Wait for
@@ -778,6 +826,7 @@ export default function CheckoutClient({
   // while cancel is in flight makes the whole day look empty.
   useEffect(() => {
     if (!holdExpired || !uid) return;
+    if (checkoutConfirmedRef.current) return;
 
     let cancelled = false;
     setHoldReleaseState('releasing');
@@ -845,7 +894,7 @@ export default function CheckoutClient({
   // a failed CVC/ZIP reject can retry without remounting (and wiping) the form.
   // Each submit mints a fresh SetupIntent and confirmSetup uses the same Elements.
   useEffect(() => {
-    if (holdExpired || threeDsSetupIntentId) return;
+    if (holdExpired || threeDsSetupIntentId || confirmed) return;
 
     if (!stripePromise) {
       setBootstrapError(
@@ -858,7 +907,7 @@ export default function CheckoutClient({
         'Missing booking reference in the URL. Please re-open this page from your booking confirmation email.'
       );
     }
-  }, [uid, holdExpired, threeDsSetupIntentId]);
+  }, [uid, holdExpired, threeDsSetupIntentId, confirmed]);
 
   const payNow = paymentTiming === 'pay_now';
 
@@ -929,7 +978,13 @@ export default function CheckoutClient({
             : 'mt-10 w-full max-w-md'
         }
       >
-        {holdExpired ? (
+        {confirmed ? (
+          <SuccessCard
+            name={confirmed.name}
+            calWarning={confirmed.calWarning}
+            contact={confirmed.contact}
+          />
+        ) : holdExpired ? (
           <ExpiredHoldCard releaseState={holdReleaseState} />
         ) : threeDsPaymentIntentId ? (
           <CheckoutThreeDSResume
@@ -949,12 +1004,6 @@ export default function CheckoutClient({
           <ErrorCard message={bootstrapError} />
         ) : !stripePromise || !uid ? (
           <LoadingCard />
-        ) : confirmed ? (
-          <SuccessCard
-            name={confirmed.name}
-            calWarning={confirmed.calWarning}
-            contact={confirmed.contact}
-          />
         ) : (
           <>
             <CheckoutHoldSummary
