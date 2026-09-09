@@ -55,7 +55,7 @@ import {
   insertOnlinePrepaidSettlement,
   isSettlementUniqueConflict,
 } from '@/lib/appointment-settlement';
-import { HOLD_EXPIRED_MESSAGE, isHoldExpired } from '@/lib/booking-hold';
+import { HOLD_EXPIRED_MESSAGE, isAbandonedCheckoutHold } from '@/lib/booking-hold';
 import { notifyBookingConfirmed } from '@/lib/booking-notifications';
 import { isWalletCard, stripeCardCheckRejection } from '@/lib/stripe-card-checks';
 import { acceptOnCal } from '@/lib/cal-accept';
@@ -294,7 +294,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 409 }
       );
     }
-    if (status === 'canceled_by_system' || isHoldExpired(hold.created_at)) {
+    if (status === 'canceled_by_system' || isAbandonedCheckoutHold(status, hold.created_at)) {
       // Pay-now can land here with money already captured client-side just
       // as the window closed. Refund deterministically instead of leaving
       // the outcome to a race between the QStash release (refund) and the

@@ -12,7 +12,7 @@ import { getAppointmentHoldByCalUid } from '@/lib/appointment-hold';
 import {
   CHECKOUT_HOLD_MINUTES,
   holdDeadlineMs,
-  isHoldExpired,
+  isAbandonedCheckoutHold,
 } from '@/lib/booking-hold';
 import {
   clientIpFromRequest,
@@ -48,8 +48,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const status = (row.status || '').toLowerCase();
     const createdAt = row.created_at;
-    const expiredByTime = isHoldExpired(createdAt);
-    const expiredByStatus = status === 'canceled_by_system';
+    const expired = isAbandonedCheckoutHold(status, createdAt);
     const expiresAt =
       createdAt != null
         ? new Date(holdDeadlineMs(createdAt)).toISOString()
@@ -60,7 +59,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       status: row.status,
       expiresAt,
       holdMinutes: CHECKOUT_HOLD_MINUTES,
-      expired: expiredByTime || expiredByStatus,
+      expired,
       bookingTime: row.booking_time,
       endTime: row.end_time,
       serviceName: row.service_name,

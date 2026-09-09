@@ -1,7 +1,10 @@
 import { Suspense } from 'react';
 
 import { getAppointmentHoldByCalUid } from '@/lib/appointment-hold';
-import { isHoldExpired } from '@/lib/booking-hold';
+import {
+  isAbandonedCheckoutHold,
+  isConfirmedBookingStatus,
+} from '@/lib/booking-hold';
 
 import CheckoutClient from './CheckoutClient';
 
@@ -41,6 +44,7 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
 
   let initialHoldCreatedAt: string | null = null;
   let initialHoldExpired = false;
+  let initialBookingConfirmed = false;
   let initialBookingTime: string | null = null;
   let initialEndTime: string | null = null;
   let initialServiceName: string | null = null;
@@ -50,9 +54,8 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
     const hold = await getAppointmentHoldByCalUid(uid);
     if (hold) {
       initialHoldCreatedAt = hold.created_at;
-      initialHoldExpired =
-        (hold.status || '').toLowerCase() === 'canceled_by_system' ||
-        isHoldExpired(hold.created_at);
+      initialHoldExpired = isAbandonedCheckoutHold(hold.status, hold.created_at);
+      initialBookingConfirmed = isConfirmedBookingStatus(hold.status);
       initialBookingTime = hold.booking_time;
       initialEndTime = hold.end_time;
       initialServiceName = hold.service_name;
@@ -65,6 +68,7 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
       <CheckoutClient
         initialHoldCreatedAt={initialHoldCreatedAt}
         initialHoldExpired={initialHoldExpired}
+        initialBookingConfirmed={initialBookingConfirmed}
         initialBookingTime={initialBookingTime}
         initialEndTime={initialEndTime}
         initialServiceName={initialServiceName}
