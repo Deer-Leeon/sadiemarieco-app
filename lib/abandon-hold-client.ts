@@ -14,6 +14,13 @@
 
 const ABANDON_PATH = '/api/booking/abandon-hold';
 
+/**
+ * Same-origin flag so the homepage drawer can skip abandon-on-pagehide
+ * when checkout promotes from the iframe to a top-level /checkout URL.
+ * Must stay in sync with `public/js/main.js`.
+ */
+export const KEEP_HOLD_STORAGE_KEY = 'sadieMarieKeepCheckoutHold';
+
 let keepHoldThroughUnload = false;
 let rememberedHoldUid = '';
 
@@ -23,6 +30,51 @@ export function setKeepHoldThroughUnload(keep: boolean): void {
 
 export function isKeepHoldThroughUnload(): boolean {
   return keepHoldThroughUnload;
+}
+
+/**
+ * Call immediately before a same-origin navigation that should keep the
+ * pending Cal hold (drawer iframe → /checkout, 3DS return, etc.).
+ *
+ * The homepage's `pagehide` listener lives in a different JS bundle, so
+ * the in-memory flag above cannot stop it. sessionStorage + a parent
+ * window property are written synchronously before `location.replace`.
+ */
+export function markKeepHoldThroughNavigation(uid: string): void {
+  keepHoldThroughUnload = true;
+  const trimmed = uid.trim();
+  if (!trimmed || typeof window === 'undefined') return;
+
+  try {
+    sessionStorage.setItem(KEEP_HOLD_STORAGE_KEY, trimmed);
+  } catch {
+    /* private mode / blocked storage */
+  }
+
+  try {
+    (
+      window as Window & { __sadieKeepCheckoutHold?: string }
+    ).__sadieKeepCheckoutHold = trimmed;
+    if (window.parent && window.parent !== window) {
+      (
+        window.parent as Window & { __sadieKeepCheckoutHold?: string }
+      ).__sadieKeepCheckoutHold = trimmed;
+      window.parent.sessionStorage.setItem(KEEP_HOLD_STORAGE_KEY, trimmed);
+    }
+  } catch {
+    /* cross-origin parent — homepage drawer is same-origin */
+  }
+
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage(
+        { type: 'sadie-checkout:keep-hold', uid: trimmed },
+        window.location.origin
+      );
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Latest pending Cal UID, including holds created inside Apple Pay before React state updates. */
