@@ -506,6 +506,7 @@ export async function POST(
           .trim(),
         appointmentId: String(row.id),
         sendClientSms: sendSms,
+        requestHost: req.headers.get('x-forwarded-host') || req.headers.get('host'),
       });
     } catch (smsErr) {
       console.warn(

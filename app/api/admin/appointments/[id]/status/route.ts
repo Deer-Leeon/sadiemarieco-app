@@ -798,6 +798,8 @@ export async function PATCH(
               bookingTime,
               serviceName: row.service_name,
               appointmentId: idParam,
+              requestHost:
+                req.headers.get('x-forwarded-host') || req.headers.get('host'),
             });
           } catch (pushErr) {
             console.warn(
