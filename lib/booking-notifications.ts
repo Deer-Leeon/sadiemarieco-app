@@ -47,6 +47,7 @@ const impl = require('./booking-notifications.js') as {
     clientName?: string | null;
     appointmentId?: string | null;
     sendClientSms?: boolean;
+    requestHost?: string | null;
   }) => Promise<Record<string, unknown>>;
   notifyLateCancelFeeSms: (args: {
     clientPhone: string | null;

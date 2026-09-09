@@ -115,6 +115,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       clientName: parsed.clientName,
       serviceName: parsed.serviceName,
       bookingTime: parsed.bookingTime,
+      requestHost: req.headers.get('x-forwarded-host') || req.headers.get('host'),
     });
     if (result.retryable && result.retryable.length > 0 && result.sent === 0) {
       return NextResponse.json(

@@ -14,6 +14,7 @@ type PushArgs = {
   serviceName?: string | null;
   appointmentId?: string | null;
   skipIfAlreadySent?: boolean;
+  requestHost?: string | null;
 };
 
 type SendArgs = {
@@ -29,6 +30,7 @@ type SendArgs = {
   clientName?: string | null;
   serviceName?: string | null;
   bookingTime?: string | Date | null;
+  requestHost?: string | null;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
