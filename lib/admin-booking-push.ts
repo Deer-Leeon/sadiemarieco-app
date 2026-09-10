@@ -31,11 +31,23 @@ type SendArgs = {
   serviceName?: string | null;
   bookingTime?: string | Date | null;
   requestHost?: string | null;
+  attempt?: number;
+};
+
+export type AdminPushRetryResult = {
+  ok: boolean;
+  sent: number;
+  /** HTTP status the QStash worker route should answer with. */
+  status: number;
+  skipped?: string;
+  retryScheduled?: boolean;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const impl = require('./admin-booking-push.js') as {
+  MAX_ATTEMPTS: number;
   ensureAdminPushDevicesTable: () => Promise<void>;
+  ensureAdminPushLogTables: () => Promise<void>;
   notifyAdminAppointmentPush: (
     args: PushArgs
   ) => Promise<Record<string, unknown>>;
@@ -44,7 +56,17 @@ const impl = require('./admin-booking-push.js') as {
   ) => Promise<Record<string, unknown>>;
   sendAdminBookingPushToTokens: (
     args: SendArgs
-  ) => Promise<{ ok: boolean; sent: number; retryable?: unknown[] }>;
+  ) => Promise<{
+    ok: boolean;
+    sent: number;
+    retryable: unknown[];
+    invalid: number;
+    skipped?: string;
+  }>;
+  runAdminPushRetry: (args: {
+    body: unknown;
+    requestHost?: string | null;
+  }) => Promise<AdminPushRetryResult>;
   loadDevices: () => Promise<
     Array<{
       device_token: string;
@@ -54,8 +76,11 @@ const impl = require('./admin-booking-push.js') as {
   >;
 };
 
+export const ADMIN_PUSH_MAX_ATTEMPTS = impl.MAX_ATTEMPTS;
 export const ensureAdminPushDevicesTable = impl.ensureAdminPushDevicesTable;
+export const ensureAdminPushLogTables = impl.ensureAdminPushLogTables;
 export const notifyAdminAppointmentPush = impl.notifyAdminAppointmentPush;
 export const notifyAdminBookingConfirmed = impl.notifyAdminBookingConfirmed;
 export const sendAdminBookingPushToTokens = impl.sendAdminBookingPushToTokens;
+export const runAdminPushRetry = impl.runAdminPushRetry;
 export const loadAdminPushDevices = impl.loadDevices;

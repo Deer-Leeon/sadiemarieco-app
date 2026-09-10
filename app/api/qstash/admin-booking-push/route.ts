@@ -1,13 +1,21 @@
 /**
  * POST /api/qstash/admin-booking-push
  *
- * Retry remaining APNs tokens after a 5xx / timeout on the first send.
- * Signature-gated like other QStash workers. Always 200 on logical skips.
+ * Attempt N (N ≥ 2) of an admin iOS booking alert: retries the tokens that
+ * failed on the previous attempt (or reloads registered devices when none
+ * were registered yet). The chain re-queues itself with growing delays and
+ * gives up after `ADMIN_PUSH_MAX_ATTEMPTS`. Signature-gated like other
+ * QStash workers.
+ *
+ * 200 → attempt handled (sent, re-queued, or exhausted; QStash must not
+ *       retry this message).
+ * 503 → nothing sent AND the next attempt could not be queued; QStash's own
+ *       retries re-deliver this same attempt.
  */
 import { Receiver } from '@upstash/qstash';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { loadAdminPushDevices, sendAdminBookingPushToTokens } from '@/lib/admin-booking-push';
+import { runAdminPushRetry } from '@/lib/admin-booking-push';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,78 +64,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  let parsed: {
-    tokens?: Array<{
-      device_token?: string;
-      bundle_id?: string;
-      environment?: string;
-    }>;
-    reloadDevices?: boolean;
-    kind?: string | null;
-    source?: string | null;
-    appointmentId?: string | null;
-    bookingUid?: string;
-    clientName?: string | null;
-    serviceName?: string | null;
-    bookingTime?: string | null;
-  } = {};
+  let parsed: unknown = {};
   try {
-    parsed = rawBody ? (JSON.parse(rawBody) as typeof parsed) : {};
+    parsed = rawBody ? (JSON.parse(rawBody) as unknown) : {};
   } catch {
     return NextResponse.json({ ok: true, skipped: 'invalid_json' });
   }
 
-  const bookingUid =
-    typeof parsed.bookingUid === 'string' ? parsed.bookingUid.trim() : '';
-  let tokens = Array.isArray(parsed.tokens)
-    ? parsed.tokens.filter(
-        (row): row is {
-          device_token: string;
-          bundle_id: string;
-          environment: string;
-        } =>
-          typeof row?.device_token === 'string' &&
-          typeof row?.bundle_id === 'string' &&
-          (row.environment === 'development' || row.environment === 'production')
-      )
-    : [];
+  const result = await runAdminPushRetry({
+    body: parsed,
+    requestHost: req.headers.get('x-forwarded-host') || req.headers.get('host'),
+  });
 
-  if (parsed.reloadDevices === true) {
-    tokens = await loadAdminPushDevices();
+  if (result.status !== 200) {
+    return NextResponse.json(
+      { error: 'apns_retryable', sent: result.sent, skipped: result.skipped },
+      { status: result.status }
+    );
   }
-
-  if (!bookingUid || tokens.length === 0) {
-    return NextResponse.json({ ok: true, skipped: 'empty' });
-  }
-
-  try {
-    const kind =
-      parsed.kind === 'rescheduled' || parsed.kind === 'canceled'
-        ? parsed.kind
-        : 'confirmed';
-    const source = parsed.source === 'admin' ? 'admin' : 'client';
-    const result = await sendAdminBookingPushToTokens({
-      tokens,
-      kind,
-      source,
-      appointmentId: parsed.appointmentId ?? null,
-      bookingUid,
-      clientName: parsed.clientName,
-      serviceName: parsed.serviceName,
-      bookingTime: parsed.bookingTime,
-      requestHost: req.headers.get('x-forwarded-host') || req.headers.get('host'),
-    });
-    if (result.retryable && result.retryable.length > 0 && result.sent === 0) {
-      return NextResponse.json(
-        { error: 'apns_retryable', retryable: result.retryable.length },
-        { status: 502 }
-      );
-    }
-    return NextResponse.json({ ok: true, sent: result.sent });
-  } catch (err) {
-    console.error('[api/qstash/admin-booking-push] send failed', {
-      error: errorMessage(err),
-    });
-    return NextResponse.json({ error: 'send_failed' }, { status: 500 });
-  }
+  return NextResponse.json({
+    ok: true,
+    sent: result.sent,
+    skipped: result.skipped,
+    retryScheduled: result.retryScheduled,
+  });
 }
