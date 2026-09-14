@@ -414,7 +414,7 @@ nav {
   width: 100%;
 }
 .services-referral-line:last-child {
-  align-items: center;
+  justify-content: center;
 }
 .services-referral-label,
 .services-referral-hook {
@@ -460,25 +460,6 @@ nav {
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-color: rgba(245, 243, 240, 0.95);
-}
-.services-referral-link {
-  flex-shrink: 0;
-  display: inline-block;
-  font-family: var(--sans);
-  font-size: 0.52rem;
-  font-weight: 400;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--navy);
-  text-decoration: none;
-  background: var(--off-white);
-  padding: 8px 13px;
-  border: none;
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-.services-referral-link:hover {
-  opacity: 0.9;
-  transform: translateY(-1px);
 }
 .services-cols {
   display: grid;
@@ -2408,17 +2389,12 @@ footer {
     justify-content: flex-start;
   }
   .services-referral-line:last-child {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
+    justify-content: flex-start;
   }
   .services-referral-detail {
     max-width: none;
     flex: none;
     width: 100%;
-  }
-  .services-referral-link {
-    align-self: flex-start;
   }
   .services-cols { grid-template-columns: 1fr; }
   .col-rule { display: none; }
