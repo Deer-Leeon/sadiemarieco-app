@@ -17,10 +17,10 @@ export const STUDIO_REGION = 'UT';
 export const STUDIO_POSTAL = '84043';
 export const STUDIO_COUNTRY = 'US';
 
-/** Approximate geo for LocalBusiness schema (Serenity Studios Lehi). */
+/** Street pin at W 3200 N & N Center St (Google Maps for 61 W 3200 N Ste 10, by Skyridge). */
 export const STUDIO_GEO = {
-  latitude: 40.4249,
-  longitude: -111.8794,
+  latitude: 40.42797,
+  longitude: -111.84968,
 } as const;
 
 export const STUDIO_PHONE_DISPLAY = '(385) 200-3904';
