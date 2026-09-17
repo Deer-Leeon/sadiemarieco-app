@@ -34,6 +34,7 @@ import {
   notifyAppointmentRescheduled,
   rescheduleAppointmentReminderEmails,
 } from '@/lib/booking-notifications';
+import { preserveChairEndTime } from '@/lib/visit-duration';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -95,6 +96,7 @@ interface UpdatedRow {
 interface ExistingRow {
   booking_time: Date | string | null;
   end_time: Date | string | null;
+  chair_duration_mins: number | null;
 }
 
 function serialiseDate(value: Date | string | null): string | null {
@@ -167,7 +169,7 @@ export async function POST(
 
     if (isUuid) {
       const found = await sql<ExistingRow>`
-        SELECT booking_time, end_time
+        SELECT booking_time, end_time, chair_duration_mins
         FROM appointments
         WHERE id = ${idParam}::uuid
         LIMIT 1
@@ -175,7 +177,7 @@ export async function POST(
       existing = found.rows[0] ?? null;
     } else if (intId !== null) {
       const found = await sql<ExistingRow>`
-        SELECT booking_time, end_time
+        SELECT booking_time, end_time, chair_duration_mins
         FROM appointments
         WHERE id = ${intId}
         LIMIT 1
@@ -185,7 +187,7 @@ export async function POST(
 
     if (!existing && oldCalUid) {
       const found = await sql<ExistingRow>`
-        SELECT booking_time, end_time
+        SELECT booking_time, end_time, chair_duration_mins
         FROM appointments
         WHERE cal_event_id = ${oldCalUid}
         LIMIT 1
@@ -193,13 +195,20 @@ export async function POST(
       existing = found.rows[0] ?? null;
     }
 
+    const writeEndTime =
+      preserveChairEndTime({
+        startIso: newBookingTime,
+        fallbackEndIso: newEndTime,
+        chairDurationMins: existing?.chair_duration_mins,
+      }) ?? newEndTime;
+
     if (
       existing &&
       isSameAppointmentSlot(
         existing.booking_time,
         existing.end_time,
         newBookingTime,
-        newEndTime
+        writeEndTime
       )
     ) {
       return NextResponse.json(
@@ -218,7 +227,7 @@ export async function POST(
         UPDATE appointments
         SET cal_event_id = ${newCalUid},
             booking_time = ${newBookingTime},
-            end_time     = ${newEndTime},
+            end_time     = ${writeEndTime},
             status       = 'confirmed'
         WHERE id = ${idParam}::uuid
         RETURNING id, cal_event_id, booking_time, end_time, status,
@@ -229,7 +238,7 @@ export async function POST(
         UPDATE appointments
         SET cal_event_id = ${newCalUid},
             booking_time = ${newBookingTime},
-            end_time     = ${newEndTime},
+            end_time     = ${writeEndTime},
             status       = 'confirmed'
         WHERE id = ${intId}
         RETURNING id, cal_event_id, booking_time, end_time, status,
@@ -245,7 +254,7 @@ export async function POST(
         UPDATE appointments
         SET cal_event_id = ${newCalUid},
             booking_time = ${newBookingTime},
-            end_time     = ${newEndTime},
+            end_time     = ${writeEndTime},
             status       = 'confirmed'
         WHERE cal_event_id = ${oldCalUid}
         RETURNING id, cal_event_id, booking_time, end_time, status,

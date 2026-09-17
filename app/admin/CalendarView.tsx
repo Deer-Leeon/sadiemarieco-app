@@ -24,7 +24,7 @@ import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import { timeBlockTimeLabel } from './components/TimeBlockPill';
 import { settlementAriaLabel } from './settlementDisplay';
-import { getServiceColor } from './serviceColors';
+import { getServiceColor, visitBlockBackground } from './serviceColors';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Constants
@@ -491,9 +491,12 @@ function AppointmentPill({
   // baked into makeColor keeps both the time stamp and the client
   // name legible on every hue in the palette.
   const color = isNoShow ? null : getServiceColor(appointment);
-  const colorStyle = color
-    ? { backgroundColor: color.accent, color: color.text }
-    : undefined;
+  const blockPaint = isNoShow ? null : visitBlockBackground(appointment);
+  const colorStyle = blockPaint?.backgroundImage
+    ? { backgroundImage: blockPaint.backgroundImage, color: color?.text }
+    : color
+      ? { backgroundColor: color.accent, color: color.text }
+      : undefined;
   const settledLabel = settlementAriaLabel(appointment.terminal_payment);
 
   return (
@@ -505,7 +508,7 @@ function AppointmentPill({
       className={`relative block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] transition-colors ${
         isNoShow
           ? 'bg-stone-50 text-gray-400 line-through opacity-60 hover:bg-stone-100'
-          : color
+          : color || blockPaint?.backgroundImage
             ? 'hover:brightness-95'
             : 'bg-stone-100 text-stone-800 hover:bg-stone-200'
       } ${hasNoShowFlag && !isNoShow ? 'ring-1 ring-inset ring-amber-400/70' : ''} ${onClick ? 'cursor-pointer' : ''}`}

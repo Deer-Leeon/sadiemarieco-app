@@ -11,9 +11,11 @@ import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import type { Appointment } from '@/app/admin/types';
+import { loadVisitAppointment } from '@/lib/admin-appointment-load';
 import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
 import { loadCalEventTypeMaps } from '@/lib/cal-config';
 import { isValidAppointmentId } from '@/lib/stripe-terminal';
+import { adjustChairDurationBy } from '@/lib/visit-duration';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,6 +47,7 @@ interface CatalogueRow {
   description: string | null;
   color: string | null;
   price: string | number | null;
+  duration_mins: number | null;
 }
 
 function authError(reason: string): NextResponse {
@@ -90,7 +93,7 @@ async function loadCatalogueService(args: {
 }): Promise<CatalogueRow | null> {
   if (args.eventTypeId != null) {
     const { rows } = await sql<CatalogueRow>`
-      SELECT title, cal_event_id, slug, description, color, price
+      SELECT title, cal_event_id, slug, description, color, price, duration_mins
       FROM site_services
       WHERE is_active = TRUE
         AND is_group = FALSE
@@ -102,7 +105,7 @@ async function loadCatalogueService(args: {
   }
   if (args.slug) {
     const { rows } = await sql<CatalogueRow>`
-      SELECT title, cal_event_id, slug, description, color, price
+      SELECT title, cal_event_id, slug, description, color, price, duration_mins
       FROM site_services
       WHERE is_active = TRUE
         AND is_group = FALSE
@@ -149,6 +152,13 @@ function extraToAppointment(args: {
     attached_to_appointment_id: args.parent.id,
     extras: [],
     extra_count: 0,
+    chair_duration_mins: null,
+    catalogue_duration_mins:
+      args.service.duration_mins == null
+        ? null
+        : Number.isFinite(Number(args.service.duration_mins))
+          ? Number(args.service.duration_mins)
+          : null,
   };
 }
 
@@ -339,8 +349,18 @@ export async function POST(
       return NextResponse.json({ error: 'insert_failed' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      extra: extraToAppointment({
+    const extraMins = Number(service.duration_mins);
+    if (Number.isFinite(extraMins) && extraMins > 0) {
+      await adjustChairDurationBy({
+        parentId: parent.id,
+        deltaMins: extraMins,
+      });
+    }
+
+    const appointment = await loadVisitAppointment(parent.id);
+    const extra =
+      appointment?.extras?.find((row) => row.id === inserted.id) ??
+      extraToAppointment({
         id: inserted.id,
         parent,
         service,
@@ -349,7 +369,11 @@ export async function POST(
         serviceName: inserted.service_name || service.title,
         status: inserted.status,
         quotedCents: inserted.quoted_service_price_cents,
-      }),
+      });
+
+    return NextResponse.json({
+      extra,
+      appointment,
     });
   } catch (err) {
     console.error('[add-ons POST] failed', err);

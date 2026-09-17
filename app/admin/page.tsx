@@ -3,15 +3,10 @@ import { sql } from '@vercel/postgres';
 import { redirect } from 'next/navigation';
 
 import { loadCalEventTypeMaps } from '@/lib/cal-config';
-import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
 import { ALLOWED_ADMIN_EMAILS } from '@/lib/admin-allowlist';
+import { mapAndNestAdminAppointments } from '@/lib/admin-appointment-map';
 import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
-import { nestAttachedExtras } from '@/lib/appointment-extras';
-import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
-import {
-  applyCatalogueService,
-  loadActiveCatalogueServices,
-} from '@/lib/match-catalogue-service';
+import { loadActiveCatalogueServices } from '@/lib/match-catalogue-service';
 
 import { fetchDefaultScheduleCached } from './availability/calSchedules';
 import type {
@@ -54,6 +49,8 @@ interface DbRow {
   // server → client boundary.
   booking_time: Date | string | null;
   end_time: Date | string | null;
+  chair_duration_mins: number | null;
+  catalogue_duration_mins: number | null;
   service_name: string | null;
   status: string | null;
   client_phone: string | null;
@@ -207,6 +204,7 @@ export default async function AdminPage() {
         a.client_last_name,
         a.booking_time,
         a.end_time,
+        a.chair_duration_mins,
         a.service_name,
         a.status,
         a.client_phone,
@@ -248,6 +246,7 @@ export default async function AdminPage() {
         s.description AS service_description,
         s.slug        AS service_slug,
         s.color       AS service_color,
+        s.duration_mins AS catalogue_duration_mins,
         pay.id AS terminal_payment_id,
         pay.payment_kind AS terminal_payment_kind,
         pay.stripe_payment_intent_id AS terminal_payment_intent_id,
@@ -264,7 +263,7 @@ export default async function AdminPage() {
         pay.paid_at AS terminal_paid_at
       FROM appointments a
       LEFT JOIN LATERAL (
-        SELECT s.price, s.description, s.slug, s.color
+        SELECT s.price, s.description, s.slug, s.color, s.duration_mins
         FROM site_services s
         WHERE s.is_active = TRUE
           AND (
@@ -280,7 +279,8 @@ export default async function AdminPage() {
                   'classic', 'hybrid', 'volume'
                 )
                 OR (
-                  a.booking_time IS NOT NULL
+                  a.chair_duration_mins IS NULL
+                  AND a.booking_time IS NOT NULL
                   AND a.end_time IS NOT NULL
                   AND s.duration_mins IS NOT NULL
                   AND s.duration_mins = GREATEST(
@@ -325,48 +325,7 @@ export default async function AdminPage() {
     `,
       loadActiveCatalogueServices(),
     ]);
-    appointments = rows.map<Appointment>((r) => {
-      const catalogueFields = applyCatalogueService(r, catalogue);
-      return {
-        id: r.id,
-      cal_uid: r.cal_event_id,
-      client_first_name: r.client_first_name,
-      client_last_name: r.client_last_name,
-      booking_time: serializeDate(r.booking_time),
-      end_time: serializeDate(r.end_time),
-      service_name: catalogueFields.service_name,
-      status: r.status,
-      client_phone: r.client_phone,
-      client_email: r.client_email,
-      booking_notes: clientBookingNotesForDisplay(
-        r.booking_notes,
-        catalogueFields.service_description
-      ),
-      // NUMERIC arrives stringified — coerce here so the client side
-      // never has to think about parsing. Use Number() rather than
-      // parseFloat so a non-numeric string surfaces as NaN, which we
-      // then normalise to null so the modal hides the line cleanly.
-      service_price:
-        r.service_price === null
-          ? null
-          : (() => {
-              const n = Number(r.service_price);
-              return Number.isFinite(n) ? n : null;
-            })(),
-      service_description: catalogueFields.service_description,
-      service_slug: catalogueFields.service_slug,
-      service_color: catalogueFields.service_color,
-      stripe_customer_id: r.stripe_customer_id,
-      terminal_payment: mapSqlPaymentFields(r),
-      client_no_show_flag: Boolean(r.client_no_show_flag),
-      attached_to_appointment_id: r.attached_to_appointment_id
-        ? String(r.attached_to_appointment_id)
-        : null,
-      extras: [],
-      extra_count: 0,
-    };
-    });
-    appointments = nestAttachedExtras(appointments);
+    appointments = mapAndNestAdminAppointments(rows, catalogue);
   } catch (err) {
     console.error('[admin] appointments query failed:', err);
     dbError = err instanceof Error ? err.message : 'Unknown DB error';

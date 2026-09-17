@@ -25,6 +25,7 @@ import {
   MessageSquare,
   Phone,
   Plus,
+  Minus,
   RefreshCw,
   Scissors,
   Trash2,
@@ -67,6 +68,13 @@ import {
   unpaidExtras,
   withPatchedPayments,
 } from '@/lib/appointment-extras';
+import {
+  CHAIR_DURATION_MAX_MIN,
+  CHAIR_DURATION_MIN_MIN,
+  CHAIR_DURATION_STEP_MIN,
+  displayedChairDurationMins,
+  formatChairDurationLabel,
+} from '@/lib/chair-duration';
 import { isAppointmentSettled } from './settlementDisplay';
 import ManualBookingServicePicker from './components/ManualBookingServicePicker';
 import AdminRescheduleView from './components/AdminRescheduleView';
@@ -132,7 +140,10 @@ interface Props {
     appointmentIds?: string[],
     payments?: TerminalPaymentSummary[] | null
   ) => void;
-  onExtrasUpdated?: (extras: Appointment[]) => void;
+  onExtrasUpdated?: (
+    extras: Appointment[],
+    visit?: Appointment | null
+  ) => void;
   catalogueServices?: ManualBookingServiceOption[];
   catalogueGroupHeaders?: ManualBookingServiceGroupHeader[];
 }
@@ -235,12 +246,23 @@ export default function AppointmentModal({
   const [liveExtras, setLiveExtras] = useState<Appointment[]>(
     () => appointment.extras ?? []
   );
+  const [liveBookingTime, setLiveBookingTime] = useState(
+    appointment.booking_time
+  );
+  const [liveEndTime, setLiveEndTime] = useState(appointment.end_time);
+  const [liveChairMins, setLiveChairMins] = useState(
+    appointment.chair_duration_mins ?? null
+  );
+  const [durationBusy, setDurationBusy] = useState(false);
   useEffect(() => {
     setLivePayment(appointment.terminal_payment);
   }, [appointment.id, appointment.terminal_payment]);
   useEffect(() => {
     setLiveExtras(appointment.extras ?? []);
-  }, [appointment.id, appointment.extras]);
+    setLiveBookingTime(appointment.booking_time);
+    setLiveEndTime(appointment.end_time);
+    setLiveChairMins(appointment.chair_duration_mins ?? null);
+  }, [appointment.id, appointment.extras, appointment.booking_time, appointment.end_time, appointment.chair_duration_mins]);
 
   const [addingExtra, setAddingExtra] = useState(false);
   const [extraBusy, setExtraBusy] = useState(false);
@@ -297,6 +319,16 @@ export default function AppointmentModal({
     onMutated?.();
   };
 
+  const commitVisit = (visit: Appointment) => {
+    setLiveExtras(visit.extras ?? []);
+    setLiveBookingTime(visit.booking_time);
+    setLiveEndTime(visit.end_time);
+    setLiveChairMins(visit.chair_duration_mins ?? null);
+    onExtrasUpdated?.(visit.extras ?? [], visit);
+    router.refresh();
+    onMutated?.();
+  };
+
   const commitExtras = (next: Appointment[]) => {
     setLiveExtras(next);
     onExtrasUpdated?.(next);
@@ -345,6 +377,7 @@ export default function AppointmentModal({
       );
       const data = (await res.json().catch(() => null)) as {
         extra?: Appointment;
+        appointment?: Appointment;
         message?: string;
         error?: string;
       } | null;
@@ -352,7 +385,11 @@ export default function AppointmentModal({
         setExtraError(data?.message || data?.error || `HTTP ${res.status}`);
         return;
       }
-      commitExtras([...liveExtras, data.extra]);
+      if (data.appointment) {
+        commitVisit(data.appointment);
+      } else {
+        commitExtras([...liveExtras, data.extra]);
+      }
       setAddingExtra(false);
     } catch (err) {
       setExtraError(err instanceof Error ? err.message : String(err));
@@ -371,6 +408,7 @@ export default function AppointmentModal({
         { method: 'DELETE' }
       );
       const data = (await res.json().catch(() => null)) as {
+        appointment?: Appointment;
         message?: string;
         error?: string;
       } | null;
@@ -378,7 +416,11 @@ export default function AppointmentModal({
         setExtraError(data?.message || data?.error || `HTTP ${res.status}`);
         return;
       }
-      commitExtras(liveExtras.filter((extra) => extra.id !== extraId));
+      if (data?.appointment) {
+        commitVisit(data.appointment);
+      } else {
+        commitExtras(liveExtras.filter((extra) => extra.id !== extraId));
+      }
     } catch (err) {
       setExtraError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -401,6 +443,43 @@ export default function AppointmentModal({
       : 0;
 
   const readOnly = isAppointmentReadOnly(appointment.status);
+
+  const changeVisitLength = async (deltaMins: number) => {
+    if (readOnly || durationBusy || extraBusy) return;
+    const current = displayedChairDurationMins({
+      chair_duration_mins: liveChairMins,
+      booking_time: liveBookingTime,
+      end_time: liveEndTime,
+    });
+    const next = current + deltaMins;
+    if (next < CHAIR_DURATION_MIN_MIN || next > CHAIR_DURATION_MAX_MIN) return;
+    setDurationBusy(true);
+    setExtraError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/appointments/${appointment.id}/duration`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ durationMins: next }),
+        }
+      );
+      const data = (await res.json().catch(() => null)) as {
+        appointment?: Appointment;
+        message?: string;
+        error?: string;
+      } | null;
+      if (!res.ok || !data?.appointment) {
+        setExtraError(data?.message || data?.error || `HTTP ${res.status}`);
+        return;
+      }
+      commitVisit(data.appointment);
+    } catch (err) {
+      setExtraError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDurationBusy(false);
+    }
+  };
 
   const submitStatusChange = async (
     next: AppointmentStatus,
@@ -628,6 +707,9 @@ export default function AppointmentModal({
   );
   const visitWithExtras: Appointment = {
     ...appointment,
+    booking_time: liveBookingTime,
+    end_time: liveEndTime,
+    chair_duration_mins: liveChairMins,
     extras: liveExtras,
     extra_count: liveExtras.length,
   };
@@ -755,13 +837,28 @@ export default function AppointmentModal({
                 {displayBookingNotes ? (
                   <BookingNotesBox notes={displayBookingNotes} />
                 ) : null}
-                <DateTimeBox appointment={appointment} />
+                <DateTimeBox appointment={visitWithExtras} />
                 <ServiceBox appointment={appointment} />
                 {!readOnly || liveExtras.length > 0 ? (
                 <VisitExtrasBox
                   extras={liveExtras}
+                  chairMins={displayedChairDurationMins({
+                    chair_duration_mins: liveChairMins,
+                    booking_time: liveBookingTime,
+                    end_time: liveEndTime,
+                  })}
+                  catalogueMins={appointment.catalogue_duration_mins ?? null}
+                  parentLabel={appointmentServiceLabel(appointment)}
+                  timeRangeLabel={
+                    liveBookingTime
+                      ? formatStudioClockRange(
+                          parseISO(liveBookingTime),
+                          liveEndTime ? parseISO(liveEndTime) : null
+                        )
+                      : null
+                  }
                   readOnly={readOnly}
-                  busy={extraBusy}
+                  busy={extraBusy || durationBusy}
                   error={extraError}
                   adding={addingExtra}
                   services={pickerServices}
@@ -774,6 +871,7 @@ export default function AppointmentModal({
                   }}
                   onSelectService={(service) => void addCatalogueExtra(service)}
                   onRemove={(extraId) => void removeExtra(extraId)}
+                  onStepDuration={(delta) => void changeVisitLength(delta)}
                 />
                 ) : null}
                 {!readOnly ? (
@@ -1196,6 +1294,10 @@ function ServiceBox({ appointment }: { appointment: Appointment }) {
 
 function VisitExtrasBox({
   extras,
+  chairMins,
+  catalogueMins,
+  parentLabel,
+  timeRangeLabel,
   readOnly,
   busy,
   error,
@@ -1206,8 +1308,13 @@ function VisitExtrasBox({
   onCancelAdd,
   onSelectService,
   onRemove,
+  onStepDuration,
 }: {
   extras: Appointment[];
+  chairMins: number;
+  catalogueMins: number | null;
+  parentLabel: string;
+  timeRangeLabel: string | null;
   readOnly: boolean;
   busy: boolean;
   error: string | null;
@@ -1218,10 +1325,116 @@ function VisitExtrasBox({
   onCancelAdd: () => void;
   onSelectService: (service: ManualBookingServiceOption) => void;
   onRemove: (id: string) => void;
+  onStepDuration: (deltaMins: number) => void;
 }) {
+  const canShorten = chairMins - CHAIR_DURATION_STEP_MIN >= CHAIR_DURATION_MIN_MIN;
+  const canLengthen = chairMins + CHAIR_DURATION_STEP_MIN <= CHAIR_DURATION_MAX_MIN;
+  const extraLines = extras.map((extra) => ({
+    extra,
+    mins:
+      typeof extra.catalogue_duration_mins === 'number' &&
+      Number.isFinite(extra.catalogue_duration_mins) &&
+      extra.catalogue_duration_mins > 0
+        ? Math.round(extra.catalogue_duration_mins)
+        : null,
+  }));
+  const extraSum = extraLines.reduce((sum, line) => sum + (line.mins ?? 0), 0);
+  const parentMins =
+    catalogueMins != null && catalogueMins > 0 ? Math.round(catalogueMins) : null;
+  const catalogueTotal =
+    parentMins != null ? parentMins + extraSum : extraSum > 0 ? extraSum : null;
+  const adjustedMins =
+    catalogueTotal != null && catalogueTotal !== chairMins
+      ? chairMins - catalogueTotal
+      : 0;
+  const showAddUp = extras.length > 0 || (parentMins != null && parentMins !== chairMins);
+
   return (
     <div className="rounded-lg border border-stone-200 bg-white p-4">
-      <div className="flex items-center justify-between gap-3">
+      <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
+        Visit length
+      </p>
+      <div className="mt-3 flex items-center gap-3">
+        {!readOnly ? (
+          <button
+            type="button"
+            onClick={() => onStepDuration(-CHAIR_DURATION_STEP_MIN)}
+            disabled={busy || !canShorten}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-stone-200 text-stone-700 transition-colors hover:bg-stone-50 disabled:opacity-40"
+            aria-label={`Shorten visit by ${CHAIR_DURATION_STEP_MIN} minutes`}
+          >
+            <Minus className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <p className="font-serif text-lg text-stone-900">
+            {formatChairDurationLabel(chairMins)}
+          </p>
+          {timeRangeLabel ? (
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-stone-500">
+              <Clock className="h-3 w-3" />
+              {timeRangeLabel}
+            </p>
+          ) : null}
+        </div>
+        {!readOnly ? (
+          <button
+            type="button"
+            onClick={() => onStepDuration(CHAIR_DURATION_STEP_MIN)}
+            disabled={busy || !canLengthen}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-stone-200 text-stone-700 transition-colors hover:bg-stone-50 disabled:opacity-40"
+            aria-label={`Lengthen visit by ${CHAIR_DURATION_STEP_MIN} minutes`}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
+      {showAddUp ? (
+        <dl className="mt-3 space-y-1.5 rounded-md bg-stone-50 px-3 py-2.5 text-xs text-stone-600">
+          {parentMins != null ? (
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="min-w-0 truncate">{parentLabel}</dt>
+              <dd className="shrink-0 tabular-nums text-stone-800">
+                {formatChairDurationLabel(parentMins)}
+              </dd>
+            </div>
+          ) : null}
+          {extraLines.map(({ extra, mins }) => (
+            <div
+              key={extra.id}
+              className="flex items-baseline justify-between gap-3"
+            >
+              <dt className="min-w-0 truncate">
+                + {appointmentServiceLabel(extra)}
+              </dt>
+              <dd className="shrink-0 tabular-nums text-stone-800">
+                {mins != null ? formatChairDurationLabel(mins) : '—'}
+              </dd>
+            </div>
+          ))}
+          {adjustedMins !== 0 ? (
+            <div className="flex items-baseline justify-between gap-3">
+              <dt>{adjustedMins > 0 ? 'Added buffer' : 'Finished early'}</dt>
+              <dd className="shrink-0 tabular-nums text-stone-800">
+                {adjustedMins > 0 ? '+' : '−'}
+                {formatChairDurationLabel(Math.abs(adjustedMins))}
+              </dd>
+            </div>
+          ) : null}
+          <div className="flex items-baseline justify-between gap-3 border-t border-stone-200/80 pt-1.5 font-medium text-stone-800">
+            <dt>In the chair</dt>
+            <dd className="shrink-0 tabular-nums">
+              {formatChairDurationLabel(chairMins)}
+            </dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="mt-1 text-xs text-stone-500">
+          Shorten or extend the chair block. Later public slots stay free when you cut time.
+        </p>
+      )}
+
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-stone-100 pt-4">
         <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
           Extras
         </p>
@@ -1254,6 +1467,10 @@ function VisitExtrasBox({
                     {appointmentServiceLabel(extra)}
                   </p>
                   <p className="mt-0.5 text-xs text-stone-500">
+                    {typeof extra.catalogue_duration_mins === 'number' &&
+                    extra.catalogue_duration_mins > 0
+                      ? `${formatChairDurationLabel(Math.round(extra.catalogue_duration_mins))} · `
+                      : ''}
                     {extra.service_price != null
                       ? `$${formatPrice(extra.service_price)}`
                       : 'No price'}

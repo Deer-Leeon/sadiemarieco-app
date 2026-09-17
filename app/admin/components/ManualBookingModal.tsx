@@ -744,10 +744,18 @@ export default function ManualBookingModal({
     resolvedForGates.lastName.trim()
   );
 
-  const extraOccupiedStartMs = pendingVisits
+  const extraOccupiedIntervals = pendingVisits
     .filter((visit) => visit.id !== editingVisitId)
-    .map((visit) => epochMsFromIsoUtc(visit.slotIsoUtc))
-    .filter((n): n is number => n != null);
+    .flatMap((visit) => {
+      const startMs = epochMsFromIsoUtc(visit.slotIsoUtc);
+      if (startMs == null) return [];
+      const mins = visit.service.durationMins;
+      const endMs =
+        typeof mins === 'number' && Number.isFinite(mins) && mins > 0
+          ? startMs + mins * 60_000
+          : startMs + 15 * 60_000;
+      return [{ startMs, endMs }];
+    });
 
   const scheduleSeedDate = (() => {
     if (editingVisitId) {
@@ -942,7 +950,7 @@ export default function ManualBookingModal({
                 onSelectSlot={setSelectedSlot}
                 seedDate={scheduleSeedDate}
                 seedHour={editingVisitId ? undefined : seedHour}
-                extraOccupiedStartMs={extraOccupiedStartMs}
+                extraOccupiedIntervals={extraOccupiedIntervals}
               />
               <label className="block">
                 <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-stone-500">

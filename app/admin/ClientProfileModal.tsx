@@ -911,17 +911,22 @@ function DossierSection({
                 : prev
             );
           }}
-          onExtrasUpdated={(extras) => {
+          onExtrasUpdated={(extras, visit) => {
             mutatedRef.current = true;
-            setOpenAppointment((prev) =>
-              prev ? { ...prev, extras, extra_count: extras.length } : prev
-            );
+            const patch = (prev: Appointment) =>
+              visit
+                ? {
+                    ...prev,
+                    ...visit,
+                    extras: visit.extras ?? extras,
+                    extra_count: visit.extra_count ?? extras.length,
+                  }
+                : { ...prev, extras, extra_count: extras.length };
+            setOpenAppointment((prev) => (prev ? patch(prev) : prev));
             setAppts((prev) =>
               prev
                 ? prev.map((a) =>
-                    a.id === openAppointment.id
-                      ? { ...a, extras, extra_count: extras.length }
-                      : a
+                    a.id === openAppointment.id ? patch(a) : a
                   )
                 : prev
             );
@@ -2354,17 +2359,22 @@ function AppointmentsView({ client }: { client: Client }) {
                 : prev
             );
           }}
-          onExtrasUpdated={(extras) => {
+          onExtrasUpdated={(extras, visit) => {
             mutatedRef.current = true;
-            setOpenAppointment((prev) =>
-              prev ? { ...prev, extras, extra_count: extras.length } : prev
-            );
+            const patch = (prev: Appointment) =>
+              visit
+                ? {
+                    ...prev,
+                    ...visit,
+                    extras: visit.extras ?? extras,
+                    extra_count: visit.extra_count ?? extras.length,
+                  }
+                : { ...prev, extras, extra_count: extras.length };
+            setOpenAppointment((prev) => (prev ? patch(prev) : prev));
             setAppts((prev) =>
               prev
                 ? prev.map((a) =>
-                    a.id === openAppointment.id
-                      ? { ...a, extras, extra_count: extras.length }
-                      : a
+                    a.id === openAppointment.id ? patch(a) : a
                   )
                 : prev
             );

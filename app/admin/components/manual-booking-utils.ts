@@ -286,6 +286,31 @@ export function epochMsFromIsoUtc(isoUtc: string): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+export interface OccupiedTimeInterval {
+  startMs: number;
+  endMs: number;
+}
+
+function chairEndMs(startMs: number, durationMins: number | null | undefined): number {
+  const mins =
+    typeof durationMins === 'number' && Number.isFinite(durationMins) && durationMins > 0
+      ? durationMins
+      : 15;
+  return startMs + mins * 60_000;
+}
+
+/** True when [slotStart, slotStart + duration) overlaps any busy interval. */
+export function slotOverlapsOccupiedIntervals(
+  slotIsoUtc: string,
+  durationMins: number | null | undefined,
+  intervals: OccupiedTimeInterval[]
+): boolean {
+  const startMs = epochMsFromIsoUtc(slotIsoUtc);
+  if (startMs == null || intervals.length === 0) return false;
+  const endMs = chairEndMs(startMs, durationMins);
+  return intervals.some((busy) => startMs < busy.endMs && endMs > busy.startMs);
+}
+
 /**
  * Build a start value the API treats as studio-local wall time
  * (YYYY-MM-DDTHH:mm:ss with no offset).

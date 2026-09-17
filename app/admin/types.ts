@@ -131,6 +131,17 @@ export interface Appointment {
    * as `booking_time` so the client can parse with `date-fns/parseISO`.
    */
   end_time: string | null;
+  /**
+   * Total chair-block minutes from booking_time when extras or a custom
+   * visit length have been applied. Null means use `end_time − start`.
+   */
+  chair_duration_mins?: number | null;
+  /**
+   * Catalogue `site_services.duration_mins` for this row's event type.
+   * Used for fill labels and calendar color-segment weights — not the
+   * (possibly extended) chair window.
+   */
+  catalogue_duration_mins?: number | null;
   service_name: string | null;
   /**
    * One of `AppointmentStatus`, or `null` for malformed legacy rows

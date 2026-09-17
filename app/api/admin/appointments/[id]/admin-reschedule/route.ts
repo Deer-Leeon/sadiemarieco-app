@@ -24,6 +24,7 @@ import {
   notifyAppointmentRescheduled,
   rescheduleAppointmentReminderEmails,
 } from '@/lib/booking-notifications';
+import { preserveChairEndTime } from '@/lib/visit-duration';
 import {
   CAL_STUDIO_IN_PERSON_LOCATION,
   getCalComApiKey,
@@ -74,6 +75,7 @@ interface AppointmentRow {
   cal_event_id: string | null;
   booking_time: Date | string | null;
   end_time: Date | string | null;
+  chair_duration_mins: number | null;
   status: string | null;
   client_first_name: string | null;
   client_last_name: string | null;
@@ -189,7 +191,7 @@ async function loadAppointment(idParam: string): Promise<AppointmentRow | null> 
   const intId = parseIntegerId(idParam);
   if (UUID_RE.test(idParam)) {
     const { rows } = await sql<AppointmentRow>`
-      SELECT id, cal_event_id, booking_time, end_time, status,
+      SELECT id, cal_event_id, booking_time, end_time, chair_duration_mins, status,
              client_first_name, client_last_name, client_phone, client_email,
              service_name, sms_opt_in
       FROM appointments
@@ -200,7 +202,7 @@ async function loadAppointment(idParam: string): Promise<AppointmentRow | null> 
   }
   if (intId !== null) {
     const { rows } = await sql<AppointmentRow>`
-      SELECT id, cal_event_id, booking_time, end_time, status,
+      SELECT id, cal_event_id, booking_time, end_time, chair_duration_mins, status,
              client_first_name, client_last_name, client_phone, client_email,
              service_name, sms_opt_in
       FROM appointments
@@ -426,9 +428,15 @@ export async function POST(
     }
 
     const newBookingTime = created.startTime ?? startUtc.toISOString();
-    const newEndTime =
+    const calEndTime =
       created.endTime ??
       bookingEndFromDurationMins(newBookingTime, service.duration_mins);
+    const newEndTime =
+      preserveChairEndTime({
+        startIso: newBookingTime,
+        fallbackEndIso: calEndTime,
+        chairDurationMins: existing.chair_duration_mins,
+      }) ?? calEndTime;
 
     let calCancelError: string | null = null;
     const oldUid = existing.cal_event_id?.trim() || null;
