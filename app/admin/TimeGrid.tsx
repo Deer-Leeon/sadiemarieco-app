@@ -468,11 +468,17 @@ function AppointmentBlock({
     includeServiceOnPill(durationMinutes, heightPct, stacked);
   const hasExtras = (apt.extras?.length ?? 0) > 0;
   const showExtraNames = hasExtras && !peekingUnder && !compactLabel;
+  const showParentServiceLine =
+    hasExtras && stacked && Boolean(service) && !peekingUnder;
   const detailBits = compactLabel
     ? peekingUnder
       ? ''
       : startLabel
-    : [timeLabel, showExtraNames ? '' : showService ? service : ''].filter(Boolean).join(' · ');
+    : hasExtras
+      ? stacked
+        ? timeLabel
+        : [timeLabel, service].filter(Boolean).join(' · ')
+      : [timeLabel, showService ? service : ''].filter(Boolean).join(' · ');
 
   const laneBox = useCascade
     ? overlapLaneCascadeStyle(col, totalCols)
@@ -596,6 +602,14 @@ function AppointmentBlock({
           <div className={nameClass} style={nameStyle}>
             {name}
           </div>
+          {showParentServiceLine ? (
+            <div
+              className={`mt-0.5 truncate ${compactLabel ? 'text-[9px]' : 'text-[10px]'} font-semibold leading-tight`}
+              style={nameStyle}
+            >
+              {service}
+            </div>
+          ) : null}
           {detailBits ? (
             <div className={`truncate ${mutedClass}`} style={mutedStyle}>
               {detailBits}

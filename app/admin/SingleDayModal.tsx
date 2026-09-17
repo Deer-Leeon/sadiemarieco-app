@@ -421,9 +421,10 @@ function ModalAppointment({
   const settledLabel = settlementAriaLabel(apt.terminal_payment);
   const hasExtras = (apt.extras?.length ?? 0) > 0;
   const showExtraNames = hasExtras && stacked;
+  const showParentServiceLine = hasExtras && stacked && Boolean(service);
   const subtitle = hasExtras
     ? timeLabel
-    : [timeLabel, service].filter(Boolean).join(stacked ? ' · ' : ' · ');
+    : [timeLabel, service].filter(Boolean).join(' · ');
 
   return (
     <button
@@ -478,6 +479,16 @@ function ModalAppointment({
           >
             {name}
           </div>
+          {showParentServiceLine ? (
+            <div
+              className={`mt-0.5 truncate text-[10px] font-semibold leading-tight ${
+                isNoShow ? 'text-gray-400 line-through' : ''
+              }`}
+              style={color ? { color: color.text } : undefined}
+            >
+              {service}
+            </div>
+          ) : null}
           {subtitle ? (
           <div
             className={`mt-0.5 text-[11px] leading-snug ${
@@ -507,7 +518,7 @@ function ModalAppointment({
           >
             {name}
           </span>
-          {timeLabel || (!hasExtras && service) ? (
+          {timeLabel || service ? (
             <span
               className={
                 isNoShow ? 'text-gray-400' : color ? '' : 'text-stone-500'
@@ -515,7 +526,7 @@ function ModalAppointment({
               style={color ? { color: color.textMuted } : undefined}
             >
               {timeLabel ? ` / ${timeLabel}` : ''}
-              {!hasExtras && service ? ` · ${service}` : ''}
+              {service ? ` · ${service}` : ''}
             </span>
           ) : null}
         </div>
