@@ -421,10 +421,7 @@ function ModalAppointment({
   const settledLabel = settlementAriaLabel(apt.terminal_payment);
   const hasExtras = (apt.extras?.length ?? 0) > 0;
   const showExtraNames = hasExtras && stacked;
-  const showParentServiceLine = hasExtras && stacked && Boolean(service);
-  const subtitle = hasExtras
-    ? timeLabel
-    : [timeLabel, service].filter(Boolean).join(' · ');
+  const subtitle = [timeLabel, service].filter(Boolean).join(' · ');
 
   return (
     <button
@@ -464,7 +461,6 @@ function ModalAppointment({
           </span>
         ) : null}
       </span>
-      <VisitPillExtraNames appointment={apt} enabled={showExtraNames} />
       {stacked ? (
         <div className="relative z-[2]">
           <div
@@ -479,16 +475,6 @@ function ModalAppointment({
           >
             {name}
           </div>
-          {showParentServiceLine ? (
-            <div
-              className={`mt-0.5 truncate text-[10px] font-semibold leading-tight ${
-                isNoShow ? 'text-gray-400 line-through' : ''
-              }`}
-              style={color ? { color: color.text } : undefined}
-            >
-              {service}
-            </div>
-          ) : null}
           {subtitle ? (
           <div
             className={`mt-0.5 text-[11px] leading-snug ${
@@ -503,6 +489,7 @@ function ModalAppointment({
             {subtitle}
           </div>
           ) : null}
+          <VisitPillExtraNames appointment={apt} enabled={showExtraNames} />
         </div>
       ) : (
         <div

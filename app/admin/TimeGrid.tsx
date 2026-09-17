@@ -468,17 +468,11 @@ function AppointmentBlock({
     includeServiceOnPill(durationMinutes, heightPct, stacked);
   const hasExtras = (apt.extras?.length ?? 0) > 0;
   const showExtraNames = hasExtras && !peekingUnder && !compactLabel;
-  const showParentServiceLine =
-    hasExtras && stacked && Boolean(service) && !peekingUnder;
   const detailBits = compactLabel
     ? peekingUnder
       ? ''
       : startLabel
-    : hasExtras
-      ? stacked
-        ? timeLabel
-        : [timeLabel, service].filter(Boolean).join(' · ')
-      : [timeLabel, showService ? service : ''].filter(Boolean).join(' · ');
+    : [timeLabel, showService || hasExtras ? service : ''].filter(Boolean).join(' · ');
 
   const laneBox = useCascade
     ? overlapLaneCascadeStyle(col, totalCols)
@@ -592,51 +586,50 @@ function AppointmentBlock({
         ) : null}
       </span>
       )}
-      <VisitPillExtraNames
-        appointment={apt}
-        enabled={showExtraNames}
-        compact={compactLabel}
-      />
       {stacked ? (
         <div className="relative z-[2]">
           <div className={nameClass} style={nameStyle}>
             {name}
           </div>
-          {showParentServiceLine ? (
-            <div
-              className={`mt-0.5 truncate ${compactLabel ? 'text-[9px]' : 'text-[10px]'} font-semibold leading-tight`}
-              style={nameStyle}
-            >
-              {service}
-            </div>
-          ) : null}
           {detailBits ? (
             <div className={`truncate ${mutedClass}`} style={mutedStyle}>
               {detailBits}
             </div>
           ) : null}
+          <VisitPillExtraNames
+            appointment={apt}
+            enabled={showExtraNames}
+            compact={compactLabel}
+          />
         </div>
       ) : (
         <div
-          className={`relative z-[2] truncate ${compactLabel ? 'text-[10px] leading-none' : 'text-xs'} ${isNoShow ? 'line-through' : ''}`}
+          className={`relative z-[2] ${compactLabel ? 'text-[10px] leading-none' : 'text-xs'} ${isNoShow ? 'line-through' : ''}`}
         >
-          <span
-            className={
-              isNoShow
-                ? 'font-semibold text-gray-400'
-                : color
-                  ? 'font-semibold'
-                  : 'font-semibold text-stone-900'
-            }
-            style={nameStyle}
-          >
-            {name}
-          </span>
-          {detailBits ? (
-            <span className={mutedClass} style={mutedStyle}>
-              {` · ${detailBits}`}
+          <div className="truncate">
+            <span
+              className={
+                isNoShow
+                  ? 'font-semibold text-gray-400'
+                  : color
+                    ? 'font-semibold'
+                    : 'font-semibold text-stone-900'
+              }
+              style={nameStyle}
+            >
+              {name}
             </span>
-          ) : null}
+            {detailBits ? (
+              <span className={mutedClass} style={mutedStyle}>
+                {` · ${detailBits}`}
+              </span>
+            ) : null}
+          </div>
+          <VisitPillExtraNames
+            appointment={apt}
+            enabled={showExtraNames}
+            compact={compactLabel}
+          />
         </div>
       )}
     </button>
