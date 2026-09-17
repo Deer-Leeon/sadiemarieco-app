@@ -125,6 +125,15 @@ export interface VisitBlockPaint {
   backgroundImage?: string;
 }
 
+export interface VisitPaintBand {
+  hex: string;
+  text: string;
+  textMuted: string;
+  startPct: number;
+  endPct: number;
+  kind: 'parent' | 'extra';
+}
+
 function catalogueWeight(mins: number | null | undefined): number {
   if (typeof mins === 'number' && Number.isFinite(mins) && mins > 0) {
     return mins;
@@ -132,8 +141,69 @@ function catalogueWeight(mins: number | null | undefined): number {
   return 60;
 }
 
+function mixHex(a: string, b: string, t: number): string {
+  const left = hexToRgb(a);
+  const right = hexToRgb(b);
+  const mix = (from: number, to: number) =>
+    Math.round(from + (to - from) * t);
+  const toHex = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${toHex(mix(left.r, right.r))}${toHex(mix(left.g, right.g))}${toHex(mix(left.b, right.b))}`;
+}
+
+function colorTokens(hex: string, fallback: ServiceColor): ServiceColor {
+  return HEX_COLOR_RE.test(hex) ? makeColor(hex) : fallback;
+}
+
+export function visitPaintBands(appointment: {
+  service_color?: string | null;
+  catalogue_duration_mins?: number | null;
+  extras?: Array<{
+    service_color?: string | null;
+    catalogue_duration_mins?: number | null;
+  }> | null;
+}): VisitPaintBand[] {
+  const parent = getServiceColor(appointment);
+  if (!parent) return [];
+  const extras = appointment.extras ?? [];
+  const raw: { hex: string; color: ServiceColor; weight: number; kind: VisitPaintBand['kind'] }[] = [
+    {
+      hex: parent.accent,
+      color: parent,
+      weight: catalogueWeight(appointment.catalogue_duration_mins),
+      kind: 'parent',
+    },
+  ];
+  for (const extra of extras) {
+    const color = getServiceColor(extra);
+    const hex = color?.accent ?? parent.accent;
+    raw.push({
+      hex,
+      color: color ?? colorTokens(hex, parent),
+      weight: catalogueWeight(extra.catalogue_duration_mins),
+      kind: 'extra',
+    });
+  }
+  const totalWeight = raw.reduce((sum, s) => sum + s.weight, 0);
+  const bands: VisitPaintBand[] = [];
+  let cursor = 0;
+  for (const seg of raw) {
+    const startPct = (cursor / totalWeight) * 100;
+    const endPct = ((cursor + seg.weight) / totalWeight) * 100;
+    bands.push({
+      hex: seg.hex,
+      text: seg.color.text,
+      textMuted: seg.color.textMuted,
+      startPct,
+      endPct,
+      kind: seg.kind,
+    });
+    cursor += seg.weight;
+  }
+  return bands;
+}
+
 /**
- * One continuous pill: parent colour fading into extra colours in
+ * One continuous pill: parent colour melting into extra colours in
  * add order. Weights follow catalogue durations, scaled to the chair.
  */
 export function visitBlockBackground(appointment: {
@@ -144,50 +214,37 @@ export function visitBlockBackground(appointment: {
     catalogue_duration_mins?: number | null;
   }> | null;
 }): VisitBlockPaint | null {
-  const extras = appointment.extras ?? [];
-  const parent = getServiceColor(appointment);
-  if (!parent) return null;
-  if (extras.length === 0) {
-    return { backgroundColor: parent.accent };
+  const bands = visitPaintBands(appointment);
+  if (bands.length === 0) return null;
+  if (bands.length === 1) {
+    return { backgroundColor: bands[0]!.hex };
   }
 
-  const segments: { hex: string; weight: number }[] = [
-    { hex: parent.accent, weight: catalogueWeight(appointment.catalogue_duration_mins) },
-  ];
-  for (const extra of extras) {
-    const color = getServiceColor(extra);
-    segments.push({
-      hex: color?.accent ?? parent.accent,
-      weight: catalogueWeight(extra.catalogue_duration_mins),
-    });
-  }
-
-  const unique = new Set(segments.map((s) => s.hex.toUpperCase()));
+  const unique = new Set(bands.map((s) => s.hex.toUpperCase()));
   if (unique.size === 1) {
-    return { backgroundColor: segments[0]!.hex };
+    return { backgroundColor: bands[0]!.hex };
   }
 
-  const totalWeight = segments.reduce((sum, s) => sum + s.weight, 0);
-  const blendPct = Math.min(8, Math.max(3, (6 / Math.max(totalWeight, 1)) * 100));
   const stops: string[] = [];
-  let cursor = 0;
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i]!;
-    const start = (cursor / totalWeight) * 100;
-    const end = ((cursor + seg.weight) / totalWeight) * 100;
-    const next = segments[i + 1];
+  for (let i = 0; i < bands.length; i++) {
+    const seg = bands[i]!;
+    const next = bands[i + 1];
     if (!next) {
-      stops.push(`${seg.hex} ${start}%`, `${seg.hex} 100%`);
-    } else {
-      const seam = end;
-      const half = Math.min(blendPct, (end - start) / 2, ((next.weight / totalWeight) * 100) / 2);
-      stops.push(
-        `${seg.hex} ${start}%`,
-        `${seg.hex} ${Math.max(start, seam - half)}%`,
-        `${next.hex} ${Math.min(100, seam + half)}%`
-      );
+      stops.push(`${seg.hex} ${seg.startPct}%`, `${seg.hex} 100%`);
+      continue;
     }
-    cursor += seg.weight;
+    const span = seg.endPct - seg.startPct;
+    const nextSpan = next.endPct - next.startPct;
+    const fade = Math.min(32, Math.max(18, Math.min(span, nextSpan) * 0.72));
+    const hold = Math.max(seg.startPct, seg.endPct - fade);
+    const intoNext = Math.min(100, seg.endPct + fade);
+    const mid = mixHex(seg.hex, next.hex, 0.5);
+    stops.push(
+      `${seg.hex} ${seg.startPct}%`,
+      `${seg.hex} ${hold}%`,
+      `${mid} ${seg.endPct}%`,
+      `${next.hex} ${intoNext}%`
+    );
   }
 
   return {

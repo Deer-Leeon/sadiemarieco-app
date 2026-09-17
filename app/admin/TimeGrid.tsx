@@ -21,6 +21,7 @@ import ClosedHoursHatch from './components/ClosedHoursHatch';
 import { ExtraCountBadge } from './components/ExtraCountBadge';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
+import { VisitPillExtraNames } from './components/VisitPillExtraNames';
 import { settlementAriaLabel } from './settlementDisplay';
 import { getServiceColor, visitBlockBackground } from './serviceColors';
 import {
@@ -465,11 +466,13 @@ function AppointmentBlock({
   const showService =
     !compactLabel &&
     includeServiceOnPill(durationMinutes, heightPct, stacked);
+  const hasExtras = (apt.extras?.length ?? 0) > 0;
+  const showExtraNames = hasExtras && !peekingUnder && !compactLabel;
   const detailBits = compactLabel
     ? peekingUnder
       ? ''
       : startLabel
-    : [timeLabel, showService ? service : ''].filter(Boolean).join(' · ');
+    : [timeLabel, showExtraNames ? '' : showService ? service : ''].filter(Boolean).join(' · ');
 
   const laneBox = useCascade
     ? overlapLaneCascadeStyle(col, totalCols)
@@ -583,8 +586,13 @@ function AppointmentBlock({
         ) : null}
       </span>
       )}
+      <VisitPillExtraNames
+        appointment={apt}
+        enabled={showExtraNames}
+        compact={compactLabel}
+      />
       {stacked ? (
-        <>
+        <div className="relative z-[2]">
           <div className={nameClass} style={nameStyle}>
             {name}
           </div>
@@ -593,10 +601,10 @@ function AppointmentBlock({
               {detailBits}
             </div>
           ) : null}
-        </>
+        </div>
       ) : (
         <div
-          className={`truncate ${compactLabel ? 'text-[10px] leading-none' : 'text-xs'} ${isNoShow ? 'line-through' : ''}`}
+          className={`relative z-[2] truncate ${compactLabel ? 'text-[10px] leading-none' : 'text-xs'} ${isNoShow ? 'line-through' : ''}`}
         >
           <span
             className={

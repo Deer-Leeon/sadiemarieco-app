@@ -15,6 +15,7 @@ import HourAxisColumn from './components/HourAxisColumn';
 import { ExtraCountBadge } from './components/ExtraCountBadge';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
+import { VisitPillExtraNames } from './components/VisitPillExtraNames';
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import { settlementAriaLabel } from './settlementDisplay';
@@ -418,6 +419,11 @@ function ModalAppointment({
     ? 'cursor-pointer hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-stone-900/40'
     : '';
   const settledLabel = settlementAriaLabel(apt.terminal_payment);
+  const hasExtras = (apt.extras?.length ?? 0) > 0;
+  const showExtraNames = hasExtras && stacked;
+  const subtitle = hasExtras
+    ? timeLabel
+    : [timeLabel, service].filter(Boolean).join(stacked ? ' · ' : ' · ');
 
   return (
     <button
@@ -457,8 +463,9 @@ function ModalAppointment({
           </span>
         ) : null}
       </span>
+      <VisitPillExtraNames appointment={apt} enabled={showExtraNames} />
       {stacked ? (
-        <>
+        <div className="relative z-[2]">
           <div
             className={`font-medium leading-tight ${
               isNoShow
@@ -471,6 +478,7 @@ function ModalAppointment({
           >
             {name}
           </div>
+          {subtitle ? (
           <div
             className={`mt-0.5 text-[11px] leading-snug ${
               isNoShow
@@ -481,14 +489,13 @@ function ModalAppointment({
             }`}
             style={color ? { color: color.textMuted } : undefined}
           >
-            {timeLabel}
-            {timeLabel && service ? ' · ' : ''}
-            {service}
+            {subtitle}
           </div>
-        </>
+          ) : null}
+        </div>
       ) : (
         <div
-          className={`text-[13px] leading-tight ${
+          className={`relative z-[2] text-[13px] leading-tight ${
             isNoShow ? 'line-through' : ''
           }`}
         >
@@ -500,7 +507,7 @@ function ModalAppointment({
           >
             {name}
           </span>
-          {timeLabel || service ? (
+          {timeLabel || (!hasExtras && service) ? (
             <span
               className={
                 isNoShow ? 'text-gray-400' : color ? '' : 'text-stone-500'
@@ -508,7 +515,7 @@ function ModalAppointment({
               style={color ? { color: color.textMuted } : undefined}
             >
               {timeLabel ? ` / ${timeLabel}` : ''}
-              {service ? ` · ${service}` : ''}
+              {!hasExtras && service ? ` · ${service}` : ''}
             </span>
           ) : null}
         </div>

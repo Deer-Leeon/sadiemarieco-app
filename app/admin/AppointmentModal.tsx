@@ -848,6 +848,15 @@ export default function AppointmentModal({
                     end_time: liveEndTime,
                   })}
                   catalogueMins={appointment.catalogue_duration_mins ?? null}
+                  parentLabel={appointmentServiceLabel(appointment)}
+                  timeRangeLabel={
+                    liveBookingTime
+                      ? formatStudioClockRange(
+                          parseISO(liveBookingTime),
+                          liveEndTime ? parseISO(liveEndTime) : null
+                        )
+                      : null
+                  }
                   readOnly={readOnly}
                   busy={extraBusy || durationBusy}
                   error={extraError}
@@ -1287,6 +1296,8 @@ function VisitExtrasBox({
   extras,
   chairMins,
   catalogueMins,
+  parentLabel,
+  timeRangeLabel,
   readOnly,
   busy,
   error,
@@ -1302,6 +1313,8 @@ function VisitExtrasBox({
   extras: Appointment[];
   chairMins: number;
   catalogueMins: number | null;
+  parentLabel: string;
+  timeRangeLabel: string | null;
   readOnly: boolean;
   busy: boolean;
   error: string | null;
@@ -1316,12 +1329,25 @@ function VisitExtrasBox({
 }) {
   const canShorten = chairMins - CHAIR_DURATION_STEP_MIN >= CHAIR_DURATION_MIN_MIN;
   const canLengthen = chairMins + CHAIR_DURATION_STEP_MIN <= CHAIR_DURATION_MAX_MIN;
-  const customNote =
-    catalogueMins != null && catalogueMins !== chairMins
-      ? `Catalogue default ${formatChairDurationLabel(catalogueMins)}.`
-      : extras.length > 0
-        ? 'Grows with extras; shorten if you will finish early.'
-        : 'Shorten or extend the chair block. Later public slots stay free when you cut time.';
+  const extraLines = extras.map((extra) => ({
+    extra,
+    mins:
+      typeof extra.catalogue_duration_mins === 'number' &&
+      Number.isFinite(extra.catalogue_duration_mins) &&
+      extra.catalogue_duration_mins > 0
+        ? Math.round(extra.catalogue_duration_mins)
+        : null,
+  }));
+  const extraSum = extraLines.reduce((sum, line) => sum + (line.mins ?? 0), 0);
+  const parentMins =
+    catalogueMins != null && catalogueMins > 0 ? Math.round(catalogueMins) : null;
+  const catalogueTotal =
+    parentMins != null ? parentMins + extraSum : extraSum > 0 ? extraSum : null;
+  const adjustedMins =
+    catalogueTotal != null && catalogueTotal !== chairMins
+      ? chairMins - catalogueTotal
+      : 0;
+  const showAddUp = extras.length > 0 || (parentMins != null && parentMins !== chairMins);
 
   return (
     <div className="rounded-lg border border-stone-200 bg-white p-4">
@@ -1340,9 +1366,17 @@ function VisitExtrasBox({
             <Minus className="h-3.5 w-3.5" />
           </button>
         ) : null}
-        <p className="min-w-0 flex-1 font-serif text-lg text-stone-900">
-          {formatChairDurationLabel(chairMins)}
-        </p>
+        <div className="min-w-0 flex-1">
+          <p className="font-serif text-lg text-stone-900">
+            {formatChairDurationLabel(chairMins)}
+          </p>
+          {timeRangeLabel ? (
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-stone-500">
+              <Clock className="h-3 w-3" />
+              {timeRangeLabel}
+            </p>
+          ) : null}
+        </div>
         {!readOnly ? (
           <button
             type="button"
@@ -1355,7 +1389,50 @@ function VisitExtrasBox({
           </button>
         ) : null}
       </div>
-      <p className="mt-1 text-xs text-stone-500">{customNote}</p>
+      {showAddUp ? (
+        <dl className="mt-3 space-y-1.5 rounded-md bg-stone-50 px-3 py-2.5 text-xs text-stone-600">
+          {parentMins != null ? (
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="min-w-0 truncate">{parentLabel}</dt>
+              <dd className="shrink-0 tabular-nums text-stone-800">
+                {formatChairDurationLabel(parentMins)}
+              </dd>
+            </div>
+          ) : null}
+          {extraLines.map(({ extra, mins }) => (
+            <div
+              key={extra.id}
+              className="flex items-baseline justify-between gap-3"
+            >
+              <dt className="min-w-0 truncate">
+                + {appointmentServiceLabel(extra)}
+              </dt>
+              <dd className="shrink-0 tabular-nums text-stone-800">
+                {mins != null ? formatChairDurationLabel(mins) : '—'}
+              </dd>
+            </div>
+          ))}
+          {adjustedMins !== 0 ? (
+            <div className="flex items-baseline justify-between gap-3">
+              <dt>{adjustedMins > 0 ? 'Added buffer' : 'Finished early'}</dt>
+              <dd className="shrink-0 tabular-nums text-stone-800">
+                {adjustedMins > 0 ? '+' : '−'}
+                {formatChairDurationLabel(Math.abs(adjustedMins))}
+              </dd>
+            </div>
+          ) : null}
+          <div className="flex items-baseline justify-between gap-3 border-t border-stone-200/80 pt-1.5 font-medium text-stone-800">
+            <dt>In the chair</dt>
+            <dd className="shrink-0 tabular-nums">
+              {formatChairDurationLabel(chairMins)}
+            </dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="mt-1 text-xs text-stone-500">
+          Shorten or extend the chair block. Later public slots stay free when you cut time.
+        </p>
+      )}
 
       <div className="mt-4 flex items-center justify-between gap-3 border-t border-stone-100 pt-4">
         <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-500">
@@ -1390,6 +1467,10 @@ function VisitExtrasBox({
                     {appointmentServiceLabel(extra)}
                   </p>
                   <p className="mt-0.5 text-xs text-stone-500">
+                    {typeof extra.catalogue_duration_mins === 'number' &&
+                    extra.catalogue_duration_mins > 0
+                      ? `${formatChairDurationLabel(Math.round(extra.catalogue_duration_mins))} · `
+                      : ''}
                     {extra.service_price != null
                       ? `$${formatPrice(extra.service_price)}`
                       : 'No price'}
