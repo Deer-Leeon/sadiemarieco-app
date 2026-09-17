@@ -17,6 +17,8 @@ import {
   formatSlotInStudioTime,
   isStudioDateInMonth,
   occupiedStartMsFromSlotsPayload,
+  slotOverlapsOccupiedIntervals,
+  type OccupiedTimeInterval,
   slotMatchesStudioHour,
   slotsGroupedByStudioDate,
   slotToStudioLocalHhmm,
@@ -118,8 +120,8 @@ interface Props {
   seedDate?: Date;
   /** 0–23 studio hour to pre-select once slots load. */
   seedHour?: number;
-  /** Extra busy starts (other pending cart visits), epoch ms. */
-  extraOccupiedStartMs?: number[];
+  /** Other pending cart visits — full chair windows, not just start times. */
+  extraOccupiedIntervals?: OccupiedTimeInterval[];
 }
 
 export default function ManualBookingSlotPicker({
@@ -130,7 +132,7 @@ export default function ManualBookingSlotPicker({
   onSelectSlot,
   seedDate,
   seedHour,
-  extraOccupiedStartMs,
+  extraOccupiedIntervals,
 }: Props) {
   const today = todayInStudio();
   const seedYmdRaw = seedDate ? studioDateKey(seedDate) : '';
@@ -168,10 +170,7 @@ export default function ManualBookingSlotPicker({
     onSelectSlotRef.current = onSelectSlot;
   }, [onSelectSlot]);
 
-  const extraOccupiedSet = useMemo(
-    () => new Set(extraOccupiedStartMs ?? []),
-    [extraOccupiedStartMs]
-  );
+  const extraOccupied = extraOccupiedIntervals ?? [];
 
   const availableSet = useMemo(() => new Set(availableDates), [availableDates]);
 
@@ -598,7 +597,11 @@ export default function ManualBookingSlotPicker({
                   );
                 const occupied =
                   occupiedStartMs.has(new Date(slot).getTime()) ||
-                  extraOccupiedSet.has(new Date(slot).getTime());
+                  slotOverlapsOccupiedIntervals(
+                    slot,
+                    durationMins,
+                    extraOccupied
+                  );
                 return (
                   <button
                     key={slot}
