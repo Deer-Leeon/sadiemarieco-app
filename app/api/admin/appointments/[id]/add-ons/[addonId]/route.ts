@@ -8,12 +8,17 @@ import { NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import { loadVisitAppointment } from '@/lib/admin-appointment-load';
 import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
 import { getSucceededAppointmentPayment } from '@/lib/appointment-settlement';
 import {
   getLatestTerminalPayment,
   isValidAppointmentId,
 } from '@/lib/stripe-terminal';
+import {
+  adjustChairDurationBy,
+  loadCatalogueDurationMins,
+} from '@/lib/visit-duration';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -47,9 +52,11 @@ export async function DELETE(
     const { rows } = await sql<{
       id: string;
       attached_to_appointment_id: string | null;
+      cal_event_type_id: number | null;
     }>`
       SELECT id::text AS id,
-             attached_to_appointment_id::text AS attached_to_appointment_id
+             attached_to_appointment_id::text AS attached_to_appointment_id,
+             cal_event_type_id
       FROM appointments
       WHERE id::text = ${addonId}
       LIMIT 1
@@ -87,13 +94,31 @@ export async function DELETE(
       );
     }
 
+    const extraMins = await loadCatalogueDurationMins(extra.cal_event_type_id);
+
     await sql`
       DELETE FROM appointments
       WHERE id::text = ${addonId}
         AND attached_to_appointment_id::text = ${id}
     `;
 
-    return NextResponse.json({ ok: true, id: addonId });
+    if (extraMins != null && extraMins > 0) {
+      try {
+        await adjustChairDurationBy({
+          parentId: id,
+          deltaMins: -extraMins,
+        });
+      } catch (err) {
+        console.warn('[add-ons DELETE] chair shrink failed', {
+          parentId: id,
+          extraId: addonId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    const appointment = await loadVisitAppointment(id);
+    return NextResponse.json({ ok: true, id: addonId, appointment });
   } catch (err) {
     console.error('[add-ons DELETE] failed', err);
     return NextResponse.json(

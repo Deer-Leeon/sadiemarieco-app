@@ -44,6 +44,7 @@ export function matchCatalogueService(
   endTime: Date | string | null | undefined,
   catalogue: CatalogueServiceRow[],
   calEventTypeId?: number | null,
+  fillDurationMins?: number | null,
 ): CatalogueServiceRow | null {
   if (calEventTypeId != null) {
     const byId = catalogue.filter(
@@ -78,7 +79,12 @@ export function matchCatalogueService(
   if (matches.length === 0) return null;
 
   if (BARE_FILL_TITLE_KEYS.has(key)) {
-    const mins = durationMinutes(bookingTime, endTime);
+    const mins =
+      typeof fillDurationMins === 'number' &&
+      Number.isFinite(fillDurationMins) &&
+      fillDurationMins > 0
+        ? Math.round(fillDurationMins)
+        : durationMinutes(bookingTime, endTime);
     if (mins != null) {
       const byDuration = matches.filter(
         (row) => Number(row.duration_mins) === mins,
@@ -103,6 +109,8 @@ export function applyCatalogueService(
     service_slug: string | null;
     service_description: string | null;
     cal_event_type_id?: number | null;
+    catalogue_duration_mins?: number | null;
+    chair_duration_mins?: number | null;
   },
   catalogue: CatalogueServiceRow[],
 ): {
@@ -110,14 +118,35 @@ export function applyCatalogueService(
   service_slug: string | null;
   service_description: string | null;
   service_name: string | null;
+  duration_mins: number | null;
 } {
+  let fillMins: number | null = null;
+  if (
+    typeof fields.catalogue_duration_mins === 'number' &&
+    Number.isFinite(fields.catalogue_duration_mins) &&
+    fields.catalogue_duration_mins > 0
+  ) {
+    fillMins = fields.catalogue_duration_mins;
+  } else if (fields.chair_duration_mins == null) {
+    fillMins = durationMinutes(fields.booking_time, fields.end_time);
+  }
   const matched = matchCatalogueService(
     fields.service_name,
     fields.booking_time,
     fields.end_time,
     catalogue,
     fields.cal_event_type_id,
+    fillMins,
   );
+  const duration =
+    typeof matched?.duration_mins === 'number' &&
+    Number.isFinite(matched.duration_mins) &&
+    matched.duration_mins > 0
+      ? matched.duration_mins
+      : typeof fields.catalogue_duration_mins === 'number' &&
+          Number.isFinite(fields.catalogue_duration_mins)
+        ? fields.catalogue_duration_mins
+        : null;
   return {
     service_color: fields.service_color ?? matched?.color ?? null,
     service_slug: fields.service_slug ?? matched?.slug ?? null,
@@ -126,6 +155,7 @@ export function applyCatalogueService(
       fields.service_name,
       matched?.title,
     ),
+    duration_mins: duration,
   };
 }
 

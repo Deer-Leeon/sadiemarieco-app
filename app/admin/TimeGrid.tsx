@@ -22,7 +22,7 @@ import { ExtraCountBadge } from './components/ExtraCountBadge';
 import { SettlementCheckMarker } from './components/SettlementMarker';
 import TimeBlockPill from './components/TimeBlockPill';
 import { settlementAriaLabel } from './settlementDisplay';
-import { getServiceColor } from './serviceColors';
+import { getServiceColor, visitBlockBackground } from './serviceColors';
 import {
   HOURS,
   HOUR_AXIS_START_LABELS,
@@ -492,6 +492,7 @@ function AppointmentBlock({
   // happen" regardless of what was booked. Unmapped services fall
   // back to the original stone palette.
   const color = isNoShow ? null : getServiceColor(apt);
+  const blockPaint = isNoShow ? null : visitBlockBackground(apt);
   // Match SingleDayModal pills: solid fill, no black outline. Gap between
   // back-to-back same-colour bookings comes from layout packing / height,
   // not a stroke. No-show and unmapped services keep a left accent stripe.
@@ -506,7 +507,7 @@ function AppointmentBlock({
     : 'absolute z-20 overflow-hidden rounded-sm p-1.5 shadow-sm transition-colors text-left leading-tight';
   const variantClasses = isNoShow
     ? 'border-l-[3px] border-l-stone-400 bg-stone-50 opacity-60'
-    : color
+    : color || blockPaint?.backgroundImage
       ? ''
       : 'border-l-[3px] border-l-stone-800 bg-stone-100';
   const flaggedClasses = hasNoShowFlag && !isNoShow
@@ -556,10 +557,15 @@ function AppointmentBlock({
         width: laneBox.width,
         zIndex: laneBox.zIndex,
         boxShadow: overlapShadow,
-        ...(color && {
-          backgroundColor: color.accent,
-          color: color.text,
-        }),
+        ...(blockPaint?.backgroundImage
+          ? {
+              backgroundImage: blockPaint.backgroundImage,
+              color: color?.text,
+            }
+          : color && {
+              backgroundColor: color.accent,
+              color: color.text,
+            }),
       }}
     >
       {peekingUnder ? null : (

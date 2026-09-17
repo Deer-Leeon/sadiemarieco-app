@@ -41,6 +41,10 @@ export async function ensureAppointmentAttachedSchema(): Promise<void> {
           ON appointments (attached_to_appointment_id)
           WHERE attached_to_appointment_id IS NOT NULL
       `);
+      await sql.query(`
+        ALTER TABLE appointments
+          ADD COLUMN IF NOT EXISTS chair_duration_mins INTEGER NULL
+      `);
     })().catch((err) => {
       ensureSchemaPromise = null;
       throw err;

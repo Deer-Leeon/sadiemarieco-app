@@ -22,16 +22,9 @@ import { NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
-import type { Appointment } from '@/app/admin/types';
+import { mapAndNestAdminAppointments } from '@/lib/admin-appointment-map';
 import { ensureAppointmentAttachedSchema } from '@/lib/appointment-attached';
-import { nestAttachedExtras } from '@/lib/appointment-extras';
-import { clientBookingNotesForDisplay } from '@/lib/cal-booking-notes';
-import { mapSqlPaymentFields } from '@/lib/appointment-payment-sql';
-import {
-  applyCatalogueService,
-  loadActiveCatalogueServices,
-  type CatalogueServiceRow,
-} from '@/lib/match-catalogue-service';
+import { loadActiveCatalogueServices } from '@/lib/match-catalogue-service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -51,6 +44,8 @@ interface AppointmentRow {
   client_last_name: string | null;
   booking_time: Date | string | null;
   end_time: Date | string | null;
+  chair_duration_mins: number | null;
+  catalogue_duration_mins: number | null;
   service_name: string | null;
   status: string | null;
   client_phone: string | null;
@@ -75,55 +70,6 @@ interface AppointmentRow {
   terminal_settled_by_email: string | null;
   terminal_paid_at: Date | string | null;
   client_no_show_flag: boolean | null;
-}
-
-function serializeDate(value: Date | string | null): string | null {
-  if (!value) return null;
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
-}
-
-/** Same mapper as `app/api/admin/clients/[id]/appointments/route.ts`. */
-function rowToAppointment(
-  row: AppointmentRow,
-  catalogue: CatalogueServiceRow[],
-): Appointment {
-  const catalogueFields = applyCatalogueService(row, catalogue);
-  return {
-    id: row.id,
-    cal_uid: row.cal_event_id,
-    client_first_name: row.client_first_name,
-    client_last_name: row.client_last_name,
-    booking_time: serializeDate(row.booking_time),
-    end_time: serializeDate(row.end_time),
-    service_name: catalogueFields.service_name,
-    status: row.status,
-    client_phone: row.client_phone,
-    client_email: row.client_email,
-    booking_notes: clientBookingNotesForDisplay(
-      row.booking_notes,
-      catalogueFields.service_description
-    ),
-    service_price:
-      row.service_price === null
-        ? null
-        : (() => {
-            const n = Number(row.service_price);
-            return Number.isFinite(n) ? n : null;
-          })(),
-    service_description: catalogueFields.service_description,
-    service_slug: catalogueFields.service_slug,
-    service_color: catalogueFields.service_color,
-    stripe_customer_id: row.stripe_customer_id,
-    terminal_payment: mapSqlPaymentFields(row),
-    client_no_show_flag: Boolean(row.client_no_show_flag),
-    attached_to_appointment_id: row.attached_to_appointment_id
-      ? String(row.attached_to_appointment_id)
-      : null,
-    extras: [],
-    extra_count: 0,
-  };
 }
 
 function errorMessage(err: unknown): string {
@@ -152,6 +98,7 @@ export async function GET(): Promise<NextResponse> {
         a.client_last_name,
         a.booking_time,
         a.end_time,
+        a.chair_duration_mins,
         a.service_name,
         a.status,
         a.client_phone,
@@ -193,6 +140,7 @@ export async function GET(): Promise<NextResponse> {
         s.description AS service_description,
         s.slug        AS service_slug,
         s.color       AS service_color,
+        s.duration_mins AS catalogue_duration_mins,
         pay.id AS terminal_payment_id,
         pay.payment_kind AS terminal_payment_kind,
         pay.stripe_payment_intent_id AS terminal_payment_intent_id,
@@ -209,7 +157,7 @@ export async function GET(): Promise<NextResponse> {
         pay.paid_at AS terminal_paid_at
       FROM appointments a
       LEFT JOIN LATERAL (
-        SELECT s.price, s.description, s.slug, s.color
+        SELECT s.price, s.description, s.slug, s.color, s.duration_mins
         FROM site_services s
         WHERE s.is_active = TRUE
           AND (
@@ -225,7 +173,8 @@ export async function GET(): Promise<NextResponse> {
                   'classic', 'hybrid', 'volume'
                 )
                 OR (
-                  a.booking_time IS NOT NULL
+                  a.chair_duration_mins IS NULL
+                  AND a.booking_time IS NOT NULL
                   AND a.end_time IS NOT NULL
                   AND s.duration_mins IS NOT NULL
                   AND s.duration_mins = GREATEST(
@@ -272,9 +221,7 @@ export async function GET(): Promise<NextResponse> {
     ]);
 
     return NextResponse.json({
-      appointments: nestAttachedExtras(
-        rows.map((row) => rowToAppointment(row, catalogue))
-      ),
+      appointments: mapAndNestAdminAppointments(rows, catalogue),
     });
   } catch (err) {
     console.error('[api/admin/appointments] GET failed:', errorMessage(err));

@@ -18,7 +18,7 @@ import TimeBlockPill from './components/TimeBlockPill';
 import type { Appointment, TimeBlock } from './types';
 import { appointmentServiceLabel, clientDisplayName } from './helpers';
 import { settlementAriaLabel } from './settlementDisplay';
-import { getServiceColor } from './serviceColors';
+import { getServiceColor, visitBlockBackground } from './serviceColors';
 import {
   HOURS,
   HOUR_AXIS_START_LABELS,
@@ -403,6 +403,7 @@ function ModalAppointment({
   const clickable = !!onClick;
 
   const color = isNoShow ? null : getServiceColor(apt);
+  const blockPaint = isNoShow ? null : visitBlockBackground(apt);
   const baseClasses =
     'absolute z-20 overflow-hidden rounded-md text-left leading-tight shadow-sm transition-colors';
   const paddingClasses = stacked ? 'px-2.5 py-2 pr-8' : 'px-2.5 py-1 pr-8';
@@ -433,10 +434,15 @@ function ModalAppointment({
         left: laneBox.left,
         width: laneBox.width,
         zIndex: laneBox.zIndex,
-        ...(color && {
-          backgroundColor: color.accent,
-          color: color.text,
-        }),
+        ...(blockPaint?.backgroundImage
+          ? {
+              backgroundImage: blockPaint.backgroundImage,
+              color: color?.text,
+            }
+          : color && {
+              backgroundColor: color.accent,
+              color: color.text,
+            }),
       }}
     >
       <span className="pointer-events-none absolute right-1 top-1 z-10 flex items-start gap-0.5">

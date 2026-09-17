@@ -19,10 +19,9 @@ export function cleanServiceName(name: string | null): string {
  * the slug, so `cleanServiceName` alone produces an ambiguous label
  * ("Classic") whether the booking is a 2-, 3-, or 4-Week Fill.
  *
- * This helper enriches the label by mirroring the duration-fallback
- * already used in `serviceColors.ts`: any bare Classic / Hybrid /
- * Volume row gets its fill-week prepended based on the appointment's
- * actual length (end_time − booking_time).
+ * This helper enriches the label from catalogue duration (not chair
+ * end − start, which extras can lengthen). Falls back to timestamps
+ * only when catalogue minutes are missing.
  *
  *   120 min  → "Classic 2 Week Fill"
  *   150 min  → "Hybrid 3 Week Fill"
@@ -41,6 +40,7 @@ export function appointmentServiceLabel(input: {
   service_name: string | null;
   booking_time?: string | null;
   end_time?: string | null;
+  catalogue_duration_mins?: number | null;
 }): string {
   const base = cleanServiceName(input.service_name);
   const baseLower = base.toLowerCase();
@@ -50,11 +50,21 @@ export function appointmentServiceLabel(input: {
     baseLower === 'volume';
   if (!isBareFillChild) return base;
 
-  if (!input.booking_time || !input.end_time) return base;
-  const start = Date.parse(input.booking_time);
-  const end = Date.parse(input.end_time);
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return base;
-  const mins = Math.round((end - start) / 60000);
+  let mins: number | null = null;
+  if (
+    typeof input.catalogue_duration_mins === 'number' &&
+    Number.isFinite(input.catalogue_duration_mins) &&
+    input.catalogue_duration_mins > 0
+  ) {
+    mins = Math.round(input.catalogue_duration_mins);
+  } else if (input.booking_time && input.end_time) {
+    const start = Date.parse(input.booking_time);
+    const end = Date.parse(input.end_time);
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      mins = Math.round((end - start) / 60000);
+    }
+  }
+  if (mins == null) return base;
 
   if (mins === 120) return `${base} 2 Week Fill`;
   if (mins === 150) return `${base} 3 Week Fill`;

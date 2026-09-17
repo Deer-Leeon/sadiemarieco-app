@@ -119,3 +119,78 @@ export function getServiceColor(
   }
   return null;
 }
+
+export interface VisitBlockPaint {
+  backgroundColor?: string;
+  backgroundImage?: string;
+}
+
+function catalogueWeight(mins: number | null | undefined): number {
+  if (typeof mins === 'number' && Number.isFinite(mins) && mins > 0) {
+    return mins;
+  }
+  return 60;
+}
+
+/**
+ * One continuous pill: parent colour fading into extra colours in
+ * add order. Weights follow catalogue durations, scaled to the chair.
+ */
+export function visitBlockBackground(appointment: {
+  service_color?: string | null;
+  catalogue_duration_mins?: number | null;
+  extras?: Array<{
+    service_color?: string | null;
+    catalogue_duration_mins?: number | null;
+  }> | null;
+}): VisitBlockPaint | null {
+  const extras = appointment.extras ?? [];
+  const parent = getServiceColor(appointment);
+  if (!parent) return null;
+  if (extras.length === 0) {
+    return { backgroundColor: parent.accent };
+  }
+
+  const segments: { hex: string; weight: number }[] = [
+    { hex: parent.accent, weight: catalogueWeight(appointment.catalogue_duration_mins) },
+  ];
+  for (const extra of extras) {
+    const color = getServiceColor(extra);
+    segments.push({
+      hex: color?.accent ?? parent.accent,
+      weight: catalogueWeight(extra.catalogue_duration_mins),
+    });
+  }
+
+  const unique = new Set(segments.map((s) => s.hex.toUpperCase()));
+  if (unique.size === 1) {
+    return { backgroundColor: segments[0]!.hex };
+  }
+
+  const totalWeight = segments.reduce((sum, s) => sum + s.weight, 0);
+  const blendPct = Math.min(8, Math.max(3, (6 / Math.max(totalWeight, 1)) * 100));
+  const stops: string[] = [];
+  let cursor = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]!;
+    const start = (cursor / totalWeight) * 100;
+    const end = ((cursor + seg.weight) / totalWeight) * 100;
+    const next = segments[i + 1];
+    if (!next) {
+      stops.push(`${seg.hex} ${start}%`, `${seg.hex} 100%`);
+    } else {
+      const seam = end;
+      const half = Math.min(blendPct, (end - start) / 2, ((next.weight / totalWeight) * 100) / 2);
+      stops.push(
+        `${seg.hex} ${start}%`,
+        `${seg.hex} ${Math.max(start, seam - half)}%`,
+        `${next.hex} ${Math.min(100, seam + half)}%`
+      );
+    }
+    cursor += seg.weight;
+  }
+
+  return {
+    backgroundImage: `linear-gradient(to bottom, ${stops.join(', ')})`,
+  };
+}

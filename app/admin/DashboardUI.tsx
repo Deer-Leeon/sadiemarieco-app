@@ -459,17 +459,20 @@ export default function DashboardUI({
           onClose={() => setSelectedAppointment(null)}
           onClientUpdated={handleClientNoShowFlagChanged}
           onPaymentUpdated={handlePaymentUpdated}
-          onExtrasUpdated={(extras) => {
-            setSelectedAppointment((prev) =>
-              prev
-                ? { ...prev, extras, extra_count: extras.length }
-                : prev
-            );
+          onExtrasUpdated={(extras, visit) => {
+            const patch = (prev: Appointment) =>
+              visit
+                ? {
+                    ...prev,
+                    ...visit,
+                    extras: visit.extras ?? extras,
+                    extra_count: visit.extra_count ?? extras.length,
+                  }
+                : { ...prev, extras, extra_count: extras.length };
+            setSelectedAppointment((prev) => (prev ? patch(prev) : prev));
             setAppointments((prev) =>
               prev.map((a) =>
-                a.id === selectedAppointment.id
-                  ? { ...a, extras, extra_count: extras.length }
-                  : a
+                a.id === selectedAppointment.id ? patch(a) : a
               )
             );
           }}
