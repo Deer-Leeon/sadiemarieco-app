@@ -38,12 +38,12 @@ export const EMAIL_TEMPLATE_META: Record<EmailTemplateKey, EmailTemplateMeta> =
       title: 'Booking confirmation',
       triggers: [
         'After checkout confirms the appointment (card vaulted).',
-        'Mirrors the warm lines from the SMS confirmation (reminders + “can’t wait to see you”), without service/date/time/manage link — those are already in the email layout. Greeting and 24-hour notice stay locked.',
+        'Mirrors the warm lines from the SMS confirmation ({{visitPrep}} is the reminder promise, or lash/brow instructions when booked inside the 24h/48h window), without service/date/time/manage link — those are already in the email layout. Greeting and 24-hour notice stay locked.',
       ],
-      allowedPlaceholders: [],
-      requiredPlaceholders: [],
+      allowedPlaceholders: ['visitPrep'],
+      requiredPlaceholders: ['visitPrep'],
       defaultBody:
-        "You'll receive reminder messages with pre-arrival instructions before your appointment. I can't wait to see you!",
+        "{{visitPrep}} I can't wait to see you!",
       sendingLive: true,
     },
     consent_request: {
@@ -78,8 +78,24 @@ export const EMAIL_TEMPLATE_META: Record<EmailTemplateKey, EmailTemplateMeta> =
     },
   };
 
+const SUPERSEDED_EMAIL_DEFAULT_BODIES: Partial<
+  Record<EmailTemplateKey, readonly string[]>
+> = {
+  confirmation: [
+    "You'll receive reminder messages with pre-arrival instructions before your appointment. I can't wait to see you!",
+  ],
+};
+
+function isSupersededEmailBody(key: EmailTemplateKey, body: string): boolean {
+  const list = SUPERSEDED_EMAIL_DEFAULT_BODIES[key];
+  if (!list) return false;
+  return list.includes(body.trim());
+}
+
 export const SAMPLE_EMAIL_PREVIEW_VARS: Record<string, string> = {
   service: 'Touch Up',
+  visitPrep:
+    "You'll receive reminder messages with pre-arrival instructions before your appointment.",
 };
 
 const MAX_BODY_LENGTH = 2000;
@@ -162,7 +178,9 @@ export async function loadStoredEmailTemplates(): Promise<
     for (const key of EMAIL_TEMPLATE_KEYS) {
       const value = (raw as Record<string, unknown>)[key];
       if (typeof value === 'string' && value.trim()) {
-        out[key] = value.trim();
+        const trimmed = value.trim();
+        if (isSupersededEmailBody(key, trimmed)) continue;
+        out[key] = trimmed;
       }
     }
     return out;

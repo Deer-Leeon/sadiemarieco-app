@@ -241,10 +241,16 @@ export async function deliverScheduledReminderEmail(args: {
       canonicalUid: string | null;
       arrivalTime: string | null;
       leadKind: '48h' | '24h';
+      leadOffsetMs: number;
       isMulti?: boolean;
       services: Array<{ displayName?: string; serviceName?: string }>;
       visitServices?: string;
     } | null>;
+    leadOffsetMs: (leadKind: '48h' | '24h') => number;
+    leadReminderSendIsCatchUp: (
+      arrivalMs: number,
+      offsetMs: number,
+    ) => boolean;
   };
   let visit: Awaited<ReturnType<typeof visitMod.loadVisitForBookingUid>> = null;
   try {
@@ -294,6 +300,15 @@ export async function deliverScheduledReminderEmail(args: {
   }
   if (!kind) {
     return { ok: true, skipped: 'unknown_service_category' };
+  }
+
+  const arrivalMs = new Date(bookingTimeIso).getTime();
+  const leadOffsetMs =
+    visit && Number.isFinite(visit.leadOffsetMs)
+      ? visit.leadOffsetMs
+      : visitMod.leadOffsetMs(kind === 'brows' ? '48h' : '24h');
+  if (visitMod.leadReminderSendIsCatchUp(arrivalMs, leadOffsetMs)) {
+    return { ok: true, skipped: 'inside_lead_window' };
   }
 
   const serviceName =
