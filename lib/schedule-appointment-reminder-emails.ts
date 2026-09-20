@@ -70,7 +70,7 @@ async function publishReminderJob(args: {
 /**
  * Queue pre-appointment reminder emails.
  * Lead timing: 48h for brows, 24h for lashes. If the visit is already
- * inside that window (including the last 90 minutes), send immediately.
+ * inside that window, skip — confirmation copy carries prep instead.
  * There is no 1-hour reminder email.
  */
 export async function scheduleAppointmentReminderEmails(
@@ -104,7 +104,6 @@ export async function scheduleAppointmentReminderEmails(
   }
 
   const nowMs = Date.now();
-  const nowSec = Math.floor(nowMs / 1000);
   const msUntilAppt = appointmentMs - nowMs;
   if (msUntilAppt <= 0) {
     return { scheduled: false, reason: 'appointment_in_past' };
@@ -124,21 +123,24 @@ export async function scheduleAppointmentReminderEmails(
       if (!usedVisit && resolved.reminderKind) {
         leadOffset = LEAD_OFFSET_MS[resolved.reminderKind];
       }
-      const notBefore =
-        msUntilAppt >= leadOffset
-          ? Math.floor((appointmentMs - leadOffset) / 1000)
-          : nowSec + 2;
-      try {
-        out.lead = await publishReminderJob({
-          bookingUid,
-          expectedBookingTime,
-          notBefore,
-        });
-      } catch (err) {
-        console.error('[schedule-reminder-emails] lead queue failed', {
-          bookingUid,
-          error: err instanceof Error ? err.message : String(err),
-        });
+      if (msUntilAppt < leadOffset) {
+        out.scheduled = false;
+        out.reason = 'skipped_inside_lead_window';
+        out.lead = 'skipped_inside_lead_window';
+      } else {
+        const notBefore = Math.floor((appointmentMs - leadOffset) / 1000);
+        try {
+          out.lead = await publishReminderJob({
+            bookingUid,
+            expectedBookingTime,
+            notBefore,
+          });
+        } catch (err) {
+          console.error('[schedule-reminder-emails] lead queue failed', {
+            bookingUid,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
   } else {

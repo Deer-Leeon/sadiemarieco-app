@@ -28,11 +28,13 @@ Every way an appointment can be created or altered in the Sadie Marie app, with 
 | **Who** | Client |
 | **Status** | `confirmed` |
 | **SMS** | Yes — confirmation (below) |
-| **Notes** | Also schedules 48h (brows) / 24h (lashes) reminder SMS (QStash) and reminder emails. |
+| **Notes** | Schedules 48h (brows) / 24h (lashes) reminder SMS (QStash) and reminder emails **only if** arrival is still that far out. Inside that window, confirmation includes prep and no lead reminder is queued. |
 
 ```
-Sadie Marie: Your 2 Week Fill is confirmed for Saturday, July 25 at 10:00am. Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: Confirmed! You've booked a 2 Week Fill on Saturday, July 25 at 10:00am. You'll receive reminder messages with pre-arrival instructions before your appointment. I can't wait to see you! If there is any conflict, please cancel or reschedule with at least 24 hours' notice here: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
+
+Same-day / short-notice (inside the 24h/48h window) inlines prep instead of the reminder promise, and does not send an “in 2 days” / “tomorrow” catch-up reminder.
 
 ### 3. Admin manual booking complete
 
@@ -41,10 +43,10 @@ Sadie Marie: Your 2 Week Fill is confirmed for Saturday, July 25 at 10:00am. Man
 | **Who** | Admin |
 | **Status** | `confirmed` |
 | **SMS** | Yes — same confirmation as checkout |
-| **Notes** | No Stripe vault. `sms_opt_in` forced true. Confirmation + QStash 48h/24h reminders are queued from both `/api/admin/manual-booking/complete` and the Cal webhook (whichever lands first; the other is idempotent). A 15-minute cron backfills any confirmed booking still missing jobs. |
+| **Notes** | No Stripe vault. `sms_opt_in` forced true. Confirmation + QStash 48h/24h reminders are queued from both `/api/admin/manual-booking/complete` and the Cal webhook (whichever lands first; the other is idempotent) **unless** the visit is already inside the 24h/48h window, in which case confirmation includes prep. A 15-minute cron backfills any confirmed booking still missing jobs. |
 
 ```
-Sadie Marie: Your 2 Week Fill is confirmed for Saturday, July 25 at 10:00am. Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: Confirmed! You've booked a 2 Week Fill on Saturday, July 25 at 10:00am. You'll receive reminder messages with pre-arrival instructions before your appointment. I can't wait to see you! If there is any conflict, please cancel or reschedule with at least 24 hours' notice here: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 ### 4. Cal `BOOKING_REQUESTED` webhook
@@ -134,7 +136,7 @@ Sadie Marie: Your 2 Week Fill on Saturday, July 25 at 10:00am was canceled. A la
 | **Who** | Client |
 | **Status** | `confirmed` (or stays `pending` if still a hold) |
 | **SMS** | Yes when resulting status is `confirmed` — reschedule (below) |
-| **Notes** | Manage link uses the **new** Cal UID. Reminder emails + SMS jobs re-queued. Cal may also fire `BOOKING_CREATED` for the new UID; that path must **not** send confirmation SMS. |
+| **Notes** | Manage link uses the **new** Cal UID. Reminder emails + SMS jobs re-queued when the new time is still outside the 24h/48h window; otherwise the reschedule text includes prep. Cal may also fire `BOOKING_CREATED` for the new UID; that path must **not** send confirmation SMS. |
 
 ```
 Sadie Marie: Your 2 Week Fill has been rescheduled to Sunday, July 26 at 2:00pm. You'll receive a reminder with pre-arrival instructions before your visit. I'm so excited to see you! Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=jAUwov2YZ7jjfo1QrVUYAA. Msg & data rates may apply. Reply STOP to opt out, HELP for help.

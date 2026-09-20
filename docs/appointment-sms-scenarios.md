@@ -4,7 +4,7 @@ What a **client** or **admin** can do, and the studio SMS that goes with it (whe
 
 Example texts below use a **2 Week Fill** on **Saturday, July 25 at 10:00am**. Real sends use the real service, time, link, and fee amount.
 
-**Edit live copy:** Admin → **SMS Messages** (`/admin/sms-messages`). Bodies are stored in `studio_settings.sms_templates`. The brand prefix (`Sadie Marie: `) and STOP/HELP footer are locked; placeholders like `{{service}}`, `{{date}}`, `{{time}}`, `{{manageUrl}}`, `{{amount}}`, and `{{arrivalHint}}` are filled at send time. Saves apply to the next message sent.
+**Edit live copy:** Admin → **SMS Messages** (`/admin/sms-messages`). Bodies are stored in `studio_settings.sms_templates`. The brand prefix (`Sadie Marie: `) and STOP/HELP footer are locked; placeholders like `{{service}}`, `{{date}}`, `{{time}}`, `{{manageUrl}}`, `{{amount}}`, `{{arrivalHint}}`, and `{{visitPrep}}` are filled at send time. Saves apply to the next message sent.
 
 ---
 
@@ -12,10 +12,16 @@ Example texts below use a **2 Week Fill** on **Saturday, July 25 at 10:00am**. R
 
 ### Books and saves card (confirmed)
 
-**SMS**
+**SMS** — booked with enough lead (lashes ≥24h, brows ≥48h). `{{visitPrep}}` is the reminder promise.
 
 ```
-Sadie Marie: Your 2 Week Fill is confirmed for Saturday, July 25 at 10:00am. Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=EXAMPLE. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: Confirmed! You've booked a 2 Week Fill on Saturday, July 25 at 10:00am. You'll receive reminder messages with pre-arrival instructions before your appointment. I can't wait to see you! If there is any conflict, please cancel or reschedule with at least 24 hours' notice here: https://www.sadiemarie.co/manage.html?uid=EXAMPLE. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+```
+
+**SMS** — booked inside that window (same-day or <24h lashes / <48h brows). Prep is inlined; the 24h/48h reminder does **not** send.
+
+```
+Sadie Marie: Confirmed! You've booked a 2 Week Fill on Saturday, July 25 at 10:00am. Please come with clean lashes and no eye makeup. Please refrain from drinking caffeine for at least 4-6 hours before your appointment as it can cause fluttery eyelids. Feel free to bring earbuds with you. I can't wait to see you! If there is any conflict, please cancel or reschedule with at least 24 hours' notice here: https://www.sadiemarie.co/manage.html?uid=EXAMPLE. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 ---
@@ -105,7 +111,7 @@ Sadie Marie: Hi Sarah! Thank you for visiting Sadie Marie, I loved having you in
 **SMS** — same confirmation as a client checkout
 
 ```
-Sadie Marie: Your 2 Week Fill is confirmed for Saturday, July 25 at 10:00am. Manage, reschedule, or cancel: https://www.sadiemarie.co/manage.html?uid=EXAMPLE. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
+Sadie Marie: Confirmed! You've booked a 2 Week Fill on Saturday, July 25 at 10:00am. You'll receive reminder messages with pre-arrival instructions before your appointment. I can't wait to see you! If there is any conflict, please cancel or reschedule with at least 24 hours' notice here: https://www.sadiemarie.co/manage.html?uid=EXAMPLE. Msg & data rates may apply. Reply STOP to opt out, HELP for help.
 ```
 
 ---

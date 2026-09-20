@@ -67,7 +67,23 @@ export async function sendBookingConfirmationEmail(args: {
   }
 
   const { date, time } = formatBookingStartParts(args.startTime);
-  const bodyCopy = await resolveEmailCopy('confirmation');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const visitSms = require('./same-day-visit.js') as {
+    CONFIRMATION_REMINDER_PROMISE: string;
+    confirmationPrepForBooking: (args: {
+      bookingUid?: string | null;
+      serviceName?: string | null;
+      bookingTime?: string | null;
+      promise?: string;
+    }) => Promise<string>;
+  };
+  const visitPrep = await visitSms.confirmationPrepForBooking({
+    bookingUid: args.bookingUid || null,
+    serviceName: args.serviceName,
+    bookingTime: args.startTime,
+    promise: visitSms.CONFIRMATION_REMINDER_PROMISE,
+  });
+  const bodyCopy = await resolveEmailCopy('confirmation', { visitPrep });
   const html = generateConfirmationHtml({
     clientName: args.clientName,
     serviceName: args.serviceName,

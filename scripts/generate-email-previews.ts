@@ -43,7 +43,7 @@ const VARIANTS: PreviewVariant[] = [
     serviceName: SAMPLE.browsService,
     whenSent: '48 hours before the appointment',
     skipNote:
-      'Queued 48 hours before; sent immediately if booked or moved inside that window.',
+      'Queued 48 hours before; skipped if booked or moved inside that window (confirmation already includes prep).',
   },
   {
     id: 'lashes-24h',
@@ -54,7 +54,7 @@ const VARIANTS: PreviewVariant[] = [
     serviceName: SAMPLE.lashesService,
     whenSent: '24 hours before the appointment',
     skipNote:
-      'Queued 24 hours before; sent immediately if booked or moved inside that window.',
+      'Queued 24 hours before; skipped if booked or moved inside that window (confirmation already includes prep).',
   },
 ];
 
@@ -255,11 +255,11 @@ function buildIndexHtml(): string {
         <tbody>
           <tr>
             <td><strong>Brow Services</strong> (incl. Teeth Whitening)</td>
-            <td>48 hours before — sent immediately if booked or moved inside that window</td>
+            <td>48 hours before — skipped if booked or moved inside that window (prep is on confirmation)</td>
           </tr>
           <tr>
             <td><strong>Lash Services</strong></td>
-            <td>24 hours before — sent immediately if booked or moved inside that window</td>
+            <td>24 hours before — skipped if booked or moved inside that window (prep is on confirmation)</td>
           </tr>
         </tbody>
       </table>
