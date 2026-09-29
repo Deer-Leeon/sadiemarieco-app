@@ -456,18 +456,7 @@ export default function BookApplePayHost({
         zIndex: active ? 1 : 0,
       }}
     >
-      {active && prefersApplePay && !showApplePay ? (
-        <div className={styles.applePayPlaceholder} aria-hidden="true">
-          Book with Apple Pay
-        </div>
-      ) : null}
-      <div
-        className={
-          active && prefersApplePay && !showApplePay
-            ? styles.expressUnderSlot
-            : styles.expressPainted
-        }
-      >
+      <div className={styles.expressPainted}>
         <ExpressCheckoutElement
           key={expressNonce}
           options={EXPRESS_OPTIONS}

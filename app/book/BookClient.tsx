@@ -26,6 +26,7 @@ import {
 } from '@/lib/client-identity';
 import { STUDIO_TIMEZONE } from '@/lib/cal-config';
 import { stripePromise } from '@/lib/stripe-browser';
+import { isInAppBrowser } from '@/lib/in-app-browser';
 import {
   isKeepHoldThroughUnload,
   rememberActiveHoldUid,
@@ -470,7 +471,8 @@ export default function BookClient({
   const [applePayAvailable, setApplePayAvailable] = useState<boolean | null>(
     null
   );
-  const [applePayReady, setApplePayReady] = useState(false);
+  const [inAppBrowser, setInAppBrowser] = useState(false);
+  const [paySurfaceReady, setPaySurfaceReady] = useState(false);
   const [showCardCheckout, setShowCardCheckout] = useState(false);
   const resumeAppliedRef = useRef(false);
   const holdUidRef = useRef<string | null>(null);
@@ -488,8 +490,12 @@ export default function BookClient({
   slotsByDayRef.current = slotsByDay;
 
   const onApplePayResolved = useCallback((available: boolean) => {
-    setApplePayReady(true);
     setApplePayAvailable((prev) => (prev === true ? true : available));
+  }, []);
+
+  useEffect(() => {
+    setInAppBrowser(isInAppBrowser());
+    setPaySurfaceReady(true);
   }, []);
 
   const elementsAppearance = useMemo(
@@ -1399,12 +1405,14 @@ export default function BookClient({
   };
 
   const submitBooking = async () => {
-    if (!selected || !selectedStart || submitting || confirmed) return;
+    if (!selected || !selectedStart || confirmed) return;
     const uid = holdUid;
     if (!uid) {
       setSubmitError('Your time hold is missing. Go back and continue again.');
       return;
     }
+    // A hung Apple Pay attempt must not block the card path.
+    setSubmitting(false);
     setSubmitError(null);
     if (!stripePromise) {
       const params = new URLSearchParams({ uid });
@@ -1991,21 +1999,33 @@ export default function BookClient({
         </footer>
       )}
 
-      {/* Warm Apple Pay on review; same instances become the pay dock. */}
-      {stripePromise &&
+      {/*
+        Apple Pay stays mounted off-screen until Stripe confirms the
+        button can open. Instagram and other in-app browsers never
+        mount it — the sheet cannot present there.
+      */}
+      {paySurfaceReady &&
+        !inAppBrowser &&
+        stripePromise &&
         selected &&
         selectedStart &&
         (step === 'review' || step === 'pay') &&
         !showReachPanel && (
           <div
             className={
-              step === 'pay' && !showCardCheckout
+              step === 'pay' &&
+              !showCardCheckout &&
+              applePayAvailable === true
                 ? `${styles.footer} ${styles.footerStack}`
                 : styles.payWarmShell
             }
-            aria-hidden={step !== 'pay' || showCardCheckout}
+            aria-hidden={
+              step !== 'pay' || showCardCheckout || applePayAvailable !== true
+            }
           >
-            {step === 'pay' && !showCardCheckout ? (
+            {step === 'pay' &&
+            !showCardCheckout &&
+            applePayAvailable === true ? (
               <div className={styles.footerTotal}>
                 <span className={styles.footerPrice}>
                   {paymentTiming === 'pay_now' ? selected.priceLabel : '$0'}
@@ -2062,32 +2082,15 @@ export default function BookClient({
 
             {step === 'pay' &&
             !showCardCheckout &&
-            applePayAvailable !== false ? (
+            applePayAvailable === true ? (
               <button
                 type="button"
-                className={styles.textLinkBtn}
-                disabled={submitting}
+                className={styles.secondaryBtn}
                 onClick={() => void submitBooking()}
               >
-                Pay with card instead
-              </button>
-            ) : null}
-
-            {step === 'pay' &&
-            !showCardCheckout &&
-            applePayReady &&
-            applePayAvailable === false ? (
-              <button
-                type="button"
-                className={styles.primaryBtn}
-                disabled={submitting}
-                onClick={() => void submitBooking()}
-              >
-                {submitting
-                  ? 'Opening card checkout…'
-                  : paymentTiming === 'pay_now'
-                    ? 'Pay with card'
-                    : 'Continue with card'}
+                {paymentTiming === 'pay_now'
+                  ? 'Pay with card'
+                  : 'Continue with card'}
               </button>
             ) : null}
           </div>
@@ -2097,7 +2100,13 @@ export default function BookClient({
         selected &&
         selectedStart &&
         !showReachPanel &&
-        !stripePromise && (
+        !showCardCheckout &&
+        !(
+          paySurfaceReady &&
+          !inAppBrowser &&
+          stripePromise &&
+          applePayAvailable === true
+        ) && (
           <footer className={`${styles.footer} ${styles.footerStack}`}>
             <div className={styles.footerTotal}>
               <span className={styles.footerPrice}>
@@ -2105,21 +2114,16 @@ export default function BookClient({
               </span>
               <span className={styles.footerHint}>
                 {paymentTiming === 'pay_now'
-                  ? 'Pay now in full'
-                  : 'Then secure checkout'}
+                  ? 'Charged now — card also saved for your appointment'
+                  : 'No charge today — card saved, pay at your visit'}
               </span>
             </div>
             <button
               type="button"
               className={styles.primaryBtn}
-              disabled={submitting}
               onClick={() => void submitBooking()}
             >
-              {submitting
-                ? 'Opening card checkout…'
-                : paymentTiming === 'pay_now'
-                  ? 'Pay with card'
-                  : 'Continue with card'}
+              {paymentTiming === 'pay_now' ? 'Pay with card' : 'Continue with card'}
             </button>
           </footer>
         )}

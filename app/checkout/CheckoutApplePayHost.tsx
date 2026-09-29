@@ -377,16 +377,7 @@ export default function CheckoutApplePayHost({
         zIndex: active ? 1 : 0,
       }}
     >
-      {active && prefersApplePay && !showApplePay ? (
-        <div className="h-12 w-full rounded bg-black" aria-hidden="true" />
-      ) : null}
-      <div
-        className={
-          active && prefersApplePay && !showApplePay
-            ? 'absolute inset-0 opacity-0'
-            : 'relative'
-        }
-      >
+      <div className="relative w-full">
         <ExpressCheckoutElement
           key={expressNonce}
           options={EXPRESS_OPTIONS}

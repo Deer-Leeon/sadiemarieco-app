@@ -22,6 +22,7 @@ import {
 } from '@/lib/format-booking-time';
 import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
 import { prefersApplePayDevice } from '@/lib/prefers-apple-pay';
+import { isInAppBrowser } from '@/lib/in-app-browser';
 import { type StripeElementsOptions } from '@stripe/stripe-js';
 import {
   Elements,
@@ -493,7 +494,7 @@ export default function CheckoutClient({
   checkoutConfirmedRef.current = confirmed;
 
   useEffect(() => {
-    setMountApplePay(prefersApplePayDevice());
+    setMountApplePay(prefersApplePayDevice() && !isInAppBrowser());
   }, []);
 
   useEffect(() => {
@@ -1062,6 +1063,7 @@ export default function CheckoutClient({
                   embedInDrawer ? undefined : goBackToPayChoice
                 }
                 onPayWithCard={() => {
+                  setApplePaySubmitting(false);
                   setApplePayError(null);
                   if (embedInDrawer) {
                     navigateToCardCheckout(paymentTiming);
@@ -1313,8 +1315,8 @@ function CheckoutPayChoice({
 }) {
   const payNow = paymentTiming === 'pay_now';
   const priceLabel = formatUsdFromCents(quotedServicePriceCents);
-  const showApplePaySlot = mountApplePay && applePayAvailable !== false;
-  const showPrimaryCard = !mountApplePay || applePayAvailable === false;
+  const applePayLive = mountApplePay && applePayAvailable === true;
+  const cardLabel = payNow ? 'Pay with card' : 'Continue with card';
 
   return (
     <div
@@ -1445,9 +1447,27 @@ function CheckoutPayChoice({
         100%. A card on file is required either way.
       </p>
 
-      {showApplePaySlot && stripePromise ? (
+      {mountApplePay && stripePromise ? (
         <div
-          className={`relative w-full ${compact ? 'mt-4 min-h-11' : 'mt-6 min-h-12'}`}
+          className={
+            applePayLive
+              ? `relative z-0 w-full overflow-hidden ${compact ? 'mt-4 h-11' : 'mt-6 h-12'}`
+              : undefined
+          }
+          style={
+            applePayLive
+              ? undefined
+              : {
+                  position: 'fixed',
+                  left: -10000,
+                  top: 0,
+                  width: 360,
+                  height: 48,
+                  overflow: 'hidden',
+                  opacity: 0,
+                  pointerEvents: 'none',
+                }
+          }
         >
           <div className="absolute inset-0">
             <Elements stripe={stripePromise} options={setupApplePayOptions}>
@@ -1495,29 +1515,21 @@ function CheckoutPayChoice({
         </div>
       ) : null}
 
-      {showApplePaySlot ? (
-        <button
-          type="button"
-          disabled={applePaySubmitting}
-          onClick={onPayWithCard}
-          className="mt-4 w-full text-center text-sm font-medium text-stone-500 transition-colors hover:text-stone-800 disabled:opacity-50"
-        >
-          Pay with card instead
-        </button>
-      ) : null}
-
-      {showPrimaryCard ? (
-        <button
-          type="button"
-          disabled={applePaySubmitting}
-          onClick={onPayWithCard}
-          className={`${
-            compact ? 'mt-4 py-2.5' : 'mt-6 py-3'
-          } inline-flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-5 text-sm font-medium tracking-wide text-stone-50 shadow-none transition-colors hover:bg-stone-800 active:bg-stone-900 disabled:cursor-not-allowed disabled:bg-stone-400`}
-        >
-          {payNow ? 'Pay with card' : 'Continue with card'}
-        </button>
-      ) : null}
+      <button
+        type="button"
+        onClick={onPayWithCard}
+        className={
+          applePayLive
+            ? `${
+                compact ? 'mt-3 py-2.5' : 'mt-4 py-3'
+              } relative z-10 inline-flex w-full items-center justify-center rounded-md border border-stone-900 bg-white px-5 text-sm font-medium tracking-wide text-stone-900 transition-colors hover:bg-stone-50`
+            : `${
+                compact ? 'mt-4 py-2.5' : 'mt-6 py-3'
+              } relative z-10 inline-flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-5 text-sm font-medium tracking-wide text-stone-50 shadow-none transition-colors hover:bg-stone-800 active:bg-stone-900`
+        }
+      >
+        {cardLabel}
+      </button>
 
       {onReturnToDrawer ? (
         <button
