@@ -57,6 +57,22 @@ export function FieldLabel({
   );
 }
 
+/** Keeps the required star on the same line as the last word. */
+function QuestionText({ label, required }: { label: string; required?: boolean }) {
+  const words = label.trim().split(/\s+/);
+  const last = words.pop() ?? '';
+  if (!required) return label;
+  return (
+    <>
+      {words.length > 0 ? `${words.join(' ')} ` : null}
+      <span className="whitespace-nowrap">
+        {last}
+        <RequiredMark />
+      </span>
+    </>
+  );
+}
+
 export function YesNoQuestion({
   name,
   label,
@@ -75,8 +91,7 @@ export function YesNoQuestion({
   return (
     <div className="space-y-3 border-b border-dotted border-stone-200 pb-4 last:border-b-0 last:pb-0">
       <p className="text-sm leading-snug text-stone-800">
-        {label}
-        {required ? <RequiredMark /> : null}
+        <QuestionText label={label} required={required} />
       </p>
       <div className="flex flex-wrap gap-3">
         {(['yes', 'no'] as const).map((option) => (
