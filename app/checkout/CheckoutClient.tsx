@@ -14,6 +14,11 @@ import {
   analyticsServiceLabel,
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
+import {
+  ensureBookingAttempt,
+  leaveBookingAttempt,
+  reportBookingStep,
+} from '@/lib/booking-attempt-client';
 import { isValidEmail, formatUsPhoneAsYouType, clientPhoneValidationMessage, parseClientPhone } from '@/lib/client-identity';
 import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-public';
 import {
@@ -502,6 +507,7 @@ export default function CheckoutClient({
       if (event.persisted) return;
       if (isKeepHoldThroughUnload()) return;
       if (checkoutConfirmedRef.current) return;
+      if (!embedInDrawer) leaveBookingAttempt();
       if (holdExpired) return;
       const currentUid = uid.trim();
       if (!currentUid) return;
@@ -509,7 +515,7 @@ export default function CheckoutClient({
     };
     window.addEventListener('pagehide', onPageHide);
     return () => window.removeEventListener('pagehide', onPageHide);
-  }, [uid, holdExpired]);
+  }, [uid, holdExpired, embedInDrawer]);
 
   const onApplePayResolved = useCallback((available: boolean) => {
     setApplePayAvailable((prev) => (prev === true ? true : available));
@@ -666,6 +672,8 @@ export default function CheckoutClient({
       service: analyticsService,
       alreadyExpired: initialHoldExpired,
     });
+    ensureBookingAttempt(embedInDrawer ? 'desktop' : 'phone');
+    reportBookingStep('checkout', serviceName || undefined);
     // Once per mount / uid — do not re-fire when service name hydrates.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
   }, [uid]);
@@ -1882,6 +1890,7 @@ export function CheckoutForm({
       service,
       payment_timing: payNow ? 'pay_now' : 'pay_later',
     });
+    reportBookingStep('payment_attempt', service);
 
     setSubmitting(true);
     setSubmitLabel(payNow ? 'Processing payment…' : 'Saving your card…');

@@ -86,6 +86,7 @@ export const RATE_LIMITS = {
   bookingInit: { limit: 30, windowMs: 60_000 },
   bookingConfirm: { limit: 30, windowMs: 60_000 },
   bookingHoldRead: { limit: 120, windowMs: 60_000 },
+  bookingAttempt: { limit: 120, windowMs: 60_000 },
   bookingReleaseHold: { limit: 30, windowMs: 60_000 },
   stripeSetupIntent: { limit: 20, windowMs: 60_000 },
   bookServices: { limit: 60, windowMs: 60_000 },

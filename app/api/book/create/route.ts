@@ -19,6 +19,7 @@ import {
   BOOKING_ANALYTICS_EVENTS,
   trackBookingEvent,
 } from '@/lib/booking-analytics';
+import { linkBookingAttempt, parseAttemptId } from '@/lib/booking-attempt';
 import { loadBookableServiceBySlug } from '@/lib/book-public';
 import {
   CAL_STUDIO_IN_PERSON_LOCATION,
@@ -67,6 +68,7 @@ interface CreateBody {
   email?: unknown;
   smsOptIn?: unknown;
   source?: unknown;
+  attemptId?: unknown;
 }
 
 function splitName(fullName: string): { first: string; last: string } {
@@ -293,6 +295,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     sourceRaw === 'phone_booker_apple_pay'
       ? 'phone_booker_apple_pay'
       : 'phone_booker';
+  const attemptId = parseAttemptId(body.attemptId);
 
   if (!slug) {
     return NextResponse.json(
@@ -417,6 +420,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         service: analyticsServiceLabel(service.title),
         source: analyticsSource,
       });
+      await linkBookingAttempt(attemptId, existing.calBookingUid);
       return NextResponse.json({
         ok: true,
         calBookingUid: existing.calBookingUid,
@@ -533,6 +537,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         endTime: extracted.end || null,
         smsOptIn,
         eventTypeId: service.calEventId,
+        attemptId,
       }),
       cache: 'no-store',
     });
