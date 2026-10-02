@@ -2,7 +2,7 @@
  * GET /api/cron/health-alert
  *
  * Proactive monitoring: runs the same checks as the admin Health page on a
- * schedule (QStash, hourly, America/Denver) and NOTIFIES the owners when something is
+ * schedule (QStash at 8am, 1pm, and 6pm America/Denver) and NOTIFIES the owners when something is
  * actually broken — the green banner is only trustworthy if someone looks
  * at it, and nobody stares at a dashboard all day.
  *
@@ -10,7 +10,7 @@
  *   • Fires when overall status is `unhealthy` (soft checks — e.g. the
  *     Terminal reader sleeping between appointments — never count).
  *   • Timeouts/aborts (Cal.com especially) are `degraded` + `transient`
- *     and only page after the same probe fails two hourly runs in a row.
+ *     and only page after the same probe fails two scheduled runs in a row.
  *   • Email to the admin allowlist via Resend; SMS to HEALTH_ALERT_PHONE
  *     (optional env, E.164) via Twilio.
  *   • Cooldown via ops_state: the same set of failing checks re-alerts at
@@ -48,7 +48,7 @@ export const maxDuration = 120;
 const REALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const ALERT_STATE_KEY = 'health-alert:state';
 const TRANSIENT_STATE_KEY = 'health-alert:transient';
-/** Same Cal.com timeout two hours in a row is no longer a one-sample flake. */
+/** Same Cal.com timeout on two scheduled runs in a row is no longer a one-sample flake. */
 const TRANSIENT_STRIKES_TO_ALERT = 2;
 
 /**
@@ -243,8 +243,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // Cal.com (and similar) abort a single hourly probe at night, then pass
-  // on the next hour. Degraded+transient checks are not paged unless they
+  // Cal.com (and similar) abort a single probe, then pass on the next
+  // scheduled run. Degraded+transient checks are not paged unless they
   // stay failing across consecutive scheduled runs.
   const flake = transients(report);
   const flakeFingerprint = fingerprintOf(flake);
@@ -269,7 +269,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (flakeStrikes >= TRANSIENT_STRIKES_TO_ALERT) {
       bad = flake;
     } else {
-      console.warn('[api/cron/health-alert] holding flake for next hour', {
+      console.warn('[api/cron/health-alert] holding flake for the next run', {
         flake: flake.map((c) => c.id),
         flakeStrikes,
       });

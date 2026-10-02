@@ -7,7 +7,8 @@
  * that skipped scheduling.
  *
  * Auth: CRON_SECRET via Bearer / X-Cron-Secret / ?cron_secret=
- * QStash every 15 minutes; Vercel Cron is the same cadence as a backstop.
+ * QStash every 2 hours from 8am–8pm America/Denver, and not overnight.
+ * Vercel Cron is a once-a-day backstop.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
