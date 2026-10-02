@@ -2,7 +2,11 @@
  * TypeScript wrapper for admin iOS APNs booking alerts.
  */
 
-export type AdminPushKind = 'confirmed' | 'rescheduled' | 'canceled';
+export type AdminPushKind =
+  | 'confirmed'
+  | 'rescheduled'
+  | 'canceled'
+  | 'consent_signed';
 export type AdminPushSource = 'client' | 'admin';
 
 type PushArgs = {
@@ -54,6 +58,11 @@ const impl = require('./admin-booking-push.js') as {
   notifyAdminBookingConfirmed: (
     args: PushArgs
   ) => Promise<Record<string, unknown>>;
+  notifyAdminConsentSigned: (args: {
+    clientId: string;
+    clientName?: string | null;
+    requestHost?: string | null;
+  }) => Promise<Record<string, unknown>>;
   sendAdminBookingPushToTokens: (
     args: SendArgs
   ) => Promise<{
@@ -81,6 +90,7 @@ export const ensureAdminPushDevicesTable = impl.ensureAdminPushDevicesTable;
 export const ensureAdminPushLogTables = impl.ensureAdminPushLogTables;
 export const notifyAdminAppointmentPush = impl.notifyAdminAppointmentPush;
 export const notifyAdminBookingConfirmed = impl.notifyAdminBookingConfirmed;
+export const notifyAdminConsentSigned = impl.notifyAdminConsentSigned;
 export const sendAdminBookingPushToTokens = impl.sendAdminBookingPushToTokens;
 export const runAdminPushRetry = impl.runAdminPushRetry;
 export const loadAdminPushDevices = impl.loadDevices;

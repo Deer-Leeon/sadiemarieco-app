@@ -12,6 +12,7 @@ Copy depends on who made the change:
 | Rescheduled | Admin | You rescheduled a booking | `You rescheduled {service} for {name} · {when}` |
 | Canceled | Client | Booking canceled | `{name} canceled {service} · {when}` |
 | Canceled | Admin | You canceled a booking | `You canceled {service} for {name} · {when}` |
+| Consent signed | Client | Consent form signed | `{name} signed the consent form.` |
 
 `{when}` is Mountain time (same format as before, e.g. `Tue, Sep 2, 10:00 AM`). If the time is missing, the ` · {when}` suffix is omitted. `{name}` is the client's first + last name.
 
@@ -79,6 +80,7 @@ Vercel keeps roughly an hour of runtime logs, so "the banner never showed up" us
   - Confirmed: `notifyBookingConfirmed` (website checkout, Stripe recovery, admin New booking)
   - Rescheduled: `notifyAppointmentRescheduled` (Cal webhook + admin reschedule)
   - Canceled: admin status PATCH + Cal `BOOKING_CANCELLED` (client cancel of a confirmed booking)
+  - Consent signed: `POST /api/consent/[clientId]` after the form is signed and the PDF is stamped (`notifyAdminConsentSigned`). Tap opens that client. The banner shows on the current app; opening the client needs a build that reads `kind: consent_signed`.
 - Dedupe: `webhook_events.booking_uid` = `{calBookingUid}:admin_push` (confirmed) or `{calBookingUid}:admin_push:{kind}` (rescheduled / canceled)
 - Collapse id: `{uid}:{kind}` (so a cancel banner does not replace a new-booking banner)
 - Retry worker: QStash → `/api/qstash/admin-booking-push` (`lib/admin-booking-push.js` `runAdminPushRetry`; body carries `kind`, `source`, `attempt`, and either `tokens` or `reloadDevices`)

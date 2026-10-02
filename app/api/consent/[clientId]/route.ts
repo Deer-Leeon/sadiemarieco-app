@@ -19,6 +19,7 @@ import {
   validateConsentForm,
 } from '@/app/consent/[clientId]/consent-form-config';
 import { stampConsentPDF } from '@/lib/pdf-stamper';
+import { notifyAdminConsentSigned } from '@/lib/admin-booking-push';
 import {
   clientIpFromRequest,
   RATE_LIMITS,
@@ -69,6 +70,34 @@ function rowToIntake(row: IntakeRow): ClientIntakeForm {
   };
 }
 
+function consentSignerName(
+  client: ClientRow,
+  formData: ConsentFormData
+): string {
+  const fromRecord = [client.first_name, client.last_name]
+    .filter((part) => typeof part === 'string' && part.trim())
+    .join(' ')
+    .trim();
+  if (fromRecord) return fromRecord;
+  return String(formData.full_name || '').trim();
+}
+
+async function notifyConsentSigned(
+  client: ClientRow,
+  formData: ConsentFormData,
+  requestHost: string | null
+) {
+  try {
+    await notifyAdminConsentSigned({
+      clientId: client.id,
+      clientName: consentSignerName(client, formData),
+      requestHost,
+    });
+  } catch (err) {
+    console.error('[api/consent] admin push failed', err);
+  }
+}
+
 function buildResponse(
   client: ClientRow,
   intake: IntakeRow | undefined,
@@ -107,6 +136,7 @@ async function ensureStampedPdf(
   }
 
   const formData = asConsentFormData(intake.form_data);
+  const wasUnstamped = !intake.stamped_pdf_url;
 
   try {
     const stampedPdfUrl = await stampConsentPDF(
@@ -128,6 +158,11 @@ async function ensureStampedPdf(
         consent_form_url = ${stampedPdfUrl}
       WHERE id = ${clientId}::uuid
     `;
+
+    if (wasUnstamped) {
+      const client = await loadClient(clientId);
+      if (client) await notifyConsentSigned(client, formData, null);
+    }
 
     return {
       intake: { ...intake, stamped_pdf_url: stampedPdfUrl },
@@ -446,6 +481,12 @@ export async function POST(
         consent_form_url = ${stampedPdfUrl}
       WHERE id = ${clientId}::uuid
     `;
+
+    await notifyConsentSigned(
+      client,
+      formData,
+      req.headers.get('x-forwarded-host') || req.headers.get('host')
+    );
 
     const intake = await loadIntake(clientId);
     const updatedClient = (await loadClient(clientId))!;
