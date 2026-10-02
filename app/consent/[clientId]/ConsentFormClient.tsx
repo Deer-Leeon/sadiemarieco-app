@@ -23,7 +23,11 @@ import {
   asYesNo,
   buildInitialForm,
   CLIENT_AGREEMENT_TEXT,
+  CONSENT_ACKNOWLEDGMENTS,
+  CONSENT_POLICY_LINKS,
   CONSENT_STATEMENTS,
+  STUDIO_POLICIES,
+  WEBSITE_POLICIES_AGREEMENT,
   formatAgreementDateDisplay,
   MEDICAL_CONDITION_CHECKLIST,
   normalizeUsStateCode,
@@ -833,7 +837,7 @@ function EditableForm({
             <RequiredMark />
           </p>
           <ul className="divide-y divide-stone-200 rounded-md border border-stone-200">
-            {CONSENT_STATEMENTS.map((item) => (
+            {CONSENT_ACKNOWLEDGMENTS.map((item) => (
               <li key={item.key} className="first:rounded-t-md last:rounded-b-md">
                 <label className={`${checkboxRowClass} gap-3 bg-[#FAF9F6] px-3 py-3.5`}>
                   <input
@@ -884,6 +888,56 @@ function EditableForm({
           <p className="text-sm text-stone-600">
             You will review a PDF of this form and sign on the next step before submitting.
           </p>
+        </SectionBody>
+      </section>
+
+      <section className={sectionClass}>
+        <SectionHeader title="Studio policies" />
+        <SectionBody>
+          <p className="text-sm leading-relaxed text-stone-600">
+            Please read these before you agree. They are the same policies published on sadiemarie.co.
+          </p>
+          <ul className="space-y-3">
+            {STUDIO_POLICIES.map((policy) => (
+              <li
+                key={policy.title}
+                className="rounded-md border border-stone-200 bg-[#FAF9F6] px-4 py-3.5"
+              >
+                <p className="text-sm font-medium text-stone-900">{policy.title}</p>
+                <p className="mt-1.5 text-sm leading-relaxed text-stone-700">{policy.body}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm leading-relaxed text-stone-600">
+            Also read the{' '}
+            {CONSENT_POLICY_LINKS.map((link, index) => (
+              <span key={link.href}>
+                {index > 0 ? ' and ' : null}
+                <a
+                  href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-stone-900 underline underline-offset-2"
+                >
+                  {link.label}
+                </a>
+              </span>
+            ))}
+            . Each opens in a new tab.
+          </p>
+          <label className={`${checkboxRowClass} gap-3 rounded-md border border-stone-200 bg-[#FAF9F6] px-3 py-3.5`}>
+            <input
+              type="checkbox"
+              checked={statements.website_policies}
+              onChange={(e) => setStatement('website_policies', e.target.checked)}
+              className={`${checkboxClass} mt-0.5 border-stone-400`}
+              aria-required
+            />
+            <span className="leading-relaxed text-stone-800">
+              {WEBSITE_POLICIES_AGREEMENT}
+              <RequiredMark />
+            </span>
+          </label>
         </SectionBody>
       </section>
 
