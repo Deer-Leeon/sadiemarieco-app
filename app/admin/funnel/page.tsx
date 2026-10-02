@@ -7,6 +7,7 @@ import {
   getBookingAttemptFunnel,
   type AttemptFunnel,
   type AttemptStageStat,
+  type CheckoutMethodCounts,
 } from '@/lib/booking-attempt-stats';
 import {
   formatFunnelTimestamp,
@@ -47,6 +48,28 @@ function statusTone(status: string): string {
   }
 }
 
+function methodBits(counts: CheckoutMethodCounts): string | null {
+  const total = counts.applePay + counts.card + counts.googlePay + counts.link;
+  if (total === 0) return null;
+  const parts = [`Apple Pay ${counts.applePay}`, `Card ${counts.card}`];
+  if (counts.googlePay > 0) parts.push(`Google Pay ${counts.googlePay}`);
+  if (counts.link > 0) parts.push(`Link ${counts.link}`);
+  return parts.join(' · ');
+}
+
+function checkoutLine(
+  booked: CheckoutMethodCounts,
+  leftPay: CheckoutMethodCounts
+): string | null {
+  const bookedBits = methodBits(booked);
+  const leftBits = methodBits(leftPay);
+  if (!bookedBits && !leftBits) return null;
+  const sentences: string[] = [];
+  if (bookedBits) sentences.push(`Booked with ${bookedBits}`);
+  if (leftBits) sentences.push(`Left during payment with ${leftBits}`);
+  return `${sentences.join('. ')}.`;
+}
+
 function leftShare(stage: AttemptStageStat): string {
   if (stage.reached === 0) return '—';
   if (stage.left === 0) return '0';
@@ -71,6 +94,10 @@ function AttemptSteps({ attempts }: { attempts: AttemptFunnel }) {
       value: formatAttemptMinutes(attempts.medianLeftMinutes),
     },
   ];
+  const checkout = checkoutLine(
+    attempts.bookedByMethod,
+    attempts.leftAtPaymentByMethod
+  );
 
   return (
     <section className="mt-8 border-t border-stone-200 pt-6">
@@ -97,6 +124,9 @@ function AttemptSteps({ attempts }: { attempts: AttemptFunnel }) {
           </div>
         ))}
       </dl>
+      {checkout ? (
+        <p className="mt-4 max-w-2xl text-sm text-stone-600">{checkout}</p>
+      ) : null}
       {attempts.started === 0 ? (
         <p className="mt-4 text-sm text-stone-500">
           These counts start with the next booking attempt. Holds already
@@ -118,6 +148,14 @@ function AttemptSteps({ attempts }: { attempts: AttemptFunnel }) {
               book · {formatAttemptMinutes(surface.medianLeftMinutes)} before
               leaving
             </p>
+            {checkoutLine(surface.bookedByMethod, surface.leftAtPaymentByMethod) ? (
+              <p className="mt-1 text-xs text-stone-600">
+                {checkoutLine(
+                  surface.bookedByMethod,
+                  surface.leftAtPaymentByMethod
+                )}
+              </p>
+            ) : null}
             <table className="mt-4 w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-stone-200 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-400">

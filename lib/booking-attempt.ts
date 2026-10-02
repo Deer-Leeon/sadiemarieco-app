@@ -30,6 +30,11 @@ export const BOOKING_ATTEMPT_STEPS = [
 ] as const;
 export type BookingAttemptStep = (typeof BOOKING_ATTEMPT_STEPS)[number];
 
+export const CHECKOUT_METHODS = ['apple_pay', 'card', 'google_pay', 'link'] as const;
+export type CheckoutMethod = (typeof CHECKOUT_METHODS)[number];
+
+const CHECKOUT_METHOD_SET = new Set<string>(CHECKOUT_METHODS);
+
 const STEP_SET = new Set<string>(BOOKING_ATTEMPT_STEPS);
 const ATTEMPT_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -62,6 +67,18 @@ export function cleanAttemptService(value: unknown): string | null {
   return cleaned;
 }
 
+export function parseCheckoutMethod(value: unknown): CheckoutMethod | null {
+  if (typeof value !== 'string') return null;
+  const method = value.trim();
+  return CHECKOUT_METHOD_SET.has(method) ? (method as CheckoutMethod) : null;
+}
+
+/** Stripe wallet type, or the express button they confirmed. Anything else is a typed card. */
+export function checkoutMethodFromWallet(type: string | null | undefined): CheckoutMethod {
+  if (type === 'apple_pay' || type === 'google_pay' || type === 'link') return type;
+  return 'card';
+}
+
 export function calRouteToAttemptStep(route: string): BookingAttemptStep | null {
   if (route === 'calendar') return 'cal_calendar';
   if (route === 'time') return 'cal_time';
@@ -82,21 +99,24 @@ export async function recordBookingAttempt(input: {
   surface: BookingAttemptSurface;
   step: BookingAttemptStep;
   service?: string | null;
+  checkoutMethod?: CheckoutMethod | null;
 }): Promise<void> {
   const at = isoNow();
   const service = input.service ?? null;
+  const checkoutMethod = input.checkoutMethod ?? null;
   const firstStep = JSON.stringify([{ step: input.step, at }]);
   const appended = JSON.stringify([{ step: input.step, at }]);
   await sql`
     INSERT INTO booking_attempts (
-      id, surface, service_label, last_step, steps
+      id, surface, service_label, last_step, steps, checkout_method
     )
     VALUES (
       ${input.attemptId},
       ${input.surface},
       ${service},
       ${input.step},
-      ${firstStep}::jsonb
+      ${firstStep}::jsonb,
+      ${checkoutMethod}
     )
     ON CONFLICT (id) DO UPDATE SET
       last_seen_at = NOW(),
@@ -105,6 +125,11 @@ export async function recordBookingAttempt(input: {
         ELSE booking_attempts.left_at
       END,
       service_label = COALESCE(${service}, booking_attempts.service_label),
+      checkout_method = CASE
+        WHEN ${checkoutMethod}::text IS NULL THEN booking_attempts.checkout_method
+        WHEN booking_attempts.completed_at IS NOT NULL THEN booking_attempts.checkout_method
+        ELSE ${checkoutMethod}
+      END,
       last_step = CASE
         WHEN booking_attempts.completed_at IS NOT NULL THEN booking_attempts.last_step
         ELSE ${input.step}
@@ -155,18 +180,26 @@ export async function linkBookingAttempt(
  * Payment succeeded on /api/booking/confirm (card or Apple Pay).
  * Failures must not block the confirm response.
  */
-export async function completeBookingAttempt(calBookingUid: string): Promise<void> {
+export async function completeBookingAttempt(
+  calBookingUid: string,
+  checkoutMethod?: CheckoutMethod | null
+): Promise<void> {
   if (!calBookingUid) return;
+  const method = checkoutMethod ?? null;
   try {
     const confirmedStep = JSON.stringify([
       { step: 'confirmed', at: new Date().toISOString() },
     ]);
     await sql`
       UPDATE booking_attempts AS attempt
-      SET completed_at = NOW(),
+      SET completed_at = COALESCE(attempt.completed_at, NOW()),
           left_at = NULL,
           last_seen_at = NOW(),
           last_step = 'confirmed',
+          checkout_method = CASE
+            WHEN ${method}::text IS NOT NULL THEN ${method}
+            ELSE attempt.checkout_method
+          END,
           steps = CASE
             WHEN attempt.last_step = 'confirmed' THEN attempt.steps
             ELSE attempt.steps || ${confirmedStep}::jsonb
@@ -174,7 +207,10 @@ export async function completeBookingAttempt(calBookingUid: string): Promise<voi
       FROM appointments AS appt
       WHERE attempt.appointment_id = appt.id
         AND appt.cal_event_id = ${calBookingUid}
-        AND attempt.completed_at IS NULL
+        AND (
+          attempt.completed_at IS NULL
+          OR ${method}::text IS NOT NULL
+        )
     `;
   } catch (err) {
     console.warn('[booking-attempt] complete failed', {

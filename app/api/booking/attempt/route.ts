@@ -14,6 +14,7 @@ import {
   parseAttemptId,
   parseAttemptStep,
   parseAttemptSurface,
+  parseCheckoutMethod,
   recordBookingAttempt,
 } from '@/lib/booking-attempt';
 import {
@@ -53,6 +54,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     step?: unknown;
     service?: unknown;
     leave?: unknown;
+    checkoutMethod?: unknown;
   };
 
   const attemptId = parseAttemptId(body.attemptId);
@@ -75,6 +77,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         surface,
         step,
         service: cleanAttemptService(body.service),
+        checkoutMethod: parseCheckoutMethod(body.checkoutMethod),
       });
     } else if (!leave) {
       return NextResponse.json({ ok: true, ignored: true });

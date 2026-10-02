@@ -1890,7 +1890,7 @@ export function CheckoutForm({
       service,
       payment_timing: payNow ? 'pay_now' : 'pay_later',
     });
-    reportBookingStep('payment_attempt', service);
+    reportBookingStep('payment_attempt', service, 'card');
 
     setSubmitting(true);
     setSubmitLabel(payNow ? 'Processing payment…' : 'Saving your card…');
