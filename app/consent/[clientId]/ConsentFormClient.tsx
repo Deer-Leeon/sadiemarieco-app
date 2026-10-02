@@ -923,7 +923,7 @@ function EditableForm({
                 </a>
               </span>
             ))}
-            . Each opens in a new tab.
+            .
           </p>
           <label className={`${checkboxRowClass} gap-3 rounded-md border border-stone-200 bg-[#FAF9F6] px-3 py-3.5`}>
             <input
