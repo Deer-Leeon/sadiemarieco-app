@@ -1,14 +1,18 @@
 // One-shot (idempotent) setup of the recurring QStash schedules that keep
 // production self-healing and monitored:
 //
-//   0 0 * * *  America/Denver  → /api/cron/cleanup-abandoned  (midnight MT)
-//   0 * * * *  America/Denver  → /api/cron/health-alert       (hourly, MT)
-//   0 6 * * *  America/Denver  → /api/cron/sync-reviews       (6am MT)
-//   */15 * * * *                 → /api/cron/ensure-reminders  (SMS reminder backfill)
+//   0 0 * * *     America/Denver  → /api/cron/cleanup-abandoned  (midnight MT)
+//   0 8,13,18 * * * America/Denver → /api/cron/health-alert       (8am, 1pm, 6pm MT)
+//   0 6 * * *     America/Denver  → /api/cron/sync-reviews       (6am MT)
+//   0 8-20/2 * * * America/Denver → /api/cron/ensure-reminders  (8am–8pm MT, every 2h)
+//
+// Reminder texts are one-time delayed jobs. The backfill only fills in a
+// job that never got scheduled, so it does not run overnight. That lets
+// Neon suspend instead of waking every 15 minutes.
 //
 // Existing schedules for the same destination are replaced, so re-running
-// is safe. Vercel Cron (vercel.json) keeps daily/hourly backstops in UTC
-// for the first two in case QStash itself has an outage.
+// is safe. Vercel Cron (vercel.json) keeps a once-a-day backstop in UTC
+// in case QStash itself has an outage.
 //
 // Usage:
 //   node --env-file=.env.local scripts/setup-qstash-schedules.mjs
@@ -33,7 +37,7 @@ const wanted = [
   },
   {
     destination: `${BASE}/api/cron/health-alert`,
-    cron: 'CRON_TZ=America/Denver 0 * * * *',
+    cron: 'CRON_TZ=America/Denver 0 8,13,18 * * *',
   },
   {
     destination: `${BASE}/api/cron/sync-reviews`,
@@ -41,7 +45,7 @@ const wanted = [
   },
   {
     destination: `${BASE}/api/cron/ensure-reminders`,
-    cron: '*/15 * * * *',
+    cron: 'CRON_TZ=America/Denver 0 8-20/2 * * *',
   },
 ];
 

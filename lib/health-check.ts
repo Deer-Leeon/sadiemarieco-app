@@ -39,9 +39,9 @@ export interface HealthCheckResult {
   soft?: boolean;
   /**
    * Timeout / dropped socket / abort — not a real auth or config failure.
-   * The hourly alerter pages only if the same probe stays in this state
-   * across consecutive runs (Cal.com stalls like this for one sample at
-   * night, then is fine on the next hour).
+   * The alerter pages only if the same probe stays in this state
+   * across consecutive scheduled runs (Cal.com stalls like this for one
+   * sample, then is fine on the next run).
    */
   transient?: boolean;
 }
@@ -1270,12 +1270,51 @@ function humanizeAge(ms: number): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+/** Reminder backfill: 8am–8pm Denver, every 2 hours. Quiet overnight. */
+const REMINDER_BACKFILL_HOURS = [8, 10, 12, 14, 16, 18, 20];
+/** Health alert: 8am, 1pm, 6pm Denver. */
+const HEALTH_ALERT_HOURS = [8, 13, 18];
+/** A slot this fresh may still be in progress, so judge the previous one. */
+const SCHEDULE_GRACE_MS = 25 * 60 * 1000;
+/** Past the slot by this much, the job is dead rather than merely late. */
+const SCHEDULE_FAIL_EXTRA_MS = 90 * 60 * 1000;
+
+function denverMinuteOfDay(now: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Denver',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+  return (hour === 24 ? 0 : hour) * 60 + minute;
+}
+
+/**
+ * How old a successful run may be and still count as on time.
+ * Uses the latest Denver slot that has had time to finish, so a quiet
+ * night is healthy and a missed daytime slot is not.
+ */
+function freshForScheduledHours(hours: number[], now = new Date()): number {
+  const minuteOfDay = denverMinuteOfDay(now);
+  const graceMin = SCHEDULE_GRACE_MS / 60_000;
+  const slots = [...hours].sort((a, b) => a - b).map((h) => h * 60);
+  const eligible = slots.filter((slot) => minuteOfDay - slot >= graceMin);
+  const minutesAgo = eligible.length
+    ? minuteOfDay - eligible[eligible.length - 1]
+    : minuteOfDay + 24 * 60 - slots[slots.length - 1];
+  return minutesAgo * 60_000 + 10 * 60_000;
+}
+
 /**
  * A dead scheduler produces no errors anywhere — the only detectable signal
  * is that its heartbeat stops advancing. Each job writes `ops_state` on a
  * successful run (lib/ops-state.ts).
  */
 async function checkJobFreshness(): Promise<HealthCheckResult[]> {
+  const reminderFreshMs = freshForScheduledHours(REMINDER_BACKFILL_HOURS);
+  const healthFreshMs = freshForScheduledHours(HEALTH_ALERT_HOURS);
   const jobs: Array<{
     id: string;
     name: string;
@@ -1290,7 +1329,7 @@ async function checkJobFreshness(): Promise<HealthCheckResult[]> {
       id: 'job-cleanup-abandoned',
       name: 'Abandoned hold sweep (last run)',
       key: JOB_HEARTBEAT_KEYS.cleanupAbandoned,
-      // Daily midnight MT job — do not reuse the hourly 2h window or it
+      // Daily midnight MT job — do not reuse a short window or it
       // stays DEGRADED all afternoon after a successful run.
       warnAfterMs: 26 * 60 * 60 * 1000,
       failAfterMs: 50 * 60 * 60 * 1000,
@@ -1301,10 +1340,10 @@ async function checkJobFreshness(): Promise<HealthCheckResult[]> {
       id: 'job-health-alert',
       name: 'Health alert monitor (last run)',
       key: JOB_HEARTBEAT_KEYS.healthAlert,
-      warnAfterMs: 2 * 60 * 60 * 1000,
-      failAfterMs: 12 * 60 * 60 * 1000,
+      warnAfterMs: healthFreshMs,
+      failAfterMs: healthFreshMs + SCHEDULE_FAIL_EXTRA_MS,
       whatBreaks:
-        'Nobody is notified when a dependency goes down. Scheduled hourly via QStash.',
+        'Nobody is notified when a dependency goes down. Scheduled at 8am, 1pm, and 6pm Denver via QStash.',
     },
     {
       id: 'job-sync-reviews',
@@ -1318,10 +1357,10 @@ async function checkJobFreshness(): Promise<HealthCheckResult[]> {
       id: 'job-ensure-reminders',
       name: 'Appointment reminder backfill (last run)',
       key: JOB_HEARTBEAT_KEYS.ensureReminders,
-      warnAfterMs: 45 * 60 * 1000,
-      failAfterMs: 3 * 60 * 60 * 1000,
+      warnAfterMs: reminderFreshMs,
+      failAfterMs: reminderFreshMs + SCHEDULE_FAIL_EXTRA_MS,
       whatBreaks:
-        'Confirmed bookings can miss 48h/24h reminder or 30-minute post-visit texts. Scheduled every 15 minutes via QStash + Vercel Cron.',
+        'Confirmed bookings can miss 48h/24h reminder or 30-minute post-visit texts. Scheduled every 2 hours from 8am to 8pm Denver via QStash, with a daily Vercel Cron backstop.',
     },
   ];
 
