@@ -21,6 +21,10 @@ import {
 import { bookingEndFromDurationMins } from '@/lib/booking-duration';
 import { parseSendSmsFromBody } from '@/lib/admin-send-sms-flag';
 import {
+  consumeAdminRescheduleIntent,
+  markAdminRescheduleIntent,
+} from '@/lib/admin-reschedule-intent';
+import {
   notifyAppointmentRescheduled,
   rescheduleAppointmentReminderEmails,
 } from '@/lib/booking-notifications';
@@ -330,6 +334,8 @@ export async function POST(
     }
     const clientEmail = parseOptionalClientEmail(existing.client_email);
 
+    await markAdminRescheduleIntent(String(existing.id));
+
     const overrideEventTypeId = parseAdminOverrideEventId();
     const calPayload: Record<string, unknown> = {
       eventTypeId,
@@ -404,7 +410,10 @@ export async function POST(
       }
     }
 
-    if (!result.ok) return result.response;
+    if (!result.ok) {
+      await consumeAdminRescheduleIntent(String(existing.id)).catch(() => {});
+      return result.response;
+    }
 
     const created = extractBooking(result.data);
     if (!created.uid) {
@@ -522,6 +531,8 @@ export async function POST(
         { error: errorMessage(smsErr) }
       );
     }
+
+    await consumeAdminRescheduleIntent(String(existing.id)).catch(() => {});
 
     return NextResponse.json({
       appointment: {
