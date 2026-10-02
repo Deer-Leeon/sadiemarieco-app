@@ -88,6 +88,30 @@ export const MEDICAL_CONDITION_CHECKLIST: {
   { key: 'other', label: 'Other' },
 ];
 
+/** Shown on the form. Matches the homepage Studio Policies section. */
+export const STUDIO_POLICIES: { title: string; body: string }[] = [
+  {
+    title: 'Cancellation Policy',
+    body: 'To respect both my time and yours, I kindly ask for at least 24 hours’ notice for any cancellations or rescheduling requests. Appointments canceled or rescheduled within 24 hours may incur a fee of up to 50% of the scheduled service cost.',
+  },
+  {
+    title: 'No-Show Policy',
+    body: 'No-shows will be charged 100% of the scheduled service cost. Appointments canceled or rescheduled within 2 hours of the appointment time will be considered a no-show.',
+  },
+  {
+    title: 'Satisfaction Guarantee',
+    body: 'My goal is for you to leave the studio feeling like a million bucks! If you are unsatisfied with your results, please reach out within 48 hours of your appointment so I can offer a complimentary adjustment if appropriate.',
+  },
+];
+
+export const CONSENT_POLICY_LINKS: { label: string; href: string }[] = [
+  { label: 'Privacy Policy', href: 'https://www.sadiemarie.co/privacy' },
+  { label: 'Terms', href: 'https://www.sadiemarie.co/terms' },
+];
+
+export const WEBSITE_POLICIES_AGREEMENT =
+  'I have read and agree to the Cancellation, No-Show, and Satisfaction policies, the Privacy Policy, and the Terms.';
+
 export const CONSENT_STATEMENTS: {
   key: ConsentStatementKey;
   text: string;
@@ -114,9 +138,14 @@ export const CONSENT_STATEMENTS: {
   },
   {
     key: 'website_policies',
-    text: 'I acknowledge that I have read and understand the policies listed on sadiemarie.co.',
+    text: WEBSITE_POLICIES_AGREEMENT,
   },
 ];
+
+/** Acknowledgment checkboxes on the form. Studio policies are agreed separately at the bottom. */
+export const CONSENT_ACKNOWLEDGMENTS = CONSENT_STATEMENTS.filter(
+  (statement) => statement.key !== 'website_policies'
+);
 
 export const CLIENT_AGREEMENT_TEXT =
   'By signing below, I confirm that the information provided in this form is accurate and complete to the best of my knowledge. I agree to notify my technician of any changes to my health history or medications prior to future appointments.\n\nI acknowledge that I do not have any condition that would make the requested service unsuitable for me. I understand that I should communicate any discomfort experienced during the procedure so adjustments may be made as needed.\n\nI voluntarily release and waive liability against my technician and business for any injury, reaction, or complication resulting from inaccurate or incomplete health information provided by me.\n\nThis consent agreement will remain valid for all future appointments unless updated or revoked in writing. I confirm that I am at least 18 years of age and consent to receiving lash and/or brow services.';
