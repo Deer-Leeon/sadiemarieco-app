@@ -3,6 +3,12 @@ import { currentUser } from '@clerk/nextjs/server';
 import Link from 'next/link';
 
 import {
+  formatAttemptMinutes,
+  getBookingAttemptFunnel,
+  type AttemptFunnel,
+  type AttemptStageStat,
+} from '@/lib/booking-attempt-stats';
+import {
   formatFunnelTimestamp,
   getBookingFunnelStats,
   type FunnelRangeDays,
@@ -39,6 +45,115 @@ function statusTone(status: string): string {
     default:
       return 'text-stone-600';
   }
+}
+
+function leftShare(stage: AttemptStageStat): string {
+  if (stage.reached === 0) return '—';
+  if (stage.left === 0) return '0';
+  const pct = stage.leftPercent;
+  if (pct == null) return String(stage.left);
+  const shown = Number.isInteger(pct) ? String(pct) : pct.toFixed(1);
+  return `${stage.left} · ${shown}%`;
+}
+
+function AttemptSteps({ attempts }: { attempts: AttemptFunnel }) {
+  const cards = [
+    { label: 'Started', value: String(attempts.started) },
+    { label: 'Still going', value: String(attempts.active) },
+    { label: 'Left', value: String(attempts.abandoned) },
+    { label: 'Booked', value: String(attempts.confirmed) },
+    {
+      label: 'Time to book',
+      value: formatAttemptMinutes(attempts.medianBookedMinutes),
+    },
+    {
+      label: 'Time before leaving',
+      value: formatAttemptMinutes(attempts.medianLeftMinutes),
+    },
+  ];
+
+  return (
+    <section className="mt-8 border-t border-stone-200 pt-6">
+      <h2 className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-400">
+        From the first step
+      </h2>
+      <p className="mt-2 max-w-2xl text-sm text-stone-500">
+        Phone and computer are counted apart. Reaching a later step counts
+        as having passed the ones before it. Left is the last step they
+        were on.
+      </p>
+      <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {cards.map((card) => (
+          <div
+            key={card.label}
+            className="border-b border-stone-200 pb-3 sm:border-b-0 sm:pb-0"
+          >
+            <dt className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
+              {card.label}
+            </dt>
+            <dd className="mt-1 font-serif text-2xl text-stone-900 tabular-nums">
+              {card.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {attempts.started === 0 ? (
+        <p className="mt-4 text-sm text-stone-500">
+          These counts start with the next booking attempt. Holds already
+          in progress are still listed below.
+        </p>
+      ) : null}
+      <div className="mt-8 grid gap-10 lg:grid-cols-2">
+        {attempts.surfaces.map((surface) => (
+          <div key={surface.surface}>
+            <h3 className="font-serif text-xl text-stone-900">
+              {surface.label}
+            </h3>
+            <p className="mt-1 text-xs text-stone-500">
+              {surface.started} started · {surface.active} still going ·{' '}
+              {surface.abandoned} left · {surface.confirmed} booked
+            </p>
+            <p className="mt-1 text-xs text-stone-400">
+              Median {formatAttemptMinutes(surface.medianBookedMinutes)} to
+              book · {formatAttemptMinutes(surface.medianLeftMinutes)} before
+              leaving
+            </p>
+            <table className="mt-4 w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-stone-200 text-[10px] font-medium uppercase tracking-[0.18em] text-stone-400">
+                  <th className="py-2 pr-3 font-medium">Step</th>
+                  <th className="py-2 pr-3 font-medium tabular-nums">
+                    Reached
+                  </th>
+                  <th className="py-2 pr-3 font-medium tabular-nums">
+                    Left here
+                  </th>
+                  <th className="py-2 font-medium tabular-nums">Median</th>
+                </tr>
+              </thead>
+              <tbody>
+                {surface.stages.map((stage) => (
+                  <tr
+                    key={stage.id}
+                    className="border-b border-stone-100 text-stone-800"
+                  >
+                    <td className="py-2.5 pr-3">{stage.label}</td>
+                    <td className="py-2.5 pr-3 tabular-nums">{stage.reached}</td>
+                    <td className="py-2.5 pr-3 tabular-nums text-stone-600">
+                      {leftShare(stage)}
+                    </td>
+                    <td className="py-2.5 tabular-nums text-stone-600">
+                      {formatAttemptMinutes(stage.medianMinutes)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function FunnelTotals({ summary }: { summary: FunnelSummary }) {
@@ -85,7 +200,10 @@ export default async function AdminFunnelPage({
 
   const sp = await searchParams;
   const rangeDays = parseRange(sp.days);
-  const summary = await getBookingFunnelStats(rangeDays);
+  const [summary, attempts] = await Promise.all([
+    getBookingFunnelStats(rangeDays),
+    getBookingAttemptFunnel(rangeDays),
+  ]);
 
   const user = await currentUser();
   const displayName = user?.firstName || access.emails[0] || 'Admin';
@@ -101,10 +219,11 @@ export default async function AdminFunnelPage({
               Public checkout funnel
             </p>
             <p className="mt-2 max-w-xl text-sm text-stone-500">
-              Holds created after someone submits details in Cal, then
-              confirms or abandons card checkout. Earlier steps (service
-              opened, Cal calendar / details) are in Vercel Analytics →
-              Events.
+              A start is opening the phone booker, or opening a service on a
+              computer. Still going means they moved in the last 30 minutes.
+              After that, or if they close the tab, they count as left at
+              their last step. Booked is a successful payment. The holds
+              below begin once their details are in.
             </p>
           </div>
           <div className="flex items-center gap-1">
@@ -128,8 +247,15 @@ export default async function AdminFunnelPage({
           </div>
         </div>
 
-        <section className="mt-8 border-t border-stone-200 pt-6">
-          <FunnelTotals summary={summary} />
+        <AttemptSteps attempts={attempts} />
+
+        <section className="mt-10 border-t border-stone-200 pt-6">
+          <h2 className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-400">
+            After details are submitted
+          </h2>
+          <div className="mt-5">
+            <FunnelTotals summary={summary} />
+          </div>
         </section>
 
         <section className="mt-10">

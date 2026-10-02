@@ -337,6 +337,18 @@
         service,
         step
       });
+      const attemptStep =
+        step === 'calendar'
+          ? 'cal_calendar'
+          : step === 'time'
+            ? 'cal_time'
+            : step === 'details'
+              ? 'cal_details'
+              : '';
+      const attemptApi = window.SadieBookingAttempt;
+      if (attemptStep && attemptApi && typeof attemptApi.report === 'function') {
+        attemptApi.report(attemptStep, service);
+      }
     };
     nsApi('on', { action: 'routeChanged', callback: onStepChange });
     nsApi('on', {
@@ -471,6 +483,10 @@
   };
 
   const showDrawerPayChoice = (booking, email) => {
+    const attemptApi = window.SadieBookingAttempt;
+    if (attemptApi && typeof attemptApi.report === 'function') {
+      attemptApi.report('pay_choice', booking && booking.serviceName);
+    }
     hideCheckoutHandoff();
     hideContactWarning();
     if (payLoadingEl) payLoadingEl.hidden = true;
@@ -618,6 +634,10 @@
   };
 
   const showContactCapture = (booking) => {
+    const attemptApi = window.SadieBookingAttempt;
+    if (attemptApi && typeof attemptApi.report === 'function') {
+      attemptApi.report('contact', booking && booking.serviceName);
+    }
     pendingContactBooking = booking;
     hideCheckoutHandoff();
     if (payLoadingEl) payLoadingEl.hidden = true;
@@ -657,7 +677,12 @@
         bookingTime: booking.bookingTime,
         endTime: booking.endTime,
         phone: booking.phone,
-        smsOptIn: smsOptIn === true
+        smsOptIn: smsOptIn === true,
+        attemptId:
+          window.SadieBookingAttempt &&
+          typeof window.SadieBookingAttempt.id === 'function'
+            ? window.SadieBookingAttempt.id()
+            : undefined
       })
     });
     const data = await res.json().catch(() => ({}));
@@ -792,6 +817,10 @@
           hasName: Boolean(booking.name),
           hasPhone: Boolean(booking.phone)
         });
+        const attemptApi = window.SadieBookingAttempt;
+        if (attemptApi && typeof attemptApi.report === 'function') {
+          attemptApi.report('details_submitted', booking.serviceName || 'Unknown');
+        }
 
         const hasEmail = emailLooksReal(email);
         const hasSms = smsOptIn === true;
@@ -1015,10 +1044,26 @@
         ? api.serviceFromCalLink(link)
         : link)
     });
+    const attemptApi = window.SadieBookingAttempt;
+    const openedService =
+      (meta && meta.name) ||
+      (api && api.serviceFromCalLink ? api.serviceFromCalLink(link) : link);
+    if (attemptApi && typeof attemptApi.begin === 'function') {
+      attemptApi.begin('desktop');
+      attemptApi.report('opened', openedService);
+    }
   };
 
   const closeDrawer = () => {
     if (!drawer || !backdrop) return;
+    const attemptApi = window.SadieBookingAttempt;
+    if (
+      !drawerHoldConfirmed &&
+      attemptApi &&
+      typeof attemptApi.leave === 'function'
+    ) {
+      attemptApi.leave();
+    }
     abandonDrawerHold();
     hideContactWarning();
     hideDrawerPayChoice();
@@ -1029,6 +1074,16 @@
     document.documentElement.style.overflow = '';
     document.body.style.overflow = '';
   };
+
+  window.addEventListener('pagehide', (event) => {
+    if (event.persisted) return;
+    if (!drawer || !drawer.classList.contains('drawer-open')) return;
+    if (drawerHoldConfirmed) return;
+    const attemptApi = window.SadieBookingAttempt;
+    if (attemptApi && typeof attemptApi.leave === 'function') {
+      attemptApi.leave();
+    }
+  });
 
   const restoreCalendarHeader = () => {
     if (drawerSubtitleEl) {

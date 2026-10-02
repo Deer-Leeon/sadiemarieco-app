@@ -17,6 +17,7 @@ import {
   BOOKING_ANALYTICS_EVENTS,
   trackBookingEvent,
 } from '@/lib/booking-analytics';
+import { linkBookingAttempt, parseAttemptId } from '@/lib/booking-attempt';
 import {
   CONTACT_CHANNEL_REQUIRED_MESSAGE,
   hasBookingContactChannel,
@@ -55,6 +56,7 @@ interface InitBody {
   phone?: unknown;
   smsOptIn?: unknown;
   eventTypeId?: unknown;
+  attemptId?: unknown;
 }
 
 interface ParsedInit {
@@ -68,6 +70,7 @@ interface ParsedInit {
   bookingNotes: string | null;
   smsOptIn: boolean | undefined;
   calEventTypeId: number | null;
+  attemptId: string | null;
 }
 
 function errorMessage(err: unknown): string {
@@ -169,6 +172,7 @@ function parseInitBody(input: unknown): ParsedInit | { error: string } {
     bookingNotes: null,
     smsOptIn,
     calEventTypeId: extractCalEventTypeId(body),
+    attemptId: parseAttemptId(body.attemptId),
   };
 }
 
@@ -466,6 +470,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.HOLD_CREATED, {
       service: analyticsServiceLabel(data.serviceName),
     });
+    await linkBookingAttempt(data.attemptId, data.calBookingUid);
 
     return NextResponse.json({
       ok: true,

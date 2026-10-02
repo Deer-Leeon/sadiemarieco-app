@@ -11,6 +11,12 @@ import {
   analyticsServiceLabel,
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
+import {
+  bookingAttemptId,
+  ensureBookingAttempt,
+  leaveBookingAttempt,
+  reportBookingStep,
+} from '@/lib/booking-attempt-client';
 import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-public';
 import { STUDIO_SMS_CONSENT_LABEL } from '@/lib/cal-event-studio-defaults';
 import { formatAppointmentWhen } from '@/lib/format-booking-time';
@@ -1143,11 +1149,23 @@ export default function BookClient({
       if (event.persisted) return;
       if (isKeepHoldThroughUnload()) return;
       if (confirmedRef.current) return;
+      if (isPhoneViewport()) leaveBookingAttempt();
       sendAbandonHoldBeacon(holdUidRef.current);
     };
     window.addEventListener('pagehide', onPageHide);
     return () => window.removeEventListener('pagehide', onPageHide);
   }, []);
+
+  useEffect(() => {
+    if (!isPhoneViewport()) return;
+    ensureBookingAttempt('phone');
+    const service = selected?.title;
+    if (step === 'service') reportBookingStep('opened', service);
+    else if (step === 'when') reportBookingStep('service', service);
+    else if (step === 'contact') reportBookingStep('contact', service);
+    else if (step === 'review') reportBookingStep('review', service);
+    else if (step === 'pay') reportBookingStep('pay', service);
+  }, [step, selected?.title]);
 
   useEffect(() => {
     if (!holdCreatedAt || holdExpired) {
@@ -1260,6 +1278,7 @@ export default function BookClient({
 
   const continueFromWhen = () => {
     if (!selectedStart) return;
+    reportBookingStep('time', selected?.title);
     setStep('contact');
   };
 
@@ -1377,6 +1396,7 @@ export default function BookClient({
           email: email.trim() || undefined,
           smsOptIn,
           source: 'phone_booker',
+          attemptId: bookingAttemptId(),
         }),
       });
       const data = (await res.json().catch(() => null)) as {

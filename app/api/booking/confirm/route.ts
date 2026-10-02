@@ -47,6 +47,7 @@ import {
   BOOKING_ANALYTICS_EVENTS,
   trackBookingEvent,
 } from '@/lib/booking-analytics';
+import { completeBookingAttempt } from '@/lib/booking-attempt';
 import {
   getAppointmentStripeByCalUid,
   STRIPE_CUSTOMER_ID_RE,
@@ -245,6 +246,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         : (existingStripe?.stripe_setup_intent_id ?? '').trim() ===
           setupIntentId;
       if (matchesLinkedIntent) {
+        await completeBookingAttempt(calBookingUid);
         return NextResponse.json({
           ok: true,
           alreadyConfirmed: true,
@@ -332,6 +334,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             const latestStatus = (latest?.status ?? '').toLowerCase();
             const latestPi = (latest?.stripe_payment_intent_id ?? '').trim();
             if (latestStatus === 'confirmed' && latestPi === paymentIntentId) {
+              await completeBookingAttempt(calBookingUid);
               return NextResponse.json({
                 ok: true,
                 alreadyConfirmed: true,
@@ -761,6 +764,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             paymentIntentId
           : (current?.stripe_setup_intent_id ?? '').trim() === setupIntentId;
         if (matchesLinkedIntent) {
+          await completeBookingAttempt(calBookingUid);
           // Concurrent duplicate of the same confirm — the other request
           // completed the promote. Report success.
           return NextResponse.json({
@@ -1019,6 +1023,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.BOOKING_CONFIRMED, {
     service: analyticsServiceLabel(hold.service_name),
   });
+  await completeBookingAttempt(calBookingUid);
 
   return NextResponse.json({
     ok: true,
