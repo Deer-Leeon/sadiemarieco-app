@@ -35,6 +35,15 @@ const impl = require('./booking-notifications.js') as {
     bookingUid?: string | null;
     amountCents?: number | null;
   }) => Promise<Record<string, unknown>>;
+  notifyAppointmentServiceChanged: (args: {
+    bookingUid: string;
+    bookingTime: string | null;
+    clientPhone: string | null;
+    serviceName: string | null;
+    smsOptIn: boolean | null | undefined;
+    endTime?: string | null;
+    sendClientSms?: boolean;
+  }) => Promise<Record<string, unknown>>;
   notifyAppointmentRescheduled: (args: {
     bookingUid: string;
     bookingTime: string | null;
@@ -139,6 +148,8 @@ export const rescheduleAppointmentReminderEmails =
 export const notifyAdminAppointmentStatusSms =
   impl.notifyAdminAppointmentStatusSms;
 export const notifyAppointmentRescheduled = impl.notifyAppointmentRescheduled;
+export const notifyAppointmentServiceChanged =
+  impl.notifyAppointmentServiceChanged;
 export const claimSkipClientSms = impl.claimSkipClientSms;
 export const releaseSkipClientSms = impl.releaseSkipClientSms;
 export const hasSkipClientSms = impl.hasSkipClientSms;

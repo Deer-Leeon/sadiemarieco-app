@@ -17,6 +17,7 @@ interface Props {
   groupHeaders: ManualBookingServiceGroupHeader[];
   selectedService: ManualBookingServiceOption | null;
   onSelectService: (service: ManualBookingServiceOption) => void;
+  currentSlug?: string | null;
 }
 
 export default function ManualBookingServicePicker({
@@ -24,6 +25,7 @@ export default function ManualBookingServicePicker({
   groupHeaders,
   selectedService,
   onSelectService,
+  currentSlug = null,
 }: Props) {
   const menu = useMemo(
     () => buildManualBookingServiceMenu(services, groupHeaders),
@@ -33,9 +35,16 @@ export default function ManualBookingServicePicker({
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(
     () => new Set()
   );
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<number>>(
-    () => new Set(groupHeaders.map((g) => g.id))
-  );
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<number>>(() => {
+    const currentParentId = services.find(
+      (service) => service.slug === currentSlug
+    )?.parentId;
+    return new Set(
+      groupHeaders
+        .map((group) => group.id)
+        .filter((id) => id !== currentParentId)
+    );
+  });
 
   function toggleCategory(category: string) {
     setCollapsedCategories((prev) => {
@@ -101,6 +110,7 @@ export default function ManualBookingServicePicker({
                         key={row.service.slug}
                         service={row.service}
                         selected={selectedService?.slug === row.service.slug}
+                        current={row.service.slug === currentSlug}
                         onSelect={onSelectService}
                       />
                     );
@@ -140,6 +150,7 @@ export default function ManualBookingServicePicker({
                               key={child.slug}
                               service={child}
                               selected={selectedService?.slug === child.slug}
+                              current={child.slug === currentSlug}
                               onSelect={onSelectService}
                             />
                           ))}
@@ -169,10 +180,12 @@ export default function ManualBookingServicePicker({
 function ServiceCard({
   service,
   selected,
+  current = false,
   onSelect,
 }: {
   service: ManualBookingServiceOption;
   selected: boolean;
+  current?: boolean;
   onSelect: (service: ManualBookingServiceOption) => void;
 }) {
   return (
@@ -194,6 +207,15 @@ function ServiceCard({
             }`}
           >
             {service.title}
+            {current ? (
+              <span
+                className={`ml-2 align-middle text-[10px] font-medium uppercase tracking-[0.16em] ${
+                  selected ? 'text-stone-300' : 'text-stone-500'
+                }`}
+              >
+                Current
+              </span>
+            ) : null}
           </span>
           {selected ? (
             <Check

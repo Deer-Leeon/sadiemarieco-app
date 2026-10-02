@@ -43,6 +43,7 @@ export type SmsTemplateKey =
   | 'reminder_visit'
   | 'visit_update'
   | 'reschedule'
+  | 'service_change'
   | 'admin_cancel'
   | 'no_show_no_charge'
   | 'no_show_charged'

@@ -1,3 +1,6 @@
+import { isAppointmentSettled } from './settlementDisplay';
+import type { TerminalPaymentSummary } from './types';
+
 /**
  * Cal.com formats event titles as "<service> between <organiser> and
  * <attendee>" — e.g. "Hybrid Full Set between Sadie Marie and Leon". Strip
@@ -114,6 +117,26 @@ export function isAppointmentCanceled(status: string | null): boolean {
 export function isAppointmentReadOnly(status: string | null): boolean {
   const s = (status || '').toLowerCase().trim();
   return s === 'no-show' || isAppointmentCanceled(status);
+}
+
+/**
+ * Unpaid confirmed visit whose start is still in the future.
+ * A saved card is not payment. Add-ons are changed on the parent visit.
+ */
+export function canChangeAppointmentService(input: {
+  status: string | null;
+  booking_time: string | null;
+  attached_to_appointment_id?: string | null;
+  payment?: TerminalPaymentSummary | null;
+  nowMs?: number;
+}): boolean {
+  if (input.attached_to_appointment_id) return false;
+  const status = (input.status || '').toLowerCase().trim();
+  if (status !== 'confirmed' && status !== 'accepted') return false;
+  if (isAppointmentSettled(input.payment)) return false;
+  if (!input.booking_time) return false;
+  const start = Date.parse(input.booking_time);
+  return Number.isFinite(start) && start > (input.nowMs ?? Date.now());
 }
 
 /**
