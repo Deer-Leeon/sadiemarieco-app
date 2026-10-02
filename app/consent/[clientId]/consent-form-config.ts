@@ -435,12 +435,6 @@ export function validateConsentForm(form: ConsentFormData): string | null {
   if (!isYesNoAnswered(brow)) {
     return 'Please answer whether you have had a brow lamination and/or tint.';
   }
-  if (
-    (lash === 'yes' || brow === 'yes') &&
-    !String(form.service_adverse_reaction_explain ?? '').trim()
-  ) {
-    return 'Please explain any prior adverse reactions to lash or brow services.';
-  }
 
   if (!isYesNoAnswered(asYesNo(form.wears_contact_lenses))) {
     return 'Please answer the question about contact lenses.';
@@ -448,30 +442,15 @@ export function validateConsentForm(form: ConsentFormData): string | null {
   if (!isYesNoAnswered(asYesNo(form.pregnant_or_may_be))) {
     return 'Please answer the question about pregnancy.';
   }
-  if (asYesNo(form.pregnant_or_may_be) === 'yes' && !String(form.pregnancy_weeks ?? '').trim()) {
-    return 'Please indicate how far along you are in your pregnancy.';
-  }
 
-  const personalYesNo: [string, YesNo, string | undefined][] = [
-    [
-      'eye injury or condition',
-      asYesNo(form.eye_injury_or_condition),
-      form.eye_injury_or_condition_explain,
-    ],
-    ['allergies', asYesNo(form.known_allergies), form.known_allergies_explain],
-    ['Accutane use', asYesNo(form.accutane_last_6_months), undefined],
-    ['retinol or tretinoin', asYesNo(form.uses_retinol_tretinoin), undefined],
+  const personalYesNo: [string, YesNo][] = [
+    ['eye injury or condition', asYesNo(form.eye_injury_or_condition)],
+    ['allergies', asYesNo(form.known_allergies)],
+    ['Accutane use', asYesNo(form.accutane_last_6_months)],
+    ['retinol or tretinoin', asYesNo(form.uses_retinol_tretinoin)],
   ];
-  for (const [label, val, explain] of personalYesNo) {
+  for (const [label, val] of personalYesNo) {
     if (!isYesNoAnswered(val)) return `Please answer the medical question about ${label}.`;
-    if (val === 'yes' && explain !== undefined && !String(explain ?? '').trim()) {
-      return `Please provide details for: ${label}.`;
-    }
-  }
-
-  const checklist = asMedicalChecklist(form.medical_conditions_checklist);
-  if (checklist.other && !String(form.medical_conditions_other_text ?? '').trim()) {
-    return 'Please describe the “Other” medical condition you checked.';
   }
 
   const statements = asConsentStatements(form.consent_statements);

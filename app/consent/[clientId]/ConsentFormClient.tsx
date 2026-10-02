@@ -675,12 +675,11 @@ function EditableForm({
           />
           {showServiceExplain && (
             <label className="block">
-              <FieldLabel required>
+              <FieldLabel>
                 If yes to either service above, have you ever experienced an adverse
                 reaction? Please explain:
               </FieldLabel>
               <textarea
-                required
                 rows={3}
                 value={String(form.service_adverse_reaction_explain ?? '')}
                 onChange={(e) => setField('service_adverse_reaction_explain', e.target.value)}
@@ -710,10 +709,9 @@ function EditableForm({
           >
             {asYesNo(form.pregnant_or_may_be) === 'yes' && (
               <label className="mt-2 block">
-                <FieldLabel required>If yes, how far along are you?</FieldLabel>
+                <FieldLabel>If yes, how far along are you?</FieldLabel>
                 <input
                   type="text"
-                  required
                   value={form.pregnancy_weeks}
                   onChange={(e) => setField('pregnancy_weeks', e.target.value)}
                   className={inputClass}
@@ -731,9 +729,8 @@ function EditableForm({
           >
             {asYesNo(form.eye_injury_or_condition) === 'yes' && (
               <label className="block">
-                <FieldLabel required>If yes, please explain:</FieldLabel>
+                <FieldLabel>If yes, please explain:</FieldLabel>
                 <textarea
-                  required
                   rows={2}
                   value={form.eye_injury_or_condition_explain}
                   onChange={(e) =>
@@ -753,9 +750,8 @@ function EditableForm({
           >
             {asYesNo(form.known_allergies) === 'yes' && (
               <label className="block">
-                <FieldLabel required>If yes, please explain:</FieldLabel>
+                <FieldLabel>If yes, please explain:</FieldLabel>
                 <textarea
-                  required
                   rows={2}
                   value={form.known_allergies_explain}
                   onChange={(e) => setField('known_allergies_explain', e.target.value)}
@@ -805,10 +801,9 @@ function EditableForm({
             </div>
             {checklist.other && (
               <div className="border-t border-stone-200 px-4 pb-4">
-                <FieldLabel required>Other (please specify)</FieldLabel>
+                <FieldLabel>Other (please specify)</FieldLabel>
                 <input
                   type="text"
-                  required
                   value={form.medical_conditions_other_text}
                   onChange={(e) => setField('medical_conditions_other_text', e.target.value)}
                   className={inputClass}
