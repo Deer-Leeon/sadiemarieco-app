@@ -1,10 +1,12 @@
 'use client';
 
+import type { CSSProperties } from 'react';
+
 import type { Appointment } from './types';
 import { appointmentServiceLabel, clientDisplayName, isAppointmentCanceled } from './helpers';
 import { SettlementBadge } from './components/SettlementMarker';
 import { isAppointmentSettled } from './settlementDisplay';
-import { getServiceColor } from './serviceColors';
+import { getServiceColor, visitBlockBackground } from './serviceColors';
 import { formatStudioClock } from '@/lib/studio-calendar';
 
 export function AppointmentStatusPill({ status }: { status: string | null }) {
@@ -69,6 +71,31 @@ function isCanceledStatus(status: string | null): boolean {
   return isAppointmentCanceled(status);
 }
 
+function ExtraNameLines({
+  extras,
+  className,
+  style,
+}: {
+  extras: Appointment[];
+  className: string;
+  style?: CSSProperties;
+}) {
+  if (extras.length === 0) return null;
+  return (
+    <>
+      {extras.map((extra) => (
+        <p
+          key={extra.id}
+          className={`mt-0.5 truncate text-xs font-semibold leading-tight ${className}`}
+          style={style}
+        >
+          + {appointmentServiceLabel(extra)}
+        </p>
+      ))}
+    </>
+  );
+}
+
 /**
  * Bookings-list row — shared by /admin list view and client appointment
  * history. Full-width service colour block, time column, trailing
@@ -99,13 +126,24 @@ export function AppointmentListRow({
   const showTrailingBadges =
     showStatusPill || isAppointmentSettled(appointment.terminal_payment);
 
-  const color =
-    isNoShow || isPending || (variant === 'client' && isCanceled)
-      ? null
-      : getServiceColor(appointment);
-  const colorStyle = color
-    ? { backgroundColor: color.accent, color: color.text }
-    : undefined;
+  const extras = appointment.extras ?? [];
+  const paintAllowed = !(
+    isNoShow ||
+    isPending ||
+    (variant === 'client' && isCanceled)
+  );
+  const color = paintAllowed ? getServiceColor(appointment) : null;
+  const blockPaint =
+    paintAllowed && extras.length > 0
+      ? visitBlockBackground(appointment)
+      : null;
+  const colorStyle = blockPaint?.backgroundImage
+    ? { backgroundImage: blockPaint.backgroundImage, color: color?.text }
+    : blockPaint?.backgroundColor
+      ? { backgroundColor: blockPaint.backgroundColor, color: color?.text }
+      : color
+        ? { backgroundColor: color.accent, color: color.text }
+        : undefined;
   const primaryColorStyle = color ? { color: color.text } : undefined;
   const mutedColorStyle = color ? { color: color.textMuted } : undefined;
 
@@ -153,14 +191,26 @@ export function AppointmentListRow({
             >
               {appointmentServiceLabel(appointment)}
             </p>
+            <ExtraNameLines
+              extras={extras}
+              className={primaryTextClass}
+              style={primaryColorStyle}
+            />
           </>
         ) : (
-          <p
-            className={`truncate text-sm font-medium ${primaryTextClass}`}
-            style={primaryColorStyle}
-          >
-            {appointmentServiceLabel(appointment)}
-          </p>
+          <>
+            <p
+              className={`truncate text-sm font-medium ${primaryTextClass}`}
+              style={primaryColorStyle}
+            >
+              {appointmentServiceLabel(appointment)}
+            </p>
+            <ExtraNameLines
+              extras={extras}
+              className={primaryTextClass}
+              style={primaryColorStyle}
+            />
+          </>
         )}
       </div>
       {showTrailingBadges ? (

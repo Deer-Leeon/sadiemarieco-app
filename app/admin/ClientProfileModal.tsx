@@ -39,7 +39,7 @@ import {
   Camera,
   Check,
   ChevronRight,
-  ChevronUp,
+  ChevronDown,
   ClipboardCheck,
   CreditCard,
   Flag,
@@ -1780,7 +1780,7 @@ function InlineHistoryTable({
               onClick={() => setPastOpen(true)}
               className="mt-3 flex w-full items-center justify-center gap-1.5 py-2 text-[11px] font-medium uppercase tracking-[0.9px] text-stone-400 transition-colors hover:text-stone-600"
             >
-              <ChevronUp className="h-2 w-2 stroke-[2.5]" aria-hidden />
+              <ChevronDown className="h-2 w-2 stroke-[2.5]" aria-hidden />
               Show Past Appointments
             </button>
           )}
