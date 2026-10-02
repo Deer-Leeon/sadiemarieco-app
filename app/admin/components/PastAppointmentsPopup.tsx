@@ -17,8 +17,8 @@ interface Props {
 
 /**
  * Centered past-history overlay matching the iOS client-profile popup:
- * blurs the profile behind it, solid card, day-grouped visits (extras as
- * full-width cards under the parent).
+ * blurs the profile behind it, solid card, day-grouped visits. Add-ons
+ * stay on the parent card as plus lines.
  */
 export default function PastAppointmentsPopup({
   appointments,
