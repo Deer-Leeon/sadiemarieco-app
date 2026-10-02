@@ -43,6 +43,13 @@ const DESKTOP_STAGES: Stage[] = [
   { id: 'confirmed', label: 'Booked', steps: ['confirmed'] },
 ];
 
+export type CheckoutMethodCounts = {
+  applePay: number;
+  card: number;
+  googlePay: number;
+  link: number;
+};
+
 export type AttemptStageStat = {
   id: string;
   label: string;
@@ -61,6 +68,8 @@ export type AttemptSurfaceStat = {
   confirmed: number;
   medianBookedMinutes: number | null;
   medianLeftMinutes: number | null;
+  bookedByMethod: CheckoutMethodCounts;
+  leftAtPaymentByMethod: CheckoutMethodCounts;
   stages: AttemptStageStat[];
 };
 
@@ -71,6 +80,8 @@ export type AttemptFunnel = {
   confirmed: number;
   medianBookedMinutes: number | null;
   medianLeftMinutes: number | null;
+  bookedByMethod: CheckoutMethodCounts;
+  leftAtPaymentByMethod: CheckoutMethodCounts;
   surfaces: AttemptSurfaceStat[];
 };
 
@@ -81,8 +92,39 @@ type AttemptRow = {
   left_at: Date | string | null;
   completed_at: Date | string | null;
   last_step: string;
+  checkout_method: string | null;
   steps: unknown;
 };
+
+const PAYMENT_STEPS = new Set([
+  'pay',
+  'checkout',
+  'payment_attempt',
+  'pay_choice',
+]);
+
+function emptyMethods(): CheckoutMethodCounts {
+  return { applePay: 0, card: 0, googlePay: 0, link: 0 };
+}
+
+function addMethod(bucket: CheckoutMethodCounts, method: string | null) {
+  if (method === 'apple_pay') bucket.applePay += 1;
+  else if (method === 'card') bucket.card += 1;
+  else if (method === 'google_pay') bucket.googlePay += 1;
+  else if (method === 'link') bucket.link += 1;
+}
+
+function addMethodCounts(
+  left: CheckoutMethodCounts,
+  right: CheckoutMethodCounts
+): CheckoutMethodCounts {
+  return {
+    applePay: left.applePay + right.applePay,
+    card: left.card + right.card,
+    googlePay: left.googlePay + right.googlePay,
+    link: left.link + right.link,
+  };
+}
 
 function stagesFor(surface: string): Stage[] {
   return surface === 'desktop' ? DESKTOP_STAGES : PHONE_STAGES;
@@ -156,6 +198,8 @@ function emptySurface(
     confirmed: 0,
     medianBookedMinutes: null,
     medianLeftMinutes: null,
+    bookedByMethod: emptyMethods(),
+    leftAtPaymentByMethod: emptyMethods(),
     stages,
   };
 }
@@ -172,6 +216,8 @@ function summarize(
   const leftMinutes: number[][] = stages.map(() => []);
   const bookedMinutes: number[] = [];
   const abandonedMinutes: number[] = [];
+  const bookedByMethod = emptyMethods();
+  const leftAtPaymentByMethod = emptyMethods();
   let active = 0;
   let abandoned = 0;
   let confirmed = 0;
@@ -193,9 +239,13 @@ function summarize(
     if (isConfirmed) {
       confirmed += 1;
       bookedMinutes.push(duration);
+      addMethod(bookedByMethod, row.checkout_method);
     } else if (isAbandoned) {
       abandoned += 1;
       abandonedMinutes.push(duration);
+      if (row.checkout_method && PAYMENT_STEPS.has(row.last_step)) {
+        addMethod(leftAtPaymentByMethod, row.checkout_method);
+      }
       const stop = stageIndex(stages, row.last_step);
       if (stop >= 0 && stop < stages.length - 1) {
         left[stop] += 1;
@@ -220,6 +270,8 @@ function summarize(
     confirmed,
     medianBookedMinutes: median(bookedMinutes),
     medianLeftMinutes: median(abandonedMinutes),
+    bookedByMethod,
+    leftAtPaymentByMethod,
     stages: stages.map((stage, index) => ({
       id: stage.id,
       label: stage.label,
@@ -242,6 +294,14 @@ function combine(surfaces: AttemptSurfaceStat[]): AttemptFunnel {
     confirmed: surfaces.reduce((sum, item) => sum + item.confirmed, 0),
     medianBookedMinutes: null,
     medianLeftMinutes: null,
+    bookedByMethod: surfaces.reduce(
+      (sum, item) => addMethodCounts(sum, item.bookedByMethod),
+      emptyMethods()
+    ),
+    leftAtPaymentByMethod: surfaces.reduce(
+      (sum, item) => addMethodCounts(sum, item.leftAtPaymentByMethod),
+      emptyMethods()
+    ),
     surfaces,
   };
 }
@@ -254,7 +314,7 @@ export async function getBookingAttemptFunnel(
   const sinceIso = since.toISOString();
   try {
     const { rows } = await sql<AttemptRow>`
-      SELECT surface, started_at, last_seen_at, left_at, completed_at, last_step, steps
+      SELECT surface, started_at, last_seen_at, left_at, completed_at, last_step, checkout_method, steps
       FROM booking_attempts
       WHERE started_at >= ${sinceIso}
     `;

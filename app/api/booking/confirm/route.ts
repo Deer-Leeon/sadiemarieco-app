@@ -47,7 +47,7 @@ import {
   BOOKING_ANALYTICS_EVENTS,
   trackBookingEvent,
 } from '@/lib/booking-analytics';
-import { completeBookingAttempt } from '@/lib/booking-attempt';
+import { checkoutMethodFromWallet, completeBookingAttempt } from '@/lib/booking-attempt';
 import {
   getAppointmentStripeByCalUid,
   STRIPE_CUSTOMER_ID_RE,
@@ -385,6 +385,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } = { name: null, email: null };
   let intentCustomer: string | null = null;
   let payNowAmountCents: number | null = null;
+  let checkoutMethod: ReturnType<typeof checkoutMethodFromWallet> | null = null;
 
   try {
     if (paymentIntentId) {
@@ -609,6 +610,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // routinely report address_postal_code_check=fail even when Wallet ZIP
     // is right; the client cannot type a ZIP/CVC in the sheet.
     const wallet = isWalletCard(pmFull);
+    checkoutMethod = checkoutMethodFromWallet(pmFull.card?.wallet?.type);
     if (wallet && !paymentIntentId) {
       console.info('[api/booking/confirm] skipping card AVS for wallet', {
         wallet: pmFull.card?.wallet?.type ?? null,
@@ -764,7 +766,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             paymentIntentId
           : (current?.stripe_setup_intent_id ?? '').trim() === setupIntentId;
         if (matchesLinkedIntent) {
-          await completeBookingAttempt(calBookingUid);
+          await completeBookingAttempt(calBookingUid, checkoutMethod);
           // Concurrent duplicate of the same confirm — the other request
           // completed the promote. Report success.
           return NextResponse.json({
@@ -1023,7 +1025,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.BOOKING_CONFIRMED, {
     service: analyticsServiceLabel(hold.service_name),
   });
-  await completeBookingAttempt(calBookingUid);
+  await completeBookingAttempt(calBookingUid, checkoutMethod);
 
   return NextResponse.json({
     ok: true,

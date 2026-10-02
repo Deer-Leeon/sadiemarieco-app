@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { track } from '@vercel/analytics';
-import { reportBookingStep } from '@/lib/booking-attempt-client';
+import { checkoutMethodFromExpress, reportBookingStep } from '@/lib/booking-attempt-client';
 import {
   ExpressCheckoutElement,
   useElements,
@@ -173,7 +173,11 @@ export default function CheckoutApplePayHost({
           source: 'checkout_apple_pay',
           payment_timing: timing,
         });
-        reportBookingStep('payment_attempt', analyticsService);
+        reportBookingStep(
+          'payment_attempt',
+          analyticsService,
+          checkoutMethodFromExpress(event.expressPaymentType)
+        );
       } catch {
         /* analytics must never break checkout */
       }

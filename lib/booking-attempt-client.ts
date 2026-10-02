@@ -105,15 +105,31 @@ export function ensureBookingAttempt(
   return id;
 }
 
+export function checkoutMethodFromExpress(
+  type: string | null | undefined
+): 'apple_pay' | 'card' | 'google_pay' | 'link' {
+  if (type === 'apple_pay' || type === 'google_pay' || type === 'link') return type;
+  return 'card';
+}
+
 export function reportBookingStep(
   step: string,
-  service?: string | null
+  service?: string | null,
+  checkoutMethod?: 'apple_pay' | 'card' | 'google_pay' | 'link' | null
 ): void {
-  if (!step || step === lastReported) return;
+  const method =
+    checkoutMethod === 'apple_pay' ||
+    checkoutMethod === 'card' ||
+    checkoutMethod === 'google_pay' ||
+    checkoutMethod === 'link'
+      ? checkoutMethod
+      : null;
+  const signature = method ? `${step}:${method}` : step;
+  if (!step || signature === lastReported) return;
   const attemptId = bookingAttemptId();
   const surface = bookingAttemptSurface();
   if (!attemptId || !surface) return;
-  lastReported = step;
+  lastReported = signature;
   const label = service?.trim();
   postAttempt(
     {
@@ -121,6 +137,7 @@ export function reportBookingStep(
       surface,
       step,
       ...(label ? { service: label.slice(0, 120) } : {}),
+      ...(method ? { checkoutMethod: method } : {}),
     },
     false
   );

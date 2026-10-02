@@ -14,7 +14,7 @@ import {
   useState,
 } from 'react';
 import { track } from '@vercel/analytics';
-import { bookingAttemptId, reportBookingStep } from '@/lib/booking-attempt-client';
+import { bookingAttemptId, checkoutMethodFromExpress, reportBookingStep } from '@/lib/booking-attempt-client';
 import {
   ExpressCheckoutElement,
   useElements,
@@ -253,7 +253,11 @@ export default function BookApplePayHost({
         source: 'phone_booker_apple_pay',
         payment_timing: timing,
       });
-      reportBookingStep('payment_attempt', analyticsService);
+      reportBookingStep(
+        'payment_attempt',
+        analyticsService,
+        checkoutMethodFromExpress(event.expressPaymentType)
+      );
 
       let failed = true;
       let notifyWallet = true;
