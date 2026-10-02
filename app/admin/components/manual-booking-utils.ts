@@ -20,6 +20,7 @@ export interface ManualBookingServiceOption {
   parentId: number | null;
   eventTypeId: number;
   durationMins: number | null;
+  price?: number | null;
 }
 
 export interface ManualBookingServiceGroupHeader {

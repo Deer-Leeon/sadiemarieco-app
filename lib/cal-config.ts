@@ -80,6 +80,7 @@ export interface CalServiceBookingConfig {
   parentId: number | null;
   eventTypeId: number;
   durationMins: number | null;
+  price: number | null;
 }
 
 export interface CalServiceGroupHeader {
@@ -172,8 +173,10 @@ export async function loadCalEventTypeMaps(): Promise<CalEventTypeMaps> {
       parent_id: number | null;
       cal_event_id: number;
       duration_mins: number | null;
+      price: number | null;
     }>`
-      SELECT slug, title, category, parent_id, cal_event_id, duration_mins
+      SELECT slug, title, category, parent_id, cal_event_id, duration_mins,
+             price::float8 AS price
       FROM site_services
       WHERE is_active = TRUE
         AND is_group = FALSE
@@ -201,6 +204,10 @@ export async function loadCalEventTypeMaps(): Promise<CalEventTypeMaps> {
     parentId: row.parent_id,
     eventTypeId: row.cal_event_id,
     durationMins: row.duration_mins,
+    price:
+      row.price == null || !Number.isFinite(Number(row.price))
+        ? null
+        : Number(row.price),
   }));
 
   const groupHeaders: CalServiceGroupHeader[] = groupRows.map((row) => ({

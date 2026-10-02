@@ -54,6 +54,7 @@ import {
   appointmentHasEnded,
   appointmentServiceLabel,
   clientDisplayName,
+  canChangeAppointmentService,
   isAppointmentReadOnly,
 } from './helpers';
 import { getServiceColor } from './serviceColors';
@@ -78,6 +79,7 @@ import {
 import { isAppointmentSettled } from './settlementDisplay';
 import ManualBookingServicePicker from './components/ManualBookingServicePicker';
 import AdminRescheduleView from './components/AdminRescheduleView';
+import ChangeServiceView from './components/ChangeServiceView';
 import AdminSendSmsCheckbox from './components/AdminSendSmsCheckbox';
 import type {
   ManualBookingServiceGroupHeader,
@@ -235,6 +237,7 @@ export default function AppointmentModal({
   // signals success (router.refresh + onClose), we drop straight out
   // of the modal rather than flashing the details view first.
   const [isRescheduling, setIsRescheduling] = useState(false);
+  const [isChangingService, setIsChangingService] = useState(false);
   const [isCollectingPayment, setIsCollectingPayment] = useState(false);
 
   // Settlement UI reads this instead of the prop alone — parents often
@@ -697,10 +700,12 @@ export default function AppointmentModal({
 
   // The reschedule slot picker is taller than the details view but
   // does not need Cal embed width — keep it near the booking wizard.
-  const cardWidthClass = isRescheduling ? 'max-w-xl' : 'max-w-lg';
-  const cardHeightClass = isRescheduling
-    ? 'h-[min(92vh,880px)] max-h-[calc(100dvh-1.25rem)]'
-    : 'max-h-[90dvh]';
+  const cardWidthClass =
+    isRescheduling || isChangingService ? 'max-w-xl' : 'max-w-lg';
+  const cardHeightClass =
+    isRescheduling || isChangingService
+      ? 'h-[min(92vh,880px)] max-h-[calc(100dvh-1.25rem)]'
+      : 'max-h-[90dvh]';
   const displayBookingNotes = clientBookingNotesForDisplay(
     appointment.booking_notes,
     appointment.service_description
@@ -777,6 +782,8 @@ export default function AppointmentModal({
         aria-label={
           isRescheduling
             ? 'Reschedule appointment'
+            : isChangingService
+              ? 'Change service'
             : isCollectingPayment
               ? 'Collect appointment payment'
             : view === 'client'
@@ -792,6 +799,17 @@ export default function AppointmentModal({
             initialServices={pickerServices}
             initialGroupHeaders={pickerHeaders}
             onBack={() => setIsRescheduling(false)}
+            onClose={() => {
+              onMutated?.();
+              onClose();
+            }}
+          />
+        ) : isChangingService ? (
+          <ChangeServiceView
+            appointment={appointment}
+            initialServices={pickerServices}
+            initialGroupHeaders={pickerHeaders}
+            onBack={() => setIsChangingService(false)}
             onClose={() => {
               onMutated?.();
               onClose();
@@ -961,6 +979,14 @@ export default function AppointmentModal({
               <ActionFooter
                 canReschedule
                 onReschedule={() => setIsRescheduling(true)}
+                canChangeService={canChangeAppointmentService({
+                  status: appointment.status,
+                  booking_time: liveBookingTime,
+                  attached_to_appointment_id:
+                    appointment.attached_to_appointment_id,
+                  payment: livePayment,
+                })}
+                onChangeService={() => setIsChangingService(true)}
                 onNoShow={() => openStatusConfirm('no-show')}
                 onCancel={() => openStatusConfirm('cancel')}
                 statusAction={statusAction}
@@ -1755,6 +1781,8 @@ function UnsettledPaymentBox({
 function ActionFooter({
   canReschedule,
   onReschedule,
+  canChangeService,
+  onChangeService,
   onNoShow,
   onCancel,
   statusAction,
@@ -1762,6 +1790,8 @@ function ActionFooter({
 }: {
   canReschedule: boolean;
   onReschedule: () => void;
+  canChangeService: boolean;
+  onChangeService: () => void;
   onNoShow: () => void;
   onCancel: () => void;
   statusAction: null | 'no-show' | 'canceled_by_admin';
@@ -1777,6 +1807,16 @@ function ActionFooter({
         </div>
       )}
       <div className="flex flex-wrap items-center justify-end gap-2 px-6 py-4">
+        {canChangeService ? (
+          <button
+            type="button"
+            onClick={onChangeService}
+            disabled={busy}
+            className="rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-stone-700 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
+          >
+            Change service
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onReschedule}
