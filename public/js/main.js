@@ -111,11 +111,36 @@
       const target = document.getElementById(id);
       if (!target) return;
       e.preventDefault();
-      // Match native anchor jumps: section top aligns with viewport top (same as before smooth scroll).
-      const top = target.getBoundingClientRect().top + window.scrollY;
+      // scroll-margin-top keeps a column head clear of the fixed nav.
+      const marginTop = parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
+      const top = target.getBoundingClientRect().top + window.scrollY - marginTop;
       smoothScrollTo(Math.max(0, top));
+      focusMenuColumn(id);
       if (history.pushState) history.pushState(null, '', raw);
     });
+  }
+
+  const MENU_COLUMN_IDS = { 'lash-services': true, 'brow-services': true };
+  let menuFocusTimer = null;
+
+  function focusMenuColumn(id) {
+    if (!MENU_COLUMN_IDS[id]) return;
+    const column = document.getElementById(id);
+    if (!column) return;
+    document.querySelectorAll('.menu-column-focus').forEach((el) => {
+      el.classList.remove('menu-column-focus');
+    });
+    void column.offsetWidth;
+    column.classList.add('menu-column-focus');
+    if (menuFocusTimer) clearTimeout(menuFocusTimer);
+    menuFocusTimer = setTimeout(() => {
+      column.classList.remove('menu-column-focus');
+      menuFocusTimer = null;
+    }, 2300);
+  }
+
+  if (location.hash === '#lash-services' || location.hash === '#brow-services') {
+    focusMenuColumn(location.hash.slice(1));
   }
 
   initSmoothAnchorScroll();
