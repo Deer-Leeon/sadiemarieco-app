@@ -2,6 +2,7 @@ import { clerkMiddleware, createRouteMatcher, clerkClient } from '@clerk/nextjs/
 import { NextResponse } from 'next/server';
 
 import { isAllowedAdminEmail } from '@/lib/admin-allowlist';
+import { classifyUserAgent } from '@/lib/bot-detect';
 import { isReverieBeautyHost } from '@/lib/reverie-beauty-host';
 import {
   PRODUCTION_SITE_URL,
@@ -63,6 +64,44 @@ const isClerkExcludedApi = createRouteMatcher([
   '/api/qstash(.*)',
   '/api/reviews(.*)',
 ]);
+
+/**
+ * Server-to-server callers (Cal.com, Stripe, QStash, Vercel cron) and the
+ * Clerk-gated admin surfaces (iOS app included) never go through the bot
+ * filter — their user agents are HTTP libraries by design.
+ */
+const isBotFilterExempt = createRouteMatcher([
+  '/api/webhook(.*)',
+  '/api/webhooks(.*)',
+  '/api/stripe/webhook(.*)',
+  '/api/cron(.*)',
+  '/api/qstash(.*)',
+  '/api/remind(.*)',
+  '/api/remind-email(.*)',
+  '/api/feedback(.*)',
+  '/api/admin(.*)',
+  '/api/upload',
+  '/admin(.*)',
+  '/sign-in(.*)',
+  '/.well-known/(.*)',
+]);
+
+/** Public APIs that write rows or call Cal/Stripe — no crawler has a reason to call these. */
+const isPublicWriteApi = createRouteMatcher([
+  '/api/booking(.*)',
+  '/api/book/(.*)',
+  '/api/stripe/(.*)',
+  '/api/consent(.*)',
+  '/api/cancel-booking(.*)',
+]);
+
+function botBlockedResponse(): NextResponse {
+  return new NextResponse('Forbidden', {
+    status: 403,
+    headers: { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' },
+  });
+}
+
 async function userHasAdminAccess(userId: string): Promise<boolean> {
   const client = await clerkClient();
   const user = await client.users.getUser(userId);
@@ -83,6 +122,14 @@ async function userHasAdminAccess(userId: string): Promise<boolean> {
  */
 export default clerkMiddleware(async (auth, req) => {
   const host = req.headers.get('host');
+
+  // Every bot request that reaches a page or API can wake the database.
+  if (!isBotFilterExempt(req)) {
+    const agent = classifyUserAgent(req.headers.get('user-agent'));
+    if (agent === 'blocked' || (agent === 'crawler' && isPublicWriteApi(req))) {
+      return botBlockedResponse();
+    }
+  }
 
   // Dedicated client-handoff host: every path shows the welcome card.
   if (isReverieBeautyHost(host)) {

@@ -70,6 +70,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true, ignored: true });
   }
 
+  if (step === 'opened') {
+    console.info('[api/booking/attempt] opened', {
+      surface,
+      service: cleanAttemptService(body.service),
+      userAgent: (req.headers.get('user-agent') ?? '').slice(0, 200),
+    });
+  }
+
   try {
     if (step && surface) {
       await recordBookingAttempt({
