@@ -537,6 +537,12 @@ const COMING_SOON_HOST_CATEGORY: Record<string, string> = {
   'Teeth Whitening': 'Brow Services',
 };
 
+/** Nav targets for the homepage menu columns. */
+const CATEGORY_ANCHOR: Record<string, string> = {
+  'Lash Services': 'lash-services',
+  'Brow Services': 'brow-services',
+};
+
 /** Homepage column order — keep in sync with ServiceManager.tsx */
 const PUBLIC_CATEGORY_COLUMN_RANK: Record<string, number> = {
   'Lash Services': 0,
@@ -591,6 +597,8 @@ ${placeholder}
 
   const columns = groups.map(([category, services], index) => {
     const delayClass = index === 0 ? '' : ` reveal-delay-${index}`;
+    const anchor = CATEGORY_ANCHOR[category];
+    const anchorAttr = anchor ? ` id="${anchor}"` : '';
     const items = renderCategoryItems(services);
     const extras = extrasByHost.get(category);
     let extrasHtml = '';
@@ -599,7 +607,7 @@ ${placeholder}
       extrasHtml = '\n' + extras.join('\n');
     }
     return `
-    <div class="reveal${delayClass}">
+    <div class="reveal${delayClass}"${anchorAttr}>
       <div class="category-head">${escapeHtml(category)}</div>
 ${items}${extrasHtml}
     </div>`;

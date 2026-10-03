@@ -31,7 +31,8 @@
           try { id = decodeURIComponent(id); } catch (e) {}
           var el = id && document.getElementById(id);
           if (el) {
-            window.scrollTo(0, el.getBoundingClientRect().top + window.pageYOffset);
+            var margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+            window.scrollTo(0, el.getBoundingClientRect().top + window.pageYOffset - margin);
           }
           document.documentElement.classList.add('hero-ready');
         });
@@ -42,7 +43,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&amp;family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&amp;family=DM+Sans:wght@200;300;400&amp;display=swap">
   <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,600&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@200;300;400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/styles.css?v=20261003-menu2">
 </head>
 <body>
 <script src="/js/open-in-browser.js"></script>
@@ -51,8 +52,8 @@
   <a href="#hero" class="nav-logo">Sadie Marie</a>
   <ul class="nav-links">
     <li><a href="#services">Services</a></li>
-    <li><a href="/lash-extensions-lehi">Lashes</a></li>
-    <li><a href="/brow-services-lehi">Brows</a></li>
+    <li><a href="#lash-services">Lashes</a></li>
+    <li><a href="#brow-services">Brows</a></li>
     <li><a href="#portfolio">Portfolio</a></li>
     <li><a href="#about">About</a></li>
     <li><a href="#policies">Policies</a></li>
@@ -71,11 +72,6 @@
       Lash extensions &amp; brow artistry in Lehi, Utah — signature beauty services that simplify your routine and magnify your spark.
     </p>
     <a class="btn-navy fade-in delay-3" href="#services">Book Your Appointment</a>
-    <p class="hero-seo-links fade-in delay-4">
-      <a href="/lash-extensions-lehi">Lashes</a>
-      <span aria-hidden="true">·</span>
-      <a href="/brow-services-lehi">Brows</a>
-    </p>
     <div class="hero-scroll-hint fade-in delay-4">Lehi, Utah</div>
   </div>
 
@@ -553,7 +549,7 @@
 
 <script src="js/booking-attempt.js?v=20261003-bots" defer></script>
 <script src="js/booking-analytics.js" defer></script>
-<script src="js/main.js?v=20261003-visit" defer></script>
+<script src="js/main.js?v=20261003-menu2" defer></script>
 <script src="/js/reviews.js" defer></script>
 
 <!-- Vercel Web Analytics + Speed Insights (production only; no-ops locally) -->

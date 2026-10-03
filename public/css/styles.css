@@ -286,9 +286,6 @@ nav {
   width: 38px; height: 1px;
   background: var(--mist-readable);
 }
-.hero-seo-links {
-  display: none;
-}
 
 /* ── MARQUEE ── */
 .marquee-strip {
@@ -488,6 +485,31 @@ nav {
   border-bottom: 1px solid var(--cloud-mid);
   padding-bottom: 10px;
   margin-bottom: 28px;
+}
+/*
+  Nav "Lashes" / "Brows" land on these columns. The wash sits in the
+  gutter without shifting the type; it fades out after the click.
+*/
+#lash-services,
+#brow-services {
+  scroll-margin-top: calc(var(--nav-block) + 24px);
+  margin: -18px -22px 0;
+  padding: 18px 22px 4px;
+  border-radius: 2px;
+}
+.menu-column-focus {
+  animation: menu-column-focus 2.2s ease forwards;
+}
+.menu-column-focus > .category-head {
+  animation: menu-head-focus 2.2s ease forwards;
+}
+@keyframes menu-column-focus {
+  0%, 65% { background-color: rgba(13, 27, 42, 0.07); }
+  100% { background-color: transparent; }
+}
+@keyframes menu-head-focus {
+  0%, 65% { border-bottom-color: var(--navy); }
+  100% { border-bottom-color: var(--cloud-mid); }
 }
 /*
   When a second .category-head appears inside the same column (the
@@ -2328,24 +2350,6 @@ footer {
   }
   nav { padding: 0 24px; }
   .nav-links { display: none; }
-  .hero-seo-links {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-    margin: 22px 0 0;
-    font-family: var(--sans);
-    font-size: 0.56rem;
-    font-weight: 400;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-  }
-  .hero-seo-links a {
-    color: var(--navy);
-    text-decoration: none;
-  }
-  .hero-seo-links a:hover { opacity: 0.6; }
-  .hero-seo-links span { color: var(--mist-readable); }
   /*
     Reset the desktop hero padding-top: on mobile the columns stack
     and the text column's own `padding: 120px 24px 60px` already
