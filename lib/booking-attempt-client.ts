@@ -35,6 +35,8 @@ function postAttempt(
   body: Record<string, unknown>,
   beacon: boolean
 ): void {
+  // Selenium / Puppeteer / Playwright set this; real visitors never do.
+  if (typeof navigator !== 'undefined' && navigator.webdriver) return;
   const json = JSON.stringify(body);
   const url = '/api/booking/attempt';
   if (

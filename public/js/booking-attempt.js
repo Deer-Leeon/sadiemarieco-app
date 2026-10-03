@@ -37,7 +37,11 @@
     }
   }
 
+  /** Selenium / Puppeteer / Playwright set this; real visitors never do. */
+  var automated = !!(global.navigator && global.navigator.webdriver);
+
   function post(body, beacon) {
+    if (automated) return;
     var json = JSON.stringify(body);
     var url = '/api/booking/attempt';
     if (beacon && global.navigator && typeof global.navigator.sendBeacon === 'function') {
