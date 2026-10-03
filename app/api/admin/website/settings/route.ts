@@ -32,6 +32,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import { refreshPublicCatalog } from '@/lib/public-catalog-cache';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -202,6 +203,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       );
     }
 
+    refreshPublicCatalog();
     const row = rows[0];
     return NextResponse.json({
       slot: {

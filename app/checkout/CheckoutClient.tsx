@@ -20,7 +20,7 @@ import {
   reportBookingStep,
 } from '@/lib/booking-attempt-client';
 import { isValidEmail, formatUsPhoneAsYouType, clientPhoneValidationMessage, parseClientPhone } from '@/lib/client-identity';
-import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-public';
+import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-viewport';
 import {
   formatAppointmentWhen,
   formatServiceTitleForDisplay,

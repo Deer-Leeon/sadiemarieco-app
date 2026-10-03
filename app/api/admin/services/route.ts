@@ -63,6 +63,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import { refreshPublicCatalog } from '@/lib/public-catalog-cache';
 import { rewriteAppointmentServiceNames } from '@/lib/rewrite-appointment-service-names';
 import {
   CAL_AFTER_EVENT_BUFFER_MIN,
@@ -183,10 +184,11 @@ export async function GET(): Promise<NextResponse> {
 
   // Best-effort orphan cleanup. Cap wait so a Cal hang cannot block
   // the catalogue JSON the editor needs to paint the page.
-  await Promise.race([
+  const softDeleted = await Promise.race([
     reconcileWithCal({ force: true }),
-    new Promise<void>((resolve) => setTimeout(resolve, 8_000)),
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), 8_000)),
   ]);
+  if (softDeleted) refreshPublicCatalog();
 
   try {
     // ORDER BY category first then title gives the UI a stable section
@@ -231,7 +233,7 @@ export async function GET(): Promise<NextResponse> {
   }
 }
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+async function handlePost(req: NextRequest): Promise<NextResponse> {
   const gate = await gateAdmin();
   if (gate) return gate;
 
@@ -426,7 +428,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-export async function PATCH(req: NextRequest): Promise<NextResponse> {
+async function handlePatch(req: NextRequest): Promise<NextResponse> {
   const gate = await gateAdmin();
   if (gate) return gate;
 
@@ -652,7 +654,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-export async function DELETE(req: NextRequest): Promise<NextResponse> {
+async function handleDelete(req: NextRequest): Promise<NextResponse> {
   const gate = await gateAdmin();
   if (gate) return gate;
 
@@ -862,6 +864,21 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
  * the handler if the gate fails. Returns `null` on success so the
  * handler can keep going without an extra layer of nesting.
  */
+/** The homepage and /book read a cached copy of this table. */
+function refreshingCatalog(
+  handler: (req: NextRequest) => Promise<NextResponse>
+): (req: NextRequest) => Promise<NextResponse> {
+  return async (req) => {
+    const res = await handler(req);
+    if (res.ok) refreshPublicCatalog();
+    return res;
+  };
+}
+
+export const POST = refreshingCatalog(handlePost);
+export const PATCH = refreshingCatalog(handlePatch);
+export const DELETE = refreshingCatalog(handleDelete);
+
 async function gateAdmin(): Promise<NextResponse | null> {
   const access = await requireAdminUser();
   if (access.ok) return null;

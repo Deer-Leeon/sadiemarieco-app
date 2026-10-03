@@ -17,7 +17,7 @@ import {
   leaveBookingAttempt,
   reportBookingStep,
 } from '@/lib/booking-attempt-client';
-import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-public';
+import { BOOK_PHONE_MAX_WIDTH_PX } from '@/lib/book-viewport';
 import { STUDIO_SMS_CONSENT_LABEL } from '@/lib/cal-event-studio-defaults';
 import { formatAppointmentWhen } from '@/lib/format-booking-time';
 import {

@@ -374,7 +374,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const service = await loadBookableServiceBySlug(slug);
+  const service = await loadBookableServiceBySlug(slug, { fresh: true });
   if (!service) {
     return NextResponse.json(
       { error: 'service_not_found', message: 'That service is not available.' },
