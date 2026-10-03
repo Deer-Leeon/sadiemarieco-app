@@ -4,6 +4,8 @@
 
 import { sql } from '@vercel/postgres';
 
+import { cachedPublicCatalog } from '@/lib/public-catalog-cache';
+
 export interface BookableService {
   slug: string;
   title: string;
@@ -38,16 +40,18 @@ function formatDuration(mins: number): string {
   return `${mins} min`;
 }
 
-export async function loadBookableServices(): Promise<BookableService[]> {
-  const { rows } = await sql<{
-    slug: string;
-    title: string;
-    category: string;
-    description: string | null;
-    price: string;
-    duration_mins: number;
-    cal_event_id: number;
-  }>`
+interface BookableServiceRow {
+  slug: string;
+  title: string;
+  category: string;
+  description: string | null;
+  price: string;
+  duration_mins: number;
+  cal_event_id: number;
+}
+
+async function queryBookableServiceRows(): Promise<BookableServiceRow[]> {
+  const { rows } = await sql<BookableServiceRow>`
     SELECT
       slug,
       title,
@@ -65,6 +69,25 @@ export async function loadBookableServices(): Promise<BookableService[]> {
       AND duration_mins > 0
     ORDER BY display_order ASC, id ASC
   `;
+  return rows;
+}
+
+const loadCachedBookableServiceRows = cachedPublicCatalog(
+  'bookable-services',
+  queryBookableServiceRows
+);
+
+interface LoadOptions {
+  /** Skip the catalogue cache — the payment path must price from live rows. */
+  fresh?: boolean;
+}
+
+export async function loadBookableServices(
+  options: LoadOptions = {}
+): Promise<BookableService[]> {
+  const rows = options.fresh
+    ? await queryBookableServiceRows()
+    : await loadCachedBookableServiceRows();
 
   return rows.map((row) => ({
     slug: row.slug,
@@ -81,17 +104,15 @@ export async function loadBookableServices(): Promise<BookableService[]> {
 }
 
 export async function loadBookableServiceBySlug(
-  slug: string
+  slug: string,
+  options: LoadOptions = {}
 ): Promise<BookableService | null> {
   const clean = slug.trim().toLowerCase();
   if (!clean) return null;
-  const services = await loadBookableServices();
+  const services = await loadBookableServices(options);
   return (
     services.find((s) => s.slug.toLowerCase() === clean) ??
     services.find((s) => s.slug === slug.trim()) ??
     null
   );
 }
-
-/** Phone viewport heuristic for homepage → /book handoff. */
-export const BOOK_PHONE_MAX_WIDTH_PX = 768;

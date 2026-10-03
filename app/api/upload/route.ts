@@ -39,6 +39,7 @@ import { sql } from '@vercel/postgres';
 import sharp from 'sharp';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import { refreshPublicCatalog } from '@/lib/public-catalog-cache';
 
 // Default request body cap for App Router route handlers is generous, but
 // Vercel's serverless platform itself enforces a 4.5MB body limit on
@@ -259,6 +260,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
     return NextResponse.json({ error: 'db_upsert_failed' }, { status: 500 });
   }
+  refreshPublicCatalog();
 
   console.log('[api/upload] image upserted', {
     id,

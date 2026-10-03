@@ -1,7 +1,9 @@
 import { redirect } from 'next/navigation';
+import { after } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { sql } from '@vercel/postgres';
 
+import { refreshPublicCatalog } from '@/lib/public-catalog-cache';
 import { getAdminAccess } from '../auth';
 import AdminHeader from '../AdminHeader';
 import AdminSectionTabs from '../AdminSectionTabs';
@@ -47,7 +49,11 @@ export default async function ServicesPage() {
   // Cal dashboard. Do NOT await: a Cal hang used to freeze this entire
   // tab (and the Services nav click) until Vercel killed the function.
   // Errors inside the reconciler are warn-logged and never thrown.
-  void reconcileWithCal({ force: true });
+  // Runs after the response so a soft-delete can also refresh the public
+  // catalogue cache (revalidation is not allowed during render).
+  after(async () => {
+    if (await reconcileWithCal({ force: true })) refreshPublicCatalog();
+  });
 
   // ── DATA FETCH ─────────────────────────────────────────────────────────
   // We fetch on the server so the editor sees the list painted on first

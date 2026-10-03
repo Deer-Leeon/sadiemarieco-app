@@ -11,9 +11,9 @@
  *                                  disappears from the UI on the same
  *                                  page load
  *   • /  (app/route.ts)          — Public homepage HTML renderer;
- *                                  reconciles before its SELECT too so
- *                                  the customer-facing menu drops the
- *                                  orphan within the TTL window
+ *                                  reconciles each time its cached
+ *                                  catalogue regenerates (see
+ *                                  lib/public-catalog-cache.ts)
  *
  * Why this lives in its own module:
  *   The first version of this code lived inside the route handler.
@@ -262,10 +262,13 @@ interface ReconcileOptions {
  * Failures inside the helper are warn-logged but never thrown — the
  * caller pipeline (Server Component, route handler, …) must keep
  * serving its primary content even when Cal is unreachable.
+ *
+ * Resolves `true` only when rows were soft-deleted, so callers outside a
+ * cached render can refresh the public catalogue cache.
  */
 export async function reconcileWithCal(
   options: ReconcileOptions = {}
-): Promise<void> {
+): Promise<boolean> {
   const now = Date.now();
   // TTL gate. We update the timestamp BEFORE doing the work so two
   // concurrent calls (e.g. two visitors hitting the homepage in the
@@ -273,15 +276,15 @@ export async function reconcileWithCal(
   // off is that a failed reconciliation won't be retried until the
   // next TTL window, which is fine for "best-effort" semantics.
   if (!options.force && now - lastReconciledAt < RECONCILE_TTL_MS) {
-    return;
+    return false;
   }
   lastReconciledAt = now;
 
   const apiKey = process.env.CAL_API_KEY;
-  if (!apiKey) return;
+  if (!apiKey) return false;
 
   const validIds = await fetchCalEventTypeIds(apiKey);
-  if (!validIds || validIds.size === 0) return;
+  if (!validIds || validIds.size === 0) return false;
 
   let active: { id: number; cal_event_id: number | null }[];
   try {
@@ -298,9 +301,9 @@ export async function reconcileWithCal(
     console.warn('[services/sync] reconcile: db scan failed; skipping', {
       error: errorMessage(err),
     });
-    return;
+    return false;
   }
-  if (active.length === 0) return;
+  if (active.length === 0) return false;
 
   const orphanIds = active
     .filter(
@@ -308,14 +311,14 @@ export async function reconcileWithCal(
     )
     .map((r) => r.id);
 
-  if (orphanIds.length === 0) return;
+  if (orphanIds.length === 0) return false;
 
   if (orphanIds.length === active.length) {
     console.warn(
       '[services/sync] reconcile: would mass-delete entire menu — skipping (Cal probably misconfigured)',
       { activeCount: active.length, validIdCount: validIds.size }
     );
-    return;
+    return false;
   }
 
   try {
@@ -331,11 +334,13 @@ export async function reconcileWithCal(
     console.log('[services/sync] reconcile: soft-deleted orphans', {
       orphanIds,
     });
+    return true;
   } catch (err) {
     console.warn(
       '[services/sync] reconcile: orphan soft-delete failed',
       { orphanIds, error: errorMessage(err) }
     );
+    return false;
   }
 }
 

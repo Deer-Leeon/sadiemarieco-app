@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { gateAdmin } from '@/lib/cal-proxy';
+import { refreshPublicCatalog } from '@/lib/public-catalog-cache';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -138,6 +139,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       { status: 500 }
     );
   }
+  refreshPublicCatalog();
 
   return NextResponse.json({ ok: true, count: orderedIds.length });
 }

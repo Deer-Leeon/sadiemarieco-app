@@ -26,17 +26,18 @@
  *   identically except for the slots we explicitly hot-swap.
  *
  * Caching:
- *   - `dynamic = 'force-dynamic'` opts out of Next.js's data cache so
- *     every request re-runs both DB queries.
+ *   - The site_images + site_services rows come from the tagged data
+ *     cache in lib/public-catalog-cache.ts, so a visit does not wake
+ *     the Neon database. Admin writes revalidate the tag, so uploads
+ *     and service edits still appear on the next load.
  *   - `Cache-Control: no-store` opts out of browser AND Vercel CDN
- *     caches so admin uploads + service edits appear immediately on
- *     the public site.
+ *     caches so the page itself is never served stale.
  *
  * Performance:
  *   - The HTML file contents are cached at module scope after the first
  *     request — a single ~20KB read per cold serverless instance, then
  *     in-memory for the lifetime of that instance.
- *   - Two parallel DB queries (site_images + site_services) and a few
+ *   - Two parallel cache reads (site_images + site_services) and a few
  *     string substitutions per request. Sub-ms substitution work.
  */
 
@@ -46,6 +47,7 @@ import { sql } from '@vercel/postgres';
 
 import { fetchDefaultScheduleCached } from './admin/availability/calSchedules';
 import { reconcileWithCal } from './admin/services/sync';
+import { cachedPublicCatalog } from '@/lib/public-catalog-cache';
 import {
   renderWeeklyHoursHtml,
   weeklyHoursForSchema,
@@ -278,12 +280,6 @@ function injectCaptions(
 }
 
 export async function GET(): Promise<Response> {
-  // ── RECONCILE WITH CAL (non-blocking) ─────────────────────────────────
-  // Fire-and-forget on the public homepage — services HTML may lag the
-  // admin view by up to one TTL window, but TTFB no longer waits on a
-  // Cal.com round-trip before the hero preload can start.
-  void reconcileWithCal();
-
   // ── DATA FETCH ────────────────────────────────────────────────────────
   let html: string;
   let imageMap: Record<string, SiteImage>;
@@ -353,11 +349,16 @@ export async function GET(): Promise<Response> {
   return new Response(rendered, { headers });
 }
 
+const loadSiteImageRows = cachedPublicCatalog('homepage-images', async () => {
+  const { rows } = await sql<SiteImageRow>`
+    SELECT id, image_url, caption FROM site_images
+  `;
+  return rows;
+});
+
 async function fetchImageMap(): Promise<Record<string, SiteImage>> {
   try {
-    const { rows } = await sql<SiteImageRow>`
-      SELECT id, image_url, caption FROM site_images
-    `;
+    const rows = await loadSiteImageRows();
     return Object.fromEntries(
       rows.map((r) => [r.id, { url: r.image_url, caption: r.caption }])
     );
@@ -406,23 +407,39 @@ async function fetchWeeklyHoursBundle(): Promise<{
  *   • Category columns use PUBLIC_CATEGORY_COLUMN_RANK (Lash left,
  *     Brow right) — must stay aligned with /admin/services.
  */
+/** Cap on how long a cache regeneration waits for Cal before reading rows. */
+const RECONCILE_WAIT_MS = 2_000;
+
+/**
+ * Reconciles with Cal only when the cached rows regenerate, so a service
+ * deleted in the Cal dashboard drops off on the next refresh.
+ */
+const loadSiteServiceRows = cachedPublicCatalog('homepage-services', async () => {
+  await Promise.race([
+    reconcileWithCal(),
+    new Promise((resolve) => setTimeout(resolve, RECONCILE_WAIT_MS)),
+  ]);
+  const { rows } = await sql<SiteServiceRow>`
+    SELECT
+      id,
+      category,
+      title,
+      description,
+      price,
+      duration_mins,
+      slug,
+      is_group,
+      parent_id
+    FROM site_services
+    WHERE is_active = TRUE
+    ORDER BY display_order ASC, id ASC
+  `;
+  return rows;
+});
+
 async function fetchServicesHtml(): Promise<string> {
   try {
-    const { rows } = await sql<SiteServiceRow>`
-      SELECT
-        id,
-        category,
-        title,
-        description,
-        price,
-        duration_mins,
-        slug,
-        is_group,
-        parent_id
-      FROM site_services
-      WHERE is_active = TRUE
-      ORDER BY display_order ASC, id ASC
-    `;
+    const rows = await loadSiteServiceRows();
     return renderServicesHtml(rows);
   } catch (err) {
     console.error('[/] site_services query failed:', err);
