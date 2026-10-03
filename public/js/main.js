@@ -1048,8 +1048,12 @@
     const openedService =
       (meta && meta.name) ||
       (api && api.serviceFromCalLink ? api.serviceFromCalLink(link) : link);
-    if (attemptApi && typeof attemptApi.begin === 'function') {
-      attemptApi.begin('desktop');
+    if (attemptApi && typeof attemptApi.report === 'function') {
+      if (typeof attemptApi.ensure === 'function') {
+        attemptApi.ensure('desktop');
+      } else if (typeof attemptApi.begin === 'function') {
+        attemptApi.begin('desktop');
+      }
       attemptApi.report('opened', openedService);
     }
   };
