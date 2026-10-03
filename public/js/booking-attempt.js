@@ -8,6 +8,7 @@
   var ID_KEY = 'sadie_booking_attempt_id';
   var SURFACE_KEY = 'sadie_booking_attempt_surface';
   var lastReported = '';
+  var lastService = '';
 
   function uuid() {
     if (global.crypto && typeof global.crypto.randomUUID === 'function') {
@@ -67,18 +68,30 @@
     }
     var next = uuid();
     lastReported = '';
+    lastService = '';
     write(ID_KEY, next);
     write(SURFACE_KEY, nextSurface || 'desktop');
     return next;
   }
 
+  /** Keep this tab's visit. A new one starts only when the surface changes. */
+  function ensure(nextSurface) {
+    var wanted = nextSurface || 'desktop';
+    var current = id();
+    if (current && surface() === wanted) return current;
+    return begin(wanted);
+  }
+
   function report(step, service) {
-    if (!step || step === lastReported) return;
+    if (!step) return;
     var attemptId = id();
     if (!attemptId) return;
+    var serviceText = service ? String(service).slice(0, 120) : '';
+    if (step === lastReported && serviceText === lastService) return;
     lastReported = step;
+    lastService = serviceText;
     var body = { attemptId: attemptId, surface: surface(), step: step };
-    if (service) body.service = String(service).slice(0, 120);
+    if (serviceText) body.service = serviceText;
     post(body, false);
   }
 
@@ -86,13 +99,16 @@
     var attemptId = id();
     if (!attemptId) return;
     lastReported = '';
+    lastService = '';
     post({ attemptId: attemptId, surface: surface(), leave: true }, true);
   }
 
   global.SadieBookingAttempt = {
     begin: begin,
+    ensure: ensure,
     report: report,
     leave: leave,
-    id: id
+    id: id,
+    surface: surface
   };
 })(typeof window !== 'undefined' ? window : globalThis);

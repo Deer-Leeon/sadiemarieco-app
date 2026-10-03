@@ -8,6 +8,7 @@ import {
   type AttemptFunnel,
   type AttemptStageStat,
   type CheckoutMethodCounts,
+  type RepeatedOpenNote,
 } from '@/lib/booking-attempt-stats';
 import {
   formatFunnelTimestamp,
@@ -70,6 +71,11 @@ function checkoutLine(
   return `${sentences.join('. ')}.`;
 }
 
+function repeatNote(note: RepeatedOpenNote): string {
+  const where = note.surface === 'desktop' ? 'a computer' : 'a phone';
+  return `${note.service} on ${where} was opened ${note.opens} times on a repeating timer and never went further, so those opens are not counted as visits.`;
+}
+
 function leftShare(stage: AttemptStageStat): string {
   if (stage.reached === 0) return '—';
   if (stage.left === 0) return '0';
@@ -107,7 +113,8 @@ function AttemptSteps({ attempts }: { attempts: AttemptFunnel }) {
       <p className="mt-2 max-w-2xl text-sm text-stone-500">
         Phone and computer are counted apart. Reaching a later step counts
         as having passed the ones before it. Left is the last step they
-        were on.
+        were on. Time before leaving is filled in only when they close
+        the booker.
       </p>
       <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {cards.map((card) => (
@@ -127,6 +134,14 @@ function AttemptSteps({ attempts }: { attempts: AttemptFunnel }) {
       {checkout ? (
         <p className="mt-4 max-w-2xl text-sm text-stone-600">{checkout}</p>
       ) : null}
+      {attempts.repeatedOpens.map((note) => (
+        <p
+          key={`${note.surface}:${note.service}`}
+          className="mt-3 max-w-2xl text-sm text-stone-500"
+        >
+          {repeatNote(note)}
+        </p>
+      ))}
       {attempts.started === 0 ? (
         <p className="mt-4 text-sm text-stone-500">
           These counts start with the next booking attempt. Holds already
@@ -257,10 +272,12 @@ export default async function AdminFunnelPage({
               Public checkout funnel
             </p>
             <p className="mt-2 max-w-xl text-sm text-stone-500">
-              A start is opening the phone booker, or opening a service on a
-              computer. Still going means they moved in the last 30 minutes.
-              After that, or if they close the tab, they count as left at
-              their last step. Booked is a successful payment. The holds
+              Each person is counted once per visit. On a phone that is
+              opening the booker. On a computer it is opening a service, and
+              opening another one in the same visit still counts once. The
+              same service opening itself again and again on a timer is left
+              out of these counts. Still going means they did something in
+              the last 30 minutes. Booked is a successful payment. The holds
               below begin once their details are in.
             </p>
           </div>

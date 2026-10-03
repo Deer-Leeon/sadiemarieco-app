@@ -82,6 +82,7 @@ export type AttemptFunnel = {
   medianLeftMinutes: number | null;
   bookedByMethod: CheckoutMethodCounts;
   leftAtPaymentByMethod: CheckoutMethodCounts;
+  repeatedOpens: RepeatedOpenNote[];
   surfaces: AttemptSurfaceStat[];
 };
 
@@ -94,7 +95,23 @@ type AttemptRow = {
   last_step: string;
   checkout_method: string | null;
   steps: unknown;
+  service_label: string | null;
 };
+
+export type RepeatedOpenNote = {
+  surface: BookingAttemptSurface;
+  service: string;
+  opens: number;
+};
+
+/** Opens closer than this are one person clicking again. */
+const BURST_MS = 3 * 60 * 1000;
+/** A repeating open sits on a loose hourly cadence. */
+const REGULAR_MIN_MS = 20 * 60 * 1000;
+const REGULAR_MAX_MS = 100 * 60 * 1000;
+/** One longer gap (a sleeping computer) can sit inside that cadence. */
+const BRIDGE_MS = 4 * 60 * 60 * 1000;
+const MIN_TIMER_OPENS = 4;
 
 const PAYMENT_STEPS = new Set([
   'pay',
@@ -242,14 +259,17 @@ function summarize(
       addMethod(bookedByMethod, row.checkout_method);
     } else if (isAbandoned) {
       abandoned += 1;
-      abandonedMinutes.push(duration);
+      // Silence after the open is not a measured visit length. Only a
+      // close (left_at) says how long they actually stayed.
+      const knowsDwell = Boolean(leftAt);
+      if (knowsDwell) abandonedMinutes.push(duration);
       if (row.checkout_method && PAYMENT_STEPS.has(row.last_step)) {
         addMethod(leftAtPaymentByMethod, row.checkout_method);
       }
       const stop = stageIndex(stages, row.last_step);
       if (stop >= 0 && stop < stages.length - 1) {
         left[stop] += 1;
-        leftMinutes[stop].push(duration);
+        if (knowsDwell) leftMinutes[stop].push(duration);
       }
     } else {
       active += 1;
@@ -302,8 +322,118 @@ function combine(surfaces: AttemptSurfaceStat[]): AttemptFunnel {
       (sum, item) => addMethodCounts(sum, item.leftAtPaymentByMethod),
       emptyMethods()
     ),
+    repeatedOpens: [],
     surfaces,
   };
+}
+
+function startedMs(row: AttemptRow): number {
+  return asDate(row.started_at)?.getTime() ?? 0;
+}
+
+function isGlance(row: AttemptRow): boolean {
+  if (row.completed_at) return false;
+  const surface = row.surface === 'desktop' ? 'desktop' : 'phone';
+  return furthest(stagesFor(surface), row) <= 0;
+}
+
+function gapIsRegular(gap: number): boolean {
+  return (
+    gap <= BURST_MS || (gap >= REGULAR_MIN_MS && gap <= REGULAR_MAX_MS)
+  );
+}
+
+/** Same service, opened on a timer, never past the first step. */
+function isTimerChain(chain: AttemptRow[]): boolean {
+  if (chain.length < MIN_TIMER_OPENS) return false;
+  let bridges = 0;
+  let spaced = 0;
+  for (let i = 1; i < chain.length; i += 1) {
+    const gap = startedMs(chain[i]) - startedMs(chain[i - 1]);
+    if (gap >= REGULAR_MIN_MS && gap <= REGULAR_MAX_MS) spaced += 1;
+    if (gapIsRegular(gap)) continue;
+    if (gap <= BRIDGE_MS) {
+      bridges += 1;
+      if (bridges > 1) return false;
+      continue;
+    }
+    return false;
+  }
+  return spaced >= MIN_TIMER_OPENS - 2;
+}
+
+function splitChains(sorted: AttemptRow[]): AttemptRow[][] {
+  const chains: AttemptRow[][] = [];
+  let current: AttemptRow[] = [];
+  for (const row of sorted) {
+    if (current.length === 0) {
+      current.push(row);
+      continue;
+    }
+    const gap = startedMs(row) - startedMs(current[current.length - 1]);
+    if (gap <= BRIDGE_MS) current.push(row);
+    else {
+      chains.push(current);
+      current = [row];
+    }
+  }
+  if (current.length > 0) chains.push(current);
+  return chains;
+}
+
+function collapseBursts(chain: AttemptRow[]): AttemptRow[] {
+  const out: AttemptRow[] = [];
+  for (const row of chain) {
+    const prev = out[out.length - 1];
+    if (prev && startedMs(row) - startedMs(prev) <= BURST_MS) {
+      out[out.length - 1] = row;
+      continue;
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/**
+ * A double-click stays one visit. The same service opening on a timer
+ * and never getting past the first step is left out of the counts.
+ * People who reached a later step stay as they are.
+ */
+export function foldOpenOnlyRepeats(rows: AttemptRow[]): {
+  rows: AttemptRow[];
+  notes: RepeatedOpenNote[];
+} {
+  const kept: AttemptRow[] = [];
+  const notes: RepeatedOpenNote[] = [];
+  const groups = new Map<string, AttemptRow[]>();
+
+  for (const row of rows) {
+    if (!isGlance(row)) {
+      kept.push(row);
+      continue;
+    }
+    const surface = row.surface === 'desktop' ? 'desktop' : 'phone';
+    const service = (row.service_label || '').trim().toLowerCase() || '(unknown)';
+    const key = `${surface}|${service}`;
+    const list = groups.get(key);
+    if (list) list.push(row);
+    else groups.set(key, [row]);
+  }
+
+  for (const list of groups.values()) {
+    const sorted = [...list].sort((a, b) => startedMs(a) - startedMs(b));
+    for (const chain of splitChains(sorted)) {
+      if (isTimerChain(chain)) {
+        const surface = chain[0].surface === 'desktop' ? 'desktop' : 'phone';
+        const service = (chain[0].service_label || '').trim() || 'A service';
+        notes.push({ surface, service, opens: chain.length });
+      } else {
+        kept.push(...collapseBursts(chain));
+      }
+    }
+  }
+
+  return { rows: kept, notes };
 }
 
 export async function getBookingAttemptFunnel(
@@ -314,40 +444,40 @@ export async function getBookingAttemptFunnel(
   const sinceIso = since.toISOString();
   try {
     const { rows } = await sql<AttemptRow>`
-      SELECT surface, started_at, last_seen_at, left_at, completed_at, last_step, checkout_method, steps
+      SELECT surface, started_at, last_seen_at, left_at, completed_at, last_step, checkout_method, steps, service_label
       FROM booking_attempts
       WHERE started_at >= ${sinceIso}
     `;
+    const folded = foldOpenOnlyRepeats(rows);
     const phone = summarize(
       'phone',
       'Phone',
-      rows.filter((row) => row.surface === 'phone'),
+      folded.rows.filter((row) => row.surface === 'phone'),
       now
     );
     const desktop = summarize(
       'desktop',
       'Desktop',
-      rows.filter((row) => row.surface === 'desktop'),
+      folded.rows.filter((row) => row.surface === 'desktop'),
       now
     );
     const allBooked: number[] = [];
     const allLeft: number[] = [];
-    for (const row of rows) {
+    for (const row of folded.rows) {
       const started = asDate(row.started_at);
       if (!started) continue;
       const completed = asDate(row.completed_at);
       const leftAt = asDate(row.left_at);
-      const seen = asDate(row.last_seen_at) ?? started;
-      const quiet = now.getTime() - seen.getTime() >= BOOKING_ATTEMPT_ABANDON_MS;
       if (completed) {
         allBooked.push(minutesBetween(started, completed));
-      } else if (leftAt || quiet) {
-        allLeft.push(minutesBetween(started, leftAt ?? seen));
+      } else if (leftAt) {
+        allLeft.push(minutesBetween(started, leftAt));
       }
     }
     const funnel = combine([phone, desktop]);
     funnel.medianBookedMinutes = median(allBooked);
     funnel.medianLeftMinutes = median(allLeft);
+    funnel.repeatedOpens = folded.notes;
     return funnel;
   } catch (err) {
     console.warn('[booking-attempt] funnel read failed', {

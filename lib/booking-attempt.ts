@@ -1,8 +1,9 @@
 /**
  * Public booking-attempt sessions for /admin/funnel.
  *
- * A start is opening /book (phone) or a service drawer (desktop).
- * Steps are appended only when they change. Closing the tab sets left_at.
+ * A start is one visit: opening /book (phone) or a service drawer (desktop).
+ * Another service in that same tab continues the visit. Steps are appended
+ * only when they move forward. Closing the tab sets left_at.
  * Quiet rows are treated as abandoned when the funnel page is read
  * (30 minutes) — there is no cron. No name, phone, or email is stored.
  */
@@ -90,9 +91,40 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
+/** Later steps outrank earlier ones. Reopening a service must not rewind progress. */
+function stepRank(step: string): number {
+  switch (step) {
+    case 'opened':
+      return 0;
+    case 'service':
+    case 'cal_calendar':
+      return 1;
+    case 'time':
+    case 'cal_time':
+      return 2;
+    case 'contact':
+    case 'cal_details':
+    case 'details_submitted':
+      return 3;
+    case 'review':
+      return 4;
+    case 'pay_choice':
+    case 'pay':
+    case 'checkout':
+      return 5;
+    case 'payment_attempt':
+      return 6;
+    case 'confirmed':
+      return 7;
+    default:
+      return 0;
+  }
+}
+
 /**
  * Upsert one step. Same step again only refreshes last_seen_at.
- * A return after close clears left_at. Completed rows stay completed.
+ * A return after close clears left_at. An earlier step does not rewind
+ * last_step. Completed rows stay completed.
  */
 export async function recordBookingAttempt(input: {
   attemptId: string;
@@ -104,6 +136,7 @@ export async function recordBookingAttempt(input: {
   const at = isoNow();
   const service = input.service ?? null;
   const checkoutMethod = input.checkoutMethod ?? null;
+  const rank = stepRank(input.step);
   const firstStep = JSON.stringify([{ step: input.step, at }]);
   const appended = JSON.stringify([{ step: input.step, at }]);
   await sql`
@@ -132,11 +165,45 @@ export async function recordBookingAttempt(input: {
       END,
       last_step = CASE
         WHEN booking_attempts.completed_at IS NOT NULL THEN booking_attempts.last_step
+        WHEN ${rank} < CASE booking_attempts.last_step
+          WHEN 'opened' THEN 0
+          WHEN 'service' THEN 1
+          WHEN 'cal_calendar' THEN 1
+          WHEN 'time' THEN 2
+          WHEN 'cal_time' THEN 2
+          WHEN 'contact' THEN 3
+          WHEN 'cal_details' THEN 3
+          WHEN 'details_submitted' THEN 3
+          WHEN 'review' THEN 4
+          WHEN 'pay_choice' THEN 5
+          WHEN 'pay' THEN 5
+          WHEN 'checkout' THEN 5
+          WHEN 'payment_attempt' THEN 6
+          WHEN 'confirmed' THEN 7
+          ELSE 0
+        END THEN booking_attempts.last_step
         ELSE ${input.step}
       END,
       steps = CASE
         WHEN booking_attempts.completed_at IS NOT NULL THEN booking_attempts.steps
         WHEN booking_attempts.last_step = ${input.step} THEN booking_attempts.steps
+        WHEN ${rank} < CASE booking_attempts.last_step
+          WHEN 'opened' THEN 0
+          WHEN 'service' THEN 1
+          WHEN 'cal_calendar' THEN 1
+          WHEN 'time' THEN 2
+          WHEN 'cal_time' THEN 2
+          WHEN 'contact' THEN 3
+          WHEN 'cal_details' THEN 3
+          WHEN 'details_submitted' THEN 3
+          WHEN 'review' THEN 4
+          WHEN 'pay_choice' THEN 5
+          WHEN 'pay' THEN 5
+          WHEN 'checkout' THEN 5
+          WHEN 'payment_attempt' THEN 6
+          WHEN 'confirmed' THEN 7
+          ELSE 0
+        END THEN booking_attempts.steps
         ELSE booking_attempts.steps || ${appended}::jsonb
       END
   `;
