@@ -67,7 +67,7 @@ async function connectionUri(apiKey, projectId, branchId) {
     branch_id: branchId,
     database_name: databaseName,
     role_name: roleName,
-    pooled: 'false',
+    pooled: 'true',
   });
   const connection = await neon(
     apiKey,
