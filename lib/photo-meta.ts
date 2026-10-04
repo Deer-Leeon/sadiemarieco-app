@@ -1,4 +1,4 @@
-import { serviceFamily, type ServiceFamily } from '@/lib/seo-service-pages';
+import { serviceFamily, type ServiceFamily } from '@/lib/service-family';
 
 /** Choice stored when a photo is a portrait or the studio, not a service. */
 export const PORTRAIT_SUBJECT = 'portrait';
