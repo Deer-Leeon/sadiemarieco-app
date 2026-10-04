@@ -108,6 +108,7 @@ interface SiteImageRow {
   id: string;
   image_url: string;
   caption: string | null;
+  alt_text: string | null;
 }
 
 /**
@@ -121,6 +122,8 @@ interface SiteImageRow {
 interface SiteImage {
   url: string;
   caption: string | null;
+  /** Null keeps the alt text already written in public/index.html. */
+  alt: string | null;
 }
 
 interface SiteServiceRow {
@@ -242,7 +245,16 @@ function injectImageUrls(
     if (!idMatch) return tag;
     const entry = imageMap[idMatch[1]];
     if (!entry?.url) return tag;
-    return tag.replace(/src="[^"]*"/, `src="${entry.url}"`);
+    let next = tag.replace(/src="[^"]*"/, `src="${escapeAttr(entry.url)}"`);
+    const alt = entry.alt?.trim();
+    if (alt) {
+      if (/alt="[^"]*"/.test(next)) {
+        next = next.replace(/alt="[^"]*"/, `alt="${escapeAttr(alt)}"`);
+      } else {
+        next = next.replace(/<img\s/, `<img alt="${escapeAttr(alt)}" `);
+      }
+    }
+    return next;
   });
 }
 
@@ -350,17 +362,34 @@ export async function GET(): Promise<Response> {
 }
 
 const loadSiteImageRows = cachedPublicCatalog('homepage-images', async () => {
-  const { rows } = await sql<SiteImageRow>`
-    SELECT id, image_url, caption FROM site_images
-  `;
-  return rows;
+  try {
+    const { rows } = await sql<SiteImageRow>`
+      SELECT id, image_url, caption, alt_text FROM site_images
+    `;
+    return rows;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes('alt_text')) throw err;
+    console.warn('[/] site_images.alt_text is missing; images keep their built-in alt text');
+    const { rows } = await sql<{
+      id: string;
+      image_url: string;
+      caption: string | null;
+    }>`
+      SELECT id, image_url, caption FROM site_images
+    `;
+    return rows.map((row) => ({ ...row, alt_text: null }));
+  }
 });
 
 async function fetchImageMap(): Promise<Record<string, SiteImage>> {
   try {
     const rows = await loadSiteImageRows();
     return Object.fromEntries(
-      rows.map((r) => [r.id, { url: r.image_url, caption: r.caption }])
+      rows.map((r) => [
+        r.id,
+        { url: r.image_url, caption: r.caption, alt: r.alt_text },
+      ])
     );
   } catch (err) {
     console.error('[/] site_images query failed:', err);

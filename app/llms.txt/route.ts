@@ -100,10 +100,16 @@ function renderBrief(services: readonly BookableService[] | null): string {
     (item) => `Q: ${oneLine(item.question)}\nA: ${oneLine(item.answer)}`
   ).join('\n\n');
 
-  const pages = PAGES.map(
-    (page) =>
-      `- ${page.label}: ${page.path === '/' ? `${STUDIO_SITE_URL}/` : `${STUDIO_SITE_URL}${page.path}`}`
-  ).join('\n');
+  const pages = [
+    ...PAGES.map(
+      (page) =>
+        `- ${page.label}: ${page.path === '/' ? `${STUDIO_SITE_URL}/` : `${STUDIO_SITE_URL}${page.path}`}`
+    ),
+    ...(services ?? []).map(
+      (service) =>
+        `- ${oneLine(service.title)}: ${STUDIO_SITE_URL}/services/${encodeURIComponent(service.slug)}`
+    ),
+  ].join('\n');
 
   return [
     `# ${STUDIO_BRAND_NAME}`,

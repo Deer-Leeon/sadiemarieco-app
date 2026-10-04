@@ -39,6 +39,7 @@ import { sql } from '@vercel/postgres';
 import sharp from 'sharp';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import { PORTRAIT_SUBJECT, sanitisePhotoFileName } from '@/lib/photo-meta';
 import { refreshPublicCatalog } from '@/lib/public-catalog-cache';
 
 // Default request body cap for App Router route handlers is generous, but
@@ -137,6 +138,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     captionValue = trimmed.length > 0 ? trimmed : '';
   }
 
+  const alt = readOptionalText(form, 'altText', MAX_CAPTION_LENGTH);
+  if (!alt.ok) {
+    return NextResponse.json({ error: alt.error }, { status: 400 });
+  }
+  const fileName = readOptionalFileName(form);
+  if (!fileName.ok) {
+    return NextResponse.json({ error: fileName.error }, { status: 400 });
+  }
+  const subject = readOptionalSubject(form);
+  if (!subject.ok) {
+    return NextResponse.json({ error: subject.error }, { status: 400 });
+  }
+
   if (typeof id !== 'string' || !ID_REGEX.test(id)) {
     return NextResponse.json(
       { error: 'invalid_id', hint: 'id must be 1-64 chars of [a-zA-Z0-9_-]' },
@@ -201,7 +215,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // (HTTP 409) and fail unless we opt back in here. The alternative —
   // `allowOverwrite: true` — would also work but would re-use the URL
   // and leave stale CDN copies in front of admins for the cache TTL.
-  const basename = stripExtension(sanitiseFilename(file.name)) || 'image';
+  const chosenName = fileName.provided ? fileName.value : '';
+  const basename =
+    chosenName || stripExtension(sanitiseFilename(file.name)) || 'image';
   const pathname = `site-images/${id}/${basename}.${processed.extension}`;
 
   let blob;
@@ -233,13 +249,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // level so a partial update can't accidentally null the caption.
   try {
     await sql`
-      INSERT INTO site_images (id, image_url, caption)
-      VALUES (${id}, ${blob.url}, ${captionValue})
+      INSERT INTO site_images (id, image_url, caption, alt_text, file_name, photo_subject)
+      VALUES (
+        ${id},
+        ${blob.url},
+        ${captionValue},
+        ${alt.value},
+        ${fileName.value},
+        ${subject.value}
+      )
       ON CONFLICT (id) DO UPDATE SET
         image_url = EXCLUDED.image_url,
         caption = CASE
           WHEN ${captionProvided}::boolean THEN EXCLUDED.caption
           ELSE site_images.caption
+        END,
+        alt_text = CASE
+          WHEN ${alt.provided}::boolean THEN EXCLUDED.alt_text
+          ELSE site_images.alt_text
+        END,
+        file_name = CASE
+          WHEN ${fileName.provided}::boolean THEN EXCLUDED.file_name
+          ELSE site_images.file_name
+        END,
+        photo_subject = CASE
+          WHEN ${subject.provided}::boolean THEN EXCLUDED.photo_subject
+          ELSE site_images.photo_subject
         END,
         updated_at = NOW()
     `;
@@ -279,7 +314,56 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // it, the trimmed string when they saved something, undefined
     // (key absent) when no caption was provided at all.
     ...(captionProvided ? { caption: captionValue } : {}),
+    ...(alt.provided ? { altText: alt.value } : {}),
+    ...(fileName.provided ? { fileName: fileName.value } : {}),
+    ...(subject.provided ? { photoSubject: subject.value } : {}),
   });
+}
+
+const SUBJECT_REGEX = /^[a-zA-Z0-9_-]{1,80}$/;
+
+function readOptionalText(
+  form: FormData,
+  key: string,
+  max: number
+):
+  | { ok: true; provided: boolean; value: string | null }
+  | { ok: false; error: string } {
+  const raw = form.get(key);
+  if (raw === null) return { ok: true, provided: false, value: null };
+  if (typeof raw !== 'string') return { ok: false, error: `invalid_${key}` };
+  const trimmed = raw.trim();
+  if (trimmed.length > max) return { ok: false, error: `${key}_too_long` };
+  return { ok: true, provided: true, value: trimmed.length > 0 ? trimmed : null };
+}
+
+function readOptionalFileName(
+  form: FormData
+):
+  | { ok: true; provided: boolean; value: string | null }
+  | { ok: false; error: string } {
+  const raw = form.get('fileName');
+  if (raw === null) return { ok: true, provided: false, value: null };
+  if (typeof raw !== 'string') return { ok: false, error: 'invalid_fileName' };
+  if (raw.trim().length > 120) return { ok: false, error: 'fileName_too_long' };
+  const cleaned = sanitisePhotoFileName(raw);
+  return { ok: true, provided: true, value: cleaned.length > 0 ? cleaned : null };
+}
+
+function readOptionalSubject(
+  form: FormData
+):
+  | { ok: true; provided: boolean; value: string | null }
+  | { ok: false; error: string } {
+  const raw = form.get('photoSubject');
+  if (raw === null) return { ok: true, provided: false, value: null };
+  if (typeof raw !== 'string') return { ok: false, error: 'invalid_photo_subject' };
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return { ok: true, provided: true, value: null };
+  if (trimmed !== PORTRAIT_SUBJECT && !SUBJECT_REGEX.test(trimmed)) {
+    return { ok: false, error: 'invalid_photo_subject' };
+  }
+  return { ok: true, provided: true, value: trimmed };
 }
 
 /**
