@@ -5,6 +5,8 @@ import { sql } from '@vercel/postgres';
 import { getAdminAccess } from '../auth';
 import AdminHeader from '../AdminHeader';
 import AdminSectionTabs from '../AdminSectionTabs';
+import { loadBookableServices } from '@/lib/book-public';
+import type { PhotoServiceOption } from '@/lib/photo-meta';
 import ImageUploader from './ImageUploader';
 
 /**
@@ -19,6 +21,9 @@ interface SiteImageRow {
   id: string;
   image_url: string;
   caption: string | null;
+  alt_text: string | null;
+  file_name: string | null;
+  photo_subject: string | null;
 }
 
 /**
@@ -30,6 +35,9 @@ interface SiteImageRow {
 interface SlotRecord {
   url: string | null;
   caption: string | null;
+  alt: string | null;
+  fileName: string | null;
+  photoSubject: string | null;
 }
 
 /**
@@ -107,25 +115,52 @@ export default async function WebsiteEditorPage() {
   // such a small table.
   let slotMap: Record<string, SlotRecord> = {};
   let dbError: string | null = null;
+  let photoServices: PhotoServiceOption[] = [];
   try {
     const { rows } = await sql<SiteImageRow>`
-      SELECT id, image_url, caption FROM site_images
+      SELECT id, image_url, caption, alt_text, file_name, photo_subject
+      FROM site_images
     `;
     const knownIds = new Set<string>(KNOWN_SLOT_IDS);
     slotMap = Object.fromEntries(
       rows
         .filter((r) => knownIds.has(r.id))
-        .map((r) => [r.id, { url: r.image_url, caption: r.caption }])
+        .map((r) => [
+          r.id,
+          {
+            url: r.image_url,
+            caption: r.caption,
+            alt: r.alt_text,
+            fileName: r.file_name,
+            photoSubject: r.photo_subject,
+          },
+        ])
     );
   } catch (err) {
     console.error('[admin/website] site_images query failed:', err);
     dbError = err instanceof Error ? err.message : 'Unknown DB error';
   }
 
+  try {
+    const menu = await loadBookableServices();
+    photoServices = menu.map((service) => ({
+      slug: service.slug,
+      title: service.title,
+      category: service.category,
+    }));
+  } catch (err) {
+    console.error('[admin/website] service menu unavailable:', err);
+  }
+
   // Small conveniences to keep the JSX below readable.
   const urlFor = (id: string): string | null => slotMap[id]?.url ?? null;
   const captionFor = (id: string): string | null =>
     slotMap[id]?.caption ?? null;
+  const altFor = (id: string): string | null => slotMap[id]?.alt ?? null;
+  const fileNameFor = (id: string): string | null =>
+    slotMap[id]?.fileName ?? null;
+  const subjectFor = (id: string): string | null =>
+    slotMap[id]?.photoSubject ?? null;
 
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-stone-900">
@@ -155,8 +190,9 @@ export default async function WebsiteEditorPage() {
           editing affordances.                                              */}
       <main className="mx-auto max-w-6xl space-y-10 px-6 py-8">
         <p className="text-sm text-stone-500">
-          Replace the images that appear across the public site. Changes
-          go live the moment the upload completes.
+          Replace the images that appear across the public site. Choose
+          the service a photo shows and the alt text and file name fill
+          in — both stay editable. Changes go live when you save.
         </p>
 
         {dbError && (
@@ -182,6 +218,10 @@ export default async function WebsiteEditorPage() {
               imageId="home_hero"
               label="Homepage Hero Image"
               currentUrl={urlFor('home_hero')}
+              initialAlt={altFor('home_hero')}
+              initialFileName={fileNameFor('home_hero')}
+              initialPhotoSubject={subjectFor('home_hero')}
+              photoServices={photoServices}
               aspectClass="aspect-[4/5]"
               chromeOverlay={<HeroNavMask />}
             />
@@ -189,6 +229,10 @@ export default async function WebsiteEditorPage() {
               imageId="about_profile"
               label="About Section Portrait"
               currentUrl={urlFor('about_profile')}
+              initialAlt={altFor('about_profile')}
+              initialFileName={fileNameFor('about_profile')}
+              initialPhotoSubject={subjectFor('about_profile')}
+              photoServices={photoServices}
               aspectClass="aspect-[3/4]"
             />
           </div>
@@ -221,6 +265,10 @@ export default async function WebsiteEditorPage() {
                 label="Classic Lashes"
                 currentUrl={urlFor('portfolio_1')}
                 initialCaption={captionFor('portfolio_1')}
+                initialAlt={altFor('portfolio_1')}
+                initialFileName={fileNameFor('portfolio_1')}
+                initialPhotoSubject={subjectFor('portfolio_1')}
+                photoServices={photoServices}
                 className="col-span-5 row-start-1 max-[860px]:w-[65%] max-[860px]:self-start"
               />
               <ImageUploader
@@ -229,6 +277,10 @@ export default async function WebsiteEditorPage() {
                 label="Glow Facial"
                 currentUrl={urlFor('portfolio_2')}
                 initialCaption={captionFor('portfolio_2')}
+                initialAlt={altFor('portfolio_2')}
+                initialFileName={fileNameFor('portfolio_2')}
+                initialPhotoSubject={subjectFor('portfolio_2')}
+                photoServices={photoServices}
                 className="col-span-7 row-start-1 max-[860px]:w-[65%] max-[860px]:self-end"
               />
               <ImageUploader
@@ -237,6 +289,10 @@ export default async function WebsiteEditorPage() {
                 label="Brow Lamination"
                 currentUrl={urlFor('portfolio_3')}
                 initialCaption={captionFor('portfolio_3')}
+                initialAlt={altFor('portfolio_3')}
+                initialFileName={fileNameFor('portfolio_3')}
+                initialPhotoSubject={subjectFor('portfolio_3')}
+                photoServices={photoServices}
                 className="col-span-4 row-start-2 max-[860px]:w-[65%] max-[860px]:self-start"
               />
               <ImageUploader
@@ -245,6 +301,10 @@ export default async function WebsiteEditorPage() {
                 label="Volume Set"
                 currentUrl={urlFor('portfolio_4')}
                 initialCaption={captionFor('portfolio_4')}
+                initialAlt={altFor('portfolio_4')}
+                initialFileName={fileNameFor('portfolio_4')}
+                initialPhotoSubject={subjectFor('portfolio_4')}
+                photoServices={photoServices}
                 className="col-span-4 row-start-2 max-[860px]:w-[65%] max-[860px]:self-end"
               />
               <ImageUploader
@@ -253,6 +313,10 @@ export default async function WebsiteEditorPage() {
                 label="Skin Treatment"
                 currentUrl={urlFor('portfolio_5')}
                 initialCaption={captionFor('portfolio_5')}
+                initialAlt={altFor('portfolio_5')}
+                initialFileName={fileNameFor('portfolio_5')}
+                initialPhotoSubject={subjectFor('portfolio_5')}
+                photoServices={photoServices}
                 className="col-span-4 row-start-2 max-[860px]:w-[65%] max-[860px]:self-start"
               />
             </div>

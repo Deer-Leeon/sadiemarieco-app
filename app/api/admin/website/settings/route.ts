@@ -32,6 +32,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { requireAdminUser } from '@/app/admin/auth';
+import { PORTRAIT_SUBJECT, sanitisePhotoFileName } from '@/lib/photo-meta';
 import { refreshPublicCatalog } from '@/lib/public-catalog-cache';
 
 export const runtime = 'nodejs';
@@ -58,13 +59,21 @@ interface SiteImageRow {
   id: string;
   image_url: string;
   caption: string | null;
+  alt_text: string | null;
+  file_name: string | null;
+  photo_subject: string | null;
 }
 
 export interface SiteImageSlotWire {
   id: string;
   image_url: string | null;
   caption: string | null;
+  alt_text: string | null;
+  file_name: string | null;
+  photo_subject: string | null;
 }
+
+const SUBJECT_REGEX = /^[a-zA-Z0-9_-]{1,80}$/;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -99,6 +108,47 @@ function normaliseCaptionInput(
   return { ok: true, value: trimmed };
 }
 
+function parseStoredText(
+  present: boolean,
+  value: unknown,
+  max: number,
+  key: string
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (!present) return { ok: true, value: null };
+  if (value === null) return { ok: true, value: null };
+  if (typeof value !== 'string') return { ok: false, error: `invalid_${key}` };
+  const trimmed = value.trim();
+  if (trimmed.length > max) return { ok: false, error: `${key}_too_long` };
+  return { ok: true, value: trimmed.length > 0 ? trimmed : null };
+}
+
+function parseFileName(
+  present: boolean,
+  value: unknown
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (!present) return { ok: true, value: null };
+  if (value === null) return { ok: true, value: null };
+  if (typeof value !== 'string') return { ok: false, error: 'invalid_fileName' };
+  if (value.trim().length > 120) return { ok: false, error: 'fileName_too_long' };
+  const cleaned = sanitisePhotoFileName(value);
+  return { ok: true, value: cleaned.length > 0 ? cleaned : null };
+}
+
+function parseSubject(
+  present: boolean,
+  value: unknown
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (!present) return { ok: true, value: null };
+  if (value === null) return { ok: true, value: null };
+  if (typeof value !== 'string') return { ok: false, error: 'invalid_photo_subject' };
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return { ok: true, value: null };
+  if (trimmed !== PORTRAIT_SUBJECT && !SUBJECT_REGEX.test(trimmed)) {
+    return { ok: false, error: 'invalid_photo_subject' };
+  }
+  return { ok: true, value: trimmed };
+}
+
 export async function GET(): Promise<NextResponse> {
   const access = await requireAdminUser();
   if (!access.ok) {
@@ -110,7 +160,8 @@ export async function GET(): Promise<NextResponse> {
 
   try {
     const { rows } = await sql<SiteImageRow>`
-      SELECT id, image_url, caption FROM site_images
+      SELECT id, image_url, caption, alt_text, file_name, photo_subject
+      FROM site_images
     `;
 
     const knownIds = new Set<string>(KNOWN_SLOT_IDS);
@@ -127,6 +178,9 @@ export async function GET(): Promise<NextResponse> {
         id,
         image_url: row?.image_url ?? null,
         caption: row?.caption ?? null,
+        alt_text: row?.alt_text ?? null,
+        file_name: row?.file_name ?? null,
+        photo_subject: row?.photo_subject ?? null,
       };
     });
 
@@ -172,28 +226,68 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
   }
 
-  const { id, caption } = body as { id?: unknown; caption?: unknown };
+  const record = body as Record<string, unknown>;
+  const { id } = record;
   if (typeof id !== 'string' || !isKnownSlotId(id)) {
     return NextResponse.json({ error: 'invalid_id' }, { status: 400 });
   }
-  if (!('caption' in (body as object))) {
+
+  const hasCaption = 'caption' in record;
+  const hasAlt = 'altText' in record;
+  const hasFileName = 'fileName' in record;
+  const hasSubject = 'photoSubject' in record;
+  if (!hasCaption && !hasAlt && !hasFileName && !hasSubject) {
     return NextResponse.json({ error: 'missing_caption' }, { status: 400 });
   }
 
-  const parsed = normaliseCaptionInput(caption);
-  if (!parsed.ok) {
-    return NextResponse.json(
-      { error: parsed.error, maxChars: MAX_CAPTION_LENGTH },
-      { status: parsed.error === 'caption_too_long' ? 400 : 400 }
-    );
+  let captionValue: string | null = null;
+  if (hasCaption) {
+    const parsed = normaliseCaptionInput(record.caption);
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { error: parsed.error, maxChars: MAX_CAPTION_LENGTH },
+        { status: 400 }
+      );
+    }
+    captionValue = parsed.value;
+  }
+
+  const alt = parseStoredText(hasAlt, record.altText, MAX_CAPTION_LENGTH, 'altText');
+  if (!alt.ok) {
+    return NextResponse.json({ error: alt.error }, { status: 400 });
+  }
+  const fileName = parseFileName(hasFileName, record.fileName);
+  if (!fileName.ok) {
+    return NextResponse.json({ error: fileName.error }, { status: 400 });
+  }
+  const subject = parseSubject(hasSubject, record.photoSubject);
+  if (!subject.ok) {
+    return NextResponse.json({ error: subject.error }, { status: 400 });
   }
 
   try {
     const { rows } = await sql<SiteImageRow>`
       UPDATE site_images
-      SET caption = ${parsed.value}, updated_at = NOW()
+      SET
+        caption = CASE
+          WHEN ${hasCaption}::boolean THEN ${captionValue}
+          ELSE caption
+        END,
+        alt_text = CASE
+          WHEN ${hasAlt}::boolean THEN ${alt.value}
+          ELSE alt_text
+        END,
+        file_name = CASE
+          WHEN ${hasFileName}::boolean THEN ${fileName.value}
+          ELSE file_name
+        END,
+        photo_subject = CASE
+          WHEN ${hasSubject}::boolean THEN ${subject.value}
+          ELSE photo_subject
+        END,
+        updated_at = NOW()
       WHERE id = ${id}
-      RETURNING id, image_url, caption
+      RETURNING id, image_url, caption, alt_text, file_name, photo_subject
     `;
 
     if (rows.length === 0) {
@@ -210,6 +304,9 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
         id: row.id,
         image_url: row.image_url,
         caption: row.caption,
+        alt_text: row.alt_text,
+        file_name: row.file_name,
+        photo_subject: row.photo_subject,
       },
     });
   } catch (err) {

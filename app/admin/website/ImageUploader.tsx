@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Cropper, { type Area } from 'react-easy-crop';
+
+import {
+  PORTRAIT_SUBJECT,
+  suggestPhotoCopy,
+  type PhotoServiceOption,
+} from '@/lib/photo-meta';
 import { Check, ImageIcon, Loader2, Pencil, X } from 'lucide-react';
 
 import { getCroppedImageFile } from '@/lib/cropImage';
@@ -35,6 +41,14 @@ interface Props {
    * prop if it's accidentally passed.
    */
   initialCaption?: string | null;
+  /** Saved alt text. Null keeps the alt already written on the homepage. */
+  initialAlt?: string | null;
+  /** Saved blob file name, without the random suffix. */
+  initialFileName?: string | null;
+  /** Service slug, or `portrait` for a studio or portrait photo. */
+  initialPhotoSubject?: string | null;
+  /** Live bookable services, used to suggest alt text and a file name. */
+  photoServices?: PhotoServiceOption[];
   /**
    * Tailwind aspect-ratio class applied to the preview frame so the
    * editor tile mirrors the shape of the slot on the live site (WYSIWYG).
@@ -116,6 +130,10 @@ export default function ImageUploader({
   currentUrl,
   label,
   initialCaption = null,
+  initialAlt = null,
+  initialFileName = null,
+  initialPhotoSubject = null,
+  photoServices = [],
   aspectClass = 'aspect-video',
   className,
   variant = 'card',
@@ -164,6 +182,17 @@ export default function ImageUploader({
   // handleFileChange below) so cancelling a crop doesn't bleed an
   // unsaved draft into a future session.
   const [captionDraft, setCaptionDraft] = useState<string>('');
+  const [savedAlt, setSavedAlt] = useState<string | null>(initialAlt);
+  const [savedFileName, setSavedFileName] = useState<string | null>(initialFileName);
+  const [savedSubject, setSavedSubject] = useState<string | null>(initialPhotoSubject);
+  const [altDraft, setAltDraft] = useState('');
+  const [fileNameDraft, setFileNameDraft] = useState('');
+  const [subjectDraft, setSubjectDraft] = useState('');
+  useEffect(() => {
+    setSavedAlt(initialAlt);
+    setSavedFileName(initialFileName);
+    setSavedSubject(initialPhotoSubject);
+  }, [initialAlt, initialFileName, initialPhotoSubject]);
 
   // Caption editing is only meaningful for the tile variant —
   // Core Pages cards don't render a subtitle on the public site.
@@ -213,12 +242,26 @@ export default function ImageUploader({
     inputRef.current?.click();
   };
 
+  const seedPhotoDrafts = () => {
+    setAltDraft(savedAlt ?? '');
+    setFileNameDraft(savedFileName ?? '');
+    setSubjectDraft(savedSubject ?? '');
+  };
+
+  const applySubject = (next: string) => {
+    setSubjectDraft(next);
+    const suggestion = suggestPhotoCopy(next, photoServices);
+    setAltDraft(suggestion.alt);
+    setFileNameDraft(suggestion.fileName);
+  };
+
   const openEditModal = () => {
     if (isUploading || isSavingCaption || imageToCrop) return;
     setErrorMsg(null);
     setCaptionDraft(
       savedCaption === null || savedCaption === undefined ? '' : savedCaption
     );
+    seedPhotoDrafts();
     setEditOpen(true);
   };
 
@@ -237,7 +280,12 @@ export default function ImageUploader({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: imageId,
-          caption: trimmed.length > 0 ? trimmed : '',
+          ...(captionEditable
+            ? { caption: trimmed.length > 0 ? trimmed : '' }
+            : {}),
+          altText: altDraft,
+          fileName: fileNameDraft,
+          photoSubject: subjectDraft,
         }),
       });
       if (!res.ok) {
@@ -251,9 +299,17 @@ export default function ImageUploader({
         throw new Error(detail || 'caption_save_failed');
       }
       const data = (await res.json()) as {
-        slot: { caption: string | null };
+        slot: {
+          caption: string | null;
+          alt_text: string | null;
+          file_name: string | null;
+          photo_subject: string | null;
+        };
       };
       setSavedCaption(data.slot.caption);
+      setSavedAlt(data.slot.alt_text);
+      setSavedFileName(data.slot.file_name);
+      setSavedSubject(data.slot.photo_subject);
       setEditOpen(false);
       router.refresh();
     } catch (err) {
@@ -266,7 +322,15 @@ export default function ImageUploader({
     } finally {
       setIsSavingCaption(false);
     }
-  }, [captionDraft, imageId, router]);
+  }, [
+    altDraft,
+    captionDraft,
+    captionEditable,
+    fileNameDraft,
+    imageId,
+    router,
+    subjectDraft,
+  ]);
 
   // STAGE 1: file picked → open cropper. NO upload here.
   // We measure the rendered slot's aspect ratio first so the
@@ -306,6 +370,9 @@ export default function ImageUploader({
       setCaptionDraft(
         savedCaption === null || savedCaption === undefined ? '' : savedCaption
       );
+      setAltDraft(savedAlt ?? '');
+      setFileNameDraft(savedFileName ?? '');
+      setSubjectDraft(savedSubject ?? '');
     }
     setImageToCrop(URL.createObjectURL(file));
   };
@@ -346,6 +413,9 @@ export default function ImageUploader({
         if (caption !== undefined) {
           form.append('caption', caption);
         }
+        form.append('altText', altDraft);
+        form.append('fileName', fileNameDraft);
+        form.append('photoSubject', subjectDraft);
 
         const res = await fetch('/api/upload', {
           method: 'POST',
@@ -367,18 +437,24 @@ export default function ImageUploader({
           url: string;
           id: string;
           caption?: string | null;
+          altText?: string | null;
+          fileName?: string | null;
+          photoSubject?: string | null;
         };
         // Fire-and-forget — re-fetches the server component so any
         // OTHER on-page consumer of `site_images` (e.g. a sibling
         // uploader showing the same slot) stays consistent. Our own
         // tile updates immediately via the returned values below.
         router.refresh();
+        if (data.altText !== undefined) setSavedAlt(data.altText);
+        if (data.fileName !== undefined) setSavedFileName(data.fileName);
+        if (data.photoSubject !== undefined) setSavedSubject(data.photoSubject);
         return { url: data.url, caption: data.caption };
       } finally {
         setIsUploading(false);
       }
     },
-    [imageId, router]
+    [altDraft, fileNameDraft, imageId, router, subjectDraft]
   );
 
   // STAGE 2: admin confirmed crop → produce the cropped File,
@@ -426,8 +502,11 @@ export default function ImageUploader({
     imageToCrop,
     croppedAreaPixels,
     originalFileName,
+    altDraft,
     captionDraft,
     captionEditable,
+    fileNameDraft,
+    subjectDraft,
     uploadFile,
   ]);
 
@@ -579,26 +658,39 @@ export default function ImageUploader({
       onConfirm={handleConfirmCrop}
       isUploading={isUploading}
       canConfirm={!!croppedAreaPixels}
+      services={photoServices}
+      subject={subjectDraft}
+      alt={altDraft}
+      fileName={fileNameDraft}
+      onSubjectChange={applySubject}
+      onAltChange={setAltDraft}
+      onFileNameChange={setFileNameDraft}
     />
   );
 
-  const slotEditModal =
-    captionEditable &&
-    editOpen && (
-      <SlotEditModal
-        label={label}
-        displayUrl={displayUrl}
-        captionDraft={captionDraft}
-        onCaptionDraftChange={setCaptionDraft}
-        captionPlaceholder={label}
-        onClose={closeEditModal}
-        onChangeImage={triggerPicker}
-        onSaveCaption={saveCaptionOnly}
-        isSaving={isSavingCaption}
-        isUploading={isUploading}
-        errorMsg={errorMsg}
-      />
-    );
+  const slotEditModal = editOpen && (
+    <SlotEditModal
+      label={label}
+      displayUrl={displayUrl}
+      showCaption={captionEditable}
+      captionDraft={captionDraft}
+      onCaptionDraftChange={setCaptionDraft}
+      captionPlaceholder={label}
+      services={photoServices}
+      subject={subjectDraft}
+      alt={altDraft}
+      fileName={fileNameDraft}
+      onSubjectChange={applySubject}
+      onAltChange={setAltDraft}
+      onFileNameChange={setFileNameDraft}
+      onClose={closeEditModal}
+      onChangeImage={triggerPicker}
+      onSaveCaption={saveCaptionOnly}
+      isSaving={isSavingCaption}
+      isUploading={isUploading}
+      errorMsg={errorMsg}
+    />
+  );
 
   // ── CARD variant ────────────────────────────────────────────────────
   if (isCard) {
@@ -612,6 +704,14 @@ export default function ImageUploader({
           {label}
         </h3>
         {clickableImage}
+        <button
+          type="button"
+          onClick={openEditModal}
+          disabled={isUploading || isSavingCaption}
+          className="mt-3 w-full rounded-md border border-stone-300 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-800 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Photo details
+        </button>
         {fileInput}
         {errorMsg && (
           <p className="mt-2 text-xs text-rose-700" role="alert">
@@ -656,9 +756,17 @@ export default function ImageUploader({
 function SlotEditModal({
   label,
   displayUrl,
+  showCaption,
   captionDraft,
   onCaptionDraftChange,
   captionPlaceholder,
+  services,
+  subject,
+  alt,
+  fileName,
+  onSubjectChange,
+  onAltChange,
+  onFileNameChange,
   onClose,
   onChangeImage,
   onSaveCaption,
@@ -668,9 +776,17 @@ function SlotEditModal({
 }: {
   label: string;
   displayUrl: string | null;
+  showCaption: boolean;
   captionDraft: string;
   onCaptionDraftChange: (next: string) => void;
   captionPlaceholder: string;
+  services: PhotoServiceOption[];
+  subject: string;
+  alt: string;
+  fileName: string;
+  onSubjectChange: (next: string) => void;
+  onAltChange: (next: string) => void;
+  onFileNameChange: (next: string) => void;
   onClose: () => void;
   onChangeImage: () => void;
   onSaveCaption: () => void;
@@ -698,7 +814,7 @@ function SlotEditModal({
       aria-modal="true"
       aria-label={`Edit ${label}`}
     >
-      <div className="flex w-full max-w-md flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-2xl">
+      <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-stone-200 px-4 py-3">
           <h3 className="font-serif text-lg text-stone-900">Edit · {label}</h3>
           <button
@@ -732,7 +848,7 @@ function SlotEditModal({
           )}
         </div>
 
-        <div className="space-y-4 px-4 py-4">
+        <div className="space-y-4 overflow-y-auto px-4 py-4">
           <button
             type="button"
             onClick={onChangeImage}
@@ -742,24 +858,37 @@ function SlotEditModal({
             Change image…
           </button>
 
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-semibold uppercase tracking-wider text-stone-500">
-              Image Title / Caption
-            </span>
-            <input
-              type="text"
-              value={captionDraft}
-              onChange={(e) => onCaptionDraftChange(e.target.value)}
-              disabled={busy}
-              placeholder={captionPlaceholder}
-              maxLength={300}
-              className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500/40 disabled:opacity-50"
-            />
-            <span className="text-[11px] text-stone-500">
-              Shown on hover on the live site. Leave blank to hide the label
-              and gradient for this tile.
-            </span>
-          </label>
+          {showCaption && (
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-stone-500">
+                Image Title / Caption
+              </span>
+              <input
+                type="text"
+                value={captionDraft}
+                onChange={(e) => onCaptionDraftChange(e.target.value)}
+                disabled={busy}
+                placeholder={captionPlaceholder}
+                maxLength={300}
+                className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500/40 disabled:opacity-50"
+              />
+              <span className="text-[11px] text-stone-500">
+                Shown on hover on the live site. Leave blank to hide the label
+                and gradient for this tile.
+              </span>
+            </label>
+          )}
+
+          <PhotoMetaFields
+            services={services}
+            subject={subject}
+            alt={alt}
+            fileName={fileName}
+            onSubjectChange={onSubjectChange}
+            onAltChange={onAltChange}
+            onFileNameChange={onFileNameChange}
+            disabled={busy}
+          />
 
           {errorMsg && (
             <p className="text-xs text-rose-700" role="alert">
@@ -825,6 +954,13 @@ function CropperOverlay({
   onConfirm,
   isUploading,
   canConfirm,
+  services,
+  subject,
+  alt,
+  fileName,
+  onSubjectChange,
+  onAltChange,
+  onFileNameChange,
 }: {
   imageSrc: string;
   aspect: number;
@@ -838,6 +974,13 @@ function CropperOverlay({
   onConfirm: () => void;
   isUploading: boolean;
   canConfirm: boolean;
+  services: PhotoServiceOption[];
+  subject: string;
+  alt: string;
+  fileName: string;
+  onSubjectChange: (next: string) => void;
+  onAltChange: (next: string) => void;
+  onFileNameChange: (next: string) => void;
 }) {
   // ESC closes the cropper unless an upload is in flight — never
   // let the user dismiss UI while a network request is still
@@ -872,7 +1015,7 @@ function CropperOverlay({
       aria-modal="true"
       aria-label={`Crop ${label}`}
     >
-      <div className="flex w-auto max-w-[95vw] flex-col overflow-hidden rounded-2xl border border-stone-800 bg-stone-950 shadow-2xl">
+      <div className="flex max-h-[92vh] w-auto max-w-[95vw] flex-col overflow-hidden rounded-2xl border border-stone-800 bg-stone-950 shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between gap-6 border-b border-stone-800/80 px-5 py-3">
           <div className="min-w-0">
@@ -953,6 +1096,20 @@ function CropperOverlay({
           </label>
         </div>
 
+        <div className="overflow-y-auto border-t border-stone-800/80 px-5 py-4">
+          <PhotoMetaFields
+            dark
+            services={services}
+            subject={subject}
+            alt={alt}
+            fileName={fileName}
+            onSubjectChange={onSubjectChange}
+            onAltChange={onAltChange}
+            onFileNameChange={onFileNameChange}
+            disabled={isUploading}
+          />
+        </div>
+
         {/* Footer — Cancel + Confirm. Cream primary on stone matches
             the admin's neutral aesthetic; no rose/blue accents. */}
         <div className="flex items-center justify-end gap-2 border-t border-stone-800/80 bg-stone-900/60 px-5 py-3">
@@ -993,6 +1150,82 @@ function CropperOverlay({
  * mapping for falls through to the original detail string so we never
  * swallow useful diagnostic info.
  */
+function PhotoMetaFields({
+  services,
+  subject,
+  alt,
+  fileName,
+  onSubjectChange,
+  onAltChange,
+  onFileNameChange,
+  disabled,
+  dark = false,
+}: {
+  services: PhotoServiceOption[];
+  subject: string;
+  alt: string;
+  fileName: string;
+  onSubjectChange: (next: string) => void;
+  onAltChange: (next: string) => void;
+  onFileNameChange: (next: string) => void;
+  disabled: boolean;
+  dark?: boolean;
+}) {
+  const labelClass = dark
+    ? 'text-[10px] font-medium uppercase tracking-[0.18em] text-stone-400'
+    : 'text-xs font-semibold uppercase tracking-wider text-stone-500';
+  const inputClass = dark
+    ? 'w-full rounded-md border border-stone-700 bg-stone-900 px-3 py-2 text-sm text-stone-100 placeholder:text-stone-500 focus:border-stone-400 focus:outline-none disabled:opacity-50'
+    : 'w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500/40 disabled:opacity-50';
+
+  return (
+    <div className="space-y-3">
+      <label className="flex flex-col gap-1.5">
+        <span className={labelClass}>What this photo shows</span>
+        <select
+          value={subject}
+          onChange={(e) => onSubjectChange(e.target.value)}
+          disabled={disabled}
+          className={inputClass}
+        >
+          <option value="">Choose a service</option>
+          <option value={PORTRAIT_SUBJECT}>Portrait / studio</option>
+          {services.map((service) => (
+            <option key={service.slug} value={service.slug}>
+              {service.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1.5">
+        <span className={labelClass}>Alt text</span>
+        <input
+          type="text"
+          value={alt}
+          onChange={(e) => onAltChange(e.target.value)}
+          disabled={disabled}
+          maxLength={300}
+          className={inputClass}
+        />
+        <span className={dark ? 'text-[11px] text-stone-500' : 'text-[11px] text-stone-500'}>
+          Choosing a service fills this in. Your edit is what gets saved.
+        </span>
+      </label>
+      <label className="flex flex-col gap-1.5">
+        <span className={labelClass}>File name</span>
+        <input
+          type="text"
+          value={fileName}
+          onChange={(e) => onFileNameChange(e.target.value)}
+          disabled={disabled}
+          maxLength={80}
+          className={inputClass}
+        />
+      </label>
+    </div>
+  );
+}
+
 function humaniseUploadError(detail: string): string {
   switch (detail) {
     case 'file_too_large':

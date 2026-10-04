@@ -13,6 +13,9 @@ const nextConfig = {
   // Consent PDF stamping embeds EB Garamond from disk at runtime.
   outputFileTracingIncludes: {
     '/api/consent/[clientId]': ['./public/fonts/**/*', './assets/fonts/**/*'],
+    '/lash-extensions-lehi': ['./content/seo/**/*'],
+    '/brow-services-lehi': ['./content/seo/**/*'],
+    '/beauty-studio-lehi': ['./content/seo/**/*'],
   },
 
   // ── Image domain allowlist ─────────────────────────────────────────────
@@ -62,23 +65,31 @@ const nextConfig = {
     ];
   },
 
+  async redirects() {
+    return [
+      {
+        source: '/lash-extensions-lehi.html',
+        destination: '/lash-extensions-lehi',
+        permanent: true,
+      },
+      {
+        source: '/brow-services-lehi.html',
+        destination: '/brow-services-lehi',
+        permanent: true,
+      },
+      {
+        source: '/beauty-studio-lehi.html',
+        destination: '/beauty-studio-lehi',
+        permanent: true,
+      },
+    ];
+  },
+
   async rewrites() {
     return [
       { source: '/manage', destination: '/manage.html' },
       { source: '/privacy', destination: '/privacy.html' },
       { source: '/terms', destination: '/terms.html' },
-      {
-        source: '/lash-extensions-lehi',
-        destination: '/lash-extensions-lehi.html',
-      },
-      {
-        source: '/brow-services-lehi',
-        destination: '/brow-services-lehi.html',
-      },
-      {
-        source: '/beauty-studio-lehi',
-        destination: '/beauty-studio-lehi.html',
-      },
       { source: '/areas-we-serve', destination: '/areas-we-serve.html' },
       { source: '/reveriebeauty', destination: '/reverie-beauty.html' },
     ];
