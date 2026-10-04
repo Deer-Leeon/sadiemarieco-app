@@ -13,6 +13,7 @@ import {
 } from '@/lib/book-public';
 import { buildMetaHead } from '@/lib/seo-meta';
 import { jsonLdScriptTag } from '@/lib/seo-json-ld';
+import { serviceFamily, type ServiceFamily } from '@/lib/service-family';
 import {
   STUDIO_ADDRESS_LINE1,
   STUDIO_ADDRESS_ONE_LINE,
@@ -30,7 +31,8 @@ import {
 
 export const SERVICE_LINKS_TOKEN = '<!-- INJECT_SERVICE_LINKS -->';
 
-export type ServiceFamily = 'lash' | 'brow' | 'other';
+export type { ServiceFamily } from '@/lib/service-family';
+export { serviceFamily } from '@/lib/service-family';
 
 const LANDING_FILE: Record<ServiceFamily, string> = {
   lash: 'lash-extensions-lehi.html',
@@ -52,13 +54,6 @@ const FAMILY_PARENT: Record<
   brow: { path: '/brow-services-lehi', label: 'All brow services' },
   other: { path: '/beauty-studio-lehi', label: 'The studio' },
 };
-
-export function serviceFamily(category: string): ServiceFamily {
-  const value = category.toLowerCase();
-  if (value.includes('lash')) return 'lash';
-  if (value.includes('brow')) return 'brow';
-  return 'other';
-}
 
 export function servicePagePath(slug: string): string {
   return `/services/${encodeURIComponent(slug)}`;
