@@ -8,13 +8,20 @@ import {
   type TipPreset,
 } from '@/lib/booking-tip';
 
-const CHOICES: { preset: TipPreset; label: string }[] = [
+const QUICK_CHOICES: { preset: TipPreset; label: string }[] = [
   { preset: 'none', label: 'No tip' },
   { preset: '10', label: '10%' },
   { preset: '15', label: '15%' },
   { preset: '20', label: '20%' },
-  { preset: 'custom', label: 'Custom' },
 ];
+
+function tipChoiceClass(selected: boolean): string {
+  return `flex min-h-12 flex-col items-center justify-center rounded-full border px-3 py-2 text-center transition-colors ${
+    selected
+      ? 'border-stone-900 bg-stone-900 text-white'
+      : 'border-stone-200 bg-white text-stone-800 hover:border-stone-400'
+  }`;
+}
 
 export function formatTipUsd(cents: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -45,16 +52,18 @@ export function TipPicker({
       : resolveTipCents(serviceCents, preset);
   const maxCents = customTipMaxCents(serviceCents);
 
+  const customSelected = preset === 'custom';
+
   return (
-    <fieldset className={compact ? 'mt-3' : 'mt-5'}>
+    <fieldset className={`min-w-0 border-0 p-0 ${compact ? 'mt-5' : 'mt-6'}`}>
       <legend className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
         Add a tip
       </legend>
-      <p className="mt-1 text-xs leading-relaxed text-stone-500">
+      <p className="mt-1.5 text-xs leading-relaxed text-stone-500">
         Optional. The tip is separate from the service price.
       </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {CHOICES.map((choice) => {
+      <div className="mt-3.5 grid grid-cols-2 gap-2">
+        {QUICK_CHOICES.map((choice) => {
           const selected = preset === choice.preset;
           const amount =
             choice.preset === '10' || choice.preset === '15' || choice.preset === '20'
@@ -66,16 +75,15 @@ export function TipPicker({
               type="button"
               aria-pressed={selected}
               onClick={() => onPreset(choice.preset)}
-              className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
-                selected
-                  ? 'border-stone-900 bg-stone-900 text-white'
-                  : 'border-stone-200 bg-white text-stone-800 hover:border-stone-400'
-              }`}
+              className={tipChoiceClass(selected)}
             >
-              {choice.label}
+              <span className="text-sm font-medium leading-none">{choice.label}</span>
               {amount && amount.ok && amount.tipCents > 0 ? (
-                <span className={selected ? 'text-stone-200' : 'text-stone-500'}>
-                  {' '}
+                <span
+                  className={`mt-1 text-[11px] tabular-nums leading-none ${
+                    selected ? 'text-stone-300' : 'text-stone-500'
+                  }`}
+                >
                   {formatTipUsd(amount.tipCents)}
                 </span>
               ) : null}
@@ -83,8 +91,16 @@ export function TipPicker({
           );
         })}
       </div>
+      <button
+        type="button"
+        aria-pressed={customSelected}
+        onClick={() => onPreset('custom')}
+        className={`${tipChoiceClass(customSelected)} mt-2 w-full`}
+      >
+        <span className="text-sm font-medium leading-none">Custom</span>
+      </button>
       {preset === 'custom' ? (
-        <label className="mt-3 block">
+        <label className="mt-2.5 block">
           <span className="sr-only">Custom tip amount</span>
           <input
             inputMode="decimal"

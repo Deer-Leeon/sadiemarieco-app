@@ -1529,8 +1529,8 @@ function CheckoutPayChoice({
       <p
         className={
           compact
-            ? 'mt-3 text-[11px] leading-snug text-stone-400'
-            : 'mt-5 text-xs leading-relaxed text-stone-400'
+            ? 'mt-6 text-[11px] leading-relaxed text-stone-400'
+            : 'mt-6 text-xs leading-relaxed text-stone-400'
         }
       >
         24+ hours notice to cancel or reschedule. Inside 24 hours may be
