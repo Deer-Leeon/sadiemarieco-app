@@ -79,15 +79,12 @@ export function formatPhoneInputDisplay(raw: string): string {
   return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`;
 }
 
-/**
- * Live US phone mask for public booking: 8015551234 → (801) 555-1234.
- * Strips a leading country-code 1 so paste of +1801… still formats nationally.
- */
-export function formatUsPhoneAsYouType(raw: string): string {
+function nationalPhoneDigits(raw: string): string {
   const digits = raw.replace(/\D/g, '');
-  const national = (
-    digits.startsWith('1') ? digits.slice(1) : digits
-  ).slice(0, 10);
+  return (digits.startsWith('1') ? digits.slice(1) : digits).slice(0, 10);
+}
+
+function formatNationalPhone(national: string): string {
   if (!national) return '';
   if (national.length < 3) return `(${national}`;
   if (national.length === 3) return `(${national})`;
@@ -95,6 +92,25 @@ export function formatUsPhoneAsYouType(raw: string): string {
     return `(${national.slice(0, 3)}) ${national.slice(3)}`;
   }
   return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`;
+}
+
+/**
+ * Live US phone mask for public booking: 8015551234 → (801) 555-1234.
+ * Strips a leading country-code 1 so paste of +1801… still formats nationally.
+ *
+ * Pass the field's current value as `previous` from onChange. Backspace on a
+ * closing parenthesis would otherwise delete only that character, the digits
+ * would be unchanged, and the mask would put the parenthesis straight back.
+ */
+export function formatUsPhoneAsYouType(raw: string, previous?: string): string {
+  let national = nationalPhoneDigits(raw);
+  if (previous && national.length > 0 && raw.length < previous.length) {
+    const prevNational = nationalPhoneDigits(previous);
+    if (national === prevNational && formatNationalPhone(national).startsWith(raw)) {
+      national = national.slice(0, -1);
+    }
+  }
+  return formatNationalPhone(national);
 }
 
 /** Trim + lowercase; empty / invalid / Cal placeholder → null. */

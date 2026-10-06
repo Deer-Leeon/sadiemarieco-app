@@ -32,6 +32,7 @@ import {
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
 import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
+import type { TipPreset } from '@/lib/booking-tip';
 import { applePayFriendlyError } from '@/lib/apple-pay-express';
 import {
   rememberActiveHoldUid,
@@ -91,6 +92,7 @@ type Props = {
   active: boolean;
   paymentTiming: BookingPaymentTiming;
   serviceTitle: string;
+  tipBody?: { tipPreset: TipPreset; tipCents?: number } | null;
   createPayload: Omit<BookCreatePayload, 'source'>;
   /** Already-created hold from the Payment step; skip a second Cal create. */
   calBookingUid?: string | null;
@@ -124,6 +126,7 @@ export default function BookApplePayHost({
   active,
   paymentTiming,
   serviceTitle,
+  tipBody = null,
   createPayload,
   calBookingUid,
   submitting,
@@ -146,6 +149,7 @@ export default function BookApplePayHost({
   const payloadRef = useRef(createPayload);
   const serviceTitleRef = useRef(serviceTitle);
   const paymentTimingRef = useRef(paymentTiming);
+  const tipBodyRef = useRef(tipBody);
   const holdUidRef = useRef(calBookingUid);
   const activeRef = useRef(active);
   const inFlightRef = useRef(false);
@@ -153,9 +157,10 @@ export default function BookApplePayHost({
     payloadRef.current = createPayload;
     serviceTitleRef.current = serviceTitle;
     paymentTimingRef.current = paymentTiming;
+    tipBodyRef.current = tipBody;
     holdUidRef.current = calBookingUid;
     activeRef.current = active;
-  }, [createPayload, serviceTitle, paymentTiming, calBookingUid, active]);
+  }, [createPayload, serviceTitle, paymentTiming, tipBody, calBookingUid, active]);
 
   const onReady = useCallback(
     (event: StripeExpressCheckoutElementReadyEvent) => {
@@ -173,6 +178,10 @@ export default function BookApplePayHost({
 
   const onClick = useCallback(
     (event: StripeExpressCheckoutElementClickEvent) => {
+      if (paymentTimingRef.current === 'pay_now' && !tipBodyRef.current) {
+        onError('Enter a tip from $1 up to twice the service price, or choose No tip.');
+        return;
+      }
       onError(null);
       event.resolve({});
     },
@@ -287,6 +296,9 @@ export default function BookApplePayHost({
               calBookingUid: hold.calBookingUid,
               ...(bookingName ? { name: bookingName } : {}),
               ...(bookingEmail ? { email: bookingEmail } : {}),
+              ...(timing === 'pay_now' && tipBodyRef.current
+                ? tipBodyRef.current
+                : {}),
             }),
           },
           30_000

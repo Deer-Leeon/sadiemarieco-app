@@ -57,6 +57,10 @@ import {
   isSettlementUniqueConflict,
 } from '@/lib/appointment-settlement';
 import { HOLD_EXPIRED_MESSAGE, isAbandonedCheckoutHold } from '@/lib/booking-hold';
+import {
+  chargeMatchesQuotedTip,
+  tipCentsFromAmountDetails,
+} from '@/lib/booking-tip';
 import { notifyBookingConfirmed } from '@/lib/booking-notifications';
 import { isWalletCard, stripeCardCheckRejection } from '@/lib/stripe-card-checks';
 import { acceptOnCal } from '@/lib/cal-accept';
@@ -385,6 +389,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } = { name: null, email: null };
   let intentCustomer: string | null = null;
   let payNowAmountCents: number | null = null;
+  let payNowTipCents = 0;
   let checkoutMethod: ReturnType<typeof checkoutMethodFromWallet> | null = null;
 
   try {
@@ -450,22 +455,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           { status: 400 }
         );
       }
-      // Server-side amount check: the PI was minted from
-      // quoted_service_price_cents; any drift means a stale/incorrect
-      // payment session. Refund rather than record a wrong amount.
-      const quotedCents = Number(
-        existingStripe?.quoted_service_price_cents ?? 0
+      // The charge is the quoted service plus an optional tip declared on
+      // the PaymentIntent. A larger amount with no tip field is refunded
+      // so extra money is never stored as the service price.
+      const quotedRaw = Number(existingStripe?.quoted_service_price_cents ?? 0);
+      const quotedCents = Number.isFinite(quotedRaw) ? Math.round(quotedRaw) : 0;
+      const reportedTipCents = tipCentsFromAmountDetails(
+        paymentIntent.amount_details
       );
       if (
-        Number.isFinite(quotedCents) &&
         quotedCents >= 50 &&
-        paymentIntent.amount !== quotedCents
+        !chargeMatchesQuotedTip(
+          quotedCents,
+          paymentIntent.amount,
+          reportedTipCents
+        )
       ) {
         console.error('[api/booking/confirm] pay-now amount mismatch', {
           calBookingUid,
           paymentIntentId,
           paymentAmount: paymentIntent.amount,
           quotedCents,
+          reportedTipCents,
         });
         try {
           await stripe.refunds.create({ payment_intent: paymentIntentId });
@@ -484,7 +495,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           { status: 409 }
         );
       }
-      payNowAmountCents = paymentIntent.amount;
+      payNowAmountCents = quotedCents >= 50
+        ? quotedCents
+        : Math.max(0, paymentIntent.amount - reportedTipCents);
+      payNowTipCents = reportedTipCents;
       intentCustomer =
         typeof paymentIntent.customer === 'string'
           ? paymentIntent.customer
@@ -853,6 +867,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         calBookingUid,
         stripePaymentIntentId: paymentIntentId,
         baseAmountCents: payNowAmountCents,
+        tipAmountCents: payNowTipCents,
       });
     } catch (err) {
       if (!isSettlementUniqueConflict(err)) {

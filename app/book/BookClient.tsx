@@ -41,11 +41,18 @@ import {
 } from '@/lib/abandon-hold-client';
 
 import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
+import {
+  parseTipDollars,
+  resolveTipCents,
+  tipRequestBody,
+  type TipPreset,
+} from '@/lib/booking-tip';
 
 import BookPayErrorBoundary from './BookPayErrorBoundary';
 import BookApplePayHost, { type BookConfirmed } from './BookApplePayHost';
 import BookTopBar from './BookTopBar';
 import { CheckoutForm } from '@/app/checkout/CheckoutClient';
+import { TipPicker, formatTipUsd } from '@/app/checkout/TipPicker';
 import styles from './book.module.css';
 
 type Step = 'service' | 'when' | 'contact' | 'review' | 'pay';
@@ -469,6 +476,8 @@ export default function BookClient({
   const [confirmed, setConfirmed] = useState<BookConfirmed | null>(null);
   const [paymentTiming, setPaymentTiming] =
     useState<BookingPaymentTiming>('pay_later');
+  const [tipPreset, setTipPreset] = useState<TipPreset>('none');
+  const [customTipInput, setCustomTipInput] = useState('');
   const [holdUid, setHoldUid] = useState<string | null>(null);
   const [holdCreatedAt, setHoldCreatedAt] = useState<string | null>(null);
   const [holdCountdown, setHoldCountdown] = useState('');
@@ -515,8 +524,9 @@ export default function BookClient({
     []
   );
 
-  // Dual Elements (setup + payment) stay mounted across review → pay and
-  // radio switches so Apple Pay never remounts / reanimates.
+  // Setup and payment Elements stay mounted across review → pay.
+  // The pay-now element is keyed on the charge total so a tip change
+  // cannot leave Apple Pay showing the previous price.
   const setupElementsOptions: StripeElementsOptions = useMemo(
     () => ({
       mode: 'setup',
@@ -529,19 +539,30 @@ export default function BookClient({
   );
 
   const selectedPriceCents = selected?.priceCents ?? null;
+  const payNowSelected = paymentTiming === 'pay_now';
+  const bookServiceCents =
+    selectedPriceCents && selectedPriceCents > 0 ? selectedPriceCents : 0;
+  const bookTipResolved = payNowSelected
+    ? resolveTipCents(
+        bookServiceCents,
+        tipPreset,
+        tipPreset === 'custom' ? parseTipDollars(customTipInput) : null
+      )
+    : { ok: true as const, tipCents: 0 };
+  const bookTipCents = bookTipResolved.ok ? bookTipResolved.tipCents : 0;
+  const bookTipReady = !payNowSelected || bookTipResolved.ok;
+  const bookChargeCents = bookServiceCents + bookTipCents;
   const paymentElementsOptions: StripeElementsOptions = useMemo(() => {
-    const amount =
-      selectedPriceCents && selectedPriceCents > 0 ? selectedPriceCents : 50;
     return {
       mode: 'payment',
-      amount,
+      amount: bookChargeCents > 0 ? bookChargeCents : 50,
       currency: 'usd',
       paymentMethodTypes: ['card'],
       // Must match PaymentIntent setup_future_usage or Apple Pay confirm fails.
       setupFutureUsage: 'off_session',
       appearance: elementsAppearance,
     };
-  }, [elementsAppearance, selectedPriceCents]);
+  }, [elementsAppearance, bookChargeCents]);
 
   useEffect(() => {
     if (!isPhoneViewport()) {
@@ -1697,7 +1718,9 @@ export default function BookClient({
               <input
                 type="tel"
                 value={phone}
-                onChange={(e) => setPhone(formatUsPhoneAsYouType(e.target.value))}
+                onChange={(e) =>
+                  setPhone(formatUsPhoneAsYouType(e.target.value, phone))
+                }
                 autoComplete="tel"
                 inputMode="numeric"
                 maxLength={14}
@@ -1801,6 +1824,12 @@ export default function BookClient({
                 service={analyticsServiceLabel(selected.title)}
                 payNow={paymentTiming === 'pay_now'}
                 quotedServicePriceCents={selected.priceCents}
+                tipPreset={tipPreset}
+                customTipInput={customTipInput}
+                onTipPreset={setTipPreset}
+                onCustomTipInput={setCustomTipInput}
+                tipCents={bookTipCents}
+                tipReady={bookTipReady}
                 returnPath="/book"
                 onBack={() => {
                   setShowCardCheckout(false);
@@ -1850,7 +1879,7 @@ export default function BookClient({
                   </span>
                   <span>
                     {paymentTiming === 'pay_now'
-                      ? selected.priceLabel
+                      ? formatTipUsd(bookChargeCents)
                       : '$0'}
                   </span>
                 </p>
@@ -1897,11 +1926,22 @@ export default function BookClient({
                     </span>
                     <span className={styles.payOptionHint}>
                       Save time at your appointment — charged{' '}
-                      {selected.priceLabel} now
+                      {formatTipUsd(bookChargeCents)} now
                     </span>
                   </span>
                 </label>
               </fieldset>
+
+              {paymentTiming === 'pay_now' && bookServiceCents > 0 ? (
+                <TipPicker
+                  serviceCents={bookServiceCents}
+                  preset={tipPreset}
+                  customInput={customTipInput}
+                  onPreset={setTipPreset}
+                  onCustomInput={setCustomTipInput}
+                  compact
+                />
+              ) : null}
 
               <hr className={styles.reviewRule} />
 
@@ -2048,7 +2088,7 @@ export default function BookClient({
             applePayAvailable === true ? (
               <div className={styles.footerTotal}>
                 <span className={styles.footerPrice}>
-                  {paymentTiming === 'pay_now' ? selected.priceLabel : '$0'}
+                  {paymentTiming === 'pay_now' ? formatTipUsd(bookChargeCents) : '$0'}
                 </span>
                 <span className={styles.footerHint}>
                   {paymentTiming === 'pay_now'
@@ -2080,6 +2120,7 @@ export default function BookClient({
                   />
                 </Elements>
                 <Elements
+                  key={`pay-now-${bookChargeCents > 0 ? bookChargeCents : 50}`}
                   stripe={stripePromise}
                   options={paymentElementsOptions}
                 >
@@ -2087,6 +2128,11 @@ export default function BookClient({
                     active={step === 'pay' && paymentTiming === 'pay_now'}
                     paymentTiming="pay_now"
                     serviceTitle={selected.title}
+                    tipBody={
+                      bookTipReady
+                        ? tipRequestBody(tipPreset, parseTipDollars(customTipInput))
+                        : null
+                    }
                     createPayload={createPayload}
                     calBookingUid={holdUid}
                     submitting={submitting}
@@ -2107,6 +2153,7 @@ export default function BookClient({
                 type="button"
                 className={styles.secondaryBtn}
                 onClick={() => void submitBooking()}
+                disabled={paymentTiming === 'pay_now' && !bookTipReady}
               >
                 {paymentTiming === 'pay_now'
                   ? 'Pay with card'
@@ -2130,7 +2177,7 @@ export default function BookClient({
           <footer className={`${styles.footer} ${styles.footerStack}`}>
             <div className={styles.footerTotal}>
               <span className={styles.footerPrice}>
-                {paymentTiming === 'pay_now' ? selected.priceLabel : '$0'}
+                {paymentTiming === 'pay_now' ? formatTipUsd(bookChargeCents) : '$0'}
               </span>
               <span className={styles.footerHint}>
                 {paymentTiming === 'pay_now'
@@ -2142,6 +2189,7 @@ export default function BookClient({
               type="button"
               className={styles.primaryBtn}
               onClick={() => void submitBooking()}
+              disabled={paymentTiming === 'pay_now' && !bookTipReady}
             >
               {paymentTiming === 'pay_now' ? 'Pay with card' : 'Continue with card'}
             </button>

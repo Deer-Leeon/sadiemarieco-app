@@ -149,8 +149,9 @@ export async function insertOnlinePrepaidSettlement(args: {
   calBookingUid: string | null;
   stripePaymentIntentId: string;
   baseAmountCents: number;
+  tipAmountCents?: number;
 }): Promise<TerminalPaymentSummary> {
-  const tipAmountCents = 0;
+  const tipAmountCents = Math.max(0, args.tipAmountCents ?? 0);
   const totalAmountCents = args.baseAmountCents + tipAmountCents;
   const { rows } = await sql.query(
     `INSERT INTO appointment_payments (

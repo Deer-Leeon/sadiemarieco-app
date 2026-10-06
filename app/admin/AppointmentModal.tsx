@@ -1609,7 +1609,11 @@ function PaymentBox({
               {isComp
                 ? 'No charge · settled without payment'
                 : isOnlinePrepaid
-                  ? `Service ${formatCentsUsd(payment.base_amount_cents)} · Card at booking`
+                  ? `Service ${formatCentsUsd(payment.base_amount_cents)}${
+                      payment.tip_amount_cents > 0
+                        ? ` + ${formatCentsUsd(payment.tip_amount_cents)} tip`
+                        : ''
+                    } · Card at booking`
                   : `Service ${formatCentsUsd(payment.base_amount_cents)}${
                       payment.tip_amount_cents > 0
                         ? ` + ${formatCentsUsd(payment.tip_amount_cents)} tip`

@@ -3,12 +3,14 @@
  *
  * Pay-now bootstrap for phone /book:
  *   1. Resolve (or create) Stripe Customer from Cal booking context.
- *   2. Create a PaymentIntent for quoted_service_price_cents with
- *      setup_future_usage so the card stays on file after charge.
+ *   2. Create a PaymentIntent for the quoted service plus an optional tip.
+ *      amount_details.tip marks the tip. setup_future_usage keeps the card
+ *      on file after the charge.
  *   3. Persist stripe_payment_intent_id on the pending appointment.
  *   4. Return { clientSecret } for Elements confirmPayment.
  */
 import { NextRequest, NextResponse } from 'next/server';
+import type Stripe from 'stripe';
 
 import {
   getAppointmentStripeByCalUid,
@@ -29,6 +31,11 @@ import {
   shouldEnforceStripeMode,
   stripeModeMismatchMessage,
 } from '@/lib/stripe-mode';
+import {
+  isTipPreset,
+  resolveTipCents,
+  type TipPreset,
+} from '@/lib/booking-tip';
 import { stripe } from '@/lib/stripe';
 import { stripeCardStatementFields } from '@/lib/stripe-statement-descriptor';
 
@@ -40,6 +47,8 @@ interface CreateBody {
   calBookingUid?: unknown;
   email?: unknown;
   name?: unknown;
+  tipPreset?: unknown;
+  tipCents?: unknown;
 }
 
 function errorMessage(err: unknown): string {
@@ -50,6 +59,8 @@ function parseBody(input: unknown): {
   calBookingUid: string;
   email: string;
   name: string;
+  tipPreset: TipPreset;
+  tipCents: number | null;
 } | { error: string } {
   if (!input || typeof input !== 'object') {
     return { error: 'invalid_body' };
@@ -64,10 +75,22 @@ function parseBody(input: unknown): {
     return { error: 'invalid_cal_booking_uid' };
   }
 
+  let tipPreset: TipPreset = 'none';
+  if (body.tipPreset != null && body.tipPreset !== '') {
+    if (!isTipPreset(body.tipPreset)) return { error: 'invalid_tip' };
+    tipPreset = body.tipPreset;
+  }
+  const tipCents =
+    typeof body.tipCents === 'number' && Number.isSafeInteger(body.tipCents)
+      ? body.tipCents
+      : null;
+
   return {
     calBookingUid,
     email: isValidEmail(rawEmail) ? rawEmail.trim().toLowerCase() : '',
     name: rawName.length > 0 && rawName.length <= 200 ? rawName : '',
+    tipPreset,
+    tipCents,
   };
 }
 
@@ -118,7 +141,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
 
-  const { calBookingUid, email, name } = parsed;
+  const { calBookingUid, email, name, tipPreset, tipCents: requestedTipCents } = parsed;
 
   try {
     const hold = await getAppointmentHoldByCalUid(calBookingUid);
@@ -157,8 +180,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const existing = await getAppointmentStripeByCalUid(calBookingUid);
-    const amountCents = Number(existing?.quoted_service_price_cents ?? 0);
-    if (!Number.isFinite(amountCents) || amountCents < 50) {
+    const serviceCents = Number(existing?.quoted_service_price_cents ?? 0);
+    if (!Number.isSafeInteger(serviceCents) || serviceCents < 50) {
       return NextResponse.json(
         {
           error: 'invalid_service_price',
@@ -168,6 +191,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 400 }
       );
     }
+    const tip = resolveTipCents(serviceCents, tipPreset, requestedTipCents);
+    if (!tip.ok) {
+      return NextResponse.json(
+        {
+          error: 'invalid_tip',
+          message: 'Enter a tip from $1 up to twice the service price, or choose no tip.',
+        },
+        { status: 400 }
+      );
+    }
+    const tipCents = tip.tipCents;
+    const amountCents = serviceCents + tipCents;
 
     let stripeCustomerId =
       existing?.stripe_customer_id &&
@@ -196,7 +231,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const paymentIntent = await stripe.paymentIntents.create({
+    const createParams: Stripe.PaymentIntentCreateParams = {
       amount: amountCents,
       currency: 'usd',
       customer: stripeCustomerId,
@@ -211,9 +246,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       metadata: {
         cal_booking_uid: calBookingUid,
         payment_timing: 'pay_now',
+        tip_cents: String(tipCents),
+        tip_preset: tipPreset,
       },
-      description: 'Service payment at booking',
-    });
+      description:
+        tipCents > 0 ? 'Service and tip at booking' : 'Service payment at booking',
+    };
+    if (tipCents > 0) {
+      // Stripe categorizes this portion of the one charge as a tip.
+      // The installed create-params type omits amount_details.tip; the
+      // PaymentIntent object still returns it.
+      (
+        createParams as Stripe.PaymentIntentCreateParams & {
+          amount_details: { tip: { amount: number } };
+        }
+      ).amount_details = { tip: { amount: tipCents } };
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create(createParams);
 
     if (!paymentIntent.client_secret) {
       return NextResponse.json(
@@ -265,6 +315,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       stripeCustomerId,
       paymentIntentId: paymentIntent.id,
       amountCents,
+      serviceCents,
+      tipCents,
       dbLinked,
     });
   } catch (err) {

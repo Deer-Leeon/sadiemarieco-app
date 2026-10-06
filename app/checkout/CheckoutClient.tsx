@@ -26,6 +26,12 @@ import {
   formatServiceTitleForDisplay,
 } from '@/lib/format-booking-time';
 import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
+import {
+  parseTipDollars,
+  resolveTipCents,
+  tipRequestBody,
+  type TipPreset,
+} from '@/lib/booking-tip';
 import { prefersApplePayDevice } from '@/lib/prefers-apple-pay';
 import { isInAppBrowser } from '@/lib/in-app-browser';
 import { type StripeElementsOptions } from '@stripe/stripe-js';
@@ -46,6 +52,7 @@ import {
 import CheckoutApplePayHost, {
   type CheckoutApplePayConfirmed,
 } from './CheckoutApplePayHost';
+import { PayNowLines, TipPicker } from './TipPicker';
 
 function trackCheckoutEvent(
   name: string,
@@ -298,6 +305,20 @@ function formatUsdFromCents(cents: number | null): string {
   }).format(cents / 100);
 }
 
+function tipFromSearch(params: { get(name: string): string | null }): {
+  preset: TipPreset;
+  customInput: string;
+} {
+  const raw = params.get('tip');
+  if (raw === '10' || raw === '15' || raw === '20' || raw === 'custom') {
+    return {
+      preset: raw,
+      customInput: raw === 'custom' ? (params.get('tipDollars') ?? '') : '',
+    };
+  }
+  return { preset: 'none', customInput: '' };
+}
+
 function prefersPhoneBooker(): boolean {
   if (typeof window === 'undefined') return false;
   return window.matchMedia(`(max-width: ${BOOK_PHONE_MAX_WIDTH_PX}px)`).matches;
@@ -444,6 +465,9 @@ export default function CheckoutClient({
   const [paymentTiming, setPaymentTiming] = useState<BookingPaymentTiming>(
     urlPayNow ? 'pay_now' : 'pay_later'
   );
+  const initialTip = tipFromSearch(params);
+  const [tipPreset, setTipPreset] = useState<TipPreset>(initialTip.preset);
+  const [customTipInput, setCustomTipInput] = useState(initialTip.customInput);
   // Drawer already showed pay-later / pay-now. payMode skips that step
   // and opens the card form. Bare /checkout?uid= still shows choose.
   const [payPhase, setPayPhase] = useState<'choose' | 'card' | 'details'>(
@@ -529,6 +553,12 @@ export default function CheckoutClient({
         'payMode',
         timing === 'pay_now' ? 'now' : 'later'
       );
+      if (timing === 'pay_now' && tipPreset !== 'none') {
+        url.searchParams.set('tip', tipPreset);
+        if (tipPreset === 'custom' && customTipInput.trim()) {
+          url.searchParams.set('tipDollars', customTipInput.trim());
+        }
+      }
       if (contactName) url.searchParams.set('name', contactName);
       else url.searchParams.delete('name');
       if (contactEmail) url.searchParams.set('email', contactEmail);
@@ -538,7 +568,7 @@ export default function CheckoutClient({
       markKeepHoldThroughNavigation(uid);
       target.location.replace(url.toString());
     },
-    [uid, contactName, contactEmail]
+    [uid, contactName, contactEmail, tipPreset, customTipInput]
   );
 
   const goBackToPayChoice = useCallback(() => {
@@ -919,6 +949,20 @@ export default function CheckoutClient({
   }, [uid, holdExpired, threeDsSetupIntentId, confirmed]);
 
   const payNow = paymentTiming === 'pay_now';
+  const serviceCents =
+    quotedServicePriceCents && quotedServicePriceCents > 0
+      ? quotedServicePriceCents
+      : 0;
+  const tipResolved = payNow
+    ? resolveTipCents(
+        serviceCents,
+        tipPreset,
+        tipPreset === 'custom' ? parseTipDollars(customTipInput) : null
+      )
+    : { ok: true as const, tipCents: 0 };
+  const tipCents = tipResolved.ok ? tipResolved.tipCents : 0;
+  const tipReady = !payNow || tipResolved.ok;
+  const chargeCents = serviceCents + tipCents;
 
   const setupApplePayOptions: StripeElementsOptions = useMemo(
     () => ({
@@ -932,29 +976,21 @@ export default function CheckoutClient({
   );
 
   const paymentApplePayOptions: StripeElementsOptions = useMemo(() => {
-    const amount =
-      quotedServicePriceCents && quotedServicePriceCents > 0
-        ? quotedServicePriceCents
-        : 50;
     return {
       mode: 'payment',
-      amount,
+      amount: chargeCents > 0 ? chargeCents : 50,
       currency: 'usd',
       paymentMethodTypes: ['card'],
       setupFutureUsage: 'off_session',
       appearance: STRIPE_APPEARANCE,
     };
-  }, [quotedServicePriceCents]);
+  }, [chargeCents]);
 
   const cardElementsOptions: StripeElementsOptions = useMemo(() => {
     if (payNow) {
-      const amount =
-        quotedServicePriceCents && quotedServicePriceCents > 0
-          ? quotedServicePriceCents
-          : 50;
       return {
         mode: 'payment' as const,
-        amount,
+        amount: chargeCents > 0 ? chargeCents : 50,
         currency: 'usd',
         appearance: STRIPE_APPEARANCE,
         paymentMethodTypes: ['card'],
@@ -968,7 +1004,7 @@ export default function CheckoutClient({
       paymentMethodTypes: ['card'],
       setupFutureUsage: 'off_session',
     };
-  }, [payNow, quotedServicePriceCents]);
+  }, [payNow, chargeCents]);
 
   return (
     <main
@@ -1053,6 +1089,12 @@ export default function CheckoutClient({
                   setApplePayError(null);
                 }}
                 quotedServicePriceCents={quotedServicePriceCents}
+                tipPreset={tipPreset}
+                customTipInput={customTipInput}
+                onTipPreset={setTipPreset}
+                onCustomTipInput={setCustomTipInput}
+                tipCents={tipCents}
+                tipReady={tipReady}
                 compact={embedInDrawer}
                 mountApplePay={mountApplePay}
                 applePayAvailable={applePayAvailable}
@@ -1094,6 +1136,12 @@ export default function CheckoutClient({
                   service={analyticsService}
                   payNow={payNow}
                   quotedServicePriceCents={quotedServicePriceCents}
+                  tipPreset={tipPreset}
+                  customTipInput={customTipInput}
+                  onTipPreset={setTipPreset}
+                  onCustomTipInput={setCustomTipInput}
+                  tipCents={tipCents}
+                  tipReady={tipReady}
                   onBack={goBackToPayChoice}
                   onConfirmed={(result) =>
                     markConfirmed({ ...result, name: contactName })
@@ -1233,7 +1281,9 @@ function CheckoutDetailsForm({
           type="tel"
           inputMode="numeric"
           value={phoneValue}
-          onChange={(e) => setPhoneValue(formatUsPhoneAsYouType(e.target.value))}
+          onChange={(e) =>
+            setPhoneValue(formatUsPhoneAsYouType(e.target.value, phoneValue))
+          }
           autoComplete="tel"
           maxLength={14}
           placeholder="(555) 123-4567"
@@ -1284,6 +1334,12 @@ function CheckoutPayChoice({
   paymentTiming,
   onPaymentTimingChange,
   quotedServicePriceCents,
+  tipPreset,
+  customTipInput,
+  onTipPreset,
+  onCustomTipInput,
+  tipCents,
+  tipReady,
   compact = false,
   mountApplePay,
   applePayAvailable,
@@ -1306,6 +1362,12 @@ function CheckoutPayChoice({
   paymentTiming: BookingPaymentTiming;
   onPaymentTimingChange: (next: BookingPaymentTiming) => void;
   quotedServicePriceCents: number | null;
+  tipPreset: TipPreset;
+  customTipInput: string;
+  onTipPreset: (preset: TipPreset) => void;
+  onCustomTipInput: (value: string) => void;
+  tipCents: number;
+  tipReady: boolean;
   compact?: boolean;
   mountApplePay: boolean;
   applePayAvailable: boolean | null;
@@ -1322,7 +1384,9 @@ function CheckoutPayChoice({
   onReturnToDrawer?: () => void;
 }) {
   const payNow = paymentTiming === 'pay_now';
-  const priceLabel = formatUsdFromCents(quotedServicePriceCents);
+  const dueLabel = formatUsdFromCents(
+    (quotedServicePriceCents ?? 0) + (payNow ? tipCents : 0)
+  );
   const applePayLive = mountApplePay && applePayAvailable === true;
   const cardLabel = payNow ? 'Pay with card' : 'Continue with card';
 
@@ -1362,26 +1426,34 @@ function CheckoutPayChoice({
         </p>
       )}
 
-      <div
-        className={
-          compact
-            ? 'mt-3 flex items-baseline justify-between border-b border-stone-100 pb-3'
-            : 'mt-6 flex items-baseline justify-between border-b border-stone-100 pb-4'
-        }
-      >
-        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
-          Due today
-        </p>
-        <p
+      {payNow && (quotedServicePriceCents ?? 0) > 0 ? (
+        <PayNowLines
+          serviceCents={quotedServicePriceCents ?? 0}
+          tipCents={tipCents}
+          compact={compact}
+        />
+      ) : (
+        <div
           className={
             compact
-              ? 'font-serif text-xl text-stone-900'
-              : 'font-serif text-2xl text-stone-900'
+              ? 'mt-3 flex items-baseline justify-between border-b border-stone-100 pb-3'
+              : 'mt-6 flex items-baseline justify-between border-b border-stone-100 pb-4'
           }
         >
-          {payNow ? priceLabel || 'Pay now' : '$0'}
-        </p>
-      </div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+            Due today
+          </p>
+          <p
+            className={
+              compact
+                ? 'font-serif text-xl text-stone-900'
+                : 'font-serif text-2xl text-stone-900'
+            }
+          >
+            $0
+          </p>
+        </div>
+      )}
 
       <fieldset
         disabled={applePaySubmitting}
@@ -1437,11 +1509,22 @@ function CheckoutPayChoice({
             </span>
             <span className="mt-0.5 block text-xs leading-relaxed text-stone-500">
               Save time at your appointment
-              {priceLabel ? ` — charged ${priceLabel} now` : ''}
+              {dueLabel ? ` — charged ${dueLabel} now` : ''}
             </span>
           </span>
         </label>
       </fieldset>
+
+      {payNow && (quotedServicePriceCents ?? 0) > 0 ? (
+        <TipPicker
+          serviceCents={quotedServicePriceCents ?? 0}
+          preset={tipPreset}
+          customInput={customTipInput}
+          onPreset={onTipPreset}
+          onCustomInput={onCustomTipInput}
+          compact={compact}
+        />
+      ) : null}
 
       <p
         className={
@@ -1495,7 +1578,11 @@ function CheckoutPayChoice({
             </Elements>
           </div>
           <div className="absolute inset-0">
-            <Elements stripe={stripePromise} options={paymentApplePayOptions}>
+            <Elements
+              key={`pay-now-${Math.max((quotedServicePriceCents ?? 0) + tipCents, 50)}`}
+              stripe={stripePromise}
+              options={paymentApplePayOptions}
+            >
               <CheckoutApplePayHost
                 active={paymentTiming === 'pay_now'}
                 paymentTiming="pay_now"
@@ -1503,6 +1590,11 @@ function CheckoutPayChoice({
                 name={name}
                 email={email}
                 serviceTitle={serviceTitle}
+                tipBody={
+                  tipReady
+                    ? tipRequestBody(tipPreset, parseTipDollars(customTipInput))
+                    : null
+                }
                 submitting={applePaySubmitting}
                 onSubmittingChange={onApplePaySubmittingChange}
                 onError={onApplePayError}
@@ -1526,14 +1618,15 @@ function CheckoutPayChoice({
       <button
         type="button"
         onClick={onPayWithCard}
+        disabled={payNow && !tipReady}
         className={
           applePayLive
             ? `${
                 compact ? 'mt-3 py-2.5' : 'mt-4 py-3'
-              } relative z-10 inline-flex w-full items-center justify-center rounded-md border border-stone-900 bg-white px-5 text-sm font-medium tracking-wide text-stone-900 transition-colors hover:bg-stone-50`
+              } relative z-10 inline-flex w-full items-center justify-center rounded-md border border-stone-900 bg-white px-5 text-sm font-medium tracking-wide text-stone-900 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50`
             : `${
                 compact ? 'mt-4 py-2.5' : 'mt-6 py-3'
-              } relative z-10 inline-flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-5 text-sm font-medium tracking-wide text-stone-50 shadow-none transition-colors hover:bg-stone-800 active:bg-stone-900`
+              } relative z-10 inline-flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-5 text-sm font-medium tracking-wide text-stone-50 shadow-none transition-colors hover:bg-stone-800 active:bg-stone-900 disabled:cursor-not-allowed disabled:opacity-50`
         }
       >
         {cardLabel}
@@ -1679,6 +1772,12 @@ interface FormProps {
   service: string;
   payNow: boolean;
   quotedServicePriceCents: number | null;
+  tipPreset?: TipPreset;
+  customTipInput?: string;
+  onTipPreset?: (preset: TipPreset) => void;
+  onCustomTipInput?: (value: string) => void;
+  tipCents?: number;
+  tipReady?: boolean;
   onBack?: () => void;
   /** 3DS / bank redirect target. /book when the card form is inlined on the phone booker. */
   returnPath?: string;
@@ -1798,6 +1897,12 @@ export function CheckoutForm({
   service,
   payNow,
   quotedServicePriceCents,
+  tipPreset = 'none',
+  customTipInput = '',
+  onTipPreset,
+  onCustomTipInput,
+  tipCents = 0,
+  tipReady = true,
   onBack,
   returnPath = '/checkout',
   onConfirmed,
@@ -1885,6 +1990,10 @@ export function CheckoutForm({
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (holdExpired || !stripe || !elements || submitting) return;
+    if (payNow && !tipReady) {
+      setSubmitError('Enter a tip from $1 up to twice the service price, or choose No tip.');
+      return;
+    }
 
     trackCheckoutEvent(BOOKING_ANALYTICS_EVENTS.CHECKOUT_PAYMENT_ATTEMPT, {
       service,
@@ -1918,6 +2027,9 @@ export function CheckoutForm({
               calBookingUid: uid,
               ...(name ? { name } : {}),
               ...(email ? { email } : {}),
+              ...(payNow
+                ? tipRequestBody(tipPreset, parseTipDollars(customTipInput))
+                : {}),
             }),
           },
           30_000
@@ -2066,15 +2178,16 @@ export function CheckoutForm({
       <p className="mt-2 text-sm leading-relaxed text-stone-500">
         {payNow ? (
           <>
-            You&rsquo;ll be charged now for the full service. Your card stays on
-            file for cancellation policy if needed.
+            You&rsquo;ll be charged now for the service
+            {tipCents > 0 ? ' and tip' : ''}. Your card stays on file for
+            cancellation policy if needed.
             {quotedServicePriceCents && quotedServicePriceCents > 0 ? (
               <span className="mt-1 block font-medium text-stone-700">
                 Charged today:{' '}
                 {new Intl.NumberFormat('en-US', {
                   style: 'currency',
                   currency: 'USD',
-                }).format(quotedServicePriceCents / 100)}
+                }).format((quotedServicePriceCents + tipCents) / 100)}
               </span>
             ) : null}
           </>
@@ -2087,6 +2200,16 @@ export function CheckoutForm({
           </>
         )}
       </p>
+
+      {payNow && onTipPreset && onCustomTipInput && (quotedServicePriceCents ?? 0) > 0 ? (
+        <TipPicker
+          serviceCents={quotedServicePriceCents ?? 0}
+          preset={tipPreset}
+          customInput={customTipInput}
+          onPreset={onTipPreset}
+          onCustomInput={onCustomTipInput}
+        />
+      ) : null}
 
       {name && (
         <div className="mt-6 rounded-md border border-stone-200 bg-stone-50 px-4 py-3">
@@ -2144,7 +2267,7 @@ export function CheckoutForm({
 
       <button
         type="submit"
-        disabled={!ready || submitting || holdExpired}
+        disabled={!ready || submitting || holdExpired || (payNow && !tipReady)}
         className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-5 py-3 text-sm font-medium tracking-wide text-stone-50 shadow-none transition-colors hover:bg-stone-800 active:bg-stone-900 disabled:cursor-not-allowed disabled:bg-stone-400"
       >
         {submitting ? (
