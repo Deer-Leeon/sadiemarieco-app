@@ -323,6 +323,58 @@ function splitPersonName(full: string): { first: string; last: string } {
 
 const STEPS: Step[] = ['service', 'when', 'contact', 'review', 'pay'];
 
+const TIP_REVEAL_MS = 850;
+
+function scrollableAncestor(el: HTMLElement): HTMLElement | null {
+  let node = el.parentElement;
+  while (node) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if (
+      (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') &&
+      node.scrollHeight > node.clientHeight + 1
+    ) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
+/** Ease the tip block up until its bottom sits just above the pay bar. */
+function revealTipAbovePayDock(
+  tip: HTMLElement,
+  frameRef: { current: number | null }
+) {
+  const dock = document.querySelector<HTMLElement>('[data-pay-dock]');
+  const limit = dock
+    ? dock.getBoundingClientRect().top - 18
+    : window.innerHeight - 18;
+  const delta = tip.getBoundingClientRect().bottom - limit;
+  if (delta <= 8) return;
+
+  const scroller = scrollableAncestor(tip);
+  const start = scroller ? scroller.scrollTop : window.scrollY;
+  const apply = (top: number) => {
+    if (scroller) scroller.scrollTop = top;
+    else window.scrollTo(0, top);
+  };
+
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    apply(start + delta);
+    return;
+  }
+
+  const t0 = performance.now();
+  const tick = (now: number) => {
+    const progress = Math.min(1, (now - t0) / TIP_REVEAL_MS);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    apply(start + delta * eased);
+    if (progress < 1) frameRef.current = requestAnimationFrame(tick);
+    else frameRef.current = null;
+  };
+  frameRef.current = requestAnimationFrame(tick);
+}
+
 function BookDayScroller({
   dayOptions,
   slotsByDay,
@@ -552,6 +604,35 @@ export default function BookClient({
   const bookTipCents = bookTipResolved.ok ? bookTipResolved.tipCents : 0;
   const bookTipReady = !payNowSelected || bookTipResolved.ok;
   const bookChargeCents = bookServiceCents + bookTipCents;
+  const tipRevealRef = useRef<HTMLDivElement | null>(null);
+  const tipScrollFrame = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (
+      step !== 'pay' ||
+      !payNowSelected ||
+      bookServiceCents <= 0 ||
+      showCardCheckout
+    ) {
+      return;
+    }
+    const tip = tipRevealRef.current;
+    if (!tip) return;
+
+    let cancelled = false;
+    const frame = requestAnimationFrame(() => {
+      if (cancelled) return;
+      revealTipAbovePayDock(tip, tipScrollFrame);
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      if (tipScrollFrame.current != null) {
+        cancelAnimationFrame(tipScrollFrame.current);
+        tipScrollFrame.current = null;
+      }
+    };
+  }, [step, payNowSelected, bookServiceCents, showCardCheckout, applePayAvailable]);
   const paymentElementsOptions: StripeElementsOptions = useMemo(() => {
     return {
       mode: 'payment',
@@ -1933,14 +2014,16 @@ export default function BookClient({
               </fieldset>
 
               {paymentTiming === 'pay_now' && bookServiceCents > 0 ? (
-                <TipPicker
-                  serviceCents={bookServiceCents}
-                  preset={tipPreset}
-                  customInput={customTipInput}
-                  onPreset={setTipPreset}
-                  onCustomInput={setCustomTipInput}
-                  compact
-                />
+                <div ref={tipRevealRef}>
+                  <TipPicker
+                    serviceCents={bookServiceCents}
+                    preset={tipPreset}
+                    customInput={customTipInput}
+                    onPreset={setTipPreset}
+                    onCustomInput={setCustomTipInput}
+                    compact
+                  />
+                </div>
               ) : null}
 
               <div className={`${styles.reviewBlock} ${styles.payPolicy}`}>
@@ -2077,6 +2160,11 @@ export default function BookClient({
                 ? `${styles.footer} ${styles.footerStack}`
                 : styles.payWarmShell
             }
+            {...(step === 'pay' &&
+            !showCardCheckout &&
+            applePayAvailable === true
+              ? { 'data-pay-dock': '' }
+              : {})}
             aria-hidden={
               step !== 'pay' || showCardCheckout || applePayAvailable !== true
             }
@@ -2172,7 +2260,7 @@ export default function BookClient({
           stripePromise &&
           applePayAvailable === true
         ) && (
-          <footer className={`${styles.footer} ${styles.footerStack}`}>
+          <footer className={`${styles.footer} ${styles.footerStack}`} data-pay-dock="">
             <div className={styles.footerTotal}>
               <span className={styles.footerPrice}>
                 {paymentTiming === 'pay_now' ? formatTipUsd(bookChargeCents) : '$0'}
