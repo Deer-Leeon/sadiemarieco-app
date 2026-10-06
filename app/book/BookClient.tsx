@@ -1943,9 +1943,7 @@ export default function BookClient({
                 />
               ) : null}
 
-              <hr className={styles.reviewRule} />
-
-              <div className={styles.reviewBlock}>
+              <div className={`${styles.reviewBlock} ${styles.payPolicy}`}>
                 <p className={styles.policyTitle}>Cancellation</p>
                 <p className={styles.policyCopy}>
                   24+ hours notice to cancel or reschedule. Inside 24 hours may

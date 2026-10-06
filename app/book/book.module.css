@@ -453,6 +453,10 @@
   margin-top: auto;
 }
 
+.payPolicy {
+  margin-top: 16px;
+}
+
 .reviewBlock + .reviewBlock {
   margin: 0;
 }
