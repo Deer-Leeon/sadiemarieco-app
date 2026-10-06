@@ -533,7 +533,7 @@ function AddClientModal({
                 type="tel"
                 value={phone}
                 onChange={(e) =>
-                  setPhone(formatUsPhoneAsYouType(e.target.value))
+                  setPhone(formatUsPhoneAsYouType(e.target.value, phone))
                 }
                 onBlur={() => setPhoneTouched(true)}
                 autoComplete="tel"

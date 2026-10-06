@@ -34,6 +34,7 @@ import {
 import { notifyBookingConfirmed } from '@/lib/booking-notifications';
 import { acceptOnCal } from '@/lib/cal-accept';
 import { CAL_BOOKINGS_API_VERSION } from '@/lib/cal-proxy';
+import { tipCentsFromAmountDetails } from '@/lib/booking-tip';
 import { stripe } from '@/lib/stripe';
 
 function errorMessage(err: unknown): string {
@@ -170,12 +171,16 @@ export async function reconcileSucceededBookingPayment(
   }
 
   if (intent.amount >= 50) {
+    const reportedTip = tipCentsFromAmountDetails(intent.amount_details);
+    const tipAmountCents = Math.min(reportedTip, intent.amount);
+    const baseAmountCents = intent.amount - tipAmountCents;
     try {
       await insertOnlinePrepaidSettlement({
         appointmentId,
         calBookingUid,
         stripePaymentIntentId: intent.id,
-        baseAmountCents: intent.amount,
+        baseAmountCents,
+        tipAmountCents,
       });
     } catch (err) {
       if (!isSettlementUniqueConflict(err)) {

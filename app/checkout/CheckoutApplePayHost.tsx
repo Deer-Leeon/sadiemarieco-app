@@ -31,6 +31,7 @@ import {
   BOOKING_ANALYTICS_EVENTS,
 } from '@/lib/booking-analytics';
 import type { BookingPaymentTiming } from '@/lib/appointment-stripe';
+import type { TipPreset } from '@/lib/booking-tip';
 import { applePayFriendlyError } from '@/lib/apple-pay-express';
 import { setKeepHoldThroughUnload } from '@/lib/abandon-hold-client';
 import { prefersApplePayDevice } from '@/lib/prefers-apple-pay';
@@ -62,6 +63,7 @@ type Props = {
   name: string;
   email: string;
   serviceTitle: string;
+  tipBody?: { tipPreset: TipPreset; tipCents?: number } | null;
   submitting: boolean;
   onSubmittingChange: (v: boolean) => void;
   onError: (message: string | null) => void;
@@ -94,6 +96,7 @@ export default function CheckoutApplePayHost({
   name,
   email,
   serviceTitle,
+  tipBody = null,
   submitting,
   onSubmittingChange,
   onError,
@@ -114,6 +117,7 @@ export default function CheckoutApplePayHost({
   const emailRef = useRef(email);
   const serviceTitleRef = useRef(serviceTitle);
   const paymentTimingRef = useRef(paymentTiming);
+  const tipBodyRef = useRef(tipBody);
   const activeRef = useRef(active);
   const inFlightRef = useRef(false);
   useEffect(() => {
@@ -122,8 +126,9 @@ export default function CheckoutApplePayHost({
     emailRef.current = email;
     serviceTitleRef.current = serviceTitle;
     paymentTimingRef.current = paymentTiming;
+    tipBodyRef.current = tipBody;
     activeRef.current = active;
-  }, [uid, name, email, serviceTitle, paymentTiming, active]);
+  }, [uid, name, email, serviceTitle, paymentTiming, tipBody, active]);
 
   const onReady = useCallback(
     (event: StripeExpressCheckoutElementReadyEvent) => {
@@ -141,6 +146,10 @@ export default function CheckoutApplePayHost({
 
   const onClick = useCallback(
     (event: StripeExpressCheckoutElementClickEvent) => {
+      if (paymentTimingRef.current === 'pay_now' && !tipBodyRef.current) {
+        onError('Enter a tip from $1 up to twice the service price, or choose No tip.');
+        return;
+      }
       onError(null);
       event.resolve({});
     },
@@ -205,6 +214,9 @@ export default function CheckoutApplePayHost({
               calBookingUid,
               ...(bookingName ? { name: bookingName } : {}),
               ...(bookingEmail ? { email: bookingEmail } : {}),
+              ...(timing === 'pay_now' && tipBodyRef.current
+                ? tipBodyRef.current
+                : {}),
             }),
           },
           30_000
