@@ -128,6 +128,11 @@ export default function SingleDayModal({
   );
 
   const header = studioHeaderParts(activeDate);
+  const collectedCents = useMemo(
+    () => collectedCentsForDay(positioned.map((item) => item.appointment)),
+    [positioned]
+  );
+  const collectedLabel = formatUsdFromCents(collectedCents);
 
   const hatchBands = useMemo(
     () =>
@@ -152,11 +157,12 @@ export default function SingleDayModal({
           onClick={(e) => e.stopPropagation()}
           role="dialog"
           aria-modal="true"
-          aria-label={`Schedule on ${header.weekday}, ${header.monthDay}`}
+          aria-label={`Schedule on ${header.weekday}, ${header.monthDay}. ${collectedLabel} collected.`}
         >
           <ModalHeader
             weekday={header.weekday}
             monthDay={header.monthDay}
+            collectedLabel={collectedLabel}
             onPrev={() => setActiveDate((d) => subDays(d, 1))}
             onNext={() => setActiveDate((d) => addDays(d, 1))}
             onClose={onClose}
@@ -186,12 +192,14 @@ export default function SingleDayModal({
 function ModalHeader({
   weekday,
   monthDay,
+  collectedLabel,
   onPrev,
   onNext,
   onClose,
 }: {
   weekday: string;
   monthDay: string;
+  collectedLabel: string;
   onPrev: () => void;
   onNext: () => void;
   onClose: () => void;
@@ -202,7 +210,7 @@ function ModalHeader({
         type="button"
         onClick={onPrev}
         aria-label="Previous day"
-        className="absolute left-4 inline-flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 transition-colors hover:bg-stone-100"
+        className="absolute left-4 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 transition-colors hover:bg-stone-100"
       >
         <ChevronLeft className="h-4 w-4" />
       </button>
@@ -212,9 +220,17 @@ function ModalHeader({
           {weekday}
         </p>
         <h2 className="font-serif text-2xl text-stone-900">{monthDay}</h2>
+        <p className="mt-1 flex items-baseline justify-center gap-2">
+          <span className="font-serif text-[15px] tabular-nums tracking-tight text-stone-800">
+            {collectedLabel}
+          </span>
+          <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-stone-400">
+            Collected
+          </span>
+        </p>
       </div>
 
-      <div className="absolute right-4 flex items-center gap-2">
+      <div className="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-2">
         <button
           type="button"
           onClick={onNext}
@@ -273,6 +289,32 @@ function DayTimeline({
       />
     </div>
   );
+}
+
+/** Card, cash, and online payments already settled, including tips and extras. */
+function collectedCentsForDay(appointments: Appointment[]): number {
+  let cents = 0;
+  const add = (apt: Appointment) => {
+    const payment = apt.terminal_payment;
+    if (payment?.status !== 'succeeded') return;
+    const total = Number(payment.total_amount_cents);
+    if (Number.isFinite(total) && total > 0) cents += total;
+  };
+  for (const apt of appointments) {
+    add(apt);
+    for (const extra of apt.extras ?? []) add(extra);
+  }
+  return cents;
+}
+
+function formatUsdFromCents(cents: number): string {
+  const dollars = cents / 100;
+  return dollars.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function TimeLabelColumn() {
