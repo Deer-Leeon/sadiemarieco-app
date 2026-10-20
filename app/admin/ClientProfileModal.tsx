@@ -1373,11 +1373,7 @@ function FeeWaivePassesBar({
               type="button"
               onClick={() => onConfirm(confirming.kind, confirming.action)}
               disabled={grantingWaive}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-white transition-colors disabled:opacity-50 ${
-                isRevoke
-                  ? 'bg-rose-700 hover:bg-rose-800'
-                  : 'border border-stone-900 bg-stone-900 hover:bg-stone-800'
-              }`}
+              className="inline-flex items-center gap-1.5 rounded-full border border-stone-900 bg-stone-900 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
             >
               {grantingWaive && (
                 <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
@@ -1442,7 +1438,7 @@ function FeeWaivePassCard({
           type="button"
           onClick={onRevoke}
           disabled={busy}
-          className="mt-2 rounded-md border border-rose-300/80 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-rose-800 transition-colors hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/60 disabled:opacity-50"
+          className="mt-2 text-xs font-normal text-stone-500 transition-colors hover:text-stone-700 hover:underline focus-visible:outline-none focus-visible:underline disabled:opacity-50"
         >
           Remove free pass
         </button>
