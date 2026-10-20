@@ -50,6 +50,7 @@ import {
 
 import BookPayErrorBoundary from './BookPayErrorBoundary';
 import BookApplePayHost, { type BookConfirmed } from './BookApplePayHost';
+import { BookMonthCalendar } from './BookMonthCalendar';
 import BookTopBar from './BookTopBar';
 import { CheckoutForm } from '@/app/checkout/CheckoutClient';
 import { TipPicker, formatTipUsd } from '@/app/checkout/TipPicker';
@@ -96,6 +97,7 @@ export type BookQuery = {
   setupIntent: string;
   paymentIntent: string;
   uid: string;
+  embed: string;
 };
 
 function trackBook(name: string, data?: Record<string, string | number | boolean | null>) {
@@ -228,6 +230,7 @@ async function fetchBookSlots(
   slug: string,
   rangeStart: string,
   rangeEnd: string,
+  extraSlugs: string[] = [],
   parentSignal?: AbortSignal
 ): Promise<Record<string, string[]>> {
   const params = new URLSearchParams({
@@ -235,6 +238,7 @@ async function fetchBookSlots(
     date: rangeStart,
     end: rangeEnd,
   });
+  for (const extra of extraSlugs) params.append('extra', extra);
   const controller = new AbortController();
   const onParentAbort = () => controller.abort();
   if (parentSignal?.aborted) {
@@ -496,6 +500,7 @@ export default function BookClient({
   const router = useRouter();
   const presetSlug = bookQuery.service;
   const resumeUidParam = bookQuery.resumeCheckout;
+  const embed = bookQuery.embed === '1';
 
   const ready = true;
   const [step, setStep] = useState<Step>(() =>
@@ -504,6 +509,8 @@ export default function BookClient({
   const [services, setServices] = useState<BookService[]>(initialServices);
   const [servicesError, setServicesError] = useState<string | null>(null);
   const [selected, setSelected] = useState<BookService | null>(null);
+  const [extras, setExtras] = useState<BookService[]>([]);
+  const [extrasOpen, setExtrasOpen] = useState(false);
 
   const [dayOptions, setDayOptions] = useState<string[]>([]);
   const [selectedDay, setSelectedDay] = useState<string>('');
@@ -646,11 +653,9 @@ export default function BookClient({
   }, [elementsAppearance, bookChargeCents]);
 
   useEffect(() => {
-    if (!isPhoneViewport()) {
-      window.location.replace('/#services');
-      return;
-    }
-  }, []);
+    if (embed || isPhoneViewport()) return;
+    window.location.replace('/#services');
+  }, [embed]);
 
   useEffect(() => {
     if (!ready) return;
@@ -791,11 +796,13 @@ export default function BookClient({
         keepSelection?: boolean;
         restoreStart?: string | null;
         waitForRestore?: boolean;
+        extraSlugs?: string[];
       }
     ) => {
       const restoreStart = options?.restoreStart ?? null;
       const waitForRestore = Boolean(options?.waitForRestore && restoreStart);
       const keepSelection = Boolean(options?.keepSelection);
+      const extraSlugs = options?.extraSlugs ?? [];
 
       const applyRestore = (incoming: Record<string, string[]>) => {
         if (!restoreStart) return incoming;
@@ -822,7 +829,7 @@ export default function BookClient({
           while (Date.now() < deadline) {
             try {
               const probe = ymd
-                ? await fetchBookSlots(slug, ymd, ymd)
+                ? await fetchBookSlots(slug, ymd, ymd, extraSlugs)
                 : {};
               if (slotsIncludeInstant(probe, restoreStart)) {
                 await sleepMs(SLOT_RELEASE_SETTLE_MS);
@@ -866,7 +873,7 @@ export default function BookClient({
       setSlotsByDay({});
 
       const fetchRange = (rangeStart: string, rangeEnd: string) =>
-        fetchBookSlots(slug, rangeStart, rangeEnd, loadAbort.signal);
+        fetchBookSlots(slug, rangeStart, rangeEnd, extraSlugs, loadAbort.signal);
 
       const paintSlots = (
         incoming: Record<string, string[]>,
@@ -1082,10 +1089,14 @@ export default function BookClient({
   useEffect(() => {
     if (resumeUidParam) return;
     if (step !== 'when' || !selected?.slug) return;
-    if (slotsLoadedForSlugRef.current === selected.slug) return;
-    slotsLoadedForSlugRef.current = selected.slug;
-    void loadSlots(selected.slug);
-  }, [step, selected?.slug, loadSlots, resumeUidParam]);
+    const slotKey = `${selected.slug}|${extras.map((s) => s.slug).join(',')}`;
+    if (slotsLoadedForSlugRef.current === slotKey) return;
+    slotsLoadedForSlugRef.current = slotKey;
+    setSelectedStart(null);
+    void loadSlots(selected.slug, {
+      extraSlugs: extras.map((s) => s.slug),
+    });
+  }, [step, selected?.slug, extras, loadSlots, resumeUidParam]);
 
   useEffect(() => {
     return () => {
@@ -1116,6 +1127,18 @@ export default function BookClient({
   const fullName = useMemo(
     () => [firstName.trim(), lastName.trim()].filter(Boolean).join(' '),
     [firstName, lastName]
+  );
+  const visitServices = useMemo(
+    () => (selected ? [selected, ...extras] : []),
+    [selected, extras]
+  );
+  const visitPriceCents = visitServices.reduce((n, s) => n + s.priceCents, 0);
+  const visitDurationMins = visitServices.reduce((n, s) => n + s.durationMins, 0);
+  const visitPriceLabel = `$${Number.isInteger(visitPriceCents / 100) ? visitPriceCents / 100 : (visitPriceCents / 100).toFixed(2)}`;
+  const visitDurationLabel = `${visitDurationMins} min`;
+  const extraChoices = services.filter(
+    (s) =>
+      s.slug !== selected?.slug && !extras.some((extra) => extra.slug === s.slug)
   );
 
   // Rare Apple Pay / wallet 3DS redirect return onto /book.
@@ -1306,6 +1329,7 @@ export default function BookClient({
           restoreStart: releasedStart,
           waitForRestore: Boolean(releasedStart),
           keepSelection: hasCache,
+          extraSlugs: extras.map((s) => s.slug),
         });
       }
       setSubmitError(
@@ -1314,6 +1338,38 @@ export default function BookClient({
     })();
   }, [holdExpired, holdUid, abandonHold, selected?.slug, selectedStart, loadSlots]);
 
+  useEffect(() => {
+    if (!embed || !selected) return;
+    window.parent.postMessage(
+      {
+        type: 'sadie-book:summary',
+        title: selected.title,
+        subtitle: [visitPriceLabel, visitDurationLabel].filter(Boolean).join(' · '),
+      },
+      window.location.origin
+    );
+    window.parent.postMessage(
+      { type: 'sadie-book:extras', open: extrasOpen },
+      window.location.origin
+    );
+  }, [embed, selected, visitPriceLabel, visitDurationLabel, extrasOpen]);
+
+  useEffect(() => {
+    if (!embed) return;
+    const onMsg = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== 'sadie-book:back') return;
+      if (extrasOpen) {
+        setExtrasOpen(false);
+        return;
+      }
+      goBackRef.current();
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, [embed, extrasOpen]);
+
+  const goBackRef = useRef<() => void>(() => {});
   const goBack = () => {
     if (showCardCheckout) {
       setShowCardCheckout(false);
@@ -1350,6 +1406,7 @@ export default function BookClient({
             restoreStart: releasedStart,
             waitForRestore: Boolean(releasedStart) && !hasCache,
             keepSelection: hasCache,
+            extraSlugs: extras.map((s) => s.slug),
           });
         }
       })();
@@ -1358,8 +1415,11 @@ export default function BookClient({
     setSubmitError(null);
     setContactError(null);
   };
+  goBackRef.current = goBack;
 
   const pickService = (service: BookService) => {
+    setExtras([]);
+    setExtrasOpen(false);
     void abandonHold();
     slotsLoadedForSlugRef.current = null;
     slotsAbortRef.current?.abort();
@@ -1490,6 +1550,7 @@ export default function BookClient({
         },
         body: JSON.stringify({
           slug: selected.slug,
+          extras: extras.map((s) => s.slug),
           start: selectedStart,
           firstName: firstName.trim(),
           lastName: lastName.trim(),
@@ -1625,13 +1686,15 @@ export default function BookClient({
 
   return (
     <div className={styles.shell}>
-      <BookTopBar
-        showBack={step !== 'service'}
-        onBack={goBack}
-        onHomeClick={() => {
-          void abandonHold();
-        }}
-      />
+      {!embed ? (
+        <BookTopBar
+          showBack={step !== 'service'}
+          onBack={goBack}
+          onHomeClick={() => {
+            void abandonHold();
+          }}
+        />
+      ) : null}
 
       <div className={styles.progress} aria-hidden="true">
         {STEPS.map((s, i) => (
@@ -1714,8 +1777,27 @@ export default function BookClient({
         {step === 'when' && selected && !resumeUidParam && (
           <section className={styles.section}>
             <p className={styles.selectedService}>
-              {selected.title} · {selected.priceLabel} · {selected.durationLabel}
+              {visitServices.map((s) => s.title).join(' + ')} · {visitPriceLabel} · {visitDurationLabel}
             </p>
+            {extras.length > 0 ? (
+              <ul className={styles.extraChips}>
+                {extras.map((extra) => (
+                  <li key={extra.slug} className={styles.extraChip}>
+                    <span>
+                      {extra.title} · {extra.durationLabel}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExtras((list) => list.filter((s) => s.slug !== extra.slug))
+                      }
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {slotsError && <p className={styles.error}>{slotsError}</p>}
             {slotsLoading ? (
               <div
@@ -1731,7 +1813,22 @@ export default function BookClient({
                 </p>
               </div>
             ) : null}
-            {!slotsLoading && selectedDay && dayOptions.length > 0 ? (
+            {!slotsLoading && selectedDay && dayOptions.length > 0 && embed ? (
+              <BookMonthCalendar
+                todayYmd={studioTodayYmd()}
+                slotsByDay={slotsByDay}
+                selectedDay={selectedDay}
+                onSelectDay={(ymd) => {
+                  setSelectedDay(ymd);
+                  setSelectedStart(null);
+                  if (!Object.prototype.hasOwnProperty.call(slotsByDay, ymd)) {
+                    requestMoreDays();
+                  }
+                }}
+                onNeedMore={requestMoreDays}
+              />
+            ) : null}
+            {!slotsLoading && selectedDay && dayOptions.length > 0 && !embed ? (
               <BookDayScroller
                 dayOptions={dayOptions}
                 slotsByDay={slotsByDay}
@@ -1742,6 +1839,15 @@ export default function BookClient({
                 }}
                 onApproachEnd={requestMoreDays}
               />
+            ) : null}
+            {!slotsLoading && !slotsError ? (
+              <button
+                type="button"
+                className={styles.addExtra}
+                onClick={() => setExtrasOpen(true)}
+              >
+                + Add Extra Service
+              </button>
             ) : null}
             {!slotsLoading && !slotsError && selectedDay && (
               <div className={styles.slotGrid}>
@@ -1829,16 +1935,18 @@ export default function BookClient({
             <div className={styles.reviewSheet}>
               <div className={styles.reviewBlock}>
                 <p className={styles.reviewEyebrow}>Your appointment</p>
-                <p className={styles.reviewService}>{selected.title}</p>
+                <p className={styles.reviewService}>
+                  {visitServices.map((s) => s.title).join(' + ')}
+                </p>
                 <p className={styles.reviewMeta}>
-                  {selected.durationLabel} · {selected.priceLabel}
+                  {visitDurationLabel} · {visitPriceLabel}
                   {appointmentWhen
                     ? ` · ${appointmentWhen.date} · ${appointmentWhen.timeRange}`
                     : ''}
                 </p>
                 <p className={styles.reviewTotal}>
                   <span>Total</span>
-                  <span>{selected.priceLabel}</span>
+                  <span>{visitPriceLabel}</span>
                 </p>
                 <p className={styles.reviewNote}>
                   Next you&apos;ll choose pay now or pay later in studio.
@@ -2095,6 +2203,62 @@ export default function BookClient({
           </div>
         </div>
       )}
+      {extrasOpen && selected ? (
+        <div className={styles.extraPanel} role="dialog" aria-label="Add an extra service">
+          <div className={styles.extraPanelHead}>
+            <button type="button" aria-label="Back" onClick={() => setExtrasOpen(false)}>
+              ←
+            </button>
+            <h2>Add an extra service</h2>
+          </div>
+          <section className={styles.section}>
+            {extraChoices.length === 0 ? (
+              <p className={styles.muted}>Every service is already on this visit.</p>
+            ) : (
+              [...servicesByCategory.entries()].map(([category, list]) => {
+                const choices = list.filter((s) =>
+                  extraChoices.some((c) => c.slug === s.slug)
+                );
+                if (choices.length === 0) return null;
+                return (
+                  <div key={category} className={styles.categoryBlock}>
+                    <p className={styles.categoryLabel}>{category}</p>
+                    <ul className={styles.serviceList}>
+                      {choices.map((service) => (
+                        <li key={service.slug}>
+                          <button
+                            type="button"
+                            className={styles.serviceRow}
+                            onClick={() => {
+                              setExtras((current) =>
+                                current.some((s) => s.slug === service.slug)
+                                  ? current
+                                  : [...current, service]
+                              );
+                              setExtrasOpen(false);
+                            }}
+                          >
+                            <span className={styles.serviceMain}>
+                              <span className={styles.serviceName}>{service.title}</span>
+                              {service.description ? (
+                                <span className={styles.serviceDesc}>{service.description}</span>
+                              ) : null}
+                            </span>
+                            <span className={styles.serviceMeta}>
+                              <span className={styles.servicePrice}>{service.priceLabel}</span>
+                              <span className={styles.serviceDuration}>{service.durationLabel}</span>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })
+            )}
+          </section>
+        </div>
+      ) : null}
       {((step === 'when' && !slotsLoading && !resumeUidParam) ||
         step === 'contact' ||
         step === 'review') &&
@@ -2102,7 +2266,7 @@ export default function BookClient({
         <footer className={styles.footer}>
           {selected && (
             <div className={styles.footerTotal}>
-              <span className={styles.footerPrice}>{selected.priceLabel}</span>
+              <span className={styles.footerPrice}>{visitPriceLabel}</span>
               <span className={styles.footerHint}>
                 {step === 'review' ? 'Continue to payment' : selected.title}
               </span>

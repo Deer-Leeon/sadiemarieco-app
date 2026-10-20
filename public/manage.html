@@ -71,8 +71,9 @@
     <p class="portal-inline-notice" id="portal-inline-notice" hidden role="status"></p>
     <div id="portal-upcoming" class="portal-upcoming" hidden>
       <span class="portal-eyebrow">Upcoming appointments</span>
-      <h2 class="portal-card-title portal-upcoming-heading">Choose a visit to change</h2>
+      <h2 class="portal-card-title portal-upcoming-heading">Choose services on one day</h2>
       <ul id="portal-upcoming-list" class="portal-upcoming-list"></ul>
+      <p class="portal-fineprint" id="portal-upcoming-summary" hidden></p>
     </div>
     <div class="portal-grid">
 
@@ -145,6 +146,12 @@
     <p class="portal-reschedule-hint" id="portal-reschedule-hint">
       Choose a different time than your current appointment. Confirming the same slot keeps your existing booking.
     </p>
+    <div id="portal-day-reschedule" class="portal-day-reschedule" hidden>
+      <div id="portal-day-calendar" class="portal-day-calendar"></div>
+      <div id="portal-day-times" class="portal-day-times"></div>
+      <p class="portal-modal-fee" id="portal-day-confirm-fee" hidden></p>
+      <button type="button" class="btn-navy" id="portal-day-confirm" disabled>Confirm new time</button>
+    </div>
     <div class="portal-reschedule-mount" id="portal-reschedule-mount"></div>
   </section>
 
@@ -303,7 +310,7 @@
   Cal("ui", window.calUiConfig);
 </script>
 
-<script src="js/manage.js" defer></script>
+<script src="js/manage.js?v=20261019-days" defer></script>
 
 <!-- Vercel Web Analytics + Speed Insights (production only; no-ops locally) -->
 <script>

@@ -78,7 +78,21 @@
   const inlineNotice = el('portal-inline-notice');
   const upcomingWrap = el('portal-upcoming');
   const upcomingList = el('portal-upcoming-list');
+  const upcomingSummary = el('portal-upcoming-summary');
+  const dayReschedule = el('portal-day-reschedule');
+  const dayCalendar = el('portal-day-calendar');
+  const dayTimes = el('portal-day-times');
+  const dayConfirmFee = el('portal-day-confirm-fee');
+  const dayConfirm = el('portal-day-confirm');
+  const rescheduleHint = el('portal-reschedule-hint');
   const emptyMessage = el('portal-empty-message');
+  let selectedIds = new Set();
+  let daySlots = {};
+  let dayMonth = '';
+  let pickedStart = '';
+  let visibleDay = '';
+  let dayDurationMins = 0;
+  let lastFeePreview = null;
 
   // ── HELPERS ──
   const setState = (name) => {
@@ -167,6 +181,61 @@
       node.innerHTML = '';
       return;
     }
+    node.innerHTML = desc.html;
+    node.hidden = false;
+  };
+
+  const escapeHtml = (value) =>
+    String(value == null ? '' : value).replace(/[&<>"']/g, (ch) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+    ));
+
+  const servicesOf = (b) => (Array.isArray(b && b.services) ? b.services : []);
+
+  const selectedServices = (b) =>
+    servicesOf(b).filter((service) => service && selectedIds.has(service.id));
+
+  const selectionHasStarted = () => {
+    const chosen = selectedServices(booking);
+    if (!chosen.length) return appointmentHasStarted(booking);
+    return chosen.some((service) => {
+      const startMs = service.start ? new Date(service.start).getTime() : NaN;
+      return Number.isFinite(startMs) && startMs <= Date.now();
+    });
+  };
+
+  const postManageChange = async (action, extra) => {
+    const res = await fetch('/api/manage/change', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(Object.assign({
+        uid: booking && booking.uid,
+        ids: [...selectedIds],
+        action,
+      }, extra || {})),
+    });
+    const payload = await res.json().catch(() => null);
+    return { ok: res.ok && payload && payload.ok, payload };
+  };
+
+  const describeFeePreview = (preview, action) => {
+    const verb = action === 'reschedule' ? 'Rescheduling' : 'Canceling';
+    const lines = (preview && preview.services ? preview.services : []).map((service) => {
+      const name = escapeHtml(service.service_name || 'Service');
+      if (service.waived) return `${name}: one-time courtesy waiver — $0`;
+      if (!service.amount_cents) return `${name}: no fee`;
+      return `${name}: ${escapeHtml(service.amount_display || '$0')}`;
+    });
+    const total = escapeHtml((preview && preview.total_display) || '$0');
+    return {
+      show: true,
+      html: `${verb} charges each service from its own start time.<br>${lines.join('<br>')}<br><strong>Total ${total}</strong>`,
+    };
+  };
+
+  const setPreviewCallout = (node, preview, action) => {
+    if (!node) return;
+    const desc = describeFeePreview(preview, action);
     node.innerHTML = desc.html;
     node.hidden = false;
   };
@@ -455,9 +524,114 @@
     return m ? `${h}h ${m}m` : `${h} hour${h === 1 ? '' : 's'}`;
   };
 
+  const syncSelectionButtons = (chosen) => {
+    const mins = chosen.reduce((sum, service) => sum + (Number(service.duration_mins) || 0), 0);
+    const started = chosen.some((service) => {
+      const startMs = service.start ? new Date(service.start).getTime() : NaN;
+      return Number.isFinite(startMs) && startMs <= Date.now();
+    });
+    const actionable = chosen.length > 0 && !started;
+    rescheduleBtn.disabled = !actionable;
+    cancelBtn.disabled = !actionable;
+    rescheduleBtn.textContent = chosen.length > 1
+      ? `Reschedule ${chosen.length} services (${formatDuration(mins)})`
+      : 'Reschedule';
+    cancelBtn.textContent = chosen.length > 1
+      ? `Cancel ${chosen.length} services (${formatDuration(mins)})`
+      : 'Cancel appointment';
+    if (upcomingSummary) {
+      upcomingSummary.hidden = chosen.length === 0;
+      upcomingSummary.textContent = chosen.length
+        ? `${chosen.length} selected · ${formatDuration(mins)} together`
+        : '';
+    }
+  };
+
   // ── RENDER ──
   const renderUpcomingList = (b) => {
     if (!upcomingWrap || !upcomingList) return;
+    const services = servicesOf(b);
+    if (services.length > 0) {
+      const known = new Set(services.map((service) => service.id));
+      selectedIds = new Set([...selectedIds].filter((id) => known.has(id)));
+      if (selectedIds.size === 0) {
+        const current = services.find((service) => service.uid && service.uid === b.uid) || services[0];
+        if (current) selectedIds.add(current.id);
+      }
+
+      const tz = tzForDisplay(b);
+      const days = [];
+      const byDay = new Map();
+      services.forEach((service) => {
+        if (!byDay.has(service.day)) {
+          byDay.set(service.day, []);
+          days.push(service.day);
+        }
+        byDay.get(service.day).push(service);
+      });
+
+      upcomingList.innerHTML = '';
+      days.forEach((day) => {
+        const members = byDay.get(day) || [];
+        const li = document.createElement('li');
+        li.className = 'portal-day-group';
+        const heading = document.createElement('h3');
+        heading.className = 'portal-day-heading';
+        heading.textContent = formatDate(members[0] && members[0].start, tz);
+        const nested = document.createElement('ul');
+        nested.className = 'portal-upcoming-list';
+        members.forEach((service) => {
+          const item = document.createElement('li');
+          const label = document.createElement('label');
+          label.className = 'portal-service-check';
+          const checked = selectedIds.has(service.id);
+          if (checked) label.classList.add('is-selected');
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.checked = checked;
+          input.addEventListener('change', () => {
+            const chosenNow = selectedServices(b);
+            const currentDay = chosenNow[0] && chosenNow[0].day;
+            if (input.checked && currentDay && service.day !== currentDay) {
+              selectedIds = new Set([service.id]);
+            } else if (input.checked) {
+              selectedIds.add(service.id);
+            } else {
+              selectedIds.delete(service.id);
+            }
+            renderUpcomingList(b);
+          });
+          const copy = document.createElement('span');
+          copy.className = 'portal-upcoming-item-copy';
+          const name = document.createElement('span');
+          name.className = 'portal-upcoming-item-service';
+          name.textContent = service.service_name || 'Appointment';
+          const when = document.createElement('span');
+          when.className = 'portal-upcoming-item-when';
+          const length = formatDuration(service.duration_mins);
+          const ownEnd = service.duration_mins
+            ? new Date(new Date(service.start).getTime() + Number(service.duration_mins) * 60000).toISOString()
+            : service.end;
+          when.textContent = `${formatListWhen(service.start, ownEnd, tz)} · ${length}`;
+          copy.appendChild(name);
+          copy.appendChild(when);
+          label.appendChild(input);
+          label.appendChild(copy);
+          item.appendChild(label);
+          nested.appendChild(item);
+        });
+        li.appendChild(heading);
+        li.appendChild(nested);
+        upcomingList.appendChild(li);
+      });
+      upcomingWrap.hidden = false;
+      syncSelectionButtons(selectedServices(b));
+      return;
+    }
+
+    if (upcomingSummary) upcomingSummary.hidden = true;
+    rescheduleBtn.textContent = 'Reschedule';
+    cancelBtn.textContent = 'Cancel appointment';
     const items = Array.isArray(b && b.upcoming) ? b.upcoming : [];
     const selectedUid = b && b.uid;
     const showList =
@@ -829,9 +1003,155 @@
     return Number.isFinite(startMs) && startMs <= Date.now();
   };
 
-  const openRescheduleModal = () => {
+  const shiftMonth = (ym, delta) => {
+    const [year, month] = ym.split('-').map(Number);
+    const next = new Date(Date.UTC(year, month - 1 + delta, 1));
+    return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const renderDayTimes = (day) => {
+    if (!dayTimes) return;
+    visibleDay = day || visibleDay;
+    const times = daySlots[visibleDay] || [];
+    dayTimes.innerHTML = '';
+    const tz = tzForDisplay(booking);
+    times.forEach((iso) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'portal-day-time';
+      if (iso === pickedStart) btn.classList.add('is-picked');
+      const end = new Date(new Date(iso).getTime() + dayDurationMins * 60000).toISOString();
+      btn.textContent = formatTimeRange(iso, end, tz);
+      btn.addEventListener('click', () => {
+        pickedStart = iso;
+        if (dayConfirm) dayConfirm.disabled = false;
+        renderDayTimes(visibleDay);
+        renderDayCalendar();
+      });
+      dayTimes.appendChild(btn);
+    });
+  };
+
+  const renderDayCalendar = () => {
+    if (!dayCalendar) return;
+    if (!dayMonth) {
+      const keys = Object.keys(daySlots).sort();
+      dayMonth = keys[0] ? keys[0].slice(0, 7) : new Date().toISOString().slice(0, 7);
+    }
+    const [year, month] = dayMonth.split('-').map(Number);
+    const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+    const count = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const title = new Date(Date.UTC(year, month - 1, 1)).toLocaleString('en-US', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    let cells = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+      .map((label) => `<span>${label}</span>`)
+      .join('');
+    for (let blank = 0; blank < first; blank += 1) cells += '<span></span>';
+    for (let day = 1; day <= count; day += 1) {
+      const key = `${dayMonth}-${String(day).padStart(2, '0')}`;
+      const open = Array.isArray(daySlots[key]) && daySlots[key].length > 0;
+      const picked = key === visibleDay;
+      cells += `<button type="button" class="portal-day-cell${open ? ' is-open' : ''}${picked ? ' is-picked' : ''}" data-day="${key}" ${open ? '' : 'disabled'}>${day}</button>`;
+    }
+    dayCalendar.innerHTML =
+      `<div class="portal-day-calendar-nav">` +
+      `<button type="button" class="btn-outline-navy" data-month="-1">←</button>` +
+      `<h3>${escapeHtml(title)}</h3>` +
+      `<button type="button" class="btn-outline-navy" data-month="1">→</button>` +
+      `</div><div class="portal-day-grid">${cells}</div>`;
+    dayCalendar.querySelectorAll('[data-month]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        dayMonth = shiftMonth(dayMonth, Number(btn.getAttribute('data-month')));
+        renderDayCalendar();
+      });
+    });
+    dayCalendar.querySelectorAll('[data-day]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        pickedStart = '';
+        if (dayConfirm) dayConfirm.disabled = true;
+        renderDayTimes(btn.getAttribute('data-day'));
+        renderDayCalendar();
+      });
+    });
+  };
+
+  const mountDayPicker = async () => {
+    pickedStart = '';
+    visibleDay = '';
+    if (dayConfirm) {
+      dayConfirm.disabled = true;
+      dayConfirm.textContent = 'Confirm new time';
+    }
+    if (dayTimes) dayTimes.innerHTML = '';
+    if (dayConfirmFee && lastFeePreview) {
+      setPreviewCallout(dayConfirmFee, lastFeePreview, 'reschedule');
+    }
+    if (dayCalendar) dayCalendar.textContent = 'Loading open times…';
+    const params = new URLSearchParams({
+      uid: booking.uid,
+      ids: [...selectedIds].join(','),
+    });
+    try {
+      const res = await fetch(`/api/manage/change?${params.toString()}`, {
+        headers: { Accept: 'application/json' },
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload || !payload.ok) {
+        if (dayCalendar) {
+          dayCalendar.textContent =
+            (payload && payload.message) || "We couldn't load open times.";
+        }
+        return;
+      }
+      daySlots = payload.slots || {};
+      dayDurationMins = Number(payload.duration_mins) || 0;
+      const first = Object.keys(daySlots).sort()[0] || '';
+      dayMonth = (payload.today || first || new Date().toISOString()).slice(0, 7);
+      visibleDay = first;
+      renderDayCalendar();
+      if (first) renderDayTimes(first);
+      else if (dayTimes) dayTimes.textContent = 'No open times fit these services in the next six weeks.';
+    } catch (err) {
+      console.error('[manage] slots failed', err);
+      if (dayCalendar) dayCalendar.textContent = "We couldn't load open times.";
+    }
+  };
+
+  const confirmDayMove = async () => {
+    if (!pickedStart || !dayConfirm) return;
+    dayConfirm.disabled = true;
+    dayConfirm.textContent = 'Moving…';
+    try {
+      const result = await postManageChange('reschedule', { start: pickedStart });
+      if (!result.ok) {
+        setInlineNotice(
+          (result.payload && result.payload.message) || "We couldn't move that visit."
+        );
+        dayConfirm.disabled = false;
+        dayConfirm.textContent = 'Confirm new time';
+        return;
+      }
+      const payload = result.payload || {};
+      showRescheduledSuccess({
+        uid: payload.uid || booking.uid,
+        start: payload.start,
+        end: payload.end,
+        title: payload.service_name,
+      });
+    } catch (err) {
+      console.error('[manage] reschedule failed', err);
+      setInlineNotice("We couldn't move that visit. Please try again.");
+      dayConfirm.disabled = false;
+      dayConfirm.textContent = 'Confirm new time';
+    }
+  };
+
+  const openRescheduleModal = async () => {
     if (!booking) return;
-    if (appointmentHasStarted(booking)) {
+    if (selectionHasStarted()) {
       showError(
         'This appointment has started and can no longer be rescheduled. Please contact the studio if you need help.'
       );
@@ -839,10 +1159,32 @@
       return;
     }
     setInlineNotice('');
-    setFeeCallout(rescheduleModalFee, booking.change_fee, 'reschedule');
-    if (rescheduleModalBody) {
-      rescheduleModalBody.textContent =
-        "You'll pick a new time on the next screen. Your current slot is released once you confirm the new one.";
+    const chosen = selectedServices(booking);
+    if (chosen.length) {
+      const mins = chosen.reduce((sum, service) => sum + (Number(service.duration_mins) || 0), 0);
+      if (rescheduleModalBody) {
+        rescheduleModalBody.textContent = chosen.length > 1
+          ? `You'll move ${chosen.length} services to one new time that fits ${formatDuration(mins)}. Each service is charged from its own current start time.`
+          : "You'll pick a new time on the next screen. Your current slot is released once you confirm the new one.";
+      }
+      try {
+        const preview = await postManageChange('preview');
+        if (preview.ok) {
+          lastFeePreview = preview.payload;
+          setPreviewCallout(rescheduleModalFee, preview.payload, 'reschedule');
+        } else {
+          setFeeCallout(rescheduleModalFee, booking.change_fee, 'reschedule');
+        }
+      } catch (err) {
+        setFeeCallout(rescheduleModalFee, booking.change_fee, 'reschedule');
+      }
+    } else {
+      lastFeePreview = null;
+      setFeeCallout(rescheduleModalFee, booking.change_fee, 'reschedule');
+      if (rescheduleModalBody) {
+        rescheduleModalBody.textContent =
+          "You'll pick a new time on the next screen. Your current slot is released once you confirm the new one.";
+      }
     }
     modalBackdrop.hidden = false;
     rescheduleModal.hidden = false;
@@ -863,15 +1205,34 @@
 
   const proceedToReschedule = () => {
     if (!booking) return;
-    if (appointmentHasStarted(booking)) {
+    if (selectionHasStarted()) {
       showError(
         'This appointment has started and can no longer be rescheduled. Please contact the studio if you need help.'
       );
       setState('loaded');
       return;
     }
+    const chosen = selectedServices(booking);
+    if (chosen.length) {
+      const label = chosen.map((service) => service.service_name).join(' + ');
+      const mins = chosen.reduce((sum, service) => sum + (Number(service.duration_mins) || 0), 0);
+      if (rescheduleTitle) {
+        rescheduleTitle.innerHTML = `Pick a new time for <em>${escapeHtml(label)}</em>`;
+      }
+      if (rescheduleHint) {
+        rescheduleHint.textContent =
+          `Only times long enough for ${formatDuration(mins)} are shown. The services stay back to back.`;
+      }
+      if (rescheduleMount) rescheduleMount.hidden = true;
+      if (dayReschedule) dayReschedule.hidden = false;
+      setState('reschedule');
+      mountDayPicker();
+      return;
+    }
+    if (dayReschedule) dayReschedule.hidden = true;
+    if (rescheduleMount) rescheduleMount.hidden = false;
     if (rescheduleTitle) {
-      rescheduleTitle.innerHTML = `Pick a new time for <em>${deriveServiceName(booking)}</em>`;
+      rescheduleTitle.innerHTML = `Pick a new time for <em>${escapeHtml(deriveServiceName(booking))}</em>`;
     }
     setState('reschedule');
     mountReschedule();
@@ -882,27 +1243,48 @@
   };
 
   const closeReschedule = () => {
-    if (rescheduleMount) rescheduleMount.innerHTML = '';
+    if (rescheduleMount) {
+      rescheduleMount.innerHTML = '';
+      rescheduleMount.hidden = false;
+    }
+    if (dayReschedule) dayReschedule.hidden = true;
     rescheduleMounted = false;
     setState('loaded');
   };
 
   // ── CANCEL ──
-  const openCancelModal = () => {
-    if (appointmentHasStarted(booking)) {
+  const openCancelModal = async () => {
+    if (selectionHasStarted()) {
       showError(
         'This appointment has started and can no longer be canceled. Please contact the studio if you need help.'
       );
       return;
     }
-    setFeeCallout(modalFee, booking && booking.change_fee, 'cancel');
+    const chosen = selectedServices(booking);
+    if (chosen.length) {
+      const mins = chosen.reduce((sum, service) => sum + (Number(service.duration_mins) || 0), 0);
+      const modalBody = el('portal-modal-body');
+      if (modalBody) {
+        modalBody.textContent = chosen.length > 1
+          ? `Cancel ${chosen.length} services (${formatDuration(mins)})? This can't be undone.`
+          : "Are you sure you want to cancel? This can't be undone — you'd need to book a new session if you change your mind.";
+      }
+      try {
+        const preview = await postManageChange('preview');
+        if (preview.ok) setPreviewCallout(modalFee, preview.payload, 'cancel');
+        else setFeeCallout(modalFee, booking && booking.change_fee, 'cancel');
+      } catch (err) {
+        setFeeCallout(modalFee, booking && booking.change_fee, 'cancel');
+      }
+    } else {
+      setFeeCallout(modalFee, booking && booking.change_fee, 'cancel');
+    }
     modal.hidden = false;
     modalBackdrop.hidden = false;
     modalError.hidden = true;
     modalError.textContent = '';
     modalConfirm.disabled = false;
     modalDismiss.disabled = false;
-    // Focus the safe action by default so a stray Enter keypress doesn't cancel.
     requestAnimationFrame(() => modalDismiss.focus());
   };
 
@@ -914,7 +1296,7 @@
 
   const confirmCancel = async () => {
     if (!booking) return;
-    if (appointmentHasStarted(booking)) {
+    if (selectionHasStarted()) {
       closeCancelModal();
       showError(
         'This appointment has started and can no longer be canceled. Please contact the studio if you need help.'
@@ -927,6 +1309,41 @@
     modalConfirm.textContent = 'Cancelling…';
 
     try {
+      const chosen = selectedServices(booking);
+      if (chosen.length) {
+        const result = await postManageChange('cancel');
+        if (!result.ok) {
+          modalError.textContent =
+            (result.payload && result.payload.message) ||
+            "We couldn't cancel right now. Please try again or contact the studio.";
+          modalError.hidden = false;
+          modalConfirm.disabled = false;
+          modalDismiss.disabled = false;
+          modalConfirm.textContent = 'Yes, cancel it';
+          return;
+        }
+        closeCancelModal();
+        modalConfirm.disabled = false;
+        modalDismiss.disabled = false;
+        modalConfirm.textContent = 'Yes, cancel it';
+        const payload = result.payload || {};
+        if (payload.remaining_uid) {
+          selectedIds = new Set();
+          replaceManageUidInUrl(payload.remaining_uid);
+          setInlineNotice('Those services were cancelled. Your other upcoming visits are still listed.');
+          await loadBooking(payload.remaining_uid);
+          return;
+        }
+        if (payload.remaining) {
+          showEmptyUpcoming(
+            'Those services were cancelled. If another visit is still booked and this page looks empty, contact the studio.'
+          );
+          return;
+        }
+        setState('cancelled');
+        return;
+      }
+
       const res = await fetch('/api/cancel-booking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -974,6 +1391,7 @@
   // ── EVENT WIRING ──
   rescheduleBtn.addEventListener('click', openReschedule);
   rescheduleBackBtn.addEventListener('click', closeReschedule);
+  if (dayConfirm) dayConfirm.addEventListener('click', confirmDayMove);
   cancelBtn.addEventListener('click', openCancelModal);
   modalDismiss.addEventListener('click', closeCancelModal);
   modalBackdrop.addEventListener('click', () => {

@@ -271,6 +271,38 @@ export async function grantFeeWaiveNext(
   };
 }
 
+/**
+ * Take away a free pass (waive_next = FALSE). No text is sent.
+ */
+export async function revokeFeeWaiveNext(
+  kind: FeeWaiveKind,
+  clientId: string
+): Promise<{ revoked: boolean } | null> {
+  const { rows } = await sql<{ id: string }>`
+    SELECT id
+    FROM clients
+    WHERE id = ${clientId}::uuid
+    LIMIT 1
+  `;
+  if (!rows[0]) return null;
+
+  if (kind === 'late_change') {
+    await sql`
+      UPDATE clients
+      SET late_change_waive_next = FALSE
+      WHERE id = ${clientId}::uuid
+    `;
+  } else {
+    await sql`
+      UPDATE clients
+      SET no_show_waive_next = FALSE
+      WHERE id = ${clientId}::uuid
+    `;
+  }
+
+  return { revoked: true };
+}
+
 export async function resolveClientId(
   clientId: string | null,
   clientPhone: string | null

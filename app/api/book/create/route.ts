@@ -20,7 +20,9 @@ import {
   trackBookingEvent,
 } from '@/lib/booking-analytics';
 import { linkBookingAttempt, parseAttemptId } from '@/lib/booking-attempt';
-import { loadBookableServiceBySlug } from '@/lib/book-public';
+import { resolveBookedServices } from '@/lib/book-public';
+import { applyPublicBookingExtras } from '@/lib/book-visit-extras';
+import { endIsoFromDuration } from '@/lib/chair-duration';
 import {
   CAL_STUDIO_IN_PERSON_LOCATION,
   STUDIO_TIMEZONE,
@@ -69,6 +71,7 @@ interface CreateBody {
   smsOptIn?: unknown;
   source?: unknown;
   attemptId?: unknown;
+  extras?: unknown;
 }
 
 function splitName(fullName: string): { first: string; last: string } {
@@ -374,13 +377,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const service = await loadBookableServiceBySlug(slug, { fresh: true });
-  if (!service) {
+  const extraSlugs = Array.isArray(body.extras)
+    ? body.extras.filter((s): s is string => typeof s === 'string')
+    : [];
+  const selection = await resolveBookedServices(slug, extraSlugs, {
+    fresh: true,
+  });
+  if ('error' in selection) {
     return NextResponse.json(
-      { error: 'service_not_found', message: 'That service is not available.' },
+      { error: selection.error, message: selection.message },
       { status: 404 }
     );
   }
+  const service = selection.primary;
 
   let startUtc: Date;
   try {
@@ -403,7 +412,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const existing = await findExistingHoldForPhone({
       phoneDigits: phoneLookup.digits,
       startUtc,
-      durationMins: service.durationMins,
+      durationMins: selection.durationMins,
       serviceTitle: service.title,
     });
     if (existing?.kind === 'conflict') {
@@ -440,7 +449,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const slotOpen = await studioSlotIsOpen({
     startUtc,
-    durationMins: service.durationMins,
+    durationMins: selection.durationMins,
   });
   if (!slotOpen) {
     return NextResponse.json(
@@ -596,20 +605,52 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  if (selection.extras.length > 0) {
+    try {
+      await applyPublicBookingExtras({
+        calUid: extracted.uid,
+        durationMins: selection.durationMins,
+        priceCents: selection.priceCents,
+        extras: selection.extras,
+      });
+    } catch (err) {
+      console.error('[api/book/create] extras failed', err);
+      await cancelCalBooking(extracted.uid);
+      try {
+        await releaseAbandonedHoldByCalUid(extracted.uid, {
+          sendAbandonedSms: false,
+        });
+      } catch {
+        /* best-effort */
+      }
+      return NextResponse.json(
+        {
+          error: 'extras_failed',
+          message: 'Could not add the extra services. Please try again.',
+        },
+        { status: 502 }
+      );
+    }
+  }
+
   await trackBookingEvent(BOOKING_ANALYTICS_EVENTS.DETAILS_SUBMITTED, {
-    service: analyticsServiceLabel(service.title),
+    service: analyticsServiceLabel(selection.serviceLabel),
     source: analyticsSource,
   });
 
   const hold = await getAppointmentHoldByCalUid(extracted.uid);
+  const combinedEnd = endIsoFromDuration(
+    extracted.start || startUtc.toISOString(),
+    selection.durationMins
+  );
   return NextResponse.json({
     ok: true,
     calBookingUid: extracted.uid,
     name,
     email: emailRaw || '',
-    serviceName: service.title,
+    serviceName: selection.serviceLabel,
     bookingTime: extracted.start || startUtc.toISOString(),
-    endTime: extracted.end,
+    endTime: selection.extras.length > 0 ? combinedEnd : extracted.end,
     createdAt: hold?.created_at ?? new Date().toISOString(),
   });
 }

@@ -45,6 +45,22 @@ const INPUT_CLASS =
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const NAME_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base' });
+
+/** First name A–Z, then last name. Blank first names go last. The only order this list uses. */
+function compareClientsByFirstName(a: Client, b: Client): number {
+  const aFirst = (a.first_name || '').trim();
+  const bFirst = (b.first_name || '').trim();
+  if (!aFirst && bFirst) return 1;
+  if (aFirst && !bFirst) return -1;
+  const byFirst = NAME_COLLATOR.compare(aFirst, bFirst);
+  if (byFirst !== 0) return byFirst;
+  return NAME_COLLATOR.compare(
+    (a.last_name || '').trim(),
+    (b.last_name || '').trim()
+  );
+}
+
 function usableClientEmail(raw: string | null | undefined): string {
   const trimmed = (raw || '').trim();
   if (!trimmed || isPlaceholderClientEmail(trimmed)) return '';
@@ -141,7 +157,8 @@ export default function ManualBookingClientStep({
 
   const filteredClients = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase();
-    if (!needle) return clients.slice(0, 40);
+    const sorted = (list: Client[]) => [...list].sort(compareClientsByFirstName);
+    if (!needle) return sorted(clients);
 
     const digitsOnly = needle.replace(/\D/g, '');
     const queryVariants =
@@ -151,21 +168,22 @@ export default function ManualBookingClientStep({
           )
         : [];
 
-    return searchableClients
-      .filter(({ client, haystack }) => {
-        if (haystack.includes(needle)) return true;
-        if (digitsOnly.length >= 3 && client.phone) {
-          const clientVariants = clientPhoneLookupVariants(
-            normaliseClientPhoneForStorage(client.phone) ?? client.phone
-          );
-          if (queryVariants.some((q) => clientVariants.includes(q))) {
-            return true;
+    return sorted(
+      searchableClients
+        .filter(({ client, haystack }) => {
+          if (haystack.includes(needle)) return true;
+          if (digitsOnly.length >= 3 && client.phone) {
+            const clientVariants = clientPhoneLookupVariants(
+              normaliseClientPhoneForStorage(client.phone) ?? client.phone
+            );
+            if (queryVariants.some((q) => clientVariants.includes(q))) {
+              return true;
+            }
           }
-        }
-        return false;
-      })
-      .map(({ client }) => client)
-      .slice(0, 40);
+          return false;
+        })
+        .map(({ client }) => client)
+    );
   }, [searchQuery, searchableClients, clients]);
 
   const selectedClient = useMemo(
@@ -260,53 +278,27 @@ export default function ManualBookingClientStep({
           )}
 
           {!loading && !loadError && selectedClient && (
-            <div className="rounded-lg border border-stone-900 bg-stone-900 px-3 py-3 text-white shadow-sm">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="flex items-center gap-1.5 font-serif text-base text-white">
-                    <Check
-                      className="h-4 w-4 shrink-0 text-white"
-                      strokeWidth={2.5}
-                      aria-hidden="true"
-                    />
-                    {clientDisplayName(
-                      selectedClient.first_name,
-                      selectedClient.last_name
-                    )}
-                  </p>
-                  <p className="mt-1 text-xs text-stone-300">
-                    {[
-                      formatPhone(selectedClient.phone, ''),
-                      usableClientEmail(selectedClient.email) || null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ') || 'No contact details on file'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onSelectClient(null)}
-                  className="shrink-0 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-300 hover:text-white"
-                >
-                  Change
-                </button>
-              </div>
-              {!parseClientPhone(selectedClient.phone) && (
-                <p className="mt-2 text-xs text-rose-200" role="alert">
-                  This client has no usable phone on file. Add one from their
-                  profile, or book them as a new client.
-                </p>
-              )}
-              {!(selectedClient.first_name?.trim() && selectedClient.last_name?.trim()) && (
-                <p className="mt-2 text-xs text-rose-200" role="alert">
-                  This client is missing a first or last name. Update their
-                  profile, or book them as a new client.
-                </p>
-              )}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-stone-500">
+                Selected:{' '}
+                <span className="font-medium text-stone-800">
+                  {clientDisplayName(
+                    selectedClient.first_name,
+                    selectedClient.last_name
+                  )}
+                </span>
+              </p>
+              <button
+                type="button"
+                onClick={() => onSelectClient(null)}
+                className="shrink-0 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-500 hover:text-stone-900"
+              >
+                Clear
+              </button>
             </div>
           )}
 
-          {!loading && !loadError && !selectedClient && (
+          {!loading && !loadError && (
             <ul
               className="max-h-56 overflow-y-auto rounded-lg border border-stone-200 bg-white"
               role="listbox"
@@ -330,21 +322,45 @@ export default function ManualBookingClientStep({
                   ]
                     .filter(Boolean)
                     .join(' · ');
+                  const selected = client.id === selectedClientId;
                   return (
                     <li key={client.id} className="border-b border-stone-100 last:border-b-0">
                       <button
                         type="button"
                         role="option"
-                        aria-selected={false}
+                        aria-selected={selected}
                         onClick={() => onSelectClient(client)}
-                        className="flex w-full flex-col items-start gap-0.5 px-3 py-2.5 text-left transition-colors hover:bg-stone-50 focus-visible:bg-stone-50 focus-visible:outline-none"
+                        className={`flex w-full items-start gap-2 px-3 py-2.5 text-left transition-colors focus-visible:outline-none ${
+                          selected
+                            ? 'bg-stone-900 text-white'
+                            : 'hover:bg-stone-50 focus-visible:bg-stone-50'
+                        }`}
                       >
-                        <span className="text-sm font-medium text-stone-900">
-                          {name}
+                        {selected ? (
+                          <Check
+                            className="mt-0.5 h-4 w-4 shrink-0 text-white"
+                            strokeWidth={2.5}
+                            aria-hidden="true"
+                          />
+                        ) : null}
+                        <span className="min-w-0">
+                          <span
+                            className={`block text-sm font-medium ${
+                              selected ? 'text-white' : 'text-stone-900'
+                            }`}
+                          >
+                            {name}
+                          </span>
+                          {meta && (
+                            <span
+                              className={`block text-xs ${
+                                selected ? 'text-stone-300' : 'text-stone-500'
+                              }`}
+                            >
+                              {meta}
+                            </span>
+                          )}
                         </span>
-                        {meta && (
-                          <span className="text-xs text-stone-500">{meta}</span>
-                        )}
                       </button>
                     </li>
                   );
@@ -352,6 +368,22 @@ export default function ManualBookingClientStep({
               )}
             </ul>
           )}
+
+          {!loading && !loadError && selectedClient && !parseClientPhone(selectedClient.phone) && (
+            <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800" role="alert">
+              This client has no usable phone on file. Add one from their
+              profile, or book them as a new client.
+            </p>
+          )}
+          {!loading &&
+            !loadError &&
+            selectedClient &&
+            !(selectedClient.first_name?.trim() && selectedClient.last_name?.trim()) && (
+              <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800" role="alert">
+                This client is missing a first or last name. Update their
+                profile, or book them as a new client.
+              </p>
+            )}
         </div>
       ) : (
         <div className="space-y-4">

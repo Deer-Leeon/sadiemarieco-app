@@ -1214,6 +1214,20 @@ a.service-item:focus-visible .service-action {
   visibility: visible;
   pointer-events: auto;
 }
+#drawer-book-frame {
+  display: none;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+}
+#booking-drawer.is-book-frame #drawer-book-frame {
+  display: block;
+}
+#booking-drawer.is-book-frame #drawer-cal-container {
+  display: none;
+}
 #drawer-cal-container iframe {
   width: 100% !important;
   height: 100% !important;
@@ -2723,6 +2737,64 @@ footer {
 .portal-upcoming-item.is-selected .portal-upcoming-item-mark {
   color: var(--navy);
 }
+.portal-day-group { display: flex; flex-direction: column; gap: 8px; }
+.portal-day-heading {
+  margin: 8px 0 0;
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mist);
+}
+.portal-service-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  align-items: center;
+  background: var(--off-white);
+  border: 1px solid rgba(13, 27, 42, 0.10);
+  border-radius: 12px;
+  padding: 16px 18px;
+  cursor: pointer;
+  color: var(--navy);
+}
+.portal-service-check.is-selected {
+  border-color: var(--navy);
+  box-shadow: 0 0 0 1px var(--navy);
+}
+.portal-service-check input { width: 18px; height: 18px; accent-color: var(--navy); }
+.portal-day-reschedule { display: flex; flex-direction: column; gap: 18px; margin-top: 8px; }
+#portal-day-reschedule[hidden] { display: none; }
+.portal-day-calendar { display: flex; flex-direction: column; gap: 12px; }
+.portal-day-calendar-nav { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.portal-day-calendar-nav h3 { margin: 0; font-family: var(--serif); font-weight: 400; font-size: 1.4rem; }
+.portal-day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.portal-day-grid span,
+.portal-day-cell {
+  text-align: center;
+  font-size: 0.82rem;
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--navy);
+}
+.portal-day-grid span { color: var(--mist); font-size: 0.68rem; letter-spacing: 0.08em; }
+.portal-day-cell:disabled { color: #b7beca; }
+.portal-day-cell.is-open { background: rgba(13, 27, 42, 0.06); cursor: pointer; }
+.portal-day-cell.is-picked { background: var(--navy); color: white; }
+.portal-day-times { display: flex; flex-wrap: wrap; gap: 8px; }
+.portal-day-time {
+  border: 1px solid rgba(13, 27, 42, 0.16);
+  background: white;
+  color: var(--navy);
+  border-radius: 999px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.portal-day-time.is-picked { background: var(--navy); color: white; border-color: var(--navy); }
 
 /* ── CARDS ── */
 .portal-card {

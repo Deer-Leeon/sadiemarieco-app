@@ -32,12 +32,18 @@ export function priceToCents(price: string): number {
   return Math.round(n * 100);
 }
 
-function formatDuration(mins: number): string {
+export function formatDurationLabel(mins: number): string {
   if (mins < 60) return `${mins} min`;
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   if (m === 0) return h === 1 ? '60 min' : `${h * 60} min`;
   return `${mins} min`;
+}
+
+export function formatPriceCents(cents: number): string {
+  if (!Number.isFinite(cents) || cents < 0) return '$0';
+  const n = cents / 100;
+  return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
 }
 
 interface BookableServiceRow {
@@ -98,7 +104,7 @@ export async function loadBookableServices(
     priceLabel: formatPrice(row.price),
     priceCents: priceToCents(row.price),
     durationMins: row.duration_mins,
-    durationLabel: formatDuration(row.duration_mins),
+    durationLabel: formatDurationLabel(row.duration_mins),
     calEventId: row.cal_event_id,
   }));
 }
@@ -115,4 +121,58 @@ export async function loadBookableServiceBySlug(
     services.find((s) => s.slug === slug.trim()) ??
     null
   );
+}
+
+export interface BookedSelection {
+  primary: BookableService;
+  extras: BookableService[];
+  durationMins: number;
+  priceCents: number;
+  priceLabel: string;
+  durationLabel: string;
+  serviceLabel: string;
+}
+
+/** Primary service plus each extra once. Length and price are the sums. */
+export async function resolveBookedServices(
+  primarySlug: string,
+  extraSlugs: string[],
+  options: LoadOptions = {}
+): Promise<BookedSelection | { error: string; message: string }> {
+  const primary = await loadBookableServiceBySlug(primarySlug, options);
+  if (!primary) {
+    return {
+      error: 'service_not_found',
+      message: 'That service is not available.',
+    };
+  }
+  const extras: BookableService[] = [];
+  const seen = new Set<string>([primary.slug.toLowerCase()]);
+  for (const raw of extraSlugs) {
+    const slug = raw.trim();
+    if (!slug) continue;
+    const key = slug.toLowerCase();
+    if (seen.has(key)) continue;
+    const extra = await loadBookableServiceBySlug(slug, options);
+    if (!extra) {
+      return {
+        error: 'service_not_found',
+        message: 'One of the extra services is not available.',
+      };
+    }
+    seen.add(extra.slug.toLowerCase());
+    extras.push(extra);
+  }
+  const all = [primary, ...extras];
+  const durationMins = all.reduce((n, s) => n + s.durationMins, 0);
+  const priceCents = all.reduce((n, s) => n + s.priceCents, 0);
+  return {
+    primary,
+    extras,
+    durationMins,
+    priceCents,
+    priceLabel: formatPriceCents(priceCents),
+    durationLabel: formatDurationLabel(durationMins),
+    serviceLabel: all.map((s) => s.title).join(' + '),
+  };
 }

@@ -105,9 +105,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }>`
       SELECT id, start_time, end_time, note, cal_booking_uid, cal_booking_uids
       FROM studio_time_blocks
-      WHERE end_time >= NOW() - INTERVAL '30 days'
       ORDER BY start_time ASC
-      LIMIT 500
     `;
     return NextResponse.json({
       blocks: rows.map(serializeBlockRow),

@@ -474,9 +474,10 @@ function DossierSection({
   const [confirmClearFlag, setConfirmClearFlag] = useState(false);
   const [clearingFlag, setClearingFlag] = useState(false);
   const [waiveError, setWaiveError] = useState<string | null>(null);
-  const [confirmGrantKind, setConfirmGrantKind] = useState<
-    'no_show' | 'late_change' | null
-  >(null);
+  const [confirmFeePass, setConfirmFeePass] = useState<{
+    kind: 'no_show' | 'late_change';
+    action: 'grant' | 'revoke';
+  } | null>(null);
   const [grantingWaive, setGrantingWaive] = useState(false);
   const [reviewFlagError, setReviewFlagError] = useState<string | null>(null);
   const mutatedRef = useRef(false);
@@ -536,15 +537,15 @@ function DossierSection({
     }
   }, [client.id, onClientUpdated, applyClientToCrmStats]);
 
-  const grantFeeWaive = useCallback(
-    async (kind: 'no_show' | 'late_change') => {
+  const setFeePass = useCallback(
+    async (kind: 'no_show' | 'late_change', waiveNext: boolean) => {
       setWaiveError(null);
       setGrantingWaive(true);
       try {
         const body =
           kind === 'late_change'
-            ? { late_change_waive_next: true }
-            : { no_show_waive_next: true };
+            ? { late_change_waive_next: waiveNext }
+            : { no_show_waive_next: waiveNext };
         const res = await fetch(`/api/admin/clients/${client.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -553,7 +554,7 @@ function DossierSection({
         if (!res.ok) {
           const text = await res.text();
           setWaiveError(
-            `Could not grant free pass (HTTP ${res.status})${text ? `: ${text.slice(0, 120)}` : ''}`
+            `Could not ${waiveNext ? 'grant' : 'remove'} free pass (HTTP ${res.status})${text ? `: ${text.slice(0, 120)}` : ''}`
           );
           return;
         }
@@ -561,11 +562,15 @@ function DossierSection({
         if (data.client) {
           onClientUpdated(data.client);
           applyClientToCrmStats(data.client);
-          setConfirmGrantKind(null);
+          setConfirmFeePass(null);
         }
       } catch (err) {
         setWaiveError(
-          err instanceof Error ? err.message : 'Could not grant free pass.'
+          err instanceof Error
+            ? err.message
+            : waiveNext
+              ? 'Could not grant free pass.'
+              : 'Could not remove free pass.'
         );
       } finally {
         setGrantingWaive(false);
@@ -703,17 +708,17 @@ function DossierSection({
       <FeeWaivePassesBar
         stats={crmStats}
         waiveError={waiveError}
-        confirmGrantKind={confirmGrantKind}
+        confirmFeePass={confirmFeePass}
         grantingWaive={grantingWaive}
-        onRequestGrant={(kind) => {
+        onRequest={(kind, action) => {
           setWaiveError(null);
-          setConfirmGrantKind(kind);
+          setConfirmFeePass({ kind, action });
         }}
-        onCancelGrant={() => {
-          setConfirmGrantKind(null);
+        onCancel={() => {
+          setConfirmFeePass(null);
           setWaiveError(null);
         }}
-        onConfirmGrant={(kind) => void grantFeeWaive(kind)}
+        onConfirm={(kind, action) => void setFeePass(kind, action === 'grant')}
       />
       <GoogleReviewSmsBar
         clientId={client.id}
@@ -1287,22 +1292,40 @@ function GoogleReviewSwitchRow({
 function FeeWaivePassesBar({
   stats,
   waiveError,
-  confirmGrantKind,
+  confirmFeePass,
   grantingWaive,
-  onRequestGrant,
-  onCancelGrant,
-  onConfirmGrant,
+  onRequest,
+  onCancel,
+  onConfirm,
 }: {
   stats: ClientCrmStats;
   waiveError: string | null;
-  confirmGrantKind: 'no_show' | 'late_change' | null;
+  confirmFeePass: {
+    kind: 'no_show' | 'late_change';
+    action: 'grant' | 'revoke';
+  } | null;
   grantingWaive: boolean;
-  onRequestGrant: (kind: 'no_show' | 'late_change') => void;
-  onCancelGrant: () => void;
-  onConfirmGrant: (kind: 'no_show' | 'late_change') => void;
+  onRequest: (
+    kind: 'no_show' | 'late_change',
+    action: 'grant' | 'revoke'
+  ) => void;
+  onCancel: () => void;
+  onConfirm: (
+    kind: 'no_show' | 'late_change',
+    action: 'grant' | 'revoke'
+  ) => void;
 }) {
   const noShowFree = stats.no_show_waive_next ?? true;
   const lateFree = stats.late_change_waive_next ?? true;
+  const busy = grantingWaive || confirmFeePass !== null;
+  const confirming = confirmFeePass;
+  const isRevoke = confirming?.action === 'revoke';
+  const feeName =
+    confirming?.kind === 'late_change' ? 'Late-Change' : 'no-show';
+  const eventName =
+    confirming?.kind === 'late_change'
+      ? 'late cancel or reschedule'
+      : 'no-show';
 
   return (
     <div className="space-y-2">
@@ -1310,14 +1333,16 @@ function FeeWaivePassesBar({
         <FeeWaivePassCard
           title="No-show fee"
           freeNext={noShowFree}
-          onGrant={() => onRequestGrant('no_show')}
-          grantDisabled={grantingWaive || confirmGrantKind !== null}
+          busy={busy}
+          onGrant={() => onRequest('no_show', 'grant')}
+          onRevoke={() => onRequest('no_show', 'revoke')}
         />
         <FeeWaivePassCard
           title="Late-Change fee"
           freeNext={lateFree}
-          onGrant={() => onRequestGrant('late_change')}
-          grantDisabled={grantingWaive || confirmGrantKind !== null}
+          busy={busy}
+          onGrant={() => onRequest('late_change', 'grant')}
+          onRevoke={() => onRequest('late_change', 'revoke')}
         />
       </div>
       {waiveError && (
@@ -1325,26 +1350,20 @@ function FeeWaivePassesBar({
           {waiveError}
         </p>
       )}
-      {confirmGrantKind && (
+      {confirming && (
         <div className="rounded-lg border border-stone-200 bg-white px-3 py-3">
           <p className="text-sm font-medium text-stone-900">
-            Grant a one-time{' '}
-            {confirmGrantKind === 'late_change' ? 'Late-Change' : 'no-show'} free
-            pass?
+            {isRevoke ? 'Remove' : 'Grant'} a one-time {feeName} free pass?
           </p>
           <p className="mt-1 text-xs leading-relaxed text-stone-600">
-            Their next{' '}
-            {confirmGrantKind === 'late_change'
-              ? 'late cancel or reschedule'
-              : 'no-show'}{' '}
-            will not be charged. An SMS will tell them the fee was waived for
-            the next time. After that event, they will be charged again unless
-            you grant another pass.
+            {isRevoke
+              ? `Their next ${eventName} will be charged. They will not get a text about this.`
+              : `Their next ${eventName} will not be charged. An SMS will tell them the fee was waived for the next time. After that event, they will be charged again unless you grant another pass.`}
           </p>
           <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
-              onClick={onCancelGrant}
+              onClick={onCancel}
               disabled={grantingWaive}
               className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50"
             >
@@ -1352,14 +1371,24 @@ function FeeWaivePassesBar({
             </button>
             <button
               type="button"
-              onClick={() => onConfirmGrant(confirmGrantKind)}
+              onClick={() => onConfirm(confirming.kind, confirming.action)}
               disabled={grantingWaive}
-              className="inline-flex items-center gap-1.5 rounded-full border border-stone-900 bg-stone-900 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-white transition-colors disabled:opacity-50 ${
+                isRevoke
+                  ? 'bg-rose-700 hover:bg-rose-800'
+                  : 'border border-stone-900 bg-stone-900 hover:bg-stone-800'
+              }`}
             >
               {grantingWaive && (
                 <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
               )}
-              {grantingWaive ? 'Granting' : 'Yes, grant free pass'}
+              {grantingWaive
+                ? isRevoke
+                  ? 'Removing'
+                  : 'Granting'
+                : isRevoke
+                  ? 'Yes, remove free pass'
+                  : 'Yes, grant free pass'}
             </button>
           </div>
         </div>
@@ -1371,13 +1400,15 @@ function FeeWaivePassesBar({
 function FeeWaivePassCard({
   title,
   freeNext,
+  busy,
   onGrant,
-  grantDisabled,
+  onRevoke,
 }: {
   title: string;
   freeNext: boolean;
+  busy: boolean;
   onGrant: () => void;
-  grantDisabled: boolean;
+  onRevoke: () => void;
 }) {
   return (
     <div
@@ -1406,11 +1437,20 @@ function FeeWaivePassCard({
           ? 'One-time free pass is active. The next event skips the fee, then they are charged.'
           : 'No free pass. The next event will charge the fee unless you grant another pass.'}
       </p>
-      {!freeNext && (
+      {freeNext ? (
+        <button
+          type="button"
+          onClick={onRevoke}
+          disabled={busy}
+          className="mt-2 rounded-md border border-rose-300/80 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-rose-800 transition-colors hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/60 disabled:opacity-50"
+        >
+          Remove free pass
+        </button>
+      ) : (
         <button
           type="button"
           onClick={onGrant}
-          disabled={grantDisabled}
+          disabled={busy}
           className="mt-2 rounded-md border border-amber-300/80 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-amber-900 transition-colors hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:opacity-50"
         >
           Grant free pass
