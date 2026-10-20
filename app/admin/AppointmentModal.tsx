@@ -2364,7 +2364,7 @@ function TerminalChargeView({
         </button>
         <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-stone-500">
           Stripe Terminal
-        </p>
+          </p>
         <button
           type="button"
           onClick={isPaid ? onDone : onBack}
@@ -2395,7 +2395,7 @@ function TerminalChargeView({
               <div className="flex justify-between py-3 text-stone-600">
                 <span>Service</span>
                 <span>{formatCentsUsd(payment.base_amount_cents)}</span>
-              </div>
+            </div>
               <div className="flex justify-between py-3 text-stone-600">
                 <span>Tip</span>
                 <span>{formatCentsUsd(payment.tip_amount_cents)}</span>
@@ -2411,13 +2411,13 @@ function TerminalChargeView({
               </p>
             ) : null}
 
-            <button
-              type="button"
+                <button
+                  type="button"
               onClick={onDone}
               className="mt-6 rounded-full bg-stone-900 px-6 py-2.5 text-xs font-medium uppercase tracking-[0.18em] text-white transition-colors hover:bg-stone-800"
-            >
+                >
               Done
-            </button>
+                </button>
           </>
         ) : active ? (
           <>
@@ -2445,14 +2445,14 @@ function TerminalChargeView({
                 {reader.label} · {reader.status || 'connecting'}
               </p>
             ) : null}
-            <button
-              type="button"
+                <button
+                  type="button"
               onClick={() => void runAction('cancel')}
               disabled={busy !== null}
               className="mt-6 rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50"
-            >
+                >
               {busy === 'cancel' ? 'Canceling…' : 'Cancel payment'}
-            </button>
+                </button>
           </>
         ) : (
           <>
@@ -2546,7 +2546,7 @@ function TerminalChargeView({
               <div className="mt-3 flex w-full max-w-sm items-center justify-between rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm font-semibold text-stone-900">
                 <span>Charge</span>
                 <span>{formatCentsUsd(quotedCents)}</span>
-              </div>
+                    </div>
             ) : null}
 
             {!isFailed ? (
@@ -2563,10 +2563,10 @@ function TerminalChargeView({
                     const selected =
                       amountMode === 'discount' && discountPercent === percent;
                     return (
-                      <button
+                    <button
                         key={percent}
-                        type="button"
-                        onClick={() => {
+                      type="button"
+                      onClick={() => {
                           setAmountMode('discount');
                           setDiscountPercent(percent);
                         }}
@@ -2578,11 +2578,11 @@ function TerminalChargeView({
                         }`}
                       >
                         {percent === 0 ? 'Full' : `${percent}%`}
-                      </button>
+                    </button>
                     );
                   })}
-                  <button
-                    type="button"
+                    <button
+                      type="button"
                     onClick={() => {
                       setAmountMode('custom');
                       if (!customDollars.trim()) {
@@ -2597,8 +2597,8 @@ function TerminalChargeView({
                     }`}
                   >
                     Custom
-                  </button>
-                </div>
+                    </button>
+                  </div>
                 {amountMode === 'custom' ? (
                   <label className="mt-3 block text-left">
                     <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-stone-500">
@@ -2618,7 +2618,7 @@ function TerminalChargeView({
                         placeholder="0.00"
                         aria-label="Custom charge amount in dollars"
                       />
-                    </div>
+                </div>
                     {customDollars.trim() &&
                     !isValidTerminalCustomAmountCents(customCents) ? (
                       <p className="mt-1.5 text-xs text-rose-700">
@@ -2627,7 +2627,7 @@ function TerminalChargeView({
                     ) : null}
                   </label>
                 ) : null}
-              </div>
+            </div>
             ) : null}
 
             <p className="mt-4 max-w-sm text-xs leading-relaxed text-stone-500">
@@ -2642,8 +2642,8 @@ function TerminalChargeView({
                 className="mt-5 w-full max-w-sm rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800"
               >
                 {error || payment?.failure_message}
-              </div>
-            )}
+          </div>
+        )}
 
             <button
               type="button"
@@ -2807,7 +2807,7 @@ function SettlementConfirmDialog({
               {error}
             </p>
           ) : null}
-        </div>
+          </div>
         <div className="mt-6 flex items-center justify-end gap-2 border-t border-stone-200 bg-white px-6 py-4">
           <button
             type="button"
@@ -2830,7 +2830,7 @@ function SettlementConfirmDialog({
                 ? 'Mark cash'
                 : 'Mark complimentary'}
           </button>
-        </div>
+      </div>
       </div>
     </div>
   );
@@ -2875,35 +2875,35 @@ function StatusActionConfirmDialog({
       >
         <div className="px-6 pt-6">
           <div className="flex items-start gap-3.5">
-            <span
+          <span
               className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
-                isNoShow
+              isNoShow
                   ? 'bg-amber-100 text-amber-800'
-                  : 'bg-rose-100 text-rose-600'
-              }`}
-            >
-              {isNoShow ? (
+                : 'bg-rose-100 text-rose-600'
+            }`}
+          >
+            {isNoShow ? (
                 <Flag className="h-5 w-5" strokeWidth={1.7} />
-              ) : (
-                <X className="h-5 w-5" strokeWidth={1.6} />
-              )}
-            </span>
+            ) : (
+              <X className="h-5 w-5" strokeWidth={1.6} />
+            )}
+          </span>
             <div className="min-w-0 flex-1 pt-0.5">
-              <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
-                {isNoShow ? 'No-show' : 'Cancel booking'}
-              </p>
-              <h3
-                id="status-confirm-title"
+            <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-stone-500">
+              {isNoShow ? 'No-show' : 'Cancel booking'}
+            </p>
+            <h3
+              id="status-confirm-title"
                 className="mt-1 font-serif text-2xl leading-tight text-stone-900"
-              >
-                {isNoShow
-                  ? 'Mark as no-show?'
-                  : 'Cancel this appointment?'}
-              </h3>
+            >
+              {isNoShow
+                ? 'Mark as no-show?'
+                : 'Cancel this appointment?'}
+            </h3>
             </div>
           </div>
 
-          {isNoShow ? (
+              {isNoShow ? (
             <div className="mt-5 space-y-3">
               <p className="text-sm leading-relaxed text-stone-600">
                 <span className="font-medium text-stone-900">{clientName}</span>{' '}
@@ -2935,16 +2935,16 @@ function StatusActionConfirmDialog({
                       <>
                         <span className="font-medium text-stone-900">
                           Flag &amp; mark
-                        </span>{' '}
+                  </span>{' '}
                         also puts an attention flag on their calendar and
                         profile. Charging the fee does not.
-                      </>
-                    ) : (
-                      <>
+                </>
+              ) : (
+                <>
                         Puts an attention flag on their calendar and client
                         profile.
-                      </>
-                    )}
+                </>
+              )}
                   </span>
                 </li>
               </ul>
@@ -2953,19 +2953,19 @@ function StatusActionConfirmDialog({
                 <p className="text-xs leading-relaxed text-stone-500">
                   No vaulted card or service price on file — a fee can&apos;t
                   be charged automatically for this booking.
-                </p>
-              )}
+              </p>
+            )}
 
               {canChargeNoShow && (
                 <p className="rounded-xl border border-stone-200 bg-white px-3.5 py-2.5 text-xs leading-relaxed text-stone-600">
                   Fee if charged:{' '}
                   <span className="font-medium text-stone-900">
-                    {Math.round(NO_SHOW_PENALTY_FRACTION * 100)}% ({feeLabel})
+                  {Math.round(NO_SHOW_PENALTY_FRACTION * 100)}% ({feeLabel})
                   </span>{' '}
                   on the card saved at checkout.
-                </p>
-              )}
-            </div>
+              </p>
+            )}
+          </div>
           ) : (
             <div className="mt-4 space-y-3">
               {bookingHasEnded ? (
@@ -3062,39 +3062,39 @@ function StatusActionConfirmDialog({
 
           {isNoShow ? (
             canChargeNoShow ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => onConfirmNoShow(false)}
-                  disabled={busy}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.14em] text-amber-950 transition-colors hover:bg-amber-100 disabled:opacity-50"
-                >
-                  {busy ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Flag className="h-3 w-3" strokeWidth={2.2} />
-                  )}
-                  {busy ? 'Saving' : 'Flag & mark'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onConfirmNoShow(true)}
-                  disabled={busy}
-                  className="rounded-full border border-amber-800 bg-amber-800 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.14em] text-white transition-colors hover:bg-amber-900 disabled:opacity-50"
-                >
-                  {busy ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      Charging
-                    </span>
-                  ) : (
-                    `Charge ${feeLabel}`
-                  )}
-                </button>
-              </>
-            ) : (
+            <>
               <button
                 type="button"
+                onClick={() => onConfirmNoShow(false)}
+                disabled={busy}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.14em] text-amber-950 transition-colors hover:bg-amber-100 disabled:opacity-50"
+              >
+                {busy ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                    <Flag className="h-3 w-3" strokeWidth={2.2} />
+                )}
+                  {busy ? 'Saving' : 'Flag & mark'}
+              </button>
+              <button
+                type="button"
+                onClick={() => onConfirmNoShow(true)}
+                  disabled={busy}
+                  className="rounded-full border border-amber-800 bg-amber-800 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.14em] text-white transition-colors hover:bg-amber-900 disabled:opacity-50"
+              >
+                {busy ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Charging
+                  </span>
+                ) : (
+                  `Charge ${feeLabel}`
+                )}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
                 onClick={() => onConfirmNoShow(false)}
                 disabled={busy}
                 className="inline-flex items-center justify-center gap-1.5 rounded-full border border-amber-800 bg-amber-800 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.14em] text-white transition-colors hover:bg-amber-900 disabled:opacity-50"

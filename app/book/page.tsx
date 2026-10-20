@@ -33,6 +33,7 @@ export default async function BookPage({
     setupIntent: firstQueryValue(params.setup_intent),
     paymentIntent: firstQueryValue(params.payment_intent),
     uid: firstQueryValue(params.uid),
+    embed: firstQueryValue(params.embed),
   };
 
   let initialServices: BookService[] = [];

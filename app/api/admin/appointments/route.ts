@@ -13,10 +13,10 @@
  * the email allowlist in `app/admin/auth.ts`. Same pattern as
  * `/api/admin/clients/[id]/appointments` and `/api/admin/services`.
  *
- * Query window: last 30 days through all future rows, capped at 1000 —
- * mirrors `app/admin/page.tsx` exactly. Client-side filtering (e.g.
- * hiding canceled statuses for the list view) stays in the iOS app,
- * matching `DashboardUI.tsx`.
+ * Returns every dated appointment, past and future — mirrors
+ * `app/admin/page.tsx` exactly. Client-side filtering (e.g. hiding
+ * canceled statuses for the list view) stays in the iOS app, matching
+ * `DashboardUI.tsx`.
  */
 import { NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
@@ -213,9 +213,8 @@ export async function GET(): Promise<NextResponse> {
           p.created_at DESC
         LIMIT 1
       ) pay ON TRUE
-      WHERE a.booking_time >= NOW() - INTERVAL '30 days'
+      WHERE a.booking_time IS NOT NULL
       ORDER BY a.booking_time ASC
-      LIMIT 1000
     `,
       loadActiveCatalogueServices(),
     ]);

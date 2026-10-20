@@ -118,30 +118,37 @@ function intervalMsFromSql(value: Date | string | null): number | null {
 
 export async function loadStudioBusyIntervals(
   rangeStart: Date,
-  rangeEnd: Date
+  rangeEnd: Date,
+  excludeAppointmentIds: string[] = []
 ): Promise<BusyInterval[]> {
   const startIso = rangeStart.toISOString();
   const endIso = rangeEnd.toISOString();
   const busy: BusyInterval[] = [];
+  const exclude =
+    excludeAppointmentIds.length > 0
+      ? excludeAppointmentIds
+      : ['00000000-0000-0000-0000-000000000000'];
 
   await ensureAppointmentAttachedSchema();
-  const { rows: appointments } = await sql<{
+  const { rows: appointments } = await sql.query<{
     booking_time: Date | string | null;
     end_time: Date | string | null;
-  }>`
-    SELECT booking_time, end_time
-    FROM appointments
-    WHERE booking_time IS NOT NULL
-      AND LOWER(COALESCE(status, '')) IN (
-        'pending',
-        'confirmed',
-        'accepted',
-        'no-show'
-      )
-      AND attached_to_appointment_id IS NULL
-      AND booking_time < ${endIso}
-      AND COALESCE(end_time, booking_time) > ${startIso}
-  `;
+  }>(
+    `SELECT booking_time, end_time
+     FROM appointments
+     WHERE booking_time IS NOT NULL
+       AND LOWER(COALESCE(status, '')) IN (
+         'pending',
+         'confirmed',
+         'accepted',
+         'no-show'
+       )
+       AND attached_to_appointment_id IS NULL
+       AND booking_time < $1
+       AND COALESCE(end_time, booking_time) > $2
+       AND id::text <> ALL($3::text[])`,
+    [endIso, startIso, exclude]
+  );
 
   for (const row of appointments) {
     const startMs = intervalMsFromSql(row.booking_time);
@@ -233,6 +240,10 @@ export async function listStudioAvailableSlots(args: {
   rangeStartYmd: string;
   rangeEndYmd: string;
   durationMins: number;
+  /** Parent visit ids whose current chair block should not count as busy. */
+  excludeAppointmentIds?: string[];
+  /** Time still occupied after those visits shrink (services the client is keeping). */
+  extraBusy?: BusyInterval[];
 }): Promise<
   { ok: true; slots: Record<string, string[]> } | { ok: false; message: string }
 > {
@@ -253,7 +264,14 @@ export async function listStudioAvailableSlots(args: {
   const rangeEnd = parseBookingStartForCal(
     `${addCalendarDays(args.rangeEndYmd, 1)}T00:00:00`
   );
-  const busy = await loadStudioBusyIntervals(rangeStart, rangeEnd);
+  const busy = [
+    ...(await loadStudioBusyIntervals(
+      rangeStart,
+      rangeEnd,
+      args.excludeAppointmentIds ?? []
+    )),
+    ...(args.extraBusy ?? []),
+  ];
   const earliestStartMs = Date.now() + CAL_MIN_BOOKING_NOTICE_MIN * 60_000;
 
   const slots: Record<string, string[]> = {};

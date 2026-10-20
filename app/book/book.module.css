@@ -334,6 +334,147 @@
   border-style: solid;
 }
 
+.month {
+  margin-bottom: 8px;
+}
+
+.monthNav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.monthTitle {
+  margin: 0;
+  font-family: 'Bodoni Moda', Georgia, serif;
+  font-size: 18px;
+  color: #0d1b2a;
+}
+
+.monthNavBtns {
+  display: flex;
+  gap: 6px;
+}
+
+.monthNavBtns button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #c8cdd6;
+  background: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #0d1b2a;
+}
+
+.monthWeekdays,
+.monthGrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  text-align: center;
+}
+
+.monthWeekdays {
+  margin-bottom: 6px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8a93a0;
+}
+
+.monthDay {
+  height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  color: #0d1b2a;
+  font-size: 14px;
+}
+
+.monthDay:disabled {
+  color: #c5cad3;
+  cursor: default;
+}
+
+.monthDayOn {
+  background: #0d1b2a;
+  color: #f5f3f0;
+}
+
+.monthDayToday:not(.monthDayOn) {
+  box-shadow: inset 0 0 0 1px #0d1b2a;
+}
+
+.addExtra {
+  width: 100%;
+  margin: 4px 0 8px;
+  padding: 12px 14px;
+  border: 1px dashed #0d1b2a;
+  background: transparent;
+  color: #0d1b2a;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.extraChips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.extraChip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e2e5ea;
+  background: #fff;
+  font-size: 13px;
+}
+
+.extraChip button {
+  border: 0;
+  background: transparent;
+  color: #8a3232;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.extraPanel {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #f5f3f0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.extraPanelHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(13, 27, 42, 0.1);
+}
+
+.extraPanelHead button {
+  border: 0;
+  background: transparent;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.extraPanelHead h2 {
+  margin: 0;
+  font-size: 18px;
+  font-family: 'Bodoni Moda', Georgia, serif;
+}
+
 .slotGrid {
   display: flex;
   flex-direction: column;

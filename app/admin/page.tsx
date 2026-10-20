@@ -112,24 +112,18 @@ export default async function AdminPage() {
   }
 
   // ── DATA FETCH ──────────────────────────────────────────────────────────
-  // Window: last 30 days of history + all future bookings. This gives the
-  // calendar view enough past data to plot a meaningful month while
-  // keeping the list view focused on operationally-relevant appointments
-  // (recent + upcoming, not 2-year-old archive).
+  // Full history plus every future booking. The month, week, and list
+  // views all share this payload, so a rolling window would make older
+  // visits disappear from the calendar as time passes.
   //
   // Excludes NULL booking_times: rows with missing times can't be placed
-  // on a timeline so they shouldn't appear in a date-windowed query. (The
-  // ListView's 'Unscheduled' bucket is defensive code from before this
-  // filter — costs nothing to keep but will not be exercised in normal
-  // operation.)
+  // on a timeline. (The ListView's 'Unscheduled' bucket is defensive code
+  // from before this filter — costs nothing to keep but will not be
+  // exercised in normal operation.)
   //
   // ORDER BY ASC because the UI re-sorts on the client anyway (ListView
   // groups newest-first; CalendarView is grid-based). Ascending at the
   // DB layer is more debuggable for any raw inspection.
-  //
-  // LIMIT 1000 is a safety ceiling — 30d+future for a single studio won't
-  // realistically exceed ~200 rows, but an unbounded query would be a
-  // memory foot-gun if the data ever gets unexpectedly large.
   //
   // Wrapped so a DB outage shows a graceful banner in the UI instead of
   // surfacing the Next.js error boundary.
@@ -319,9 +313,8 @@ export default async function AdminPage() {
           p.created_at DESC
         LIMIT 1
       ) pay ON TRUE
-      WHERE a.booking_time >= NOW() - INTERVAL '30 days'
+      WHERE a.booking_time IS NOT NULL
       ORDER BY a.booking_time ASC
-      LIMIT 1000
     `,
       loadActiveCatalogueServices(),
     ]);
@@ -342,9 +335,7 @@ export default async function AdminPage() {
     }>`
       SELECT id, start_time, end_time, note, cal_booking_uid, cal_booking_uids
       FROM studio_time_blocks
-      WHERE end_time >= NOW() - INTERVAL '30 days'
       ORDER BY start_time ASC
-      LIMIT 500
     `;
     timeBlocks = blockRows.map((r) => {
       const uids = Array.isArray(r.cal_booking_uids)

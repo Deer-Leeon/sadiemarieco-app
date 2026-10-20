@@ -2,7 +2,8 @@
  * GET /api/book/slots
  *
  * Public availability for a service slug (studio timezone).
- * Query: slug, date (YYYY-MM-DD), optional end (YYYY-MM-DD).
+ * Query: slug, date (YYYY-MM-DD), optional end, repeatable extra slugs.
+ * Duration is the sum of the primary service and each extra.
  *
  * Starts come from Cal working hours (weekly + date overrides) minus
  * live Postgres occupancy. Cal.com /slots is not used: cancelled Cal
@@ -12,7 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { loadBookableServiceBySlug } from '@/lib/book-public';
+import { resolveBookedServices } from '@/lib/book-public';
 import { listStudioAvailableSlots } from '@/lib/studio-available-slots';
 import {
   inclusiveCalendarDayCount,
@@ -77,10 +78,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const service = await loadBookableServiceBySlug(slug);
-  if (!service) {
+  const selection = await resolveBookedServices(
+    slug,
+    req.nextUrl.searchParams.getAll('extra')
+  );
+  if ('error' in selection) {
     return NextResponse.json(
-      { error: 'service_not_found', message: 'That service is not available.' },
+      { error: selection.error, message: selection.message },
       { status: 404 }
     );
   }
@@ -88,7 +92,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const listed = await listStudioAvailableSlots({
     rangeStartYmd: date,
     rangeEndYmd: end,
-    durationMins: service.durationMins,
+    durationMins: selection.durationMins,
   });
   if (!listed.ok) {
     return NextResponse.json(
@@ -97,15 +101,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const body = {
+    slug: selection.primary.slug,
+    durationMins: selection.durationMins,
+    priceCents: selection.priceCents,
+    slots: listed.slots,
+  };
   if (end === date) {
     return NextResponse.json({
-      slug: service.slug,
+      ...body,
       slots: { [date]: listed.slots[date] ?? [] },
     });
   }
-
-  return NextResponse.json({
-    slug: service.slug,
-    slots: listed.slots,
-  });
+  return NextResponse.json(body);
 }

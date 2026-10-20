@@ -32,19 +32,32 @@ import { getServiceColor, visitBlockBackground } from './serviceColors';
 const WEEKDAY_HEADERS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /**
- * Month window: render 6 months of history + current + 12 months ahead
- * (19 months total). This range covers a realistic studio's planning
- * horizon — long enough to look back at last fall's clients, far enough
- * forward to see a year of standing appointments — without ballooning
- * the initial DOM to thousands of day cells.
- *
- * If we ever need a true infinite scroll (load months as the user
- * approaches the edges), this is the right place to swap for an
- * IntersectionObserver-driven pager.
+ * Months ahead of today that stay on the grid even when nothing is
+ * booked yet. History is not capped: the grid starts at the earliest
+ * appointment or time block so older visits never scroll out of range.
  */
-const MONTHS_BEFORE = 6;
 const MONTHS_AFTER = 12;
-const TOTAL_MONTHS = MONTHS_BEFORE + 1 + MONTHS_AFTER; // 19
+
+function addCalendarMonths(monthFirstKey: string, delta: number): string {
+  const [y, m] = monthFirstKey.split('-').map(Number);
+  const shifted = new Date(Date.UTC(y, m - 1 + delta, 1, 12));
+  const yy = shifted.getUTCFullYear();
+  const mm = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  return `${yy}-${mm}-01`;
+}
+
+function monthSpanCount(startKey: string, endKey: string): number {
+  const [sy, sm] = startKey.split('-').map(Number);
+  const [ey, em] = endKey.split('-').map(Number);
+  return (ey - sy) * 12 + (em - sm) + 1;
+}
+
+function monthFirstFromIso(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const key = studioDateKey(iso);
+  if (!key) return null;
+  return startOfStudioMonthKey(key);
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Types
@@ -79,7 +92,8 @@ interface MonthBlock {
 // ──────────────────────────────────────────────────────────────────────────
 
 /**
- * Build the full 19-month window with appointment buckets per day.
+ * Build every studio month from the earliest booking or block through
+ * the later of the latest one and 12 months past today.
  *
  * Apple-Calendar style: each month is a self-contained block whose first
  * row is offset by `leadingBlanks` empty cells (so the 1st appears in its
@@ -97,13 +111,23 @@ function buildMonths(
   timeBlocks: TimeBlock[]
 ): MonthBlock[] {
   const nowMonthKey = studioMonthKey(todayKey);
-  const startMonthKey = (() => {
-    const [y, m] = startOfStudioMonthKey(todayKey).split('-').map(Number);
-    const start = new Date(Date.UTC(y, m - 1 - MONTHS_BEFORE, 1, 12));
-    const yy = start.getUTCFullYear();
-    const mm = String(start.getUTCMonth() + 1).padStart(2, '0');
-    return `${yy}-${mm}-01`;
-  })();
+  const todayMonthKey = startOfStudioMonthKey(todayKey);
+  let startMonthKey = todayMonthKey;
+  let endMonthKey = addCalendarMonths(todayMonthKey, MONTHS_AFTER);
+
+  const consider = (iso: string | null | undefined) => {
+    const monthKey = monthFirstFromIso(iso);
+    if (!monthKey) return;
+    if (monthKey < startMonthKey) startMonthKey = monthKey;
+    if (monthKey > endMonthKey) endMonthKey = monthKey;
+  };
+  for (const appointment of appointments) consider(appointment.booking_time);
+  for (const block of timeBlocks) {
+    consider(block.start_time);
+    consider(block.end_time);
+  }
+
+  const totalMonths = monthSpanCount(startMonthKey, endMonthKey);
 
   // Pre-bucket appointments by studio date once (O(appts) not O(days×appts)).
   const byDay = new Map<string, Appointment[]>();
@@ -138,7 +162,7 @@ function buildMonths(
     );
   }
 
-  return Array.from({ length: TOTAL_MONTHS }, (_, i) => {
+  return Array.from({ length: totalMonths }, (_, i) => {
     const [sy, sm] = startMonthKey.split('-').map(Number);
     const monthStart = new Date(Date.UTC(sy, sm - 1 + i, 1, 12));
     const yy = monthStart.getUTCFullYear();
@@ -203,7 +227,7 @@ function buildDayTimeline(cell: DayCell): DayTimelineItem[] {
  *     Gecko (`scrollbar-width`) for the Apple-style "scroll without
  *     visible controls" look.
  *   - On mount, we jump the scroll position to the top of the current
- *     month so the user lands on "today" instead of 6 months in the past.
+   *     month so the user lands on "today" instead of the earliest history.
  */
 export default function CalendarView({
   appointments,

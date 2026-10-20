@@ -332,6 +332,7 @@ export default function DashboardUI({
         <DateNav
           view={view}
           currentDate={currentDate}
+          appointments={visibleAppointments}
           onChange={setCurrentDate}
         />
       )}
@@ -616,10 +617,12 @@ function ToggleButton({
 function DateNav({
   view,
   currentDate,
+  appointments,
   onChange,
 }: {
   view: ViewMode;
   currentDate: Date;
+  appointments: Appointment[];
   onChange: (d: Date) => void;
 }) {
   const isWeek = view === 'week';
@@ -641,35 +644,99 @@ function DateNav({
   const rangeLabel = sameMonth
     ? `${formatStudioNavDay(rangeStartKey)} – ${Number(rangeEndKey.slice(8, 10))}, ${rangeEndKey.slice(0, 4)}`
     : `${formatStudioNavDay(rangeStartKey)} – ${formatStudioNavDay(rangeEndKey, { includeYear: true })}`;
+  const weekMoney = isWeek
+    ? weekMoneyCaption(rangeStartKey, rangeEndKey, appointments)
+    : null;
 
   return (
     <div className="flex items-center justify-between border-b border-stone-200 bg-[#FAF9F6]/95 px-6 py-3 backdrop-blur-sm">
       <h2 className="font-serif text-lg text-stone-900">{rangeLabel}</h2>
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={prev}
-          aria-label={isWeek ? 'Previous week' : 'Previous 3 days'}
-          className="rounded-full border border-stone-200 bg-white p-1.5 text-stone-700 transition-colors hover:bg-stone-100"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={today}
-          className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100"
-        >
-          Today
-        </button>
-        <button
-          type="button"
-          onClick={next}
-          aria-label={isWeek ? 'Next week' : 'Next 3 days'}
-          className="rounded-full border border-stone-200 bg-white p-1.5 text-stone-700 transition-colors hover:bg-stone-100"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
+      <div className="flex items-center gap-3">
+        {weekMoney && (
+          <p className="font-serif text-lg text-stone-900">{weekMoney}</p>
+        )}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={prev}
+            aria-label={isWeek ? 'Previous week' : 'Previous 3 days'}
+            className="rounded-full border border-stone-200 bg-white p-1.5 text-stone-700 transition-colors hover:bg-stone-100"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={today}
+            className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100"
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={next}
+            aria-label={isWeek ? 'Next week' : 'Next 3 days'}
+            className="rounded-full border border-stone-200 bg-white p-1.5 text-stone-700 transition-colors hover:bg-stone-100"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
       </div>
     </div>
   );
+}
+
+function weekMoneyCaption(
+  rangeStartKey: string,
+  rangeEndKey: string,
+  appointments: Appointment[]
+): string {
+  const inWeek = appointments.filter((appointment) => {
+    const key = appointment.booking_time
+      ? studioDateKey(appointment.booking_time)
+      : '';
+    return key >= rangeStartKey && key <= rangeEndKey;
+  });
+  const past = rangeEndKey < todayStudioDateKey();
+  const cents = past ? collectedCentsForWeek(inWeek) : projectedCentsForWeek(inWeek);
+  const amount = formatUsdFromCents(cents);
+  return past ? amount : `${amount} projected`;
+}
+
+function projectedCentsForWeek(appointments: Appointment[]): number {
+  let cents = 0;
+  const addPrice = (appointment: Appointment) => {
+    const price = Number(appointment.service_price);
+    if (Number.isFinite(price) && price > 0) cents += Math.round(price * 100);
+  };
+  for (const appointment of appointments) {
+    if ((appointment.status || '').toLowerCase() === 'no-show') continue;
+    addPrice(appointment);
+    for (const extra of appointment.extras ?? []) addPrice(extra);
+  }
+  return cents;
+}
+
+function collectedCentsForWeek(appointments: Appointment[]): number {
+  let cents = 0;
+  const add = (appointment: Appointment) => {
+    const payment = appointment.terminal_payment;
+    if (payment?.status !== 'succeeded') return;
+    const total = Number(payment.total_amount_cents);
+    if (Number.isFinite(total) && total > 0) cents += total;
+  };
+  for (const appointment of appointments) {
+    add(appointment);
+    for (const extra of appointment.extras ?? []) add(extra);
+  }
+  return cents;
+}
+
+function formatUsdFromCents(cents: number): string {
+  const dollars = cents / 100;
+  return dollars.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
 }

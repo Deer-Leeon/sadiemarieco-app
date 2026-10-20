@@ -195,6 +195,8 @@
   const drawerContainer = document.getElementById('drawer-cal-container');
   const closeButton = document.getElementById('close-drawer');
   const drawerBackButton = document.getElementById('drawer-back');
+  const bookFrame = document.getElementById('drawer-book-frame');
+  let bookExtrasOpen = false;
   const drawerTitleEl = document.getElementById('drawer-title');
   const drawerSubtitleEl = drawer ? drawer.querySelector('.drawer-subtitle') : null;
 
@@ -1017,14 +1019,8 @@
     if (forceRefreshAllMounts) forceRefreshAllMounts = false;
   };
 
-  // Defer the heavy pre-render until the browser is idle so it doesn't
-  // compete with first paint. By the time the user scrolls to the
-  // services section, all 9 iframes are fully populated.
-  if ('requestIdleCallback' in window) {
-    window.requestIdleCallback(preloadAllCalendars, { timeout: 1500 });
-  } else {
-    setTimeout(preloadAllCalendars, 200);
-  }
+  // The drawer calendar is our own booker (/book?embed=1), not a Cal iframe.
+  // Preloading Cal mounts kept a stack of third-party frames on every visit.
 
   const openDrawer = (link, meta) => {
     if (!drawer || !backdrop || !link) return;
@@ -1044,24 +1040,19 @@
       drawerSubtitleEl.textContent = parts.join(' · ');
     }
 
-    // If pre-render hasn't fired yet (very fast clicker), run it now.
-    if (!mountsByLink.size) preloadAllCalendars();
-    // Hard-rebuild the iframe if its cached availability is too old
-    // (>60 s) or has been invalidated by a booking elsewhere. This is
-    // the only protection visitors have against seeing a slot that
-    // another visitor booked seconds ago; without it, the embed would
-    // keep showing it as available and Cal would only reject at
-    // confirmation time with a confusing "No available users found".
-    ensureFreshMount(link);
-    showMount(link);
+    if (bookFrame) {
+      const slug = slugFromCalLink(link);
+      bookFrame.src = `/book?embed=1&service=${encodeURIComponent(slug)}`;
+      bookFrame.hidden = false;
+      drawer.classList.add('is-book-frame');
+      bookExtrasOpen = false;
+      if (drawerBackButton) drawerBackButton.hidden = true;
+    }
     drawer.classList.add('drawer-open');
     backdrop.classList.add('drawer-open');
     document.documentElement.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
     scrollDrawerToTop();
-    const activeMount = mountsByLink.get(link);
-    if (activeMount) bindDrawerEmbedFrame(activeMount);
-
     const api = bookingAnalytics();
     const events = (api && api.events) || {};
     trackBooking(events.SERVICE_OPENED || 'Booking Service Opened', {
@@ -1098,6 +1089,13 @@
     hideDrawerPayChoice();
     hideDrawerUpdatingTimes();
     pendingContactBooking = null;
+    if (bookFrame) {
+      bookFrame.hidden = true;
+      bookFrame.src = 'about:blank';
+    }
+    bookExtrasOpen = false;
+    drawer.classList.remove('is-book-frame');
+    if (drawerBackButton) drawerBackButton.hidden = true;
     drawer.classList.remove('drawer-open');
     backdrop.classList.remove('drawer-open');
     document.documentElement.style.overflow = '';
@@ -1362,6 +1360,13 @@
   if (closeButton) closeButton.addEventListener('click', closeDrawer);
   if (drawerBackButton) {
     drawerBackButton.addEventListener('click', () => {
+      if (drawer.classList.contains('is-book-frame') && bookFrame && bookFrame.contentWindow) {
+        bookFrame.contentWindow.postMessage(
+          { type: 'sadie-book:back' },
+          window.location.origin
+        );
+        return;
+      }
       if (!payFrame || !payFrame.contentWindow) {
         returnDrawerToCalendar();
         return;
@@ -1376,6 +1381,18 @@
   window.addEventListener('message', (event) => {
     if (event.origin !== window.location.origin) return;
     const type = event.data && event.data.type;
+    if (type === 'sadie-book:extras') {
+      bookExtrasOpen = Boolean(event.data && event.data.open);
+      if (drawerBackButton) drawerBackButton.hidden = !bookExtrasOpen;
+    }
+    if (type === 'sadie-book:summary' && event.data) {
+      if (drawerTitleEl && event.data.title) {
+        drawerTitleEl.textContent = event.data.title;
+      }
+      if (drawerSubtitleEl && typeof event.data.subtitle === 'string') {
+        drawerSubtitleEl.textContent = event.data.subtitle;
+      }
+    }
     if (type === 'sadie-checkout:back-to-calendar') {
       returnDrawerToCalendar();
     }

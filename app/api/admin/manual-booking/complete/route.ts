@@ -5,7 +5,7 @@
  * booking upstream and upsert the local appointments row — no Stripe checkout.
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { bookingEndFromDurationMins } from '@/lib/booking-duration';
@@ -498,26 +498,40 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         sms_opt_in = TRUE
     `;
 
-    const notifications = await notifyBookingConfirmed({
-      bookingUid: parsed.calBookingUid,
-      bookingTime,
-      endTime,
-      clientPhone: parsed.clientPhone,
-      clientName: parsed.clientName,
-      serviceName: appointmentServiceName,
-      clientId,
-      clientEmail: parsed.clientEmail,
-      skipIfAlreadySent: true,
-      // Admin-created bookings: staff is initiating outreach for the client.
-      smsOptIn: true,
-      source: 'admin',
+    const savedUid = parsed.calBookingUid;
+    const savedTime = bookingTime;
+    const savedEnd = endTime;
+    const savedPhone = parsed.clientPhone;
+    const savedName = parsed.clientName;
+    const savedService = appointmentServiceName;
+    const savedClientId = clientId;
+    const savedEmail = parsed.clientEmail;
+    after(() => {
+      void notifyBookingConfirmed({
+        bookingUid: savedUid,
+        bookingTime: savedTime,
+        endTime: savedEnd,
+        clientPhone: savedPhone,
+        clientName: savedName,
+        serviceName: savedService,
+        clientId: savedClientId,
+        clientEmail: savedEmail,
+        skipIfAlreadySent: true,
+        // Admin-created bookings: staff is initiating outreach for the client.
+        smsOptIn: true,
+        source: 'admin',
+      }).catch((err) => {
+        console.warn('[api/admin/manual-booking/complete] notifications failed', {
+          uid: savedUid,
+          error: errorMessage(err),
+        });
+      });
     });
 
     return NextResponse.json({
       ok: true,
-      calBookingUid: parsed.calBookingUid,
+      calBookingUid: savedUid,
       status: 'confirmed',
-      notifications,
     });
   } catch (err) {
     return NextResponse.json(

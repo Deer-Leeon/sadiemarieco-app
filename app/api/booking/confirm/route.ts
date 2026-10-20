@@ -922,8 +922,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       client_last_name: string | null;
       client_id: string | null;
       sms_opt_in: boolean | null;
+      id: string;
     }>`
-      SELECT booking_time, end_time, service_name, client_phone, client_email,
+      SELECT id::text AS id, booking_time, end_time, service_name, client_phone, client_email,
              client_first_name, client_last_name, client_id, sms_opt_in
       FROM appointments
       WHERE cal_event_id = ${calBookingUid}
@@ -1010,13 +1011,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const resolvedEmail = appt.client_email || email || null;
       contactSms = smsOptIn;
       contactEmail = hasRealBookingEmail(resolvedEmail);
+      const { rows: extraRows } = await sql<{ service_name: string | null }>`
+        SELECT service_name
+        FROM appointments
+        WHERE attached_to_appointment_id::text = ${appt.id}
+        ORDER BY id
+      `;
+      const serviceName = [appt.service_name, ...extraRows.map((r) => r.service_name)]
+        .filter((n): n is string => Boolean(n && n.trim()))
+        .join(' + ');
       notifications = await notifyBookingConfirmed({
         bookingUid: calBookingUid,
         bookingTime,
         endTime,
         clientPhone: appt.client_phone || '',
         clientName: clientName || name,
-        serviceName: appt.service_name || 'appointment',
+        serviceName: serviceName || 'appointment',
         clientId: appt.client_id,
         clientEmail: resolvedEmail,
         skipIfAlreadySent: true,

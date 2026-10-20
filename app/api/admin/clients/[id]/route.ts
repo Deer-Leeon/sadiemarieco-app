@@ -30,6 +30,7 @@ import { parseOptionalClientEmail } from '@/lib/client-identity';
 import {
   clearClientNoShowFlag,
   grantFeeWaiveNext,
+  revokeFeeWaiveNext,
   type FeeWaiveKind,
 } from '@/lib/client-no-show';
 import { fetchClientCrmStats } from '@/lib/client-crm-stats';
@@ -273,6 +274,8 @@ export async function PATCH(
   const clearNoShowFlag = payload.no_show_flag === false;
   const grantNoShowWaive = payload.no_show_waive_next === true;
   const grantLateChangeWaive = payload.late_change_waive_next === true;
+  const revokeNoShowWaive = payload.no_show_waive_next === false;
+  const revokeLateChangeWaive = payload.late_change_waive_next === false;
   const patchReviewPending =
     typeof payload.review_request_pending === 'boolean'
       ? payload.review_request_pending
@@ -309,17 +312,23 @@ export async function PATCH(
 
   // Grant free-pass only (may also clear attention flag in same request — handled below).
   if (
-    (grantNoShowWaive || grantLateChangeWaive) &&
+    (grantNoShowWaive ||
+      grantLateChangeWaive ||
+      revokeNoShowWaive ||
+      revokeLateChangeWaive) &&
     !changedFirst &&
     !changedLast &&
     !changedEmail
   ) {
     try {
-      const kinds: FeeWaiveKind[] = [];
-      if (grantNoShowWaive) kinds.push('no_show');
-      if (grantLateChangeWaive) kinds.push('late_change');
+      const grantKinds: FeeWaiveKind[] = [];
+      if (grantNoShowWaive) grantKinds.push('no_show');
+      if (grantLateChangeWaive) grantKinds.push('late_change');
+      const revokeKinds: FeeWaiveKind[] = [];
+      if (revokeNoShowWaive) revokeKinds.push('no_show');
+      if (revokeLateChangeWaive) revokeKinds.push('late_change');
 
-      for (const kind of kinds) {
+      for (const kind of grantKinds) {
         const result = await grantFeeWaiveNext(kind, id);
         if (!result) {
           return NextResponse.json({ error: 'not_found' }, { status: 404 });
@@ -340,6 +349,13 @@ export async function PATCH(
             '[api/admin/clients/[id]] free-pass granted SMS failed (non-fatal)',
             { kind, error: errorMessage(smsErr) }
           );
+        }
+      }
+
+      for (const kind of revokeKinds) {
+        const result = await revokeFeeWaiveNext(kind, id);
+        if (!result) {
+          return NextResponse.json({ error: 'not_found' }, { status: 404 });
         }
       }
 
@@ -461,7 +477,7 @@ export async function PATCH(
     return NextResponse.json(
       {
         error: 'no_fields',
-        hint: 'pass at least one of first_name, last_name, email, no_show_flag: false, no_show_waive_next / late_change_waive_next: true, or review_request_pending / google_review_stars',
+        hint: 'pass at least one of first_name, last_name, email, no_show_flag: false, no_show_waive_next / late_change_waive_next true or false, or review_request_pending / google_review_stars',
       },
       { status: 400 }
     );

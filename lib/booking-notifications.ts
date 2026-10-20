@@ -138,6 +138,16 @@ const impl = require('./booking-notifications.js') as {
   releaseSkipClientSms: (calUid: string) => Promise<void>;
   hasSkipClientSms: (calUid: string) => Promise<boolean>;
   skipClientSmsClaimKey: (calUid: string) => string;
+  notifyBulkDayChange: (args: {
+    kind: 'admin_cancel_many' | 'admin_reschedule_many';
+    clientPhone: string | null;
+    smsOptIn: boolean | null | undefined;
+    visitServices: string;
+    bookingTime: string | null;
+    endTime?: string | null;
+    manageUid?: string | null;
+    serviceName?: string | null;
+  }) => Promise<Record<string, unknown>>;
 };
 
 export const notifyBookingConfirmed = impl.notifyBookingConfirmed;
@@ -151,6 +161,7 @@ export const notifyAppointmentRescheduled = impl.notifyAppointmentRescheduled;
 export const notifyAppointmentServiceChanged =
   impl.notifyAppointmentServiceChanged;
 export const claimSkipClientSms = impl.claimSkipClientSms;
+export const notifyBulkDayChange = impl.notifyBulkDayChange;
 export const releaseSkipClientSms = impl.releaseSkipClientSms;
 export const hasSkipClientSms = impl.hasSkipClientSms;
 export const skipClientSmsClaimKey = impl.skipClientSmsClaimKey;

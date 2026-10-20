@@ -53,13 +53,18 @@ async function occupiedStartsForSlots(
   slots: Record<string, string[]>,
   durationMins: number,
   rangeStartYmd: string,
-  rangeEndYmd: string
+  rangeEndYmd: string,
+  excludeAppointmentIds: string[] = []
 ): Promise<string[]> {
   const rangeStart = parseBookingStartForCal(`${rangeStartYmd}T00:00:00`);
   const rangeEnd = parseBookingStartForCal(
     `${addCalendarDays(rangeEndYmd, 1)}T00:00:00`
   );
-  const busy = await loadStudioBusyIntervals(rangeStart, rangeEnd);
+  const busy = await loadStudioBusyIntervals(
+    rangeStart,
+    rangeEnd,
+    excludeAppointmentIds
+  );
   if (busy.length === 0) return [];
 
   const durationMs = durationMins * 60_000;
@@ -131,7 +136,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const overrideEventTypeId = parseAdminOverrideEventId();
   const service = await loadServiceByCalEventId(eventTypeId);
-  const serviceDurationMins = service?.duration_mins ?? null;
+  const catalogueMins = service?.duration_mins ?? null;
+  const durationRaw = req.nextUrl.searchParams.get('durationMins');
+  const durationOverride = durationRaw ? Number(durationRaw) : NaN;
+  const serviceDurationMins =
+    Number.isFinite(durationOverride) && durationOverride > 0
+      ? Math.round(durationOverride)
+      : catalogueMins;
+  const excludeAppointmentIds = (req.nextUrl.searchParams.get('exclude') || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    );
   const useGodModeGrid =
     overrideEventTypeId != null && serviceDurationMins != null;
 
@@ -143,7 +160,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         slots,
         serviceDurationMins,
         date,
-        end
+        end,
+        excludeAppointmentIds
       );
     } catch (err) {
       console.warn(
