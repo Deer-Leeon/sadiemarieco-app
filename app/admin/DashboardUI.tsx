@@ -653,7 +653,7 @@ function DateNav({
       <h2 className="font-serif text-lg text-stone-900">{rangeLabel}</h2>
       <div className="flex items-center gap-3">
         {weekMoney && (
-          <p className="text-sm font-medium text-stone-900">{weekMoney}</p>
+          <p className="font-serif text-lg text-stone-900">{weekMoney}</p>
         )}
         <div className="flex items-center gap-1">
           <button
