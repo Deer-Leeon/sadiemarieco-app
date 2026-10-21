@@ -83,6 +83,7 @@ const impl = require('./admin-booking-push.js') as {
       environment: string;
     }>
   >;
+  probeApnsCredentials: () => { ok: boolean; message: string };
 };
 
 export const ADMIN_PUSH_MAX_ATTEMPTS = impl.MAX_ATTEMPTS;
@@ -94,3 +95,4 @@ export const notifyAdminConsentSigned = impl.notifyAdminConsentSigned;
 export const sendAdminBookingPushToTokens = impl.sendAdminBookingPushToTokens;
 export const runAdminPushRetry = impl.runAdminPushRetry;
 export const loadAdminPushDevices = impl.loadDevices;
+export const probeApnsCredentials = impl.probeApnsCredentials;

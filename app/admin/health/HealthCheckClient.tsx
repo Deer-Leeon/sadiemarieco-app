@@ -114,6 +114,7 @@ function CheckRow({ check }: { check: HealthCheckResult }) {
 }
 
 export default function HealthCheckClient() {
+  const [surface, setSurface] = useState<'website' | 'ios'>('website');
   const [report, setReport] = useState<HealthReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +123,8 @@ export default function HealthCheckClient() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/admin/health', { cache: 'no-store' });
+      const query = surface === 'ios' ? '?surface=ios' : '';
+      const res = await fetch(`/api/admin/health${query}`, { cache: 'no-store' });
       const payload: unknown = await res.json().catch(() => null);
       if (!res.ok) {
         const message =
@@ -140,7 +142,7 @@ export default function HealthCheckClient() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [surface]);
 
   useEffect(() => {
     void load();
@@ -155,11 +157,42 @@ export default function HealthCheckClient() {
 
   return (
     <div className="space-y-6">
+      <div className="flex gap-6 border-b border-stone-200">
+        {(
+          [
+            ['website', 'Website'],
+            ['ios', 'iOS app'],
+          ] as const
+        ).map(([id, label]) => {
+          const selected = surface === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                if (surface !== id) {
+                  setReport(null);
+                  setSurface(id);
+                }
+              }}
+              className={`-mb-px border-b pb-2 text-sm ${
+                selected
+                  ? 'border-stone-900 font-medium text-stone-900'
+                  : 'border-transparent text-stone-500 hover:text-stone-800'
+              }`}
+              aria-pressed={selected}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-2xl text-sm text-stone-500">
-          Live probes for every dependency in the booking chain — database, Cal.com,
-          email, SMS, payments, webhooks, cron jobs, and more. Run after deploys or
-          when something feels off.
+          {surface === 'ios'
+            ? 'What the iPhone admin app needs. The website check does not try a photo replace or a booking alert.'
+            : 'Live probes for every dependency in the booking chain — database, Cal.com, email, SMS, payments, webhooks, cron jobs, and more. Run after deploys or when something feels off.'}
         </p>
         <button
           type="button"

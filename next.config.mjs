@@ -11,7 +11,11 @@ const nextConfig = {
   serverExternalPackages: ['sharp'],
 
   // Consent PDF stamping embeds EB Garamond from disk at runtime.
+  // sharp is external, so its Linux libvips .so is not traced unless named.
+  // Without it, POST /api/upload dies with ERR_DLOPEN_FAILED before any JSON.
   outputFileTracingIncludes: {
+    '/api/upload': ['./node_modules/@img/sharp-linux-x64/**/*', './node_modules/@img/sharp-libvips-linux-x64/**/*'],
+    '/api/admin/health': ['./node_modules/@img/sharp-linux-x64/**/*', './node_modules/@img/sharp-libvips-linux-x64/**/*'],
     '/api/consent/[clientId]': ['./public/fonts/**/*', './assets/fonts/**/*'],
     '/lash-extensions-lehi': ['./content/seo/**/*'],
     '/brow-services-lehi': ['./content/seo/**/*'],

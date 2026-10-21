@@ -5,16 +5,17 @@
  * Admin-only (email allowlist via requireAdminUser).
  */
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import { runHealthChecks } from '@/lib/health-check';
+import { runIosAppHealthChecks } from '@/lib/ios-app-health';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   const access = await requireAdminUser();
   if (!access.ok) {
     return NextResponse.json(
@@ -23,8 +24,11 @@ export async function GET(): Promise<NextResponse> {
     );
   }
 
+  const surface = req.nextUrl.searchParams.get('surface');
+
   try {
-    const report = await runHealthChecks();
+    const report =
+      surface === 'ios' ? await runIosAppHealthChecks() : await runHealthChecks();
     return NextResponse.json(report);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
