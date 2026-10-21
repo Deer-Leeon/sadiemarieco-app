@@ -36,7 +36,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { del, put } from '@vercel/blob';
 import { sql } from '@vercel/postgres';
-import sharp from 'sharp';
 
 import { requireAdminUser } from '@/app/admin/auth';
 import { PORTRAIT_SUBJECT, sanitisePhotoFileName } from '@/lib/photo-meta';
@@ -87,6 +86,19 @@ interface ProcessedImage {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
+    return await postUpload(req);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[api/upload] unhandled:', message);
+    return NextResponse.json(
+      { error: 'upload_failed', message },
+      { status: 500 }
+    );
+  }
+}
+
+async function postUpload(req: NextRequest): Promise<NextResponse> {
   // ── AUTH GATE ──────────────────────────────────────────────────────────
   const access = await requireAdminUser();
   if (!access.ok) {
@@ -190,7 +202,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       error: err instanceof Error ? err.message : String(err),
     });
     return NextResponse.json(
-      { error: 'image_processing_failed' },
+      {
+        error: 'image_processing_failed',
+        message: err instanceof Error ? err.message : String(err),
+      },
       { status: 422 }
     );
   }
@@ -408,8 +423,21 @@ function readOptionalSubject(
  *   - PNG inputs → preserved as PNG so transparency survives.
  *   - WebP inputs → preserved as WebP for the same reason.
  */
+type SharpFactory = typeof import('sharp').default;
+
+async function loadSharp(): Promise<SharpFactory> {
+  try {
+    const mod = await import('sharp');
+    return mod.default;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`sharp_unavailable: ${message}`);
+  }
+}
+
 async function normaliseToSrgb(file: File): Promise<ProcessedImage> {
   const input = Buffer.from(await file.arrayBuffer());
+  const sharp = await loadSharp();
 
   const base = sharp(input, {
     // Tolerate slightly malformed images (some phones produce JPEGs with

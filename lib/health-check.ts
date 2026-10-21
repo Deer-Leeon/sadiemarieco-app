@@ -1647,6 +1647,15 @@ async function checkBookingPipeline(): Promise<HealthCheckResult[]> {
 }
 
 /** Run every health probe and return a structured report. */
+export function buildHealthReport(checks: HealthCheckResult[]): HealthReport {
+  return {
+    checkedAt: new Date().toISOString(),
+    summary: summarize(checks),
+    overall: overallFromChecks(checks),
+    checks,
+  };
+}
+
 export async function runHealthChecks(): Promise<HealthReport> {
   const groups = await Promise.all([
     checkEnvironment(),
@@ -1665,12 +1674,5 @@ export async function runHealthChecks(): Promise<HealthReport> {
   ]);
 
   const checks = groups.flat();
-  const summary = summarize(checks);
-
-  return {
-    checkedAt: new Date().toISOString(),
-    summary,
-    overall: overallFromChecks(checks),
-    checks,
-  };
+  return buildHealthReport(checks);
 }
