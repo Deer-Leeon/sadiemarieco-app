@@ -5,6 +5,7 @@ const {
   chargeMatchesQuotedTip,
   prepaidKeepAndRefund,
   parseTipDollars,
+  tipCentsFromPaymentIntent,
 } = require('../../lib/booking-tip.js');
 
 const SERVICE = 10000;
@@ -60,5 +61,43 @@ test('a prepaid charge with no tip refunds the same way it did before', () => {
     prepaidKeepAndRefund({ chargedCents: 10000, keepFraction: 0, tipCents: 0 })
       .refundAmountCents,
     10000
+  );
+});
+
+test('an online tip is read from metadata when Stripe leaves the tip field empty', () => {
+  const intent = {
+    amount: 11500,
+    amount_details: { tip: {} },
+    metadata: { tip_cents: '1500' },
+  };
+  assert.equal(tipCentsFromPaymentIntent(intent), 1500);
+  assert.equal(
+    chargeMatchesQuotedTip(SERVICE, intent.amount, tipCentsFromPaymentIntent(intent)),
+    true
+  );
+});
+
+test('a larger charge with neither tip record still does not match', () => {
+  const intent = {
+    amount: 11500,
+    amount_details: { tip: {} },
+    metadata: {},
+  };
+  assert.equal(tipCentsFromPaymentIntent(intent), 0);
+  assert.equal(
+    chargeMatchesQuotedTip(SERVICE, intent.amount, tipCentsFromPaymentIntent(intent)),
+    false
+  );
+});
+
+test('a reader tip with no metadata still comes from amount_details', () => {
+  const intent = {
+    amount: 12000,
+    amount_details: { tip: { amount: 2000 } },
+  };
+  assert.equal(tipCentsFromPaymentIntent(intent), 2000);
+  assert.equal(
+    chargeMatchesQuotedTip(SERVICE, intent.amount, tipCentsFromPaymentIntent(intent)),
+    true
   );
 });
