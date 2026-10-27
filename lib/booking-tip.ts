@@ -21,6 +21,11 @@ const impl = require('./booking-tip.js') as {
     tipCents: number
   ) => boolean;
   tipCentsFromAmountDetails: (amountDetails: unknown) => number;
+  tipCentsFromPaymentIntent: (intent: {
+    amount?: number;
+    amount_details?: unknown;
+    metadata?: { tip_cents?: string } | null;
+  } | null | undefined) => number;
   prepaidKeepAndRefund: (params: {
     chargedCents: number;
     alreadyRefunded?: number;
@@ -48,6 +53,7 @@ export const resolveTipCents = impl.resolveTipCents;
 export const isAllowedTipCents = impl.isAllowedTipCents;
 export const chargeMatchesQuotedTip = impl.chargeMatchesQuotedTip;
 export const tipCentsFromAmountDetails = impl.tipCentsFromAmountDetails;
+export const tipCentsFromPaymentIntent = impl.tipCentsFromPaymentIntent;
 export const prepaidKeepAndRefund = impl.prepaidKeepAndRefund;
 export const parseTipDollars = impl.parseTipDollars;
 

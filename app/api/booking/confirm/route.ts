@@ -59,7 +59,7 @@ import {
 import { HOLD_EXPIRED_MESSAGE, isAbandonedCheckoutHold } from '@/lib/booking-hold';
 import {
   chargeMatchesQuotedTip,
-  tipCentsFromAmountDetails,
+  tipCentsFromPaymentIntent,
 } from '@/lib/booking-tip';
 import { notifyBookingConfirmed } from '@/lib/booking-notifications';
 import { isWalletCard, stripeCardCheckRejection } from '@/lib/stripe-card-checks';
@@ -455,14 +455,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           { status: 400 }
         );
       }
-      // The charge is the quoted service plus an optional tip declared on
-      // the PaymentIntent. A larger amount with no tip field is refunded
-      // so extra money is never stored as the service price.
+      // The charge is the quoted service plus an optional tip stored in
+      // metadata.tip_cents. A card PaymentIntent leaves amount_details.tip
+      // empty, so that field alone must not look like "no tip". A larger
+      // amount with no tip record is refunded so extra money is never
+      // stored as the service price.
       const quotedRaw = Number(existingStripe?.quoted_service_price_cents ?? 0);
       const quotedCents = Number.isFinite(quotedRaw) ? Math.round(quotedRaw) : 0;
-      const reportedTipCents = tipCentsFromAmountDetails(
-        paymentIntent.amount_details
-      );
+      const reportedTipCents = tipCentsFromPaymentIntent(paymentIntent);
       if (
         quotedCents >= 50 &&
         !chargeMatchesQuotedTip(

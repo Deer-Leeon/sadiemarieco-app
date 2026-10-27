@@ -4,8 +4,10 @@
  * Pay-now bootstrap for phone /book:
  *   1. Resolve (or create) Stripe Customer from Cal booking context.
  *   2. Create a PaymentIntent for the quoted service plus an optional tip.
- *      amount_details.tip marks the tip. setup_future_usage keeps the card
- *      on file after the charge.
+ *      The tip is metadata.tip_cents, not Stripe amount_details.tip — that
+ *      field is how the card reader reports a tip and stays empty on a
+ *      normal card, which used to make confirmation refund the charge.
+ *      setup_future_usage keeps the card on file after the charge.
  *   3. Persist stripe_payment_intent_id on the pending appointment.
  *   4. Return { clientSecret } for Elements confirmPayment.
  */
@@ -252,16 +254,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       description:
         tipCents > 0 ? 'Service and tip at booking' : 'Service payment at booking',
     };
-    if (tipCents > 0) {
-      // Stripe categorizes this portion of the one charge as a tip.
-      // The installed create-params type omits amount_details.tip; the
-      // PaymentIntent object still returns it.
-      (
-        createParams as Stripe.PaymentIntentCreateParams & {
-          amount_details: { tip: { amount: number } };
-        }
-      ).amount_details = { tip: { amount: tipCents } };
-    }
 
     const paymentIntent = await stripe.paymentIntents.create(createParams);
 
