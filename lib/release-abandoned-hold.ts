@@ -84,6 +84,22 @@ async function cancelOnCal(
   }
 }
 
+async function cancelPendingExtras(parentId: string): Promise<void> {
+  try {
+    await sql`
+      UPDATE appointments
+      SET status = 'canceled_by_system'
+      WHERE attached_to_appointment_id::text = ${parentId}
+        AND LOWER(COALESCE(status, '')) = 'pending'
+    `;
+  } catch (err) {
+    console.error('[release-abandoned-hold] attached extras cancel failed', {
+      parentId,
+      error: errorMessage(err),
+    });
+  }
+}
+
 async function flipLocalStatus(appointmentId: string): Promise<boolean> {
   try {
     const { rowCount } = await sql`
@@ -92,7 +108,9 @@ async function flipLocalStatus(appointmentId: string): Promise<boolean> {
       WHERE id = ${appointmentId}::uuid
         AND status = 'pending'
     `;
-    return (rowCount ?? 0) > 0;
+    const flipped = (rowCount ?? 0) > 0;
+    if (flipped) await cancelPendingExtras(appointmentId);
+    return flipped;
   } catch (err) {
     console.error('[release-abandoned-hold] local status flip failed', {
       appointmentId,

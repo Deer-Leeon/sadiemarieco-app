@@ -32,6 +32,7 @@ import {
   isSettlementUniqueConflict,
 } from '@/lib/appointment-settlement';
 import { notifyBookingConfirmed } from '@/lib/booking-notifications';
+import { confirmAttachedExtras } from '@/lib/book-visit-extras';
 import { acceptOnCal } from '@/lib/cal-accept';
 import { CAL_BOOKINGS_API_VERSION } from '@/lib/cal-proxy';
 import { tipCentsFromPaymentIntent } from '@/lib/booking-tip';
@@ -144,6 +145,14 @@ export async function reconcileSucceededBookingPayment(
     '[booking-payment-recovery] promoted paid booking that missed confirm',
     { calBookingUid, paymentIntentId: intent.id, appointmentId }
   );
+  try {
+    await confirmAttachedExtras(appointmentId);
+  } catch (err) {
+    console.warn(
+      '[booking-payment-recovery] attached extras confirm failed',
+      { calBookingUid, error: errorMessage(err) }
+    );
+  }
 
   // Vault the card for later no-show/late-cancel policy (best-effort).
   const paymentMethodId = intentPaymentMethodId(intent);
