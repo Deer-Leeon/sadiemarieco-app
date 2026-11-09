@@ -62,6 +62,7 @@ import {
   tipCentsFromPaymentIntent,
 } from '@/lib/booking-tip';
 import { notifyBookingConfirmed } from '@/lib/booking-notifications';
+import { confirmAttachedExtras } from '@/lib/book-visit-extras';
 import { isWalletCard, stripeCardCheckRejection } from '@/lib/stripe-card-checks';
 import { acceptOnCal } from '@/lib/cal-accept';
 import { CAL_BOOKINGS_API_VERSION } from '@/lib/cal-proxy';
@@ -781,6 +782,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           : (current?.stripe_setup_intent_id ?? '').trim() === setupIntentId;
         if (matchesLinkedIntent) {
           await completeBookingAttempt(calBookingUid, checkoutMethod);
+          if (current?.id) {
+            try {
+              await confirmAttachedExtras(current.id);
+            } catch (extraErr) {
+              console.warn('[api/booking/confirm] attached extras confirm failed', {
+                calBookingUid,
+                error: errorMessage(extraErr),
+              });
+            }
+          }
           // Concurrent duplicate of the same confirm — the other request
           // completed the promote. Report success.
           return NextResponse.json({
@@ -852,6 +863,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
       { status: 500 }
     );
+  }
+
+  if (dbLinked && appointmentId) {
+    try {
+      await confirmAttachedExtras(appointmentId);
+    } catch (extraErr) {
+      console.warn('[api/booking/confirm] attached extras confirm failed', {
+        calBookingUid,
+        error: errorMessage(extraErr),
+      });
+    }
   }
 
   if (
@@ -1011,6 +1033,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const resolvedEmail = appt.client_email || email || null;
       contactSms = smsOptIn;
       contactEmail = hasRealBookingEmail(resolvedEmail);
+      try {
+        await confirmAttachedExtras(appt.id);
+      } catch (extraErr) {
+        console.warn('[api/booking/confirm] attached extras confirm failed', {
+          calBookingUid,
+          error: errorMessage(extraErr),
+        });
+      }
       const { rows: extraRows } = await sql<{ service_name: string | null }>`
         SELECT service_name
         FROM appointments

@@ -105,3 +105,19 @@ export async function applyPublicBookingExtras(args: {
     `;
   }
 }
+
+/**
+ * A paid or confirmed parent keeps its add-ons. They are not their own
+ * Cal hold, so leaving them pending lets the abandoned-hold sweep cancel them.
+ */
+export async function confirmAttachedExtras(parentId: string): Promise<void> {
+  const id = parentId.trim();
+  if (!id) return;
+  await ensureAppointmentAttachedSchema();
+  await sql`
+    UPDATE appointments
+    SET status = 'confirmed'
+    WHERE attached_to_appointment_id::text = ${id}
+      AND LOWER(COALESCE(status, '')) = 'pending'
+  `;
+}

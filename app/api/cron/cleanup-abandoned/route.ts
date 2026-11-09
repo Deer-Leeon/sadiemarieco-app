@@ -52,6 +52,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       SELECT id, cal_event_id
       FROM appointments
       WHERE LOWER(COALESCE(status, '')) = 'pending'
+        AND attached_to_appointment_id IS NULL
         AND created_at < NOW() - (${CHECKOUT_HOLD_SECONDS} || ' seconds')::interval
       ORDER BY created_at ASC
       LIMIT ${MAX_SWEEP_BATCH}
